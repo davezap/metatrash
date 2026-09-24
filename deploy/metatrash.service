@@ -1,0 +1,22 @@
+[Unit]
+Description=Metatrash shared file service
+After=network.target
+
+[Service]
+Type=simple
+User=metatrash
+Group=metatrash
+WorkingDirectory=/var/lib/metatrash
+ExecStart=/usr/local/bin/metatrash -listen 127.0.0.1:8080 -data /var/lib/metatrash -config /etc/metatrash/spaces.json -keys /etc/metatrash/keys.json -trusted-proxies 127.0.0.1/32
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/metatrash
+
+[Install]
+WantedBy=multi-user.target

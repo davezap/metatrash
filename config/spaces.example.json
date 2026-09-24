@@ -1,0 +1,33 @@
+{
+  "configVersion": "0.1.0",
+  "defaults": {
+    "rates": {
+      "windowSeconds": 60,
+      "clientReads": 120,
+      "clientWrites": 20,
+      "spaceReads": 600,
+      "spaceWrites": 60
+    },
+    "storage": {
+      "maxFileBytes": 65536,
+      "maxRequestBytes": 524288,
+      "maxFiles": 1000,
+      "maxCurrentTextBytes": 16777216,
+      "maxRepositoryBytes": 134217728
+    }
+  },
+  "global": {
+    "rates": {
+      "windowSeconds": 60,
+      "reads": 1200,
+      "writes": 120
+    },
+    "maxQueuedWrites": 32
+  },
+  "spaces": {
+    "public": {
+      "visibility": "public",
+      "overrides": {}
+    }
+  }
+}

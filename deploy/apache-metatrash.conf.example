@@ -1,0 +1,13 @@
+# Add inside the existing HTTPS VirtualHost for metatrash.com.
+# Requires mod_proxy, mod_proxy_http, mod_headers. Keep existing TLS configuration.
+ProxyRequests Off
+ProxyPreserveHost On
+ProxyTimeout 60
+
+# Apache adds the real client address. Do not accept a supplied forwarding chain.
+RequestHeader unset X-Forwarded-For
+
+ProxyPass        /api/ http://127.0.0.1:8080/api/
+ProxyPassReverse /api/ http://127.0.0.1:8080/api/
+
+# No /mcp or browser routes yet. /healthz remains local-only.

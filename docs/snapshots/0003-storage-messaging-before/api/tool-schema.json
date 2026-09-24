@@ -1,0 +1,407 @@
+{
+  "schemaVersion": "0.1.0",
+  "status": "draft",
+  "description": "MCP-style JSON tool contract mapped to HTTP. This file is not an MCP server.",
+  "authentication": {
+    "public": "No key required.",
+    "private": "Authorization: Bearer <space-key>. Read or write key permits reads; only a write key permits put_file.",
+    "rateControls": "All clients and spaces are rate limited, including private key holders. Only site-admin backend configuration can change per-space limits."
+  },
+  "tools": [
+    {
+      "name": "list_files",
+      "description": "List current paths in a space. Pagination stays on a captured space revision.",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/spaces/{space}/files",
+        "query": [
+          "limit",
+          "cursor"
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque continuation token. Keep other arguments unchanged."
+          }
+        },
+        "required": [
+          "space"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240,
+                  "description": "Relative slash-separated path; no empty, dot, hidden, or traversal segments. Each segment starts with an ASCII letter or digit and contains only letters, digits, dots, underscores or hyphens. README.md is protected case-insensitively."
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "protected": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "version",
+                "bytes",
+                "protected"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "spaceRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "files",
+          "spaceRevision",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_file",
+      "description": "Read UTF-8 text at the current head or a historical revision.",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/spaces/{space}/file",
+        "query": [
+          "path",
+          "revision"
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Relative slash-separated path; no empty, dot, hidden, or traversal segments. Each segment starts with an ASCII letter or digit and contains only letters, digits, dots, underscores or hyphens. README.md is protected case-insensitively."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+          }
+        },
+        "required": [
+          "space",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Relative slash-separated path; no empty, dot, hidden, or traversal segments. Each segment starts with an ASCII letter or digit and contains only letters, digits, dots, underscores or hyphens. README.md is protected case-insensitively."
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+          },
+          "spaceRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+          }
+        },
+        "required": [
+          "path",
+          "text",
+          "version",
+          "spaceRevision"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "put_file",
+      "description": "Create or replace text. Supply null to create an absent file, or its last read version to update. A stale version returns 409; re-read before deciding how to retry. README.md cannot be written.",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/spaces/{space}/file",
+        "query": [
+          "path"
+        ],
+        "body": [
+          "text",
+          "expectedVersion"
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Relative slash-separated path; no empty, dot, hidden, or traversal segments. Each segment starts with an ASCII letter or digit and contains only letters, digits, dots, underscores or hyphens. README.md is protected case-insensitively."
+          },
+          "text": {
+            "type": "string",
+            "description": "Valid UTF-8 text without NUL. Byte limits are configured by the site admin."
+          },
+          "expectedVersion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "space",
+          "path",
+          "text",
+          "expectedVersion"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Relative slash-separated path; no empty, dot, hidden, or traversal segments. Each segment starts with an ASCII letter or digit and contains only letters, digits, dots, underscores or hyphens. README.md is protected case-insensitively."
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+          },
+          "spaceRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "version",
+          "spaceRevision",
+          "created",
+          "changed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_versions",
+      "description": "List a file's changes newest first, with stable pagination. IDs can be used with get_file.",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/spaces/{space}/versions",
+        "query": [
+          "path",
+          "limit",
+          "cursor"
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Relative slash-separated path; no empty, dot, hidden, or traversal segments. Each segment starts with an ASCII letter or digit and contains only letters, digits, dots, underscores or hyphens. README.md is protected case-insensitively."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque continuation token. Keep other arguments unchanged."
+          }
+        },
+        "required": [
+          "space",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Relative slash-separated path; no empty, dot, hidden, or traversal segments. Each segment starts with an ASCII letter or digit and contains only letters, digits, dots, underscores or hyphens. README.md is protected case-insensitively."
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "version",
+                "timestamp"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "spaceRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "versions",
+          "spaceRevision",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "errorSchema": {
+    "type": "object",
+    "properties": {
+      "error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "invalid_request",
+              "unauthorized",
+              "forbidden",
+              "protected_file",
+              "not_found",
+              "conflict",
+              "payload_too_large",
+              "rate_limited",
+              "storage_limit",
+              "queue_full",
+              "internal_error"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "currentVersion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Full Git SHA-1 commit ID reachable from this space's current head."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retryAfterSeconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "error"
+    ],
+    "additionalProperties": false
+  },
+  "errorNotes": "currentVersion is required on conflict (null if absent). retryAfterSeconds and Retry-After are required for rate_limited and queue_full. Errors do not disclose private file information before authorization."
+}

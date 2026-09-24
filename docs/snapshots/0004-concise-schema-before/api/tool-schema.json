@@ -1,0 +1,624 @@
+{
+  "schemaVersion": "0.1.0",
+  "status": "draft",
+  "description": "Primary MCP tool contract for shared file storage and messaging conventions. An actual MCP endpoint is planned; this repository currently contains the contract only.",
+  "mcp": {
+    "endpoint": "/mcp",
+    "tools": "Expose the five entries below via tools/list; dispatch tools/call to the shared file service. Keep HTTP mappings out of tools/list."
+  },
+  "authentication": {
+    "public": "No key required.",
+    "private": "A space-scoped bearer read or write key permits read/list/history; a write key is required for write/move. Credentials travel in the transport, never tool arguments.",
+    "rateControls": "All clients, spaces and transports share rate limits; only the site admin can override space limits."
+  },
+  "tools": [
+    {
+      "name": "read",
+      "description": "Read a text file and its space state. Optionally read a historical revision. Use the returned state as ifInState when editing.",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          }
+        },
+        "required": [
+          "space",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Server-assigned opaque file ID, stable across edits and moves within a space."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+                "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "protected": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "bytes",
+              "protected",
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "space",
+          "state",
+          "file"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "write",
+      "description": "Create or replace a UTF-8 file. First read or list the space, then supply its state as ifInState. Any intervening space change causes state_mismatch. createOnly prevents overwriting an existing path. README.md cannot be changed.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+          },
+          "text": {
+            "type": "string",
+            "description": "Valid UTF-8 text without NUL, subject to configured byte limits."
+          },
+          "ifInState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "createOnly": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "space",
+          "path",
+          "text",
+          "ifInState"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "oldState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "newState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Server-assigned opaque file ID, stable across edits and moves within a space."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+                "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "protected": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "bytes",
+              "protected"
+            ],
+            "additionalProperties": false
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "space",
+          "oldState",
+          "newState",
+          "file",
+          "created",
+          "changed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list",
+      "description": "Discover files and the current space state, optionally beneath a folder such as inbox/agent-b/. Folders are implicit. Pagination uses one captured revision.",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 241,
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}$",
+            "default": "",
+            "description": "Empty for all files, or a canonical folder prefix ending in slash."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque continuation token; retain the same other arguments."
+          }
+        },
+        "required": [
+          "space"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$",
+                  "description": "Server-assigned opaque file ID, stable across edits and moves within a space."
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+                  "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "protected": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "path",
+                "bytes",
+                "protected"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "space",
+          "state",
+          "files",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "move",
+      "description": "Atomically move one file within a space, preserving its ID and text. Requires current space state; destination must be absent. Use to claim or archive inbox files. No directory or cross-space moves; README.md is protected.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+          },
+          "ifInState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          }
+        },
+        "required": [
+          "space",
+          "from",
+          "to",
+          "ifInState"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "oldState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "newState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Server-assigned opaque file ID, stable across edits and moves within a space."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+                "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "protected": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "bytes",
+              "protected"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "space",
+          "oldState",
+          "newState",
+          "file"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "history",
+      "description": "List changes to a stable file ID, including moves, newest first. Get the ID from read or list. Read older content using each entry's path and revision.",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "description": "Server-assigned opaque file ID, stable across edits and moves within a space."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque continuation token; retain the same other arguments."
+          }
+        },
+        "required": [
+          "space",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "description": "Server-assigned opaque file ID, stable across edits and moves within a space."
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+                  "description": "Case-sensitive relative file path. Root README.md is protected, including case variants."
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "write",
+                    "move"
+                  ]
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "revision",
+                "path",
+                "operation",
+                "timestamp"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "space",
+          "state",
+          "id",
+          "entries",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "restMappings": {
+    "read": {
+      "method": "GET",
+      "path": "/api/v1/spaces/{space}/file",
+      "query": [
+        "path",
+        "revision"
+      ]
+    },
+    "write": {
+      "method": "PUT",
+      "path": "/api/v1/spaces/{space}/file",
+      "query": [
+        "path"
+      ],
+      "body": [
+        "text",
+        "ifInState",
+        "createOnly"
+      ]
+    },
+    "list": {
+      "method": "GET",
+      "path": "/api/v1/spaces/{space}/files",
+      "query": [
+        "prefix",
+        "limit",
+        "cursor"
+      ]
+    },
+    "move": {
+      "method": "POST",
+      "path": "/api/v1/spaces/{space}/move",
+      "body": [
+        "from",
+        "to",
+        "ifInState"
+      ]
+    },
+    "history": {
+      "method": "GET",
+      "path": "/api/v1/spaces/{space}/history",
+      "query": [
+        "id",
+        "limit",
+        "cursor"
+      ]
+    }
+  },
+  "errorSchema": {
+    "type": "object",
+    "properties": {
+      "error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "invalid_request",
+              "unauthorized",
+              "forbidden",
+              "protected_file",
+              "not_found",
+              "state_mismatch",
+              "destination_exists",
+              "payload_too_large",
+              "rate_limited",
+              "storage_limit",
+              "queue_full",
+              "internal_error"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "currentState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space-wide Git commit hash. Pass the current state unchanged as ifInState for every write or move."
+          },
+          "retryAfterSeconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "error"
+    ],
+    "additionalProperties": false
+  },
+  "errorNotes": "state_mismatch requires currentState after authorization. rate_limited and queue_full require retryAfterSeconds. REST also returns Retry-After. MCP domain errors use isError: true and serialized error JSON in text content; successful structuredContent matches outputSchema."
+}
