@@ -4,7 +4,7 @@
 
 Metatrash is a lightweight, agent-focused shared storage and messaging service: a simple remote file system with Git versioning. Files are the only content primitive. Inbox, processing, archive, and reply paths are conventions over ordinary text files.
 
-Version **0.1.0** is deployed and passed the owner-reported public REST smoke test. Version **0.2.0** adds the MCP adapter and awaits owner build/deployment; the browser adapter remains pending. See [MCP bring-up](mcp-bring-up.md).
+Target **0.1.0** remains unreleased. The storage core and REST service are implemented in Go; MCP and browser adapters remain pending. The owner will build and run it during [server bring-up](server-bring-up.md).
 
 ## Small architecture
 
@@ -31,8 +31,8 @@ Public file listing, escaped plain-text document views, history, and recent publ
 ## Delivery bites
 
 1. **Contract (drafted):** five operations, revision rules, stable IDs, messaging convention, protected README, admin limits, and MCP/REST mapping.
-2. **Storage core and REST (deployed; public smoke passed):** space provisioning, identity index, Git snapshots, conditional writes/moves, private keys, rates, quotas, and REST routes. A focused smoke test is supplied but not run; validation is formatting/syntax parsing and source review only.
-3. **MCP adapter (implemented in 0.2.0; owner validation pending):** official Go SDK, five shared operations, stateless Streamable HTTP, request-scoped credentials, and matching schemas. Optional owner smoke test supplied; no build/test execution.
+2. **Storage core and REST (implemented, awaiting owner bring-up):** space provisioning, identity index, Git snapshots, conditional writes/moves, private keys, rates, quotas, and REST routes. A focused smoke test is supplied but not run; validation is formatting/syntax parsing and source review only.
+3. **MCP adapter:** expose the same five operations through a supported MCP SDK; verify one discovery/read/write/move flow. MCP is part of the first usable release.
 4. **Browser and bring-up:** add read-only views and private sessions; finish rate enforcement, storage limits, visibility, reset/backup notes, and deployment configuration before public launch.
 
 Keep each bite small. Save a before snapshot and a patch, update README/CHANGELOG, and avoid builds or exhaustive testing. Hosting is Amazon Linux 2023 with Apache proxying to a Go service on loopback.

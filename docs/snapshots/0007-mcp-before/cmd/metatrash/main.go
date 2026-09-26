@@ -67,7 +67,7 @@ func run() error {
 	server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 45 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()
-	log.Printf("metatrash %s REST/MCP service on %s", metatrash.Version, *listen)
+	log.Printf("metatrash %s REST service on %s", metatrash.Version, *listen)
 	select {
 	case err := <-errCh:
 		if err != http.ErrServerClosed {

@@ -1,8 +1,8 @@
-# File service contract - 0.2.0
+# File service contract - 0.1.0 draft
 
 Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
 
-This contract replaces the earlier per-file version draft. The owner deployed and smoke-tested the 0.1.0 REST service. The 0.2.0 MCP adapter calls the same service and awaits owner build and deployment. See [MCP bring-up](mcp-bring-up.md) for transport and verification details.
+This draft replaces the earlier per-file version contract. The Go storage core and REST adapter are implemented but not yet built or deployed. A real MCP adapter remains the next bite; both adapters will call the same file service.
 
 ## Five operations
 
@@ -14,7 +14,7 @@ This contract replaces the earlier per-file version draft. The owner deployed an
 | `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState` |
 | `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` |
 
-[tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json`. `/mcp` exposes these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
+[tool-schema.json](../api/tool-schema.json) defines inputs and outputs. Serve it at `/api/v1/tool-schema.json`. The planned `/mcp` endpoint exposes these tools through MCP discovery and invocation; a JSON schema file alone is not an MCP server. Use a supported MCP SDK when implementing transport and lifecycle handling. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
 
 ## Spaces and access
 

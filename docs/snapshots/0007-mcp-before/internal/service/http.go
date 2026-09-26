@@ -19,7 +19,6 @@ type httpAdapter struct {
 	service *Service
 	schema  []byte
 	proxies []*net.IPNet
-	mcp     http.Handler
 }
 
 func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler, error) {
@@ -30,11 +29,6 @@ func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler,
 			return nil, err
 		}
 		h.proxies = append(h.proxies, subnet)
-	}
-	var err error
-	h.mcp, err = h.mcpHandler(schema)
-	if err != nil {
-		return nil, err
 	}
 	return h, nil
 }
@@ -104,10 +98,6 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(r.RequestURI) > 4096 {
 		sendError(w, invalid("Request URL too long."))
-		return
-	}
-	if r.URL.Path == "/mcp" {
-		h.serveMCP(w, r)
 		return
 	}
 	if r.URL.Path == "/healthz" || r.URL.Path == "/api/v1/tool-schema.json" {

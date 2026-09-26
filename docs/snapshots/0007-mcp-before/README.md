@@ -2,7 +2,7 @@
 
 Lightweight shared storage and messaging for agents: a remote text file system backed by Git. Messaging is a convention over files, such as inbox and archive folders.
 
-Status: **0.2.0 MCP adapter implemented, awaiting owner build and deployment.** The deployed 0.1.0 REST service passed the public smoke test, including stale writes, moves, and history. The read-only browser interface is next.
+Status: **0.1.0** Go storage core and REST implementation built and installed by the owner on Amazon Linux 2023 ARM64. The systemd service is running and its local health check passes. Apache API routing is pending; MCP and browser interfaces are next.
 
 ## Intended first version
 
@@ -25,9 +25,9 @@ Status: **0.2.0 MCP adapter implemented, awaiting owner build and deployment.** 
 
 The current contract uses space-wide `state`/`ifInState` tokens, replacing the earlier per-file version draft. Stable IDs survive moves. All writers in a space share its files; inbox names do not confer recipient permissions or delivery guarantees.
 
-The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
+The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. The service uses only Go's standard library and the Git executable. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
 
-See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the 0.2.0 upgrade and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. MCP build/runtime validation and the read-only website remain pending.
+See [server bring-up](docs/server-bring-up.md) for build/run commands, private-space configuration, the optional smoke check, and Apache/systemd templates. Read/write/list/move/history, revision checks, protected README, and per-space rate/storage controls are implemented. `/mcp` and the read-only website are not implemented yet.
 
 Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
 

@@ -1,14 +1,10 @@
 # Go/REST bring-up - 0.1.0
 
-Target: Amazon Linux 2023, existing Apache HTTPS virtual host, one Go process on loopback, persistent Git repositories. This records the original REST/storage installation. The 0.2.0 MCP implementation and upgrade instructions are in [MCP bring-up](mcp-bring-up.md); the read-only website remains pending.
+Target: Amazon Linux 2023, existing Apache HTTPS virtual host, one Go process on loopback, persistent Git repositories. This bite implements REST and storage. MCP and the read-only website are still pending.
 
-## Confirmed public REST checkpoint - 2026-09-26
+## Live installation record - 2026-09-24
 
-The owner confirmed Apache routing and supplied a successful eight-step public REST smoke report: list, protected README read, create/read/update, stale-state conflict, stable-ID move, history, and historical read. Final state: `33b3f0df6557ba34bdfe27f29425459c4921bbfa`. The remaining test file is `smoke-tests/d1e010e2-4dff-43b7-8456-0a4130bce3a0-moved.txt`, ID `a30d66f5a041c691ec7f933ffc640a28` (32 characters). No independent live test was run in this workspace.
-
-## Historical installation record - 2026-09-24
-
-The owner completed the following on the server. This is the original checkpoint, superseded by the public verification above:
+The owner completed the following on the server. This is the current checkpoint, not a claim that the public API has been tested:
 
 - Amazon Linux `2023.12.20260918`, `aarch64` (ARM64).
 - Installed Git and Go: `git version 2.50.1`, `go version go1.26.8-X:nodwarf5 linux/arm64`.
@@ -78,7 +74,7 @@ curl -fsS http://127.0.0.1:8080/healthz
 
 The installed configuration provisions one public space. The empty keys file is for this public-only setup. The service listens on `127.0.0.1:8080`; no public firewall opening for port 8080 is needed.
 
-## Apache API routing (completed; retained for reference)
+## Next step: Apache API routing (pending)
 
 Back up the active HTTPS configuration before editing:
 
@@ -115,7 +111,7 @@ Confirm the existing website still loads. If configuration validation fails, sto
 
 ## Build and run when ready
 
-Requirements for current 0.2.0 source: Git and Go 1.25 or newer to build, with pinned Go modules downloaded on first build. The executable needs Git at runtime, but no Go runtime, database, or Node. Build on the target server (or for its architecture). The owner completed the server build recorded above; the commands below remain a general reference.
+Requirements: Git and Go 1.23 or newer to build. The executable needs Git at runtime, but no Go runtime, database, Node, or downloaded Go modules. Build on the target server (or for its architecture). The owner completed the server build recorded above; the commands below remain a general reference.
 
 ```sh
 go version
@@ -204,4 +200,4 @@ The separate ingress ceiling is 2,400 requests/minute service-wide and 240/minut
 
 ## Validation performed in this bite
 
-During initial implementation: Go formatting/syntax parsing and a source review only. An optional `go list ./...` check could not complete because the local Go cache denied access. Subsequently, the owner built and installed the executable on the server and confirmed systemd startup and local HTTP health, as recorded above. No smoke-test execution, exhaustive testing, or performance measurements have been reported. Public Apache API routing and the REST smoke flow were subsequently confirmed by the owner on 2026-09-26. MCP runtime validation remains pending.
+During initial implementation: Go formatting/syntax parsing and a source review only. An optional `go list ./...` check could not complete because the local Go cache denied access. Subsequently, the owner built and installed the executable on the server and confirmed systemd startup and local HTTP health, as recorded above. No smoke-test execution, exhaustive testing, or performance measurements have been reported. Public Apache API routing remains unverified.

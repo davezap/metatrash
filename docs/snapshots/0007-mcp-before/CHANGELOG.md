@@ -2,16 +2,6 @@
 
 ## Unreleased
 
-### 0.2.0 - MCP adapter (2026-09-26)
-
-- Added `/mcp` with the official Go MCP SDK v1.8.0, pinned to protocol versions 2025-11-25 and 2025-06-18, using stateless Streamable HTTP and JSON responses.
-- Reused the published schemas and shared access/storage service for all five tools; added request-scoped bearer credentials, argument validation, bounded requests, and Host/Origin checks.
-- Added an exact Apache MCP route, upgrade notes, and an optional owner-run MCP smoke test. Builds and tests have not been run for this change.
-- Raised the build requirement to Go 1.25; dependency versions and checksums are recorded.
-- Recorded the owner's successful public REST smoke test: create/read/update, stale-state rejection, stable-ID move, history, and historical reads. The reported file ID is valid at 32 characters.
-
-### Earlier 0.1.0 work
-
 ### Added
 
 - Go 0.1.0 storage/REST implementation using the standard library and system Git; not yet built or deployed.
@@ -40,4 +30,4 @@
 - Rate controls apply to all users and spaces, including private key holders, with site-admin configuration per space.
 - Bring-up remains intentionally small: the owner performed the server build and local health check; no exhaustive validation.
 
-The owner deployed and smoke-tested 0.1.0. The 0.2.0 MCP change awaits owner build/deployment; browser work remains.
+The 0.1.0 implementation is unreleased pending bring-up; MCP and browser work remains.

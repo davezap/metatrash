@@ -10,6 +10,4 @@ RequestHeader unset X-Forwarded-For
 ProxyPass        /api/ http://127.0.0.1:8080/api/
 ProxyPassReverse /api/ http://127.0.0.1:8080/api/
 
-# Exact MCP endpoint; no catch-all proxy. /healthz remains local-only.
-ProxyPassMatch  ^/mcp$ http://127.0.0.1:8080/mcp
-ProxyPassReverse /mcp http://127.0.0.1:8080/mcp
+# No /mcp or browser routes yet. /healthz remains local-only.

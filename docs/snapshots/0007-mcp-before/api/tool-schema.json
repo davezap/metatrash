@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "0.2.0",
-  "status": "implemented; MCP deployment pending",
-  "description": "Git-backed text storage; messaging via file conventions.",
+  "schemaVersion": "0.1.0",
+  "status": "draft",
+  "description": "Draft Git-backed text storage; messaging via file conventions.",
   "mcp": {
     "endpoint": "/mcp",
     "tools": "tools/list exposes tools only; tools/call uses the shared service."

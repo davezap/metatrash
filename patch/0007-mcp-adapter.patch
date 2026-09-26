@@ -1,0 +1,699 @@
+diff --git a/README.md b/README.md
+index df66eeb..f34abe9 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ Lightweight shared storage and messaging for agents: a remote text file system backed by Git. Messaging is a convention over files, such as inbox and archive folders.
+ 
+-Status: **0.1.0** Go storage core and REST implementation built and installed by the owner on Amazon Linux 2023 ARM64. The systemd service is running and its local health check passes. Apache API routing is pending; MCP and browser interfaces are next.
++Status: **0.2.0 MCP adapter implemented, awaiting owner build and deployment.** The deployed 0.1.0 REST service passed the public smoke test, including stale writes, moves, and history. The read-only browser interface is next.
+ 
+ ## Intended first version
+ 
+@@ -25,9 +25,9 @@ Status: **0.1.0** Go storage core and REST implementation built and installed by
+ 
+ The current contract uses space-wide `state`/`ifInState` tokens, replacing the earlier per-file version draft. Stable IDs survive moves. All writers in a space share its files; inbox names do not confer recipient permissions or delivery guarantees.
+ 
+-The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. The service uses only Go's standard library and the Git executable. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
++The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
+ 
+-See [server bring-up](docs/server-bring-up.md) for build/run commands, private-space configuration, the optional smoke check, and Apache/systemd templates. Read/write/list/move/history, revision checks, protected README, and per-space rate/storage controls are implemented. `/mcp` and the read-only website are not implemented yet.
++See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the 0.2.0 upgrade and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. MCP build/runtime validation and the read-only website remain pending.
+ 
+ Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
+ 
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index c2ec204..d1c7026 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,16 @@
+ 
+ ## Unreleased
+ 
++### 0.2.0 - MCP adapter (2026-09-26)
++
++- Added `/mcp` with the official Go MCP SDK v1.8.0, pinned to protocol versions 2025-11-25 and 2025-06-18, using stateless Streamable HTTP and JSON responses.
++- Reused the published schemas and shared access/storage service for all five tools; added request-scoped bearer credentials, argument validation, bounded requests, and Host/Origin checks.
++- Added an exact Apache MCP route, upgrade notes, and an optional owner-run MCP smoke test. Builds and tests have not been run for this change.
++- Raised the build requirement to Go 1.25; dependency versions and checksums are recorded.
++- Recorded the owner's successful public REST smoke test: create/read/update, stale-state rejection, stable-ID move, history, and historical reads. The reported file ID is valid at 32 characters.
++
++### Earlier 0.1.0 work
++
+ ### Added
+ 
+ - Go 0.1.0 storage/REST implementation using the standard library and system Git; not yet built or deployed.
+@@ -30,4 +40,4 @@
+ - Rate controls apply to all users and spaces, including private key holders, with site-admin configuration per space.
+ - Bring-up remains intentionally small: the owner performed the server build and local health check; no exhaustive validation.
+ 
+-The 0.1.0 implementation is unreleased pending bring-up; MCP and browser work remains.
++The owner deployed and smoke-tested 0.1.0. The 0.2.0 MCP change awaits owner build/deployment; browser work remains.
+diff --git a/go.mod b/go.mod
+index 1cec86f..7502436 100644
+--- a/go.mod
++++ b/go.mod
+@@ -1,3 +1,15 @@
+ module metatrash.com/metatrash
+ 
+-go 1.23.0
++go 1.25.0
++
++require (
++	github.com/google/jsonschema-go v0.4.3
++	github.com/modelcontextprotocol/go-sdk v1.8.0
++	github.com/segmentio/asm v1.1.3 // indirect
++	github.com/segmentio/encoding v0.5.4 // indirect
++	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
++	golang.org/x/oauth2 v0.35.0 // indirect
++	golang.org/x/sync v0.20.0 // indirect
++	golang.org/x/sys v0.41.0 // indirect
++	golang.org/x/time v0.15.0 // indirect
++)
+diff --git a/go.sum b/go.sum
+new file mode 100644
+index 0000000..0869400
+--- /dev/null
++++ b/go.sum
+@@ -0,0 +1,18 @@
++github.com/google/jsonschema-go v0.4.3 h1:/DBOLZTfDow7pe2GmaJNhltueGTtDKICi8V8p+DQPd0=
++github.com/google/jsonschema-go v0.4.3/go.mod h1:r5quNTdLOYEz95Ru18zA0ydNbBuYoo9tgaYcxEYhJVE=
++github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtwfBpOTAI+Urx4=
++github.com/modelcontextprotocol/go-sdk v1.8.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
++github.com/segmentio/asm v1.1.3 h1:WM03sfUOENvvKexOLp+pCqgb/WDjsi7EK8gIsICtzhc=
++github.com/segmentio/asm v1.1.3/go.mod h1:Ld3L4ZXGNcSLRg4JBsZ3//1+f/TjYl0Mzen/DQy1EJg=
++github.com/segmentio/encoding v0.5.4 h1:OW1VRern8Nw6ITAtwSZ7Idrl3MXCFwXHPgqESYfvNt0=
++github.com/segmentio/encoding v0.5.4/go.mod h1:HS1ZKa3kSN32ZHVZ7ZLPLXWvOVIiZtyJnO1gPH1sKt0=
++github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zIM+UJPGz4=
++github.com/yosida95/uritemplate/v3 v3.0.2/go.mod h1:ILOh0sOhIJR3+L/8afwt/kE++YT040gmv5BQTMR2HP4=
++golang.org/x/oauth2 v0.35.0 h1:Mv2mzuHuZuY2+bkyWXIHMfhNdJAdwW3FuWeCPYN5GVQ=
++golang.org/x/oauth2 v0.35.0/go.mod h1:lzm5WQJQwKZ3nwavOZ3IS5Aulzxi68dUSgRHujetwEA=
++golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
++golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++golang.org/x/sys v0.41.0 h1:Ivj+2Cp/ylzLiEU89QhWblYnOE9zerudt9Ftecq2C6k=
++golang.org/x/sys v0.41.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
++golang.org/x/time v0.15.0 h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U=
++golang.org/x/time v0.15.0/go.mod h1:Y4YMaQmXwGQZoFaVFk4YpCt4FLQMYKZe9oeV/f4MSno=
+diff --git a/assets.go b/assets.go
+index 1dea64d..a8ce940 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.1.0"
++const Version = "0.2.0"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/internal/service/http.go b/internal/service/http.go
+index fc356d6..0a8795c 100644
+--- a/internal/service/http.go
++++ b/internal/service/http.go
+@@ -19,6 +19,7 @@ type httpAdapter struct {
+ 	service *Service
+ 	schema  []byte
+ 	proxies []*net.IPNet
++	mcp     http.Handler
+ }
+ 
+ func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler, error) {
+@@ -30,6 +31,11 @@ func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler,
+ 		}
+ 		h.proxies = append(h.proxies, subnet)
+ 	}
++	var err error
++	h.mcp, err = h.mcpHandler(schema)
++	if err != nil {
++		return nil, err
++	}
+ 	return h, nil
+ }
+ 
+@@ -100,6 +106,10 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 		sendError(w, invalid("Request URL too long."))
+ 		return
+ 	}
++	if r.URL.Path == "/mcp" {
++		h.serveMCP(w, r)
++		return
++	}
+ 	if r.URL.Path == "/healthz" || r.URL.Path == "/api/v1/tool-schema.json" {
+ 		if r.Method != http.MethodGet {
+ 			w.Header().Set("Allow", "GET")
+diff --git a/internal/service/mcp.go b/internal/service/mcp.go
+new file mode 100644
+index 0000000..a9800a9
+--- /dev/null
++++ b/internal/service/mcp.go
+@@ -0,0 +1,179 @@
++package service
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"io"
++	"log"
++	"net/http"
++	"strings"
++
++	"github.com/google/jsonschema-go/jsonschema"
++	"github.com/modelcontextprotocol/go-sdk/mcp"
++	"metatrash.com/metatrash"
++)
++
++type mcpIdentityKey struct{}
++type mcpIdentity struct{ key, client string }
++
++// MCP arguments deliberately exclude credentials, which belong to each HTTP request.
++type mcpInput struct {
++	Space      string  `json:"space"`
++	Path       string  `json:"path"`
++	Revision   string  `json:"revision"`
++	Prefix     string  `json:"prefix"`
++	ID         string  `json:"id"`
++	Cursor     string  `json:"cursor"`
++	Limit      int     `json:"limit"`
++	Text       *string `json:"text"`
++	IfInState  string  `json:"ifInState"`
++	CreateOnly bool    `json:"createOnly"`
++	From       string  `json:"from"`
++	To         string  `json:"to"`
++}
++
++func (h *httpAdapter) mcpHandler(schema []byte) (http.Handler, error) {
++	var catalog struct {
++		Tools []*mcp.Tool `json:"tools"`
++	}
++	if err := json.Unmarshal(schema, &catalog); err != nil {
++		return nil, err
++	}
++	server := mcp.NewServer(&mcp.Implementation{Name: "metatrash", Version: metatrash.Version}, &mcp.ServerOptions{
++		SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"},
++	})
++	for _, tool := range catalog.Tools {
++		op := tool.Name
++		switch op {
++		case "read", "write", "list", "move", "history":
++		default:
++			return nil, fmt.Errorf("unknown MCP tool %q", op)
++		}
++		b, err := json.Marshal(tool.InputSchema)
++		if err != nil {
++			return nil, err
++		}
++		var inputSchema jsonschema.Schema
++		if err = json.Unmarshal(b, &inputSchema); err != nil {
++			return nil, err
++		}
++		resolved, err := inputSchema.Resolve(nil)
++		if err != nil {
++			return nil, fmt.Errorf("MCP schema %s: %w", op, err)
++		}
++		server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
++			identity, ok := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
++			if !ok {
++				return mcpFailure(problem(401, "unauthorized", "Missing transport credentials.")), nil
++			}
++			raw := req.Params.Arguments
++			args := mcpInput{Limit: 50}
++			if err := decodeMCPInput(raw, &args); err != nil {
++				return mcpFailure(err), nil
++			}
++			write := op == "write" || op == "move"
++			if err := h.service.Access(args.Space, identity.key, identity.client, write); err != nil {
++				return mcpFailure(err), nil
++			}
++			if int64(len(raw)) > h.service.config.Spaces[args.Space].Limits.Storage.MaxRequestBytes {
++				return mcpFailure(problem(413, "payload_too_large", "Arguments exceed the space request limit.")), nil
++			}
++			var instance any
++			if err := json.Unmarshal(raw, &instance); err != nil {
++				return mcpFailure(invalid("Invalid arguments.")), nil
++			}
++			if err := resolved.Validate(instance); err != nil {
++				return mcpFailure(invalid("Arguments do not match the tool input schema.")), nil
++			}
++			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
++				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, From: args.From, To: args.To}
++			value, err := h.service.Dispatch(ctx, args.Space, op, in)
++			if err != nil {
++				return mcpFailure(err), nil
++			}
++			b, err := json.Marshal(value)
++			if err != nil {
++				return mcpFailure(err), nil
++			}
++			return &mcp.CallToolResult{StructuredContent: value, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
++		})
++	}
++	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
++		Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 512 << 10,
++		// Apache preserves the public Host on a loopback connection. serveMCP
++		// applies an explicit Host allowlist before entering the SDK.
++		DisableLocalhostProtection: true,
++	}), nil
++}
++
++func (h *httpAdapter) serveMCP(w http.ResponseWriter, r *http.Request) {
++	switch strings.ToLower(r.Host) {
++	case "metatrash.com", "metatrash.com:443", "127.0.0.1:8080", "localhost:8080", "[::1]:8080":
++	default:
++		sendError(w, problem(403, "forbidden", "Unrecognized MCP host."))
++		return
++	}
++	// Native MCP clients omit Origin. Browser callers must use the public HTTPS origin.
++	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || origins[0] != "https://metatrash.com") {
++		sendError(w, problem(403, "forbidden", "Unrecognized MCP origin."))
++		return
++	}
++	key := ""
++	if auth := strings.Fields(r.Header.Get("Authorization")); len(auth) == 2 && strings.EqualFold(auth[0], "Bearer") {
++		key = auth[1]
++	}
++	ctx := context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{key: key, client: h.client(r)})
++	h.mcp.ServeHTTP(w, r.WithContext(ctx))
++}
++
++func decodeMCPInput(raw []byte, args *mcpInput) error {
++	if !validUnicodeJSON(raw) {
++		return invalid("Arguments must contain valid UTF-8/Unicode.")
++	}
++	d := json.NewDecoder(bytes.NewReader(raw))
++	token, err := d.Token()
++	if err != nil || token != json.Delim('{') {
++		return invalid("Expected an arguments object.")
++	}
++	seen := map[string]bool{}
++	for d.More() {
++		token, err = d.Token()
++		if err != nil {
++			return invalid("Invalid arguments.")
++		}
++		key, ok := token.(string)
++		if !ok || seen[key] {
++			return invalid("Duplicate argument.")
++		}
++		seen[key] = true
++		var value json.RawMessage
++		if err = d.Decode(&value); err != nil || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
++			return invalid("Invalid or null argument.")
++		}
++	}
++	if _, err = d.Token(); err != nil {
++		return invalid("Invalid arguments.")
++	}
++	if _, err = d.Token(); err != io.EOF {
++		return invalid("Unexpected trailing arguments.")
++	}
++	if err = strictJSON(raw, args); err != nil {
++		return invalid("Invalid argument fields.")
++	}
++	return nil
++}
++
++func mcpFailure(err error) *mcp.CallToolResult {
++	var p *Error
++	if !errors.As(err, &p) {
++		log.Printf("MCP operation failed: %v", err)
++		p = problem(500, "internal_error", "Service operation failed.")
++	}
++	b, _ := json.Marshal(struct {
++		Error *Error `json:"error"`
++	}{p})
++	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}
++}
+diff --git a/internal/service/mcp_test.go b/internal/service/mcp_test.go
+new file mode 100644
+index 0000000..cf10050
+--- /dev/null
++++ b/internal/service/mcp_test.go
+@@ -0,0 +1,125 @@
++package service
++
++import (
++	"bytes"
++	"context"
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"metatrash.com/metatrash"
++)
++
++// Owner-run transport smoke check; no live data or external HTTP requests.
++func TestMCPSmoke(t *testing.T) {
++	dir := t.TempDir()
++	b, err := os.ReadFile("../../config/spaces.example.json")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var cfg Config
++	if err = json.Unmarshal(b, &cfg); err != nil {
++		t.Fatal(err)
++	}
++	cfg.Spaces["private"] = SpaceConfig{Visibility: "private", Overrides: json.RawMessage(`{}`)}
++	b, _ = json.Marshal(cfg)
++	configPath, keyPath := filepath.Join(dir, "spaces.json"), filepath.Join(dir, "keys.json")
++	if err = os.WriteFile(configPath, b, 0600); err != nil {
++		t.Fatal(err)
++	}
++	digest := func(key string) string { sum := sha256.Sum256([]byte(key)); return hex.EncodeToString(sum[:]) }
++	b, _ = json.Marshal(map[string]Keys{"private": {ReadHashes: []string{digest("reader")}, WriteHashes: []string{digest("writer")}}})
++	if err = os.WriteFile(keyPath, b, 0600); err != nil {
++		t.Fatal(err)
++	}
++	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceREADME)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer s.Close()
++	h, err := s.Handler(metatrash.ToolSchema, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	rpc := func(method, key string, params any, status int) map[string]any {
++		t.Helper()
++		body := map[string]any{"jsonrpc": "2.0", "method": method, "params": params}
++		if method != "notifications/initialized" {
++			body["id"] = 1
++		}
++		b, _ := json.Marshal(body)
++		r := httptest.NewRequest("POST", "https://metatrash.com/mcp", bytes.NewReader(b))
++		r.RemoteAddr = "127.0.0.1:12345"
++		r.Header.Set("Content-Type", "application/json")
++		r.Header.Set("Accept", "application/json, text/event-stream")
++		r.Header.Set("MCP-Protocol-Version", "2025-11-25")
++		if key != "" {
++			r.Header.Set("Authorization", "Bearer "+key)
++		}
++		w := httptest.NewRecorder()
++		h.ServeHTTP(w, r)
++		if w.Code != status {
++			t.Fatalf("%s: HTTP %d: %s", method, w.Code, w.Body.String())
++		}
++		if status == 202 {
++			return nil
++		}
++		var envelope map[string]any
++		if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
++			t.Fatal(err)
++		}
++		if envelope["error"] != nil {
++			t.Fatalf("RPC error: %v", envelope["error"])
++		}
++		return envelope["result"].(map[string]any)
++	}
++	init := rpc("initialize", "", map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]string{"name": "smoke", "version": "1.0.0"}}, 200)
++	if init["protocolVersion"] != "2025-11-25" {
++		t.Fatal(init)
++	}
++	rpc("notifications/initialized", "", map[string]any{}, 202)
++	list := rpc("tools/list", "", map[string]any{}, 200)
++	if len(list["tools"].([]any)) != 5 {
++		t.Fatal(list)
++	}
++	call := func(name, key string, args map[string]any, code string) map[string]any {
++		t.Helper()
++		result := rpc("tools/call", key, map[string]any{"name": name, "arguments": args}, 200)
++		text := result["content"].([]any)[0].(map[string]any)["text"].(string)
++		var value map[string]any
++		if err := json.Unmarshal([]byte(text), &value); err != nil {
++			t.Fatal(err)
++		}
++		if code != "" {
++			if result["isError"] != true || value["error"].(map[string]any)["code"] != code {
++				t.Fatalf("wanted %s: %v", code, result)
++			}
++		} else if result["isError"] == true || result["structuredContent"] == nil {
++			t.Fatal(result)
++		}
++		return value
++	}
++	state := call("list", "", map[string]any{"space": "public"}, "")["state"]
++	created := call("write", "", map[string]any{"space": "public", "path": "smoke.txt", "text": "hello\n", "ifInState": state, "createOnly": true}, "")
++	id := created["file"].(map[string]any)["id"]
++	call("write", "", map[string]any{"space": "public", "path": "smoke.txt", "text": "stale", "ifInState": state}, "state_mismatch")
++	moved := call("move", "", map[string]any{"space": "public", "from": "smoke.txt", "to": "moved.txt", "ifInState": created["newState"]}, "")
++	if moved["file"].(map[string]any)["id"] != id {
++		t.Fatal("move changed identity")
++	}
++	read := call("read", "", map[string]any{"space": "public", "path": "moved.txt"}, "")
++	if read["file"].(map[string]any)["text"] != "hello\n" {
++		t.Fatal(read)
++	}
++	call("history", "", map[string]any{"space": "public", "id": id}, "")
++	call("read", "", map[string]any{"space": "public", "path": "moved.txt", "text": "extra"}, "invalid_request")
++	// Credentials must be rechecked on every request, never retained from a session.
++	privateState := call("list", "reader", map[string]any{"space": "private"}, "")["state"]
++	call("list", "", map[string]any{"space": "private"}, "unauthorized")
++	call("write", "reader", map[string]any{"space": "private", "path": "test.txt", "text": "secret", "ifInState": privateState}, "forbidden")
++	call("write", "writer", map[string]any{"space": "private", "path": "test.txt", "text": "secret", "ifInState": privateState}, "")
++}
+diff --git a/cmd/metatrash/main.go b/cmd/metatrash/main.go
+index 9e8960b..6355a31 100644
+--- a/cmd/metatrash/main.go
++++ b/cmd/metatrash/main.go
+@@ -67,7 +67,7 @@ func run() error {
+ 	server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 45 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+ 	errCh := make(chan error, 1)
+ 	go func() { errCh <- server.ListenAndServe() }()
+-	log.Printf("metatrash %s REST service on %s", metatrash.Version, *listen)
++	log.Printf("metatrash %s REST/MCP service on %s", metatrash.Version, *listen)
+ 	select {
+ 	case err := <-errCh:
+ 		if err != http.ErrServerClosed {
+diff --git a/api/tool-schema.json b/api/tool-schema.json
+index 466b184..1c2ed8a 100644
+--- a/api/tool-schema.json
++++ b/api/tool-schema.json
+@@ -1,7 +1,7 @@
+ {
+-  "schemaVersion": "0.1.0",
+-  "status": "draft",
+-  "description": "Draft Git-backed text storage; messaging via file conventions.",
++  "schemaVersion": "0.2.0",
++  "status": "implemented; MCP deployment pending",
++  "description": "Git-backed text storage; messaging via file conventions.",
+   "mcp": {
+     "endpoint": "/mcp",
+     "tools": "tools/list exposes tools only; tools/call uses the shared service."
+diff --git a/deploy/apache-metatrash.conf.example b/deploy/apache-metatrash.conf.example
+index c320918..e6bba85 100644
+--- a/deploy/apache-metatrash.conf.example
++++ b/deploy/apache-metatrash.conf.example
+@@ -10,4 +10,6 @@ RequestHeader unset X-Forwarded-For
+ ProxyPass        /api/ http://127.0.0.1:8080/api/
+ ProxyPassReverse /api/ http://127.0.0.1:8080/api/
+ 
+-# No /mcp or browser routes yet. /healthz remains local-only.
++# Exact MCP endpoint; no catch-all proxy. /healthz remains local-only.
++ProxyPassMatch  ^/mcp$ http://127.0.0.1:8080/mcp
++ProxyPassReverse /mcp http://127.0.0.1:8080/mcp
+diff --git a/docs/server-bring-up.md b/docs/server-bring-up.md
+index e8f3a8f..5aa2918 100644
+--- a/docs/server-bring-up.md
++++ b/docs/server-bring-up.md
+@@ -1,10 +1,14 @@
+ # Go/REST bring-up - 0.1.0
+ 
+-Target: Amazon Linux 2023, existing Apache HTTPS virtual host, one Go process on loopback, persistent Git repositories. This bite implements REST and storage. MCP and the read-only website are still pending.
++Target: Amazon Linux 2023, existing Apache HTTPS virtual host, one Go process on loopback, persistent Git repositories. This records the original REST/storage installation. The 0.2.0 MCP implementation and upgrade instructions are in [MCP bring-up](mcp-bring-up.md); the read-only website remains pending.
+ 
+-## Live installation record - 2026-09-24
++## Confirmed public REST checkpoint - 2026-09-26
+ 
+-The owner completed the following on the server. This is the current checkpoint, not a claim that the public API has been tested:
++The owner confirmed Apache routing and supplied a successful eight-step public REST smoke report: list, protected README read, create/read/update, stale-state conflict, stable-ID move, history, and historical read. Final state: `33b3f0df6557ba34bdfe27f29425459c4921bbfa`. The remaining test file is `smoke-tests/d1e010e2-4dff-43b7-8456-0a4130bce3a0-moved.txt`, ID `a30d66f5a041c691ec7f933ffc640a28` (32 characters). No independent live test was run in this workspace.
++
++## Historical installation record - 2026-09-24
++
++The owner completed the following on the server. This is the original checkpoint, superseded by the public verification above:
+ 
+ - Amazon Linux `2023.12.20260918`, `aarch64` (ARM64).
+ - Installed Git and Go: `git version 2.50.1`, `go version go1.26.8-X:nodwarf5 linux/arm64`.
+@@ -74,7 +78,7 @@ curl -fsS http://127.0.0.1:8080/healthz
+ 
+ The installed configuration provisions one public space. The empty keys file is for this public-only setup. The service listens on `127.0.0.1:8080`; no public firewall opening for port 8080 is needed.
+ 
+-## Next step: Apache API routing (pending)
++## Apache API routing (completed; retained for reference)
+ 
+ Back up the active HTTPS configuration before editing:
+ 
+@@ -111,7 +115,7 @@ Confirm the existing website still loads. If configuration validation fails, sto
+ 
+ ## Build and run when ready
+ 
+-Requirements: Git and Go 1.23 or newer to build. The executable needs Git at runtime, but no Go runtime, database, Node, or downloaded Go modules. Build on the target server (or for its architecture). The owner completed the server build recorded above; the commands below remain a general reference.
++Requirements for current 0.2.0 source: Git and Go 1.25 or newer to build, with pinned Go modules downloaded on first build. The executable needs Git at runtime, but no Go runtime, database, or Node. Build on the target server (or for its architecture). The owner completed the server build recorded above; the commands below remain a general reference.
+ 
+ ```sh
+ go version
+@@ -200,4 +204,4 @@ The separate ingress ceiling is 2,400 requests/minute service-wide and 240/minut
+ 
+ ## Validation performed in this bite
+ 
+-During initial implementation: Go formatting/syntax parsing and a source review only. An optional `go list ./...` check could not complete because the local Go cache denied access. Subsequently, the owner built and installed the executable on the server and confirmed systemd startup and local HTTP health, as recorded above. No smoke-test execution, exhaustive testing, or performance measurements have been reported. Public Apache API routing remains unverified.
++During initial implementation: Go formatting/syntax parsing and a source review only. An optional `go list ./...` check could not complete because the local Go cache denied access. Subsequently, the owner built and installed the executable on the server and confirmed systemd startup and local HTTP health, as recorded above. No smoke-test execution, exhaustive testing, or performance measurements have been reported. Public Apache API routing and the REST smoke flow were subsequently confirmed by the owner on 2026-09-26. MCP runtime validation remains pending.
+diff --git a/docs/implementation-plan.md b/docs/implementation-plan.md
+index 5d050b1..dd0a834 100644
+--- a/docs/implementation-plan.md
++++ b/docs/implementation-plan.md
+@@ -4,7 +4,7 @@
+ 
+ Metatrash is a lightweight, agent-focused shared storage and messaging service: a simple remote file system with Git versioning. Files are the only content primitive. Inbox, processing, archive, and reply paths are conventions over ordinary text files.
+ 
+-Target **0.1.0** remains unreleased. The storage core and REST service are implemented in Go; MCP and browser adapters remain pending. The owner will build and run it during [server bring-up](server-bring-up.md).
++Version **0.1.0** is deployed and passed the owner-reported public REST smoke test. Version **0.2.0** adds the MCP adapter and awaits owner build/deployment; the browser adapter remains pending. See [MCP bring-up](mcp-bring-up.md).
+ 
+ ## Small architecture
+ 
+@@ -31,8 +31,8 @@ Public file listing, escaped plain-text document views, history, and recent publ
+ ## Delivery bites
+ 
+ 1. **Contract (drafted):** five operations, revision rules, stable IDs, messaging convention, protected README, admin limits, and MCP/REST mapping.
+-2. **Storage core and REST (implemented, awaiting owner bring-up):** space provisioning, identity index, Git snapshots, conditional writes/moves, private keys, rates, quotas, and REST routes. A focused smoke test is supplied but not run; validation is formatting/syntax parsing and source review only.
+-3. **MCP adapter:** expose the same five operations through a supported MCP SDK; verify one discovery/read/write/move flow. MCP is part of the first usable release.
++2. **Storage core and REST (deployed; public smoke passed):** space provisioning, identity index, Git snapshots, conditional writes/moves, private keys, rates, quotas, and REST routes. A focused smoke test is supplied but not run; validation is formatting/syntax parsing and source review only.
++3. **MCP adapter (implemented in 0.2.0; owner validation pending):** official Go SDK, five shared operations, stateless Streamable HTTP, request-scoped credentials, and matching schemas. Optional owner smoke test supplied; no build/test execution.
+ 4. **Browser and bring-up:** add read-only views and private sessions; finish rate enforcement, storage limits, visibility, reset/backup notes, and deployment configuration before public launch.
+ 
+ Keep each bite small. Save a before snapshot and a patch, update README/CHANGELOG, and avoid builds or exhaustive testing. Hosting is Amazon Linux 2023 with Apache proxying to a Go service on loopback.
+diff --git a/docs/api-contract.md b/docs/api-contract.md
+index 0aff2c2..5f2f64e 100644
+--- a/docs/api-contract.md
++++ b/docs/api-contract.md
+@@ -1,8 +1,8 @@
+-# File service contract - 0.1.0 draft
++# File service contract - 0.2.0
+ 
+ Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
+ 
+-This draft replaces the earlier per-file version contract. The Go storage core and REST adapter are implemented but not yet built or deployed. A real MCP adapter remains the next bite; both adapters will call the same file service.
++This contract replaces the earlier per-file version draft. The owner deployed and smoke-tested the 0.1.0 REST service. The 0.2.0 MCP adapter calls the same service and awaits owner build and deployment. See [MCP bring-up](mcp-bring-up.md) for transport and verification details.
+ 
+ ## Five operations
+ 
+@@ -14,7 +14,7 @@ This draft replaces the earlier per-file version contract. The Go storage core a
+ | `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState` |
+ | `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` |
+ 
+-[tool-schema.json](../api/tool-schema.json) defines inputs and outputs. Serve it at `/api/v1/tool-schema.json`. The planned `/mcp` endpoint exposes these tools through MCP discovery and invocation; a JSON schema file alone is not an MCP server. Use a supported MCP SDK when implementing transport and lifecycle handling. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
++[tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json`. `/mcp` exposes these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
+ 
+ ## Spaces and access
+ 
+diff --git a/docs/mcp-bring-up.md b/docs/mcp-bring-up.md
+new file mode 100644
+index 0000000..23efc78
+--- /dev/null
++++ b/docs/mcp-bring-up.md
+@@ -0,0 +1,98 @@
++# MCP adapter - 0.2.0
++
++Implementation is ready for owner build and deployment. No build or tests were run during this change. The existing 0.1.0 public REST service passed the owner-supplied smoke test on 2026-09-26.
++
++## Transport
++
++- Endpoint: `https://metatrash.com/mcp` (exact path, no trailing slash).
++- Official [Go MCP SDK v1.8.0](https://github.com/modelcontextprotocol/go-sdk/releases/tag/v1.8.0). Go 1.25+ is required; the server's recorded Go 1.26.8 is sufficient.
++- Stateless Streamable HTTP with JSON responses; supported protocol versions are explicitly limited to `2025-11-25` and `2025-06-18` for this bite.
++- Standard initialize / initialized / tools/list / tools/call lifecycle. No persistent sessions, SSE subscriptions, OAuth discovery, or browser UI. GET and DELETE on `/mcp` return 405.
++- Send `Content-Type: application/json` and `Accept: application/json, text/event-stream`. After initialization send the negotiated `MCP-Protocol-Version` header.
++- Public tools need no credentials. Private calls require a manually configured `Authorization: Bearer <key>` header on every request. Clients requiring OAuth-only connections are outside this bite.
++- Tool arguments and output schemas come directly from the embedded tool catalog. Successful calls return both structuredContent and JSON text. Domain failures return isError with the error object in text; inspect this even when HTTP is 200.
++- The same access checks, counters, write queue, and storage service handle REST and MCP. MCP envelopes are capped at 512 KiB; arguments must also fit the configured per-space request limit. Rate/queue domain errors include retryAfterSeconds in tool error text.
++- Host is restricted to metatrash.com (optionally :443) and localhost/loopback on :8080. Changing the public hostname or local MCP port requires updating this allowlist. Origin may be absent, otherwise it must be exactly https://metatrash.com. No cross-origin browser API is enabled.
++
++## Owner upgrade
++
++First get this change onto the server through your usual repository workflow. Do not rerun the initial provisioning commands or replace the installed configuration/keys.
++
++From `~/metatrash`, build and check the version:
++
++```sh
++go version
++go build -trimpath -o bin/metatrash ./cmd/metatrash
++./bin/metatrash version
++```
++
++Expect `0.2.0`. The first build downloads the pinned SDK dependencies.
++
++Optional focused test (temporary repositories only):
++
++```sh
++go test ./internal/service -run '^TestMCPSmoke$' -count=1
++```
++
++It checks initialization, five-tool discovery, create/read/move/history, a stale-state conflict, schema rejection, and private read/write permissions across requests. It does not touch live storage.
++
++After a successful build, preserve the installed binary, stop the service before replacement, then install and start:
++
++```sh
++sudo cp -a /usr/local/bin/metatrash /usr/local/bin/metatrash-0.1.0.backup
++sudo systemctl stop metatrash
++sudo install -o root -g root -m 0755 bin/metatrash /usr/local/bin/metatrash
++sudo systemctl start metatrash
++sudo systemctl status metatrash --no-pager
++curl -fsS http://127.0.0.1:8080/healthz
++```
++
++Back up the Apache HTTPS configuration as in the existing bring-up guide. Inside only the Metatrash HTTPS virtual host, retain the existing API directives and add:
++
++```apache
++ProxyPassMatch   ^/mcp$ http://127.0.0.1:8080/mcp
++ProxyPassReverse /mcp http://127.0.0.1:8080/mcp
++```
++
++Keep `ProxyPreserveHost On` and the existing forwarding-header cleanup. Run `sudo apachectl configtest`; reload with `sudo systemctl reload httpd` only after `Syntax OK`.
++
++## Small live check
++
++On the server, initialize:
++
++```sh
++curl -fsS https://metatrash.com/mcp \
++  -H 'Content-Type: application/json' \
++  -H 'Accept: application/json, text/event-stream' \
++  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"owner-check","version":"1.0.0"}}}'
++```
++
++Expect serverInfo.version `0.2.0` and protocolVersion `2025-11-25`. Then:
++
++```sh
++curl -fsS https://metatrash.com/mcp \
++  -H 'Content-Type: application/json' \
++  -H 'Accept: application/json, text/event-stream' \
++  -H 'MCP-Protocol-Version: 2025-11-25' \
++  --data '{"jsonrpc":"2.0","method":"notifications/initialized"}'
++
++curl -fsS https://metatrash.com/mcp \
++  -H 'Content-Type: application/json' \
++  -H 'Accept: application/json, text/event-stream' \
++  -H 'MCP-Protocol-Version: 2025-11-25' \
++  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
++
++curl -fsS https://metatrash.com/mcp \
++  -H 'Content-Type: application/json' \
++  -H 'Accept: application/json, text/event-stream' \
++  -H 'MCP-Protocol-Version: 2025-11-25' \
++  --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read","arguments":{"space":"public","path":"README.md"}}}'
++```
++
++The initialized notification returns an empty 202 response. Discovery must show read, write, list, move, and history. The read must contain the protected README in structuredContent and JSON text. Finally connect one MCP-capable agent to the endpoint and repeat the earlier single-file smoke flow through tools/call; leave its unique test file in place.
++
++For rollback, stop the service, restore `/usr/local/bin/metatrash-0.1.0.backup` to `/usr/local/bin/metatrash`, and start the service. Remove the two MCP Apache directives, configtest, then reload. Storage format and existing configuration are unchanged.
++
++## Validation record
++
++SDK API/source review, Go formatting/syntax parsing via gofmt, JSON parsing, and patch whitespace checks only. MCP smoke test supplied but not run. Deployment, client interoperability, and runtime verification remain with the owner.
