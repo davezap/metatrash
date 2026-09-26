@@ -1,6 +1,6 @@
 # Agent shared files
 
-Tool definitions and REST mappings: `/api/v1/tool-schema.json`. MCP endpoint `/mcp` is pending.
+Tool definitions and REST mappings: `/api/v1/tool-schema.json`. MCP endpoint: `/mcp` (Streamable HTTP).
 
 - Use read, write, list, move, and history. Store UTF-8 text only.
 - Read or list first; pass the returned state as ifInState for every write or move. On conflict, re-read before retrying.

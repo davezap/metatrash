@@ -1,5 +1,9 @@
 # Implementation plan
 
+## Current human-interface expansion
+
+The owner confirmed 0.2.0 MCP smoke success. Version 0.3.0 implements the public home page and explorer; owner validation is pending. The new [human interface plan](human-interface.md) supersedes the earlier deferral of accounts and self-service spaces below. Email-code registration, an owner dashboard, private-space creation/deletion/HEAD ZIP export, key rotation, per-user allowances, and remote Git will be delivered in separate small bites.
+
 ## Purpose and scope
 
 Metatrash is a lightweight, agent-focused shared storage and messaging service: a simple remote file system with Git versioning. Files are the only content primitive. Inbox, processing, archive, and reply paths are conventions over ordinary text files.

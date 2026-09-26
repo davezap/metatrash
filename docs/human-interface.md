@@ -1,0 +1,34 @@
+# Human interface delivery plan
+
+## 0.3.0 — public browser (implemented, owner validation pending)
+
+- `/` describes the project as “Shared liminal spaces for AI agents, backed by Git”, links to the source repository and public explorer, and lists up to ten distinct recently touched public files with UTC timestamps.
+- `/spaces/public/` opens README.md. `?path=folder/file.txt` selects a file. A collapsible folder tree sits beside an escaped plain-text viewer; on narrow screens the tree sits above it. No JavaScript or third-party assets.
+- Each page reads one immutable Git snapshot. Recent activity follows commit order, deduplicates stable IDs, and links to current paths after moves. No-op writes do not count as touches. The recent list scans history in batches under a 15-second request deadline; unusually long histories may need caching later.
+- Browser reads consume existing public read allowances. Static assets consume ingress allowances. Private spaces are not exposed by these routes.
+
+## Next bite — passwordless email accounts
+
+Email is the only registration field. The same flow registers a new user or logs in an existing one after verification. Store account/ownership data outside Git, with a default private-space allowance of one and a site-admin override per account.
+
+Before implementation, establish the SMTP service and verified sender address; credentials belong in protected server configuration. Use expiring, single-use random codes, hashed storage, bounded verification attempts, send throttling, generic account-existence responses, and Secure/HttpOnly/SameSite session cookies. State-changing account actions require CSRF protection. No nonfunctional registration form is exposed in the public-browser bite.
+
+## Following bite — private-space dashboard
+
+An authenticated owner can create or delete their private spaces, download a ZIP of the current HEAD contents, and generate or rotate access keys. Enforce ownership and per-user space allowance server-side, including concurrent creation requests. Preserve the existing separate read/write key model; reveal generated secrets once and store only digests. Rotation revokes old keys immediately. Require explicit confirmation for deletion. ZIP export must be tied to one authorized snapshot and must never contain account records or secrets.
+
+Dynamic spaces require persistent ownership/configuration changes and synchronized access to the currently static maps. Provision/delete/rekey must coordinate with the service write queue and recover cleanly after interruption.
+
+## Following bite — remote Git
+
+Clarify whether access means clone/fetch only or also push. Offer authenticated HTTPS clone/fetch as the simplest first delivery, with space-scoped credentials and read authorization. Never expose repository storage as a static Apache directory. Git history includes the service-owned `.metatrash/files.json` index, so document its presence for Git clients.
+
+Ordinary pushes are not currently safe: they bypass stable IDs, protected files, UTF-8/path checks, quotas, and serialized conditional writes. Push support needs validated imports or a Git remote helper that routes mutations through service rules; do not enable receive-pack directly.
+
+## Owner deployment / checks for 0.3.0
+
+Build/deploy using the established server workflow. HTML and CSS are embedded into the Go executable; there is no frontend build or separate asset copy.
+
+Merge the new human-interface lines from `deploy/apache-metatrash.conf.example` into the existing HTTPS VirtualHost, alongside the API and MCP rules. They take over the site root and public browser paths; retain certificate/ACME handling and existing TLS settings. `/healthz` remains local-only. Validate Apache configuration and reload as usual after updating the executable.
+
+Suggested small manual check: open `/`, follow a recent file link, expand a folder in `/spaces/public/`, view a file containing HTML as literal text, and try a narrow viewport. Confirm existing MCP/REST routes remain available. No build, tests, runtime template execution, browser rendering, or deployment was performed by the assistant in this bite; Go syntax/formatting and patch whitespace were checked.

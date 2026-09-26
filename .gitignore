@@ -3,3 +3,4 @@
 /config/spaces.json
 /config/keys.json
 *.exe
+snapshots/

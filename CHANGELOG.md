@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### 0.3.0 - Public human interface (2026-09-27)
+
+- Added the home page with project purpose, source link, public explorer link, and ten distinct recently touched public files with dates and links.
+- Added a collapsible public file tree and escaped plain-text document viewer, responsive layout, keyboard navigation, and restrictive content security policy.
+- Reused public read limits and immutable Git snapshots; recent activity follows stable file IDs through moves.
+- Added exact Apache browser routes and a staged plan for passwordless accounts, private-space lifecycle/ZIP export, keys, account allowances, and remote Git.
+- Saved the pre-change snapshot and incremental patch 0010. Go formatting/source review only; no builds, tests, runtime/browser validation, or deployment. Existing 0.2.0 deployment remains unchanged.
+
+### Documentation - MCP smoke result and space README
+
+- Recorded the owner-reported successful public MCP smoke test, including mutations and historical reads.
+- Corrected the embedded space README template to describe MCP as available. Existing stored READMEs are unchanged; the public copy needs administrator maintenance.
+- Saved a before snapshot and patch. No build, test execution, or deployment; version remains 0.2.0.
+
+### Documentation - Windows PowerShell and Linux bring-up
+
+- Split MCP live checks into Windows PowerShell (Invoke-RestMethod with JSON serialization) and Linux Bash (curl) instructions, including expected responses and shell-specific troubleshooting.
+- Recorded owner-confirmed 0.2.0 local/public initialization and public discovery of all five tools. MCP file-operation checks remain pending.
+- Documentation-only change; application version remains 0.2.0. No builds or live tests run.
+
 ### 0.2.0 - MCP adapter (2026-09-26)
 
 - Added `/mcp` with the official Go MCP SDK v1.8.0, pinned to protocol versions 2025-11-25 and 2025-06-18, using stateless Streamable HTTP and JSON responses.
@@ -40,4 +60,4 @@
 - Rate controls apply to all users and spaces, including private key holders, with site-admin configuration per space.
 - Bring-up remains intentionally small: the owner performed the server build and local health check; no exhaustive validation.
 
-The owner deployed and smoke-tested 0.1.0. The 0.2.0 MCP change awaits owner build/deployment; browser work remains.
+The owner deployed and smoke-tested 0.2.0. The 0.3.0 public browser awaits owner build/deployment; account features remain planned.

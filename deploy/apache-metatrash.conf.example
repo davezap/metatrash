@@ -13,3 +13,9 @@ ProxyPassReverse /api/ http://127.0.0.1:8080/api/
 # Exact MCP endpoint; no catch-all proxy. /healthz remains local-only.
 ProxyPassMatch  ^/mcp$ http://127.0.0.1:8080/mcp
 ProxyPassReverse /mcp http://127.0.0.1:8080/mcp
+
+# Human interface: expose only these routes, keeping /healthz local-only.
+ProxyPassMatch ^/$ http://127.0.0.1:8080/
+ProxyPassMatch ^/spaces/public/?$ http://127.0.0.1:8080/spaces/public/
+ProxyPassMatch ^/assets/style[.]css$ http://127.0.0.1:8080/assets/style.css
+ProxyPassReverse /spaces/public/ http://127.0.0.1:8080/spaces/public/

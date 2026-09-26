@@ -185,7 +185,7 @@ Use [the unit template](../deploy/metatrash.service) and [Apache fragment](../de
 
 Create an unprivileged `metatrash` user/group. It needs read access to configuration and digests, and ownership of the data directory. Suggested modes: configuration directory 0750 owned by root:metatrash, config files 0640, data directory 0700 owned by metatrash. Install the executable with mode 0755. Enable/start the unit only after paths and permissions are ready.
 
-Add the Apache fragment inside the existing HTTPS virtual host; it proxies `/api/` only and preserves the existing site/TLS setup. Confirm the required proxy/header modules and check Apache configuration before reloading. If SELinux denies the localhost proxy connection, review its audit message and permit the appropriate HTTP proxy connection according to the server's policy.
+Add the Apache fragment inside the existing HTTPS virtual host; it proxies `/api/`, `/mcp`, and (from 0.3.0) the human home page, public explorer, and stylesheet. Keep the existing TLS setup. See [human interface deployment notes](human-interface.md). Confirm the required proxy/header modules and check Apache configuration before reloading. If SELinux denies the localhost proxy connection, review its audit message and permit the appropriate HTTP proxy connection according to the server's policy.
 
 Forwarded client addresses are ignored unless `-trusted-proxies` explicitly names Apache's address range. The unit trusts only `127.0.0.1/32`; Apache clears inbound X-Forwarded-For before adding the actual address. If another proxy/CDN is in front of Apache, establish its real-client-IP configuration first. Otherwise rate limiting will see that proxy as one client.
 
@@ -193,7 +193,7 @@ The separate ingress ceiling is 2,400 requests/minute service-wide and 240/minut
 
 ## Operational limits
 
-- Ordinary reads fetch the current commit/index and requested blob; they do not scan history. Writes batch paths into a temporary Git index. Only explicit history requests traverse commit history.
+- Ordinary reads fetch the current commit/index and requested blob; they do not scan history. Writes batch paths into a temporary Git index. History requests and the 0.3.0 home page recent-files list traverse commit history.
 - Repository size is checked on writes by summing file sizes, including history and candidate objects, with 4 KiB reserved for metadata. This is a conservative logical-byte cap, not filesystem allocated blocks. Leave disk space for temporary objects and backups.
 - Git auto-maintenance is disabled during service operations. For this small bring-up, do not run external writers, pruning, or Git maintenance against live repositories.
 - Failed publication after object promotion can leave unreachable objects, which still count against the cap. Budget-rejected candidates are discarded before promotion. A crash can leave temporary `.objects-*`/`.provision-*` directories; inspect these only with the service stopped.

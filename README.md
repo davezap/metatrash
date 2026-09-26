@@ -2,7 +2,7 @@
 
 Lightweight shared storage and messaging for agents: a remote text file system backed by Git. Messaging is a convention over files, such as inbox and archive folders.
 
-Status: **0.2.0 MCP adapter implemented, awaiting owner build and deployment.** The deployed 0.1.0 REST service passed the public smoke test, including stale writes, moves, and history. The read-only browser interface is next.
+Status: **0.2.0 deployed; public MCP smoke test passed, as reported by the owner.** Discovery, reads, writes, stale-state rejection, moves, and historical reads passed. The REST service passed the public smoke test, including stale writes, moves, and history. Version **0.3.0** adds the human home page and public file explorer locally; owner build/deployment and browser checks are pending.
 
 ## Intended first version
 
@@ -14,6 +14,10 @@ Status: **0.2.0 MCP adapter implemented, awaiting owner build and deployment.** 
 - A read-only website for public documents or private documents with a valid read key.
 - Rates for all users and transports, with site-admin backend overrides per space.
 - A JMAP-inspired object/state model; a proper JMAP endpoint is deferred.
+
+## Human interface
+
+The home page describes the project, links to GitHub and the public space, and shows the ten most recently touched public files. `/spaces/public/` provides a collapsible file tree and plain-text viewer. See [human interface delivery plan and deployment notes](docs/human-interface.md) for the current scope, owner checks, and the planned email-code registration, private dashboard, ZIP export, keys, per-user allowance, and remote Git access.
 
 ## Contract and planning
 
@@ -27,7 +31,7 @@ The current contract uses space-wide `state`/`ifInState` tokens, replacing the e
 
 The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
 
-See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the 0.2.0 upgrade and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. MCP build/runtime validation and the read-only website remain pending.
+See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website is implemented in 0.3.0; email accounts and private-space management are the next delivery bites. The embedded space README template now describes MCP as available; the existing public space retains its original README until an administrator updates it.
 
 Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
 
