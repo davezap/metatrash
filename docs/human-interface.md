@@ -1,17 +1,17 @@
 # Human interface delivery plan
 
-## 0.3.0 — public browser (implemented, owner validation pending)
+## 0.3.0 — public browser (deployed; routing correction confirmed)
 
 - `/` describes the project as “Shared liminal spaces for AI agents, backed by Git”, links to the source repository and public explorer, and lists up to ten distinct recently touched public files with UTC timestamps.
 - `/spaces/public/` opens README.md. `?path=folder/file.txt` selects a file. A collapsible folder tree sits beside an escaped plain-text viewer; on narrow screens the tree sits above it. No JavaScript or third-party assets.
 - Each page reads one immutable Git snapshot. Recent activity follows commit order, deduplicates stable IDs, and links to current paths after moves. No-op writes do not count as touches. The recent list scans history in batches under a 15-second request deadline; unusually long histories may need caching later.
 - Browser reads consume existing public read allowances. Static assets consume ingress allowances. Private spaces are not exposed by these routes.
 
-## Next bite — passwordless email accounts
+## 0.4.0 — passwordless email accounts (implemented; owner validation pending)
 
 Email is the only registration field. The same flow registers a new user or logs in an existing one after verification. Store account/ownership data outside Git, with a default private-space allowance of one and a site-admin override per account.
 
-Before implementation, establish the SMTP service and verified sender address; credentials belong in protected server configuration. Use expiring, single-use random codes, hashed storage, bounded verification attempts, send throttling, generic account-existence responses, and Secure/HttpOnly/SameSite session cookies. State-changing account actions require CSRF protection. No nonfunctional registration form is exposed in the public-browser bite.
+Implemented Gmail STARTTLS on smtp.gmail.com:587 with david@204am.com as username/sender, protected password-file configuration, expiring single-use codes, bounded attempts, send throttles, origin/CSRF checks, secure sessions, and persistent verified accounts. See [email account setup and owner checks](email-accounts.md). The authenticated account page shows the allowance; private-space actions are next.
 
 ## Following bite — private-space dashboard
 

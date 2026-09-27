@@ -11,11 +11,17 @@ ProxyPass        /api/ http://127.0.0.1:8080/api/
 ProxyPassReverse /api/ http://127.0.0.1:8080/api/
 
 # Exact MCP endpoint; no catch-all proxy. /healthz remains local-only.
-ProxyPassMatch  ^/mcp$ http://127.0.0.1:8080/mcp
+# Explicit backreferences prevent Apache appending the original path again.
+ProxyPassMatch  "^(/mcp)$" "http://127.0.0.1:8080$1"
 ProxyPassReverse /mcp http://127.0.0.1:8080/mcp
 
 # Human interface: expose only these routes, keeping /healthz local-only.
-ProxyPassMatch ^/$ http://127.0.0.1:8080/
-ProxyPassMatch ^/spaces/public/?$ http://127.0.0.1:8080/spaces/public/
-ProxyPassMatch ^/assets/style[.]css$ http://127.0.0.1:8080/assets/style.css
+ProxyPassMatch "^(/)$" "http://127.0.0.1:8080$1"
+ProxyPassMatch "^(/spaces/public/?)$" "http://127.0.0.1:8080$1"
+ProxyPassMatch "^(/assets/style[.]css)$" "http://127.0.0.1:8080$1"
 ProxyPassReverse /spaces/public/ http://127.0.0.1:8080/spaces/public/
+
+# Passwordless account pages (0.4.0). Keep the explicit backreference.
+ProxyPassMatch "^(/login(?:/send|/verify)?|/logout|/account)$" "http://127.0.0.1:8080$1"
+ProxyPassReverse /login http://127.0.0.1:8080/login
+ProxyPassReverse /account http://127.0.0.1:8080/account

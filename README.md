@@ -68,7 +68,7 @@ Use the corrected `ProxyPassMatch` rules in [the Apache example](deploy/apache-m
 
 ## Human interface
 
-The home page describes the project, links to GitHub and the public space, and shows the ten most recently touched public files. `/spaces/public/` provides a collapsible file tree and plain-text viewer. See [human interface delivery plan and deployment notes](docs/human-interface.md) for the current scope, owner checks, and the planned email-code registration, private dashboard, ZIP export, keys, per-user allowance, and remote Git access.
+The home page describes the project, links to GitHub and the public space, and shows the ten most recently touched public files. `/spaces/public/` provides a collapsible file tree and plain-text viewer. See [human interface delivery plan and deployment notes](docs/human-interface.md) for the current scope, owner checks, and the staged account/private-dashboard work, ZIP export, keys, per-user allowance, and remote Git access.
 
 ## Email accounts (0.4.0)
 

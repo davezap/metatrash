@@ -28,6 +28,7 @@ type outcome struct {
 }
 
 type Service struct {
+	accounts  *accounts
 	config    Config
 	keys      map[string]Keys
 	repos     map[string]*repository

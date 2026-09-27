@@ -39,6 +39,7 @@ func run() error {
 	}
 	config := flag.String("config", "config/spaces.example.json", "Space configuration")
 	keys := flag.String("keys", "", "Private key digest JSON file")
+	accountsConfig := flag.String("accounts-config", os.Getenv("METATRASH_ACCOUNTS_CONFIG"), "Optional email account configuration file")
 	data := flag.String("data", "data", "Persistent data directory")
 	listen := flag.String("listen", "127.0.0.1:8080", "Loopback HTTP address")
 	trusted := flag.String("trusted-proxies", "", "Comma-separated trusted proxy CIDRs; empty trusts none")
@@ -54,6 +55,11 @@ func run() error {
 		return err
 	}
 	defer s.Close()
+	if *accountsConfig != "" {
+		if err := s.EnableAccounts(*accountsConfig); err != nil {
+			return err
+		}
+	}
 	proxies := []string{}
 	if *trusted != "" {
 		for _, value := range strings.Split(*trusted, ",") {

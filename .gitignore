@@ -2,5 +2,7 @@
 /bin/
 /config/spaces.json
 /config/keys.json
+/config/accounts.json
+/config/smtp-password
 *.exe
 snapshots/

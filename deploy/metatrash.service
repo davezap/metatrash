@@ -7,6 +7,8 @@ Type=simple
 User=metatrash
 Group=metatrash
 WorkingDirectory=/var/lib/metatrash
+# Optional: enable after configuring accounts.json and the SMTP password file.
+# Environment=METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json
 ExecStart=/usr/local/bin/metatrash -listen 127.0.0.1:8080 -data /var/lib/metatrash -config /etc/metatrash/spaces.json -keys /etc/metatrash/keys.json -trusted-proxies 127.0.0.1/32
 Restart=on-failure
 RestartSec=5

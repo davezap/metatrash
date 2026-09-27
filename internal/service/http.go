@@ -110,7 +110,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveMCP(w, r)
 		return
 	}
-	if h.serveBrowser(w, r, client) {
+	if h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) {
 		return
 	}
 	if r.URL.Path == "/healthz" || r.URL.Path == "/api/v1/tool-schema.json" {

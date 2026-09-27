@@ -33,6 +33,7 @@ type recentFile struct {
 }
 
 type browserPage struct {
+	AccountsEnabled   bool
 	Home              bool
 	State, Path, Text string
 	Tree              []*browserNode
@@ -162,7 +163,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 			return true
 		}
 	}
-	page := browserPage{Home: path == "/"}
+	page := browserPage{Home: path == "/", AccountsEnabled: h.service.accounts != nil}
 	if !page.Home {
 		page.Path = q.Get("path")
 		if page.Path == "" {

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### 0.4.0 - Passwordless email accounts (2026-09-27)
+
+- Added email-only registration/login using six-digit single-use codes and Gmail SMTP with mandatory STARTTLS, certificate verification, and protected password-file configuration.
+- Added origin/CSRF checks, email/IP/global send limits, bounded verification attempts, expiring hashed sessions, secure cookies, and sign-out.
+- Persisted verified accounts outside Git with stable IDs and default private-space allowance one. Added an authenticated account page; space creation/export/keys remain the next bite.
+- Added optional startup configuration, Apache account routes, server setup notes, and owner-run fake-mail checks.
+- Recorded owner confirmation that the 0.3.0 Apache path correction fixed the public site.
+- Saved before snapshot and incremental patch 0012. Formatting/JSON/source/patch review only; no build, test execution, SMTP connection, email send, or deployment.
+
+### Apache proxy path correction (2026-09-27)
+
+- Fixed root, MCP, public explorer, and stylesheet ProxyPassMatch rules with explicit captures/backreferences. Without a backreference, Apache appends the original path to the target, causing duplicate paths and service 404 responses.
+- Owner confirmed installed version 0.3.0 and a direct localhost root response of HTTP 200. Public routing fix awaits owner Apache validation/reload. Configuration-only correction; binary version remains 0.3.0. Saved snapshot and patch 0011; no builds or runtime tests.
+
 ### 0.3.0 - Public human interface (2026-09-27)
 
 - Added the home page with project purpose, source link, public explorer link, and ten distinct recently touched public files with dates and links.
@@ -60,4 +74,4 @@
 - Rate controls apply to all users and spaces, including private key holders, with site-admin configuration per space.
 - Bring-up remains intentionally small: the owner performed the server build and local health check; no exhaustive validation.
 
-The owner deployed and smoke-tested 0.2.0. The 0.3.0 public browser awaits owner build/deployment; account features remain planned.
+The owner confirmed the 0.3.0 public routing fix. Version 0.4.0 email accounts await owner build/deployment; private-space management remains planned.
