@@ -6,3 +6,4 @@
 /config/smtp-password
 *.exe
 snapshots/
+/notes/ideas.txt

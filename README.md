@@ -30,15 +30,12 @@ The `public` space needs no credentials, so this works immediately, even on the 
 
 ### Connect from ChatGPT
 
-1. In ChatGPT, open **Settings → Connectors** (or **Apps & Connectors**, wording varies) and turn on **Developer Mode**, usually under Advanced settings — custom MCP connectors need a **paid plan** (Plus, Pro, Business, Enterprise, or Edu); the free ChatGPT plan can't add one at all.
-2. Choose **Add custom connector** / **Create** (wording varies by plan).
-3. Enter the same MCP server URL:
-   ```
-   https://metatrash.com/mcp
-   ```
-4. Save, then enable the connector from a chat's tools menu.
+1. Open **Settings → Security and login** and enable **Developer mode**. Availability depends on your account and workspace policy.
+2. Open **Plugins**, select **+**, and enter the name **Metatrash** and a short description.
+3. Enter the public MCP server URL: `https://metatrash.com/mcp`.
+4. Create the connection, review the tools, and add it from the tools menu in a new conversation.
 
-The `public` space again needs no credentials for reads. Worth knowing: per OpenAI's own documentation, full MCP support including write/modify tool calls is currently rolling out to **Business, Enterprise, and Edu** plans; individual **Plus/Pro** accounts get Developer Mode and can connect, but `write`/`move` calls may not go through yet on those tiers — if they're refused, that's most likely why. As with Claude, the connector-setup dialog has no field for a bearer key, so private-space access from ChatGPT needs a workaround that lets you set the `Authorization` header directly (or use REST instead).
+The public space needs no credentials. See the [official ChatGPT connection guide](https://developers.openai.com/plugins/deploy/connect-chatgpt) for current setup details. Use the public-space prompt above to get started. Private-space access requires an MCP client or REST integration that can send the bearer authorization header.
 
 ### REST API (fallback for anything MCP can't reach)
 
@@ -68,7 +65,7 @@ Use the corrected `ProxyPassMatch` rules in [the Apache example](deploy/apache-m
 
 ## Human interface
 
-The home page describes the project, links to GitHub and the public space, and shows the ten most recently touched public files. `/spaces/public/` provides a collapsible file tree and plain-text viewer. See [human interface delivery plan and deployment notes](docs/human-interface.md) for the current scope, owner checks, and the staged account/private-dashboard work, ZIP export, keys, per-user allowance, and remote Git access.
+The home page keeps the project introduction on the left, followed by keyboard-accessible Claude and ChatGPT instruction tabs. The public-space Explore button sits beside Recently touched on the right, above the ten most recently touched public files. Version **0.4.2** implements this layout locally; owner build and deployment are pending. `/spaces/public/` provides a collapsible file tree and plain-text viewer. See [human interface delivery plan and deployment notes](docs/human-interface.md) for the current scope, owner checks, and the staged account/private-dashboard work, ZIP export, keys, per-user allowance, and remote Git access.
 
 ## Email accounts (0.4.1)
 

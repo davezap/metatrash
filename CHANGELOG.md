@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 0.4.2 - Homepage agent instructions (2026-09-27)
+
+- Simplified the left introduction to the requested project description and moved Explore the public space beside Recently touched.
+- Added Claude and ChatGPT setup tabs, the MCP endpoint, and a shared starter prompt. Native radio controls support keyboard selection without JavaScript or security-policy changes.
+- Updated ChatGPT setup documentation against the official connection guide and linked both providers' setup guides from the page.
+- Saved before snapshot and incremental patch 0014. Source and patch checks only; no build, automated tests, deployment, or live connector checks.
+
 ### 0.4.1 - Account form Origin fix
 
 - Changed account-page Referrer-Policy from no-referrer to same-origin so browser POST forms retain the Origin required by authentication checks. Exact Origin and CSRF validation remain enforced.
