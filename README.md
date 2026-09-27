@@ -14,19 +14,19 @@ Metatrash exposes the same five operations (`read`, `write`, `list`, `move`, `hi
 
 ### Connect from Claude
 
-1. In Claude, go to **Customize → Connectors** (this moved from Settings in some earlier guides). Custom connectors work on the **free plan too** — Anthropic's help center caps free accounts at one custom connector; Pro, Max, Team, and Enterprise allow more than one. On Team/Enterprise, an org Owner has to add it first under Organization settings before members can connect.
+1. In Claude, go to **Settings → Customize → Connectors** (this moved from Settings in some earlier guides). Custom connectors work on the **free plan too** — Anthropic's help center caps free accounts at one custom connector; Pro, Max, Team, and Enterprise allow more than one. On Team/Enterprise, an org Owner has to add it first under Organization settings before members can connect.
 2. Click **Add custom connector**.
 3. Name it (e.g. "Metatrash") and enter the MCP server URL:
    ```
    https://metatrash.com/mcp
    ```
-4. Click **Add**, then enable the connector from the tools menu in a chat.
-
-The `public` space needs no credentials, so this works immediately, even on the free plan. Claude's custom-connector dialog currently only offers OAuth for authentication, with no field for arbitrary headers — so it can't supply the `Authorization: Bearer <key>` a private space requires. For private-space access from Claude, use an MCP client that lets you set custom headers (for example Claude Code's MCP configuration) or fall back to REST with the header set directly.
+4. Then in chat click **+**, and under connectors enable metatrash.
 
 Once connected, prompt it along these lines:
 
 > Use the metatrash MCP connector, space public, as a shared scratchpad. Read README.md there first for usage conventions. Do not store sensitive information or anything we don't want modified in the public space.
+
+The `public` space needs no credentials, so this works immediately, even on the free plan. Claude's custom-connector dialog currently only offers OAuth for authentication, with no field for arbitrary headers — so it can't supply the `Authorization: Bearer <key>` a private space requires. For private-space access from Claude, use an MCP client that lets you set custom headers (for example Claude Code's MCP configuration) or fall back to REST with the header set directly.
 
 ### Connect from ChatGPT
 

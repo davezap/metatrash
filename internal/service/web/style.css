@@ -3,3 +3,24 @@
 @media(max-width:800px){.home{grid-template-columns:1fr;gap:50px;padding-top:45px}.hero h1{letter-spacing:-2px}.description,.intro{max-width:100%}.about{grid-template-columns:1fr;gap:22px}.workspace{grid-template-columns:210px minmax(0,1fr)}.document-heading{padding:22px 20px}pre{padding:15px 20px 35px}header nav{gap:16px;font-size:12px}footer{flex-direction:column}.revision{max-width:100%}}
 @media(max-width:540px){header{padding:18px 5%;flex-wrap:wrap;gap:15px}.brand{font-size:24px}.workspace{grid-template-columns:1fr}aside{max-height:240px;border-right:0;border-bottom:1px solid var(--line)}.space-bar{flex-direction:column;gap:7px}.hero h1{font-size:45px}.intro{font-size:20px}.home{padding-left:6%;padding-right:6%}}
 .account-panel{max-width:600px;margin:65px auto 90px;padding:0 25px;min-height:50vh}.account-panel h1{font-size:36px;letter-spacing:-1.2px;font-weight:550}.account-panel p{line-height:1.7;color:var(--muted)}.account-panel label{display:block;margin:24px 0 10px;font-size:14px}.account-panel input:not([type=hidden]){display:block;width:100%;padding:14px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--text);font:inherit}.account-panel input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.account-panel button{border:0;cursor:pointer;font-family:inherit}.account-panel button:focus-visible{outline:2px solid var(--text);outline-offset:4px}.account-panel .form-error{padding:14px;border:1px solid #e5a78e;background:#392920;color:#ffd8c8;border-radius:4px}.account-card{margin:30px 0 0;padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:4px}.account-email{overflow-wrap:anywhere}.resend{margin-top:30px}.resend summary{cursor:pointer;font-size:14px;color:var(--accent)}.resend p{font-size:13px}
+
+/* Homepage introduction and script-free agent instructions. */
+.home{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+.hero h1.intro{font-size:22px;line-height:1.45;letter-spacing:0;font-weight:550;margin:0 0 16px;max-width:425px}
+.recent .section-heading{flex-wrap:wrap;align-items:flex-end}
+.recent .section-heading .button{margin:0;padding:12px 14px;font-size:12px}
+.usage-tabs{position:relative;min-width:0;margin:32px 0 0;padding:0;border:1px solid var(--line);border-radius:5px;background:var(--panel);display:flex;flex-wrap:wrap}
+.usage-tabs legend{padding:0 8px;margin-left:12px;font-size:13px;color:var(--muted)}
+.usage-choice{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.usage-tabs>label{flex:1;text-align:center;padding:17px 20px;cursor:pointer;font-size:14px;border-bottom:2px solid var(--line);color:var(--muted)}
+.usage-choice:checked+label{color:var(--accent);border-bottom-color:var(--accent);background:#263024}
+.usage-choice:focus-visible+label{outline:2px solid var(--accent);outline-offset:-5px}
+.usage-panel{display:none;width:100%;padding:20px}
+#agent-claude:checked~#usage-claude,#agent-chatgpt:checked~#usage-chatgpt{display:block}
+.usage-panel ol{margin:0 0 16px;padding-left:20px;font-size:14px;line-height:1.7}
+.usage-panel li+li{margin-top:12px}.usage-panel strong{font-weight:600}
+.endpoint{display:block;user-select:all;overflow-wrap:anywhere;margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--line);border-radius:3px;font:12px/1.6 ui-monospace,Consolas,monospace}
+.usage-note{font-size:12px;line-height:1.7;color:var(--muted)}
+.usage-prompt{width:100%;padding:20px;border-top:1px solid var(--line)}
+.usage-prompt h2{font-size:14px;letter-spacing:0}.usage-prompt blockquote{margin:12px 0;padding-left:14px;border-left:2px solid var(--accent);font-size:14px;line-height:1.7}.usage-prompt p{margin-bottom:0}
+@media(max-width:800px){.home{grid-template-columns:minmax(0,1fr)}.hero h1.intro{max-width:100%}}
