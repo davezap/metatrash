@@ -1,0 +1,115 @@
+diff --git a/internal/service/account_http.go b/internal/service/account_http.go
+index 6080a4e..06c582b 100644
+--- a/internal/service/account_http.go
++++ b/internal/service/account_http.go
+@@ -76,7 +76,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		return false
+ 	}
+ 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+-	w.Header().Set("Referrer-Policy", "no-referrer")
++	// no-referrer makes browsers send Origin: null on HTML form POSTs.
++	w.Header().Set("Referrer-Policy", "same-origin")
+ 	w.Header().Set("X-Frame-Options", "DENY")
+ 	a := h.service.accounts
+ 	if a == nil {
+diff --git a/internal/service/accounts_test.go b/internal/service/accounts_test.go
+index 70064aa..00125f9 100644
+--- a/internal/service/accounts_test.go
++++ b/internal/service/accounts_test.go
+@@ -134,6 +134,9 @@ func TestAccountsHTTP(t *testing.T) {
+ 	if w.Code != 200 {
+ 		t.Fatalf("login: %d", w.Code)
+ 	}
++	if w.Header().Get("Referrer-Policy") != "same-origin" {
++		t.Fatal("login page policy prevents browser form origins")
++	}
+ 	cookies := w.Result().Cookies()
+ 	if len(cookies) != 1 {
+ 		t.Fatal("missing login cookie")
+@@ -146,6 +149,11 @@ func TestAccountsHTTP(t *testing.T) {
+ 	if w := call("POST", "/login/send", "https://other.example", form, browser); w.Code != 403 || *code != "" {
+ 		t.Fatal("cross-origin send accepted")
+ 	}
++	for _, origin := range []string{"", "null"} {
++		if w := call("POST", "/login/send", origin, form, browser); w.Code != 403 || *code != "" {
++			t.Fatal("missing or null origin accepted")
++		}
++	}
+ 	form.Set("csrf", "wrong")
+ 	if w := call("POST", "/login/send", "https://metatrash.com", form, browser); w.Code != 403 {
+ 		t.Fatal("invalid CSRF accepted")
+diff --git a/assets.go b/assets.go
+index 0863d01..1a562ad 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.4.0"
++const Version = "0.4.1"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/README.md b/README.md
+index 28c3e4d..c3e6994 100644
+--- a/README.md
++++ b/README.md
+@@ -70,7 +70,9 @@ Use the corrected `ProxyPassMatch` rules in [the Apache example](deploy/apache-m
+ 
+ The home page describes the project, links to GitHub and the public space, and shows the ten most recently touched public files. `/spaces/public/` provides a collapsible file tree and plain-text viewer. See [human interface delivery plan and deployment notes](docs/human-interface.md) for the current scope, owner checks, and the staged account/private-dashboard work, ZIP export, keys, per-user allowance, and remote Git access.
+ 
+-## Email accounts (0.4.0)
++## Email accounts (0.4.1)
++
++**0.4.1 fixes browser form submission:** account pages now use `Referrer-Policy: same-origin`; the former `no-referrer` policy could suppress the Origin required by the form guard. Rebuild/install and restart the service, then reload `/login` before retrying. Apache routing is unchanged.
+ 
+ Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md). No password is stored in this repository. Implementation is complete locally, pending owner build, deployment, and live checks. The account page shows the verified email and a default private-space allowance of one; private-space creation, deletion, export, and keys remain the next bite.
+ 
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d2e6a04..d4a9437 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,11 @@
+ 
+ ## Unreleased
+ 
++### 0.4.1 - Account form Origin fix
++
++- Changed account-page Referrer-Policy from no-referrer to same-origin so browser POST forms retain the Origin required by authentication checks. Exact Origin and CSRF validation remain enforced.
++- Extended owner-run checks for the response policy and rejection of missing/null origins. Saved snapshot and patch 0013. Formatting/source/patch checks only; no builds, test execution, live email, or deployment.
++
+ ### 0.4.0 - Passwordless email accounts (2026-09-27)
+ 
+ - Added email-only registration/login using six-digit single-use codes and Gmail SMTP with mandatory STARTTLS, certificate verification, and protected password-file configuration.
+diff --git a/docs/email-accounts.md b/docs/email-accounts.md
+index 17c3469..4913e64 100644
+--- a/docs/email-accounts.md
++++ b/docs/email-accounts.md
+@@ -1,4 +1,4 @@
+-# Email accounts — 0.4.0
++# Email accounts — 0.4.1
+ 
+ This bite adds email-only registration/login and an authenticated account page. It does not create private spaces yet. Existing public, REST, and MCP behavior remains available without account configuration.
+ 
+@@ -10,7 +10,7 @@ The password is read once at startup from a separate protected file. It is never
+ 
+ ## Linux server setup
+ 
+-From your updated server checkout, build/install **0.4.0** using the existing upgrade workflow. The new templates are embedded; there is no separate frontend build. Check the installed version with `/usr/local/bin/metatrash version`.
++From your updated server checkout, build/install **0.4.1** using the existing upgrade workflow. The new templates are embedded; there is no separate frontend build. Check the installed version with `/usr/local/bin/metatrash version`.
+ 
+ Create the account configuration (this does not replace spaces.json or keys.json):
+ 
+@@ -98,3 +98,11 @@ These cover code expiry, attempt exhaustion, single use, account persistence, re
+ Small live check: register with an email you control, verify the received code, confirm the allowance is one, sign out, and sign in again. An incognito `/account` visit should redirect to `/login`. Confirm the public explorer and MCP remain available. Send limits mean repeated live tests should be paced.
+ 
+ Assistant validation: Go formatting/syntax parsing, configuration JSON parsing, source review, and patch checks only. No project build, test execution, browser runtime check, SMTP connection, email send, or deployment was performed. The owner confirmed the prior 0.3.0 Apache routing fix before this bite.
++
++## Browser form rejection fixed in 0.4.1
++
++The 0.4.0 account pages set `Referrer-Policy: no-referrer`. For ordinary HTML form POSTs this can cause `Origin: null`, which the exact-origin guard correctly rejects with “Please submit the form from this site.” The `/login/send` route exists; this error is not an Apache 404 or an SMTP failure.
++
++Version 0.4.1 sets `same-origin` on account pages. This preserves the origin for same-site form submissions while suppressing referrer information to other sites. Exact Origin matching and CSRF tokens remain required; missing/null origins are still rejected. See [MDN's explanation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Referrer-Policy).
++
++Rebuild/install 0.4.1 using the normal upgrade workflow, restart metatrash, and freshly load `https://metatrash.com/login` before submitting again. No Apache route change or SMTP setting change is needed. If the response header still says no-referrer, check whether Apache or another proxy overrides Referrer-Policy. A previously open login page must be reloaded to receive the corrected policy.

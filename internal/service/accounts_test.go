@@ -134,6 +134,9 @@ func TestAccountsHTTP(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("login: %d", w.Code)
 	}
+	if w.Header().Get("Referrer-Policy") != "same-origin" {
+		t.Fatal("login page policy prevents browser form origins")
+	}
 	cookies := w.Result().Cookies()
 	if len(cookies) != 1 {
 		t.Fatal("missing login cookie")
@@ -145,6 +148,11 @@ func TestAccountsHTTP(t *testing.T) {
 	form := url.Values{"email": {"person@example.com"}, "csrf": {browser.Value}}
 	if w := call("POST", "/login/send", "https://other.example", form, browser); w.Code != 403 || *code != "" {
 		t.Fatal("cross-origin send accepted")
+	}
+	for _, origin := range []string{"", "null"} {
+		if w := call("POST", "/login/send", origin, form, browser); w.Code != 403 || *code != "" {
+			t.Fatal("missing or null origin accepted")
+		}
 	}
 	form.Set("csrf", "wrong")
 	if w := call("POST", "/login/send", "https://metatrash.com", form, browser); w.Code != 403 {

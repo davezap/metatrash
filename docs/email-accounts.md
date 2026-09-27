@@ -1,4 +1,4 @@
-# Email accounts — 0.4.0
+# Email accounts — 0.4.1
 
 This bite adds email-only registration/login and an authenticated account page. It does not create private spaces yet. Existing public, REST, and MCP behavior remains available without account configuration.
 
@@ -10,7 +10,7 @@ The password is read once at startup from a separate protected file. It is never
 
 ## Linux server setup
 
-From your updated server checkout, build/install **0.4.0** using the existing upgrade workflow. The new templates are embedded; there is no separate frontend build. Check the installed version with `/usr/local/bin/metatrash version`.
+From your updated server checkout, build/install **0.4.1** using the existing upgrade workflow. The new templates are embedded; there is no separate frontend build. Check the installed version with `/usr/local/bin/metatrash version`.
 
 Create the account configuration (this does not replace spaces.json or keys.json):
 
@@ -98,3 +98,11 @@ These cover code expiry, attempt exhaustion, single use, account persistence, re
 Small live check: register with an email you control, verify the received code, confirm the allowance is one, sign out, and sign in again. An incognito `/account` visit should redirect to `/login`. Confirm the public explorer and MCP remain available. Send limits mean repeated live tests should be paced.
 
 Assistant validation: Go formatting/syntax parsing, configuration JSON parsing, source review, and patch checks only. No project build, test execution, browser runtime check, SMTP connection, email send, or deployment was performed. The owner confirmed the prior 0.3.0 Apache routing fix before this bite.
+
+## Browser form rejection fixed in 0.4.1
+
+The 0.4.0 account pages set `Referrer-Policy: no-referrer`. For ordinary HTML form POSTs this can cause `Origin: null`, which the exact-origin guard correctly rejects with “Please submit the form from this site.” The `/login/send` route exists; this error is not an Apache 404 or an SMTP failure.
+
+Version 0.4.1 sets `same-origin` on account pages. This preserves the origin for same-site form submissions while suppressing referrer information to other sites. Exact Origin matching and CSRF tokens remain required; missing/null origins are still rejected. See [MDN's explanation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Referrer-Policy).
+
+Rebuild/install 0.4.1 using the normal upgrade workflow, restart metatrash, and freshly load `https://metatrash.com/login` before submitting again. No Apache route change or SMTP setting change is needed. If the response header still says no-referrer, check whether Apache or another proxy overrides Referrer-Policy. A previously open login page must be reloaded to receive the corrected policy.

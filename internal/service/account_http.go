@@ -76,7 +76,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-	w.Header().Set("Referrer-Policy", "no-referrer")
+	// no-referrer makes browsers send Origin: null on HTML form POSTs.
+	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
 	a := h.service.accounts
 	if a == nil {

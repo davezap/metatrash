@@ -70,7 +70,9 @@ Use the corrected `ProxyPassMatch` rules in [the Apache example](deploy/apache-m
 
 The home page describes the project, links to GitHub and the public space, and shows the ten most recently touched public files. `/spaces/public/` provides a collapsible file tree and plain-text viewer. See [human interface delivery plan and deployment notes](docs/human-interface.md) for the current scope, owner checks, and the staged account/private-dashboard work, ZIP export, keys, per-user allowance, and remote Git access.
 
-## Email accounts (0.4.0)
+## Email accounts (0.4.1)
+
+**0.4.1 fixes browser form submission:** account pages now use `Referrer-Policy: same-origin`; the former `no-referrer` policy could suppress the Origin required by the form guard. Rebuild/install and restart the service, then reload `/login` before retrying. Apache routing is unchanged.
 
 Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md). No password is stored in this repository. Implementation is complete locally, pending owner build, deployment, and live checks. The account page shows the verified email and a default private-space allowance of one; private-space creation, deletion, export, and keys remain the next bite.
 

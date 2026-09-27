@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 0.4.1 - Account form Origin fix
+
+- Changed account-page Referrer-Policy from no-referrer to same-origin so browser POST forms retain the Origin required by authentication checks. Exact Origin and CSRF validation remain enforced.
+- Extended owner-run checks for the response policy and rejection of missing/null origins. Saved snapshot and patch 0013. Formatting/source/patch checks only; no builds, test execution, live email, or deployment.
+
 ### 0.4.0 - Passwordless email accounts (2026-09-27)
 
 - Added email-only registration/login using six-digit single-use codes and Gmail SMTP with mandatory STARTTLS, certificate verification, and protected password-file configuration.
