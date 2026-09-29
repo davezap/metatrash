@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 0.5.3 - Clean document URLs (2026-09-29)
+
+- Serve public documents at `/spaces/public/<file-path>` and use these links in the explorer and initial/refreshed recent activity.
+- Permanently redirect legacy `?path=` browser links; retain the space-root README, path validation, and folder-hosting prefix support. REST routes are unchanged.
+- Existing whole-domain/folder Apache proxies need no changes. Saved before snapshot and incremental patch 0018; formatting and patch checks only, no builds or runtime tests.
+
 ### 0.5.2 - Slate document viewer (2026-09-29)
 
 - Copied Slate 0.9.2 JavaScript and CSS into bundled assets and mounted Markdown documents in read-only preview with persistence and interactive tasks disabled.

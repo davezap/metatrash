@@ -126,7 +126,11 @@ type browserPage struct {
 }
 
 func fileURL(path string) string {
-	return "/spaces/public/?" + url.Values{"path": {path}}.Encode()
+	parts := strings.Split(path, "/")
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	return "/spaces/public/" + strings.Join(parts, "/")
 }
 
 func fileTree(files map[string]record, selected string) []*browserNode {
@@ -209,7 +213,7 @@ func (repo *repository) recent(ctx context.Context, state string, files map[stri
 
 func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
-	if path != "/" && path != "/spaces/public" && path != "/spaces/public/" {
+	if path != "/" && path != "/spaces/public" && !strings.HasPrefix(path, "/spaces/public/") {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -242,19 +246,26 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		return true
 	}
 	for key, values := range q {
-		if path == "/" || key != "path" || len(values) != 1 {
+		if path != "/spaces/public/" || key != "path" || len(values) != 1 {
 			sendError(w, invalid("Unknown or duplicate query parameter."))
 			return true
 		}
 	}
 	page := browserPage{BasePath: h.basePath, MCPURL: h.publicOrigin + h.basePath + "/mcp", Home: path == "/", AccountsEnabled: h.service.accounts != nil}
 	if !page.Home {
-		page.Path = q.Get("path")
+		page.Path = strings.TrimPrefix(path, "/spaces/public/")
+		if page.Path == "" {
+			page.Path = q.Get("path")
+		}
 		if page.Path == "" {
 			page.Path = "README.md"
 		}
 		if !validPath(page.Path) {
 			sendError(w, invalid("Invalid path."))
+			return true
+		}
+		if q.Has("path") {
+			http.Redirect(w, r, h.basePath+fileURL(page.Path), http.StatusPermanentRedirect)
 			return true
 		}
 	}

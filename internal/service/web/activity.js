@@ -47,7 +47,7 @@
         const item = document.createElement("li");
         const link = document.createElement("a");
         // Construct a fixed local route; never interpret space content as markup or a URL.
-        link.href = basePath + "/spaces/public/?" + new URLSearchParams({ path: file.path });
+        link.href = basePath + "/spaces/public/" + file.path.split("/").map(encodeURIComponent).join("/");
         const path = document.createElement("span");
         path.className = "file-path";
         path.textContent = file.path;
