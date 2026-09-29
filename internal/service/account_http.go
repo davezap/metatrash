@@ -22,6 +22,7 @@ var accountHTML string
 var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 
 type accountPage struct {
+	BasePath                   string
 	Disabled, Verify, SignedIn bool
 	CSRF, Email, Message       string
 	User                       userAccount
@@ -45,7 +46,8 @@ func cookieToken(r *http.Request, name string) string {
 	return cookie.Value
 }
 
-func renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
+func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
+	page.BasePath = h.basePath
 	var b bytes.Buffer
 	if err := accountTemplate.Execute(&b, page); err != nil {
 		sendError(w, err)
@@ -72,6 +74,12 @@ func (a *accounts) loginPage(browser string) accountPage {
 
 func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
+	loginCookie, sessionCookie := loginCookie, sessionCookie
+	if h.basePath != "" {
+		suffix := "-" + secretDigest(h.basePath)[:16]
+		loginCookie += suffix
+		sessionCookie += suffix
+	}
 	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" {
 		return false
 	}
@@ -81,7 +89,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	w.Header().Set("X-Frame-Options", "DENY")
 	a := h.service.accounts
 	if a == nil {
-		renderAccount(w, r, 503, accountPage{Disabled: true})
+		h.renderAccount(w, r, 503, accountPage{Disabled: true})
 		return true
 	}
 	origin, _ := url.Parse(a.config.Origin)
@@ -103,14 +111,14 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		user, signedIn := a.currentUser(session)
 		if path == "/account" {
 			if !signedIn {
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 				return true
 			}
-			renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session)})
+			h.renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session)})
 			return true
 		}
 		if signedIn {
-			http.Redirect(w, r, "/account", http.StatusSeeOther)
+			http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 			return true
 		}
 		browser := cookieToken(r, loginCookie)
@@ -123,7 +131,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			}
 		}
 		accountCookie(w, loginCookie, browser, 1200)
-		renderAccount(w, r, 200, a.loginPage(browser))
+		h.renderAccount(w, r, 200, a.loginPage(browser))
 		return true
 	}
 	if r.Method != http.MethodPost {
@@ -180,7 +188,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		a.mu.Unlock()
 		accountCookie(w, sessionCookie, "", -1)
 		accountCookie(w, loginCookie, "", -1)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return true
 	}
 	fail := func(err error) {
@@ -191,10 +199,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			if p.RetryAfterSeconds > 0 {
 				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
 			}
-			renderAccount(w, r, p.Status, page)
+			h.renderAccount(w, r, p.Status, page)
 		} else {
 			page.Message = "Sign-in is temporarily unavailable. Please try again later."
-			renderAccount(w, r, 503, page)
+			h.renderAccount(w, r, 503, page)
 		}
 	}
 	if path == "/login/send" {
@@ -213,7 +221,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			return true
 		}
 		accountCookie(w, loginCookie, browser, 1200)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return true
 	}
 	if err := h.service.rates.take(allowance{"verify:ip:" + client, 30, 600}); err != nil {
@@ -231,6 +239,6 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	a.mu.Unlock()
 	accountCookie(w, sessionCookie, token, int(sessionLifetime/time.Second))
 	accountCookie(w, loginCookie, "", -1)
-	http.Redirect(w, r, "/account", http.StatusSeeOther)
+	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 	return true
 }

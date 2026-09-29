@@ -110,14 +110,15 @@ func (h *httpAdapter) mcpHandler(schema []byte) (http.Handler, error) {
 }
 
 func (h *httpAdapter) serveMCP(w http.ResponseWriter, r *http.Request) {
-	switch strings.ToLower(r.Host) {
-	case "metatrash.com", "metatrash.com:443", "127.0.0.1:8080", "localhost:8080", "[::1]:8080":
+	switch strings.TrimSuffix(strings.ToLower(r.Host), ":443") {
+	case strings.TrimSuffix(h.publicHost, ":443"):
+	case "127.0.0.1:8080", "localhost:8080", "[::1]:8080":
 	default:
 		sendError(w, problem(403, "forbidden", "Unrecognized MCP host."))
 		return
 	}
 	// Native MCP clients omit Origin. Browser callers must use the public HTTPS origin.
-	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || origins[0] != "https://metatrash.com") {
+	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || origins[0] != h.publicOrigin) {
 		sendError(w, problem(403, "forbidden", "Unrecognized MCP origin."))
 		return
 	}

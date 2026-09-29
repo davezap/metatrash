@@ -43,6 +43,7 @@ func run() error {
 	data := flag.String("data", "data", "Persistent data directory")
 	listen := flag.String("listen", "127.0.0.1:8080", "Loopback HTTP address")
 	trusted := flag.String("trusted-proxies", "", "Comma-separated trusted proxy CIDRs; empty trusts none")
+	publicURL := flag.String("public-url", "https://metatrash.com", "External HTTPS URL, optionally including a proxy-stripped path prefix")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
@@ -66,7 +67,7 @@ func run() error {
 			proxies = append(proxies, strings.TrimSpace(value))
 		}
 	}
-	handler, err := s.Handler(metatrash.ToolSchema, proxies)
+	handler, err := s.Handler(metatrash.ToolSchema, proxies, *publicURL)
 	if err != nil {
 		return err
 	}

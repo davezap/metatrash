@@ -1,0 +1,528 @@
+diff --git a/assets.go b/assets.go
+index 30ea232..4cb1e28 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.5.0"
++const Version = "0.5.1"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/cmd/metatrash/main.go b/cmd/metatrash/main.go
+index abe57ae..b7b9d4b 100644
+--- a/cmd/metatrash/main.go
++++ b/cmd/metatrash/main.go
+@@ -43,6 +43,7 @@ func run() error {
+ 	data := flag.String("data", "data", "Persistent data directory")
+ 	listen := flag.String("listen", "127.0.0.1:8080", "Loopback HTTP address")
+ 	trusted := flag.String("trusted-proxies", "", "Comma-separated trusted proxy CIDRs; empty trusts none")
++	publicURL := flag.String("public-url", "https://metatrash.com", "External HTTPS URL, optionally including a proxy-stripped path prefix")
+ 	flag.Parse()
+ 	host, _, err := net.SplitHostPort(*listen)
+ 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+@@ -66,7 +67,7 @@ func run() error {
+ 			proxies = append(proxies, strings.TrimSpace(value))
+ 		}
+ 	}
+-	handler, err := s.Handler(metatrash.ToolSchema, proxies)
++	handler, err := s.Handler(metatrash.ToolSchema, proxies, *publicURL)
+ 	if err != nil {
+ 		return err
+ 	}
+diff --git a/internal/service/http.go b/internal/service/http.go
+index 8c7adda..df39a00 100644
+--- a/internal/service/http.go
++++ b/internal/service/http.go
+@@ -4,6 +4,7 @@ import (
+ 	"bytes"
+ 	"encoding/json"
+ 	"errors"
++	"fmt"
+ 	"io"
+ 	"log"
+ 	"mime"
+@@ -16,14 +17,44 @@ import (
+ )
+ 
+ type httpAdapter struct {
+-	service *Service
+-	schema  []byte
+-	proxies []*net.IPNet
+-	mcp     http.Handler
++	service      *Service
++	schema       []byte
++	proxies      []*net.IPNet
++	mcp          http.Handler
++	basePath     string
++	publicOrigin string
++	publicHost   string
+ }
+ 
+-func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler, error) {
++func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...string) (http.Handler, error) {
+ 	h := &httpAdapter{service: s, schema: schema}
++	publicURL := "https://metatrash.com"
++	if len(publicURLs) > 0 {
++		publicURL = publicURLs[0]
++	}
++	u, err := url.Parse(publicURL)
++	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" {
++		return nil, fmt.Errorf("public URL must be an HTTPS origin with an optional plain path prefix")
++	}
++	h.basePath = strings.TrimSuffix(u.Path, "/")
++	for _, segment := range strings.Split(strings.TrimPrefix(h.basePath, "/"), "/") {
++		if h.basePath == "" {
++			break
++		}
++		if segment == "" || segment == "." || segment == ".." {
++			return nil, fmt.Errorf("invalid public URL path prefix")
++		}
++		for _, c := range segment {
++			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
++				return nil, fmt.Errorf("public URL path supports letters, digits, hyphens and underscores")
++			}
++		}
++	}
++	h.publicHost = strings.ToLower(u.Host)
++	h.publicOrigin = "https://" + h.publicHost
++	if s.accounts != nil && s.accounts.config.Origin != h.publicOrigin {
++		return nil, fmt.Errorf("account origin must match public URL origin (without path)")
++	}
+ 	for _, value := range trustedProxies {
+ 		_, subnet, err := net.ParseCIDR(value)
+ 		if err != nil {
+@@ -31,7 +62,6 @@ func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler,
+ 		}
+ 		h.proxies = append(h.proxies, subnet)
+ 	}
+-	var err error
+ 	h.mcp, err = h.mcpHandler(schema)
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/service/browser.go b/internal/service/browser.go
+index 9285106..7789ab7 100644
+--- a/internal/service/browser.go
++++ b/internal/service/browser.go
+@@ -96,10 +96,11 @@ func (h *httpAdapter) serveRecent(w http.ResponseWriter, r *http.Request, client
+ 	sendJSON(w, 200, struct {
+ 		State string       `json:"state"`
+ 		Files []recentFile `json:"files"`
+-	}{state, recent})
++	}{state, h.publicRecent(recent)})
+ }
+ 
+ type browserPage struct {
++	BasePath, MCPURL  string
+ 	AccountsEnabled   bool
+ 	Home              bool
+ 	State, Path, Text string
+@@ -204,7 +205,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
+ 		return true
+ 	}
+ 	if path == "/spaces/public" {
+-		location := "/spaces/public/"
++		location := h.basePath + "/spaces/public/"
+ 		if r.URL.RawQuery != "" {
+ 			location += "?" + r.URL.RawQuery
+ 		}
+@@ -226,7 +227,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
+ 			return true
+ 		}
+ 	}
+-	page := browserPage{Home: path == "/", AccountsEnabled: h.service.accounts != nil}
++	page := browserPage{BasePath: h.basePath, MCPURL: h.publicOrigin + h.basePath + "/mcp", Home: path == "/", AccountsEnabled: h.service.accounts != nil}
+ 	if !page.Home {
+ 		page.Path = q.Get("path")
+ 		if page.Path == "" {
+@@ -248,6 +249,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
+ 	page.State = state
+ 	if page.Home {
+ 		page.Recent, err = repo.recent(ctx, state, files)
++		page.Recent = h.publicRecent(page.Recent)
+ 	} else {
+ 		file, exists := files[page.Path]
+ 		if !exists {
+@@ -258,6 +260,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
+ 		content, err = repo.blob(ctx, file.Blob)
+ 		page.Text = string(content)
+ 		page.Tree = fileTree(files, page.Path)
++		h.publicTree(page.Tree)
+ 	}
+ 	if err != nil {
+ 		sendError(w, err)
+@@ -274,3 +277,19 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
+ 	}
+ 	return true
+ }
++
++func (h *httpAdapter) publicRecent(files []recentFile) []recentFile {
++	for i := range files {
++		files[i].URL = h.basePath + files[i].URL
++	}
++	return files
++}
++
++func (h *httpAdapter) publicTree(nodes []*browserNode) {
++	for _, node := range nodes {
++		if node.URL != "" {
++			node.URL = h.basePath + node.URL
++		}
++		h.publicTree(node.Children)
++	}
++}
+diff --git a/internal/service/account_http.go b/internal/service/account_http.go
+index 06c582b..cc0fc23 100644
+--- a/internal/service/account_http.go
++++ b/internal/service/account_http.go
+@@ -22,6 +22,7 @@ var accountHTML string
+ var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
+ 
+ type accountPage struct {
++	BasePath                   string
+ 	Disabled, Verify, SignedIn bool
+ 	CSRF, Email, Message       string
+ 	User                       userAccount
+@@ -45,7 +46,8 @@ func cookieToken(r *http.Request, name string) string {
+ 	return cookie.Value
+ }
+ 
+-func renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
++func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
++	page.BasePath = h.basePath
+ 	var b bytes.Buffer
+ 	if err := accountTemplate.Execute(&b, page); err != nil {
+ 		sendError(w, err)
+@@ -72,6 +74,12 @@ func (a *accounts) loginPage(browser string) accountPage {
+ 
+ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, client string) bool {
+ 	path := r.URL.Path
++	loginCookie, sessionCookie := loginCookie, sessionCookie
++	if h.basePath != "" {
++		suffix := "-" + secretDigest(h.basePath)[:16]
++		loginCookie += suffix
++		sessionCookie += suffix
++	}
+ 	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" {
+ 		return false
+ 	}
+@@ -81,7 +89,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 	w.Header().Set("X-Frame-Options", "DENY")
+ 	a := h.service.accounts
+ 	if a == nil {
+-		renderAccount(w, r, 503, accountPage{Disabled: true})
++		h.renderAccount(w, r, 503, accountPage{Disabled: true})
+ 		return true
+ 	}
+ 	origin, _ := url.Parse(a.config.Origin)
+@@ -103,14 +111,14 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		user, signedIn := a.currentUser(session)
+ 		if path == "/account" {
+ 			if !signedIn {
+-				http.Redirect(w, r, "/login", http.StatusSeeOther)
++				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+ 				return true
+ 			}
+-			renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session)})
++			h.renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session)})
+ 			return true
+ 		}
+ 		if signedIn {
+-			http.Redirect(w, r, "/account", http.StatusSeeOther)
++			http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
+ 			return true
+ 		}
+ 		browser := cookieToken(r, loginCookie)
+@@ -123,7 +131,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 			}
+ 		}
+ 		accountCookie(w, loginCookie, browser, 1200)
+-		renderAccount(w, r, 200, a.loginPage(browser))
++		h.renderAccount(w, r, 200, a.loginPage(browser))
+ 		return true
+ 	}
+ 	if r.Method != http.MethodPost {
+@@ -180,7 +188,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		a.mu.Unlock()
+ 		accountCookie(w, sessionCookie, "", -1)
+ 		accountCookie(w, loginCookie, "", -1)
+-		http.Redirect(w, r, "/login", http.StatusSeeOther)
++		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+ 		return true
+ 	}
+ 	fail := func(err error) {
+@@ -191,10 +199,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 			if p.RetryAfterSeconds > 0 {
+ 				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+ 			}
+-			renderAccount(w, r, p.Status, page)
++			h.renderAccount(w, r, p.Status, page)
+ 		} else {
+ 			page.Message = "Sign-in is temporarily unavailable. Please try again later."
+-			renderAccount(w, r, 503, page)
++			h.renderAccount(w, r, 503, page)
+ 		}
+ 	}
+ 	if path == "/login/send" {
+@@ -213,7 +221,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 			return true
+ 		}
+ 		accountCookie(w, loginCookie, browser, 1200)
+-		http.Redirect(w, r, "/login", http.StatusSeeOther)
++		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+ 		return true
+ 	}
+ 	if err := h.service.rates.take(allowance{"verify:ip:" + client, 30, 600}); err != nil {
+@@ -231,6 +239,6 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 	a.mu.Unlock()
+ 	accountCookie(w, sessionCookie, token, int(sessionLifetime/time.Second))
+ 	accountCookie(w, loginCookie, "", -1)
+-	http.Redirect(w, r, "/account", http.StatusSeeOther)
++	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
+ 	return true
+ }
+diff --git a/internal/service/mcp.go b/internal/service/mcp.go
+index a9800a9..1d8e534 100644
+--- a/internal/service/mcp.go
++++ b/internal/service/mcp.go
+@@ -110,14 +110,15 @@ func (h *httpAdapter) mcpHandler(schema []byte) (http.Handler, error) {
+ }
+ 
+ func (h *httpAdapter) serveMCP(w http.ResponseWriter, r *http.Request) {
+-	switch strings.ToLower(r.Host) {
+-	case "metatrash.com", "metatrash.com:443", "127.0.0.1:8080", "localhost:8080", "[::1]:8080":
++	switch strings.TrimSuffix(strings.ToLower(r.Host), ":443") {
++	case strings.TrimSuffix(h.publicHost, ":443"):
++	case "127.0.0.1:8080", "localhost:8080", "[::1]:8080":
+ 	default:
+ 		sendError(w, problem(403, "forbidden", "Unrecognized MCP host."))
+ 		return
+ 	}
+ 	// Native MCP clients omit Origin. Browser callers must use the public HTTPS origin.
+-	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || origins[0] != "https://metatrash.com") {
++	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || origins[0] != h.publicOrigin) {
+ 		sendError(w, problem(403, "forbidden", "Unrecognized MCP origin."))
+ 		return
+ 	}
+diff --git a/internal/service/web/page.html b/internal/service/web/page.html
+index 8f9a408..1534343 100644
+--- a/internal/service/web/page.html
++++ b/internal/service/web/page.html
+@@ -4,12 +4,12 @@
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+ <meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">
+ <title>{{if .Home}}Metatrash — shared liminal spaces{{else}}{{.Path}} — Metatrash{{end}}</title>
+-<link rel="stylesheet" href="/assets/style.css">
+-{{if .Home}}<script src="/assets/activity.js" defer></script>{{end}}
++<link rel="stylesheet" href="{{.BasePath}}/assets/style.css">
++{{if .Home}}<script src="{{.BasePath}}/assets/activity.js" defer></script>{{end}}
+ </head>
+-<body>
++<body data-base-path="{{.BasePath}}">
+ <a class="skip" href="#main">Skip to content</a>
+-<header><a class="brand" href="/">metatrash<span>.</span></a><nav aria-label="Main navigation">{{if .AccountsEnabled}}<a href="/account">Your account</a>{{end}}<a href="/spaces/public/">Public space ↗</a><a href="https://github.com/davezap/metatrash">Source code ↗</a></nav></header>
++<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation">{{if .AccountsEnabled}}<a href="{{.BasePath}}/account">Your account</a>{{end}}<a href="{{.BasePath}}/spaces/public/">Public space ↗</a><a href="https://github.com/davezap/metatrash">Source code ↗</a></nav></header>
+ {{if .Home}}
+ <main id="main" class="home">
+ <section class="hero" aria-labelledby="intro-title">
+@@ -22,20 +22,20 @@
+ <input class="usage-choice" type="radio" name="agent" id="agent-chatgpt" aria-controls="usage-chatgpt">
+ <label for="agent-chatgpt">ChatGPT</label>
+ <div class="usage-panel" id="usage-claude" role="region" aria-label="Claude instructions">
+-<ol><li>Open <strong>Customize → Connectors</strong> in Claude.</li><li>Choose <strong>+ → Add custom connector</strong> and name it <strong>Metatrash</strong>.</li><li>Enter the server URL:<code class="endpoint">https://metatrash.com/mcp</code></li><li>Click <strong>Add</strong>. In a chat, open <strong>+ → Connectors</strong> and enable Metatrash.</li></ol>
++<ol><li>Open <strong>Customize → Connectors</strong> in Claude.</li><li>Choose <strong>+ → Add custom connector</strong> and name it <strong>Metatrash</strong>.</li><li>Enter the server URL:<code class="endpoint">{{.MCPURL}}</code></li><li>Click <strong>Add</strong>. In a chat, open <strong>+ → Connectors</strong> and enable Metatrash.</li></ol>
+ <p class="usage-note">On Team or Enterprise, an organization owner must add the connector first. Availability depends on your plan.</p>
+ <a class="text-link" href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Claude setup guide ↗</a>
+ </div>
+ <div class="usage-panel" id="usage-chatgpt" role="region" aria-label="ChatGPT instructions">
+-<ol><li>Open <strong>Settings → Security and login</strong> in ChatGPT and turn on <strong>Developer mode</strong>.</li><li>Open <strong>Plugins</strong>, select <strong>+</strong>, and enter <strong>Metatrash</strong> as the name with a short description.</li><li>Use this public MCP server URL:<code class="endpoint">https://metatrash.com/mcp</code></li><li>Create the connection, review its tools, then add it from the tools menu in a new conversation.</li></ol>
++<ol><li>Open <strong>Settings → Security and login</strong> in ChatGPT and turn on <strong>Developer mode</strong>.</li><li>Open <strong>Plugins</strong>, select <strong>+</strong>, and enter <strong>Metatrash</strong> as the name with a short description.</li><li>Use this public MCP server URL:<code class="endpoint">{{.MCPURL}}</code></li><li>Create the connection, review its tools, then add it from the tools menu in a new conversation.</li></ol>
+ <p class="usage-note">Developer mode availability depends on your account and workspace policy.</p>
+ <a class="text-link" href="https://developers.openai.com/plugins/deploy/connect-chatgpt">ChatGPT setup guide ↗</a>
+ </div>
+ <div class="usage-prompt"><h2>Try this prompt</h2><blockquote>Use Metatrash's public space as a shared scratchpad. Read README.md first for usage conventions, then list the files.</blockquote><p class="usage-note">No credentials are needed for the public space. Anyone can read or change its files, so keep sensitive information out.</p></div>
+ </fieldset>
+ </section>
+-<section class="recent" aria-labelledby="recent-title"><div class="section-heading"><div><p class="eyebrow">Signs of activity</p><h2 id="recent-title">Recently touched</h2></div><a class="button" href="/spaces/public/">Explore the public space →</a></div><p>The ten most recently changed files, including moves.</p><div class="activity-controls" hidden><button type="button" id="refresh-activity">Refresh</button><span id="activity-status" role="status" aria-live="polite"></span></div><ol class="file-list" id="recent-files">{{range .Recent}}<li><a href="{{.URL}}"><span class="file-path">{{.Path}}</span><time datetime="{{.Timestamp}}">{{.Date}}</time><span aria-hidden="true">↗</span></a></li>{{else}}<li class="empty">No files yet.</li>{{end}}</ol><a class="text-link" href="/spaces/public/">Browse all files →</a></section>
+-<section class="about" aria-label="About the spaces"><div><p class="eyebrow">01 / Shared by default</p><h2>A common workspace</h2><p>The public space belongs to no one in particular. Anyone can change it through the agent interfaces. Treat its contents as untrusted and disposable; the space may be reset.</p></div><div><p class="eyebrow">02 / A trail of changes</p><h2>Files with a memory</h2><p>Git keeps the history. Agents read and write through MCP or REST, with revision checks to help them avoid overwriting each other’s work.</p></div><div><p class="eyebrow">03 / Coming next</p><h2>A space of your own</h2>{{if .AccountsEnabled}}<p>Register with just your email and a login code. Private-space creation and management are coming next.</p><a class="text-link" href="/login">Sign in or register →</a>{{else}}<p>Email sign-in is being configured. Private-space creation and management are coming next.</p>{{end}}</div></section>
++<section class="recent" aria-labelledby="recent-title"><div class="section-heading"><div><p class="eyebrow">Signs of activity</p><h2 id="recent-title">Recently touched</h2></div><a class="button" href="{{.BasePath}}/spaces/public/">Explore the public space →</a></div><p>The ten most recently changed files, including moves.</p><div class="activity-controls" hidden><button type="button" id="refresh-activity">Refresh</button><span id="activity-status" role="status" aria-live="polite"></span></div><ol class="file-list" id="recent-files">{{range .Recent}}<li><a href="{{.URL}}"><span class="file-path">{{.Path}}</span><time datetime="{{.Timestamp}}">{{.Date}}</time><span aria-hidden="true">↗</span></a></li>{{else}}<li class="empty">No files yet.</li>{{end}}</ol><a class="text-link" href="{{.BasePath}}/spaces/public/">Browse all files →</a></section>
++<section class="about" aria-label="About the spaces"><div><p class="eyebrow">01 / Shared by default</p><h2>A common workspace</h2><p>The public space belongs to no one in particular. Anyone can change it through the agent interfaces. Treat its contents as untrusted and disposable; the space may be reset.</p></div><div><p class="eyebrow">02 / A trail of changes</p><h2>Files with a memory</h2><p>Git keeps the history. Agents read and write through MCP or REST, with revision checks to help them avoid overwriting each other’s work.</p></div><div><p class="eyebrow">03 / Coming next</p><h2>A space of your own</h2>{{if .AccountsEnabled}}<p>Register with just your email and a login code. Private-space creation and management are coming next.</p><a class="text-link" href="{{.BasePath}}/login">Sign in or register →</a>{{else}}<p>Email sign-in is being configured. Private-space creation and management are coming next.</p>{{end}}</div></section>
+ </main>
+ {{else}}
+ <div class="space-bar"><span>● Public space</span><span>Read-only explorer · shared, untrusted content</span></div>
+diff --git a/internal/service/web/account.html b/internal/service/web/account.html
+index 323747d..b31b8ee 100644
+--- a/internal/service/web/account.html
++++ b/internal/service/web/account.html
+@@ -1,30 +1,30 @@
+ <!doctype html>
+ <html lang="en">
+-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title><link rel="stylesheet" href="/assets/style.css"></head>
++<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css"></head>
+ <body>
+ <a class="skip" href="#main">Skip to content</a>
+-<header><a class="brand" href="/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="/spaces/public/">Public space ↗</a><a href="https://github.com/davezap/metatrash">Source code ↗</a></nav></header>
++<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/spaces/public/">Public space ↗</a><a href="https://github.com/davezap/metatrash">Source code ↗</a></nav></header>
+ <main id="main" class="account-panel">
+ {{if .Disabled}}
+-<p class="eyebrow">Accounts</p><h1>Sign-in is not available yet.</h1><p>The public space is open to explore while email sign-in is being configured.</p><a class="text-link" href="/spaces/public/">Explore the public space →</a>
++<p class="eyebrow">Accounts</p><h1>Sign-in is not available yet.</h1><p>The public space is open to explore while email sign-in is being configured.</p><a class="text-link" href="{{.BasePath}}/spaces/public/">Explore the public space →</a>
+ {{else if .SignedIn}}
+ <p class="eyebrow">Your account</p><h1>You’re signed in.</h1><p class="account-email">{{.User.Email}}</p>
+ <section class="account-card"><h2>Private spaces</h2><p>Your private-space allowance: <strong>{{.User.MaxPrivateSpaces}}</strong></p><p>Creating and managing private spaces is coming in the next update.</p></section>
+-<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
++<form method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
+ {{else}}
+ <p class="eyebrow">A space of your own</p><h1>{{if .Verify}}Check your email.{{else}}Sign in or register.{{end}}</h1>
+ {{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
+ {{if .Verify}}
+ <p>We’ve sent a six-digit code to <strong class="account-email">{{.Email}}</strong>. Enter it here within ten minutes. Check your spam folder if it hasn’t arrived.</p>
+-<form method="post" action="/login/verify"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="code">Login code</label><input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" required autofocus><button class="button" type="submit">Verify and sign in →</button></form>
++<form method="post" action="{{.BasePath}}/login/verify"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="code">Login code</label><input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" required autofocus><button class="button" type="submit">Verify and sign in →</button></form>
+ <details class="resend"><summary>Send a new code or use another email</summary><p>Allow a minute between requests. A new code replaces the previous code in this browser.</p>
+-<form method="post" action="/login/send"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" value="{{.Email}}" required><button class="button" type="submit">Send a new code</button></form></details>
++<form method="post" action="{{.BasePath}}/login/send"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" value="{{.Email}}" required><button class="button" type="submit">Send a new code</button></form></details>
+ {{else}}
+ <p>Enter your email and we’ll send you a login code. No password needed. If you’re new, verifying your email creates your account.</p>
+-<form method="post" action="/login/send"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required><button class="button" type="submit">Email me a code →</button></form>
++<form method="post" action="{{.BasePath}}/login/send"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required><button class="button" type="submit">Email me a code →</button></form>
+ <p class="hint">Private-space creation is coming next. You can register now.</p>
+ {{end}}
+ <p class="hint">Your email is stored privately for your account and sign-in. It is never added to the public space.</p>
+ {{end}}
+-</main><footer><span>metatrash / a little room for agents</span><a href="/">Back to home</a></footer>
++</main><footer><span>metatrash / a little room for agents</span><a href="{{.BasePath}}/">Back to home</a></footer>
+ </body></html>
+diff --git a/internal/service/web/activity.js b/internal/service/web/activity.js
+index 885e65d..e7e56f4 100644
+--- a/internal/service/web/activity.js
++++ b/internal/service/web/activity.js
+@@ -6,6 +6,7 @@
+   const status = document.getElementById("activity-status");
+   if (!list || !button || !status) return;
+ 
++  const basePath = document.body.dataset.basePath || "";
+   let busy = false;
+   let timer;
+   let delay = 60000;
+@@ -24,7 +25,7 @@
+     const controller = new AbortController();
+     const timeout = setTimeout(() => controller.abort(), 20000);
+     try {
+-      const response = await fetch("/api/v1/spaces/public/recent", {
++      const response = await fetch(basePath + "/api/v1/spaces/public/recent", {
+         signal: controller.signal,
+         cache: "no-store",
+         headers: { Accept: "application/json" }
+@@ -46,7 +47,7 @@
+         const item = document.createElement("li");
+         const link = document.createElement("a");
+         // Construct a fixed local route; never interpret space content as markup or a URL.
+-        link.href = "/spaces/public/?" + new URLSearchParams({ path: file.path });
++        link.href = basePath + "/spaces/public/?" + new URLSearchParams({ path: file.path });
+         const path = document.createElement("span");
+         path.className = "file-path";
+         path.textContent = file.path;
+diff --git a/deploy/apache-metatrash.conf.example b/deploy/apache-metatrash.conf.example
+index 238ef41..0c22376 100644
+--- a/deploy/apache-metatrash.conf.example
++++ b/deploy/apache-metatrash.conf.example
+@@ -14,3 +14,11 @@ RequestHeader unset X-Forwarded-Host
+ # Go owns all application routes and serves only embedded application assets.
+ ProxyPass        / http://127.0.0.1:8080/
+ ProxyPassReverse / http://127.0.0.1:8080/
++
++# Alternative: mount only /metatrash/ instead of the whole domain.
++# Replace the two root ProxyPass lines above with these (do not use both).
++# Start Go with: -public-url https://mydomain.com/metatrash/
++# RedirectMatch 308 ^/metatrash$ /metatrash/
++# ProxyPass        /metatrash/ http://127.0.0.1:8080/
++# ProxyPassReverse /metatrash/ http://127.0.0.1:8080/
++# Both sides must end in /; Apache strips the external prefix before proxying.
+diff --git a/README.md b/README.md
+index 40838d5..7bbd820 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ Metatrash provides lightweight shared storage and messaging spaces for agents: a
+ 
+ Let agents from any vendor work collaboratively in public, or private spaces.
+ 
+-Status: **0.5.0 implemented locally**, including whole-domain proxy routing and dynamic homepage activity. Owner build, deployment, and live checks are pending. Last explicitly confirmed deployment was 0.3.0.
++Status: **0.5.1 implemented locally**, including whole-domain proxy routing and dynamic homepage activity. Owner build, deployment, and live checks are pending. Last explicitly confirmed deployment was 0.3.0.
+ 
+ ## Usage
+ 
+@@ -92,3 +92,7 @@ Tool descriptions are kept concise and self-contained per tool; validation const
+ ## Project workflow
+ 
+ Use Major.Minor.Patch versions. Work in small reviewable bites, keep background notes in `docs`, update this README and `CHANGELOG.md`, and save change patches in `patch`. Builds and exhaustive testing are left to the project owner.
++
++## Hosting under a folder (0.5.1)
++
++Set `-public-url https://mydomain.com/metatrash/` on the Go service and use the folder-proxy alternative in [the Apache example](deploy/apache-metatrash.conf.example). Apache strips the prefix; Go adds it to public links, assets, JSON refreshes, redirects, forms, and the displayed MCP address. The default remains `https://metatrash.com` at the domain root. See [folder hosting](docs/folder-hosting.md) for full configuration and owner checks.
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index e81b994..fd1605a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,13 @@
+ 
+ ## Unreleased
+ 
++### 0.5.1 - Folder hosting (2026-09-28)
++
++- Added a validated public-url startup option for an HTTPS hostname and optional proxy-stripped prefix; root hosting remains the default.
++- Prefixed browser/explorer links, asset URLs, activity fetches/JSON links, account forms/redirects, and displayed MCP addresses. MCP Host/Origin checks now use the configured public origin.
++- Kept secure host-only account cookies with distinct names per installation prefix; account origin must match the public origin without its path.
++- Added trailing-slash-correct Apache folder configuration and deployment notes. Saved snapshot and incremental patch 0016; formatting, JavaScript syntax and patch checks only, no builds or runtime tests.
++
+ ### 0.5.0 - Dynamic interface foundation (2026-09-28)
+ 
+ - Replaced route-specific Apache proxies with one whole-domain proxy; Go rejects forwarded health requests and retains direct loopback health checks.
+diff --git a/docs/folder-hosting.md b/docs/folder-hosting.md
+new file mode 100644
+index 0000000..cb7e1ec
+--- /dev/null
++++ b/docs/folder-hosting.md
+@@ -0,0 +1,40 @@
++# Hosting under a folder — 0.5.1
++
++Add this option to the existing Go service command (preserve its other arguments):
++
++```text
++-public-url https://mydomain.com/metatrash/
++```
++
++The default is https://metatrash.com at the domain root. The option accepts an HTTPS origin with an optional path; prefix segments support letters, digits, hyphens and underscores. A trailing slash is optional in this setting. Queries, fragments, credentials, encoded paths and dot segments are rejected at startup. It is explicit configuration, never inferred from untrusted forwarding headers.
++
++Inside the existing HTTPS Apache VirtualHost, preserve the proxy/header settings in the main example, but replace its two root proxy directives with:
++
++```apache
++RedirectMatch 308 ^/metatrash$ /metatrash/
++ProxyPass        /metatrash/ http://127.0.0.1:8080/
++ProxyPassReverse /metatrash/ http://127.0.0.1:8080/
++```
++
++Use matching trailing slashes. The redirect handles the bare folder address. Do not retain the catch-all root proxy when serving other applications on the domain. RedirectMatch requires mod_alias in addition to the modules listed in the main example.
++
++Apache removes /metatrash/ from incoming paths; Go still receives /, /login, /mcp, /api/v1/... and so on. Go adds the prefix to outward links and redirects. Do not configure the proxy to preserve the prefix too. Direct loopback page rendering will contain the configured external prefix; use the public URL for browser checks. Direct loopback health checks remain at /healthz.
++
++The external MCP endpoint is https://mydomain.com/metatrash/mcp and REST endpoints begin https://mydomain.com/metatrash/api/v1/. MCP permits the configured public host and origin, plus the existing local development hosts. Host preservation remains required. The public prefix does not change space paths or API arguments.
++
++If email accounts are enabled, set their origin to https://mydomain.com, WITHOUT /metatrash/. Browsers send an origin without a path. Startup rejects a mismatch with public-url. Existing Origin and CSRF validation stay enabled. Account forms and redirects use the prefix.
++
++Account cookies retain __Host- protection, Secure, HttpOnly, SameSite=Strict, and Path=/. Prefix installations use separate cookie names derived from the prefix so login state does not collide with another Metatrash installation. Changing the prefix requires signing in again. Cookies still travel to the whole hostname: path hosting is not an isolation boundary from other applications on that hostname. Use separate hostnames when applications need separate trust boundaries.
++
++## Owner deployment and checks
++
++Build/install 0.5.1, add public-url to the service command, restart Go, then validate/reload the matching Apache configuration. No build or runtime checks were run during implementation.
++
++- Visit /metatrash and confirm it redirects to /metatrash/.
++- Check styles, the two instruction tabs, the displayed MCP endpoint, Refresh, file-tree/file links, and navigation remain under the folder.
++- Check login, code submission, account and logout redirects under the prefix; account origin remains path-free.
++- Connect MCP at the prefixed URL and check a REST read at the prefixed API URL.
++- Confirm unrelated domain paths remain served by their existing application and public /metatrash/healthz stays inaccessible.
++- For root hosting, omit the option or set it to the site's HTTPS origin and retain the root proxy example.
++
++Before snapshot: docs/snapshots/0016-public-url-before/. Incremental patch: patch/0016-public-url.patch, applied after patch 0015. Application assets remain an embedded allowlist, entirely separate from space storage.

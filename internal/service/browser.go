@@ -20,6 +20,37 @@ var browserHTML string
 //go:embed web/style.css
 var browserCSS []byte
 
+//go:embed web/activity.js
+var activityJS []byte
+
+// Only developer-owned, embedded assets belong here. Never serve space storage.
+func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
+	if !strings.HasPrefix(r.URL.Path, "/assets/") {
+		return false
+	}
+	var data []byte
+	var kind string
+	switch r.URL.Path {
+	case "/assets/style.css":
+		data, kind = browserCSS, "text/css; charset=utf-8"
+	case "/assets/activity.js":
+		data, kind = activityJS, "text/javascript; charset=utf-8"
+	default:
+		sendError(w, missing())
+		return true
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
+		return true
+	}
+	w.Header().Set("Content-Type", kind)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(data)
+	}
+	return true
+}
+
 var browserTemplate = template.Must(template.New("page").Parse(browserHTML))
 
 type browserNode struct {
@@ -29,10 +60,47 @@ type browserNode struct {
 }
 
 type recentFile struct {
-	Path, URL, Timestamp, Date string
+	Path      string `json:"path"`
+	URL       string `json:"url"`
+	Timestamp string `json:"timestamp"`
+	Date      string `json:"date"`
+}
+
+func (h *httpAdapter) serveRecent(w http.ResponseWriter, r *http.Request, client string) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		sendError(w, problem(405, "invalid_request", "Use GET."))
+		return
+	}
+	if r.URL.RawQuery != "" {
+		sendError(w, invalid("Unknown query parameter."))
+		return
+	}
+	if err := h.service.Access("public", "", client, false); err != nil {
+		sendError(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	repo := h.service.repos["public"]
+	state, files, err := repo.snapshot(ctx, "")
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	recent, err := repo.recent(ctx, state, files)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	sendJSON(w, 200, struct {
+		State string       `json:"state"`
+		Files []recentFile `json:"files"`
+	}{state, h.publicRecent(recent)})
 }
 
 type browserPage struct {
+	BasePath, MCPURL  string
 	AccountsEnabled   bool
 	Home              bool
 	State, Path, Text string
@@ -123,25 +191,21 @@ func (repo *repository) recent(ctx context.Context, state string, files map[stri
 
 func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
-	if path != "/" && path != "/spaces/public" && path != "/spaces/public/" && path != "/assets/style.css" {
+	if path != "/" && path != "/spaces/public" && path != "/spaces/public/" {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	if path == "/" {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
 		return true
 	}
-	if path == "/assets/style.css" {
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		if r.Method != http.MethodHead {
-			_, _ = w.Write(browserCSS)
-		}
-		return true
-	}
 	if path == "/spaces/public" {
-		location := "/spaces/public/"
+		location := h.basePath + "/spaces/public/"
 		if r.URL.RawQuery != "" {
 			location += "?" + r.URL.RawQuery
 		}
@@ -163,7 +227,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 			return true
 		}
 	}
-	page := browserPage{Home: path == "/", AccountsEnabled: h.service.accounts != nil}
+	page := browserPage{BasePath: h.basePath, MCPURL: h.publicOrigin + h.basePath + "/mcp", Home: path == "/", AccountsEnabled: h.service.accounts != nil}
 	if !page.Home {
 		page.Path = q.Get("path")
 		if page.Path == "" {
@@ -185,6 +249,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	page.State = state
 	if page.Home {
 		page.Recent, err = repo.recent(ctx, state, files)
+		page.Recent = h.publicRecent(page.Recent)
 	} else {
 		file, exists := files[page.Path]
 		if !exists {
@@ -195,6 +260,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		content, err = repo.blob(ctx, file.Blob)
 		page.Text = string(content)
 		page.Tree = fileTree(files, page.Path)
+		h.publicTree(page.Tree)
 	}
 	if err != nil {
 		sendError(w, err)
@@ -210,4 +276,20 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		_, _ = w.Write(body.Bytes())
 	}
 	return true
+}
+
+func (h *httpAdapter) publicRecent(files []recentFile) []recentFile {
+	for i := range files {
+		files[i].URL = h.basePath + files[i].URL
+	}
+	return files
+}
+
+func (h *httpAdapter) publicTree(nodes []*browserNode) {
+	for _, node := range nodes {
+		if node.URL != "" {
+			node.URL = h.basePath + node.URL
+		}
+		h.publicTree(node.Children)
+	}
 }

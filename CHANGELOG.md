@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### 0.5.1 - Folder hosting (2026-09-28)
+
+- Added a validated public-url startup option for an HTTPS hostname and optional proxy-stripped prefix; root hosting remains the default.
+- Prefixed browser/explorer links, asset URLs, activity fetches/JSON links, account forms/redirects, and displayed MCP addresses. MCP Host/Origin checks now use the configured public origin.
+- Kept secure host-only account cookies with distinct names per installation prefix; account origin must match the public origin without its path.
+- Added trailing-slash-correct Apache folder configuration and deployment notes. Saved snapshot and incremental patch 0016; formatting, JavaScript syntax and patch checks only, no builds or runtime tests.
+
+### 0.5.0 - Dynamic interface foundation (2026-09-28)
+
+- Replaced route-specific Apache proxies with one whole-domain proxy; Go rejects forwarded health requests and retains direct loopback health checks.
+- Added a dedicated allowlisted handler for embedded CSS/JavaScript, isolated from templates and space storage. Only the homepage permits same-origin scripts and JSON connections; inline scripts remain blocked.
+- Added the public recent-activity JSON endpoint with existing read permissions, rate limits, snapshot semantics, and a request deadline.
+- Added manual and visible-page periodic refresh, timeout/error feedback and retry backoff. Retained server-rendered content on failure; all dynamic file data uses text nodes and fixed local links.
+- Saved before snapshot and patch 0015. Go formatting, JavaScript syntax and patch checks only; no builds, runtime tests, or deployment.
+
 ### 0.4.2 - Homepage agent instructions (2026-09-27)
 
 - Simplified the left introduction to the requested project description and moved Explore the public space beside Recently touched.

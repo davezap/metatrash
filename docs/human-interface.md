@@ -44,3 +44,7 @@ Setup sources checked 2026-09-27: [Claude custom connectors](https://support.cla
 Before snapshot: `docs/snapshots/0014-home-instructions-before/`. Incremental patch: `patch/0014-home-instructions.patch`.
 
 Owner checks after build/deployment: confirm both instruction panels switch by click and keyboard; check narrow-screen stacking, endpoint wrapping, and the Explore link. Templates and styles are embedded in the Go binary, so rebuild/install and restart are needed. No build or runtime tests were run for this bite.
+
+## 0.5.0 — dynamic interface foundation
+
+Whole-domain Apache proxying, bundled application JavaScript, and JSON-based homepage activity refresh are implemented locally. See [routing, security boundaries, API response, and owner deployment checks](dynamic-interface.md). The explorer remains server-rendered; disk overrides and account AJAX controls are later bites.

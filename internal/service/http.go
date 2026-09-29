@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime"
@@ -16,14 +17,44 @@ import (
 )
 
 type httpAdapter struct {
-	service *Service
-	schema  []byte
-	proxies []*net.IPNet
-	mcp     http.Handler
+	service      *Service
+	schema       []byte
+	proxies      []*net.IPNet
+	mcp          http.Handler
+	basePath     string
+	publicOrigin string
+	publicHost   string
 }
 
-func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler, error) {
+func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...string) (http.Handler, error) {
 	h := &httpAdapter{service: s, schema: schema}
+	publicURL := "https://metatrash.com"
+	if len(publicURLs) > 0 {
+		publicURL = publicURLs[0]
+	}
+	u, err := url.Parse(publicURL)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" {
+		return nil, fmt.Errorf("public URL must be an HTTPS origin with an optional plain path prefix")
+	}
+	h.basePath = strings.TrimSuffix(u.Path, "/")
+	for _, segment := range strings.Split(strings.TrimPrefix(h.basePath, "/"), "/") {
+		if h.basePath == "" {
+			break
+		}
+		if segment == "" || segment == "." || segment == ".." {
+			return nil, fmt.Errorf("invalid public URL path prefix")
+		}
+		for _, c := range segment {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+				return nil, fmt.Errorf("public URL path supports letters, digits, hyphens and underscores")
+			}
+		}
+	}
+	h.publicHost = strings.ToLower(u.Host)
+	h.publicOrigin = "https://" + h.publicHost
+	if s.accounts != nil && s.accounts.config.Origin != h.publicOrigin {
+		return nil, fmt.Errorf("account origin must match public URL origin (without path)")
+	}
 	for _, value := range trustedProxies {
 		_, subnet, err := net.ParseCIDR(value)
 		if err != nil {
@@ -31,7 +62,6 @@ func (s *Service) Handler(schema []byte, trustedProxies []string) (http.Handler,
 		}
 		h.proxies = append(h.proxies, subnet)
 	}
-	var err error
 	h.mcp, err = h.mcpHandler(schema)
 	if err != nil {
 		return nil, err
@@ -110,8 +140,22 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveMCP(w, r)
 		return
 	}
-	if h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) {
+	if h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) {
 		return
+	}
+	if r.URL.Path == "/api/v1/spaces/public/recent" {
+		h.serveRecent(w, r, client)
+		return
+	}
+	// Health is for direct loopback checks, never requests forwarded by Apache.
+	// Reject forwarding headers regardless of configured proxy trust.
+	if r.URL.Path == "/healthz" {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() || len(r.Header.Values("X-Forwarded-For")) > 0 || len(r.Header.Values("Forwarded")) > 0 || len(r.Header.Values("X-Forwarded-Host")) > 0 {
+			sendError(w, missing())
+			return
+		}
 	}
 	if r.URL.Path == "/healthz" || r.URL.Path == "/api/v1/tool-schema.json" {
 		if r.Method != http.MethodGet {

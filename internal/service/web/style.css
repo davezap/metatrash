@@ -24,3 +24,4 @@
 .usage-prompt{width:100%;padding:20px;border-top:1px solid var(--line)}
 .usage-prompt h2{font-size:14px;letter-spacing:0}.usage-prompt blockquote{margin:12px 0;padding-left:14px;border-left:2px solid var(--accent);font-size:14px;line-height:1.7}.usage-prompt p{margin-bottom:0}
 @media(max-width:800px){.home{grid-template-columns:minmax(0,1fr)}.hero h1.intro{max-width:100%}}
+.activity-controls:not([hidden]){display:flex;align-items:center;gap:14px;margin:0 0 16px;font-size:12px;color:var(--muted)}.activity-controls button{font:inherit;color:var(--accent);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px 12px;cursor:pointer}.activity-controls button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.activity-controls button:disabled{opacity:.6;cursor:wait}

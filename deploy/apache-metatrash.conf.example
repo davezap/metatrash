@@ -1,27 +1,24 @@
-# Add inside the existing HTTPS VirtualHost for metatrash.com.
+# Replace the old route-specific proxy rules inside the existing HTTPS VirtualHost.
 # Requires mod_proxy, mod_proxy_http, mod_headers. Keep existing TLS configuration.
 ProxyRequests Off
 ProxyPreserveHost On
 ProxyTimeout 60
+ProxyAddHeaders On
 
-# Apache adds the real client address. Do not accept a supplied forwarding chain.
+# Discard supplied chains; mod_proxy adds the actual client address.
+# Go rejects forwarded /healthz requests, including from loopback clients.
 RequestHeader unset X-Forwarded-For
+RequestHeader unset Forwarded
+RequestHeader unset X-Forwarded-Host
 
-ProxyPass        /api/ http://127.0.0.1:8080/api/
-ProxyPassReverse /api/ http://127.0.0.1:8080/api/
+# Go owns all application routes and serves only embedded application assets.
+ProxyPass        / http://127.0.0.1:8080/
+ProxyPassReverse / http://127.0.0.1:8080/
 
-# Exact MCP endpoint; no catch-all proxy. /healthz remains local-only.
-# Explicit backreferences prevent Apache appending the original path again.
-ProxyPassMatch  "^(/mcp)$" "http://127.0.0.1:8080$1"
-ProxyPassReverse /mcp http://127.0.0.1:8080/mcp
-
-# Human interface: expose only these routes, keeping /healthz local-only.
-ProxyPassMatch "^(/)$" "http://127.0.0.1:8080$1"
-ProxyPassMatch "^(/spaces/public/?)$" "http://127.0.0.1:8080$1"
-ProxyPassMatch "^(/assets/style[.]css)$" "http://127.0.0.1:8080$1"
-ProxyPassReverse /spaces/public/ http://127.0.0.1:8080/spaces/public/
-
-# Passwordless account pages (0.4.0). Keep the explicit backreference.
-ProxyPassMatch "^(/login(?:/send|/verify)?|/logout|/account)$" "http://127.0.0.1:8080$1"
-ProxyPassReverse /login http://127.0.0.1:8080/login
-ProxyPassReverse /account http://127.0.0.1:8080/account
+# Alternative: mount only /metatrash/ instead of the whole domain.
+# Replace the two root ProxyPass lines above with these (do not use both).
+# Start Go with: -public-url https://mydomain.com/metatrash/
+# RedirectMatch 308 ^/metatrash$ /metatrash/
+# ProxyPass        /metatrash/ http://127.0.0.1:8080/
+# ProxyPassReverse /metatrash/ http://127.0.0.1:8080/
+# Both sides must end in /; Apache strips the external prefix before proxying.

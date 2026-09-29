@@ -6,4 +6,5 @@
 /config/smtp-password
 *.exe
 snapshots/
-/notes/ideas.txt
+/notes
+/Slate_Markdown_Components_v0.9.2-wire.1
