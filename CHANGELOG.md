@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 0.5.2 - Slate document viewer (2026-09-29)
+
+- Copied Slate 0.9.2 JavaScript and CSS into bundled assets and mounted Markdown documents in read-only preview with persistence and interactive tasks disabled.
+- Added site-colour styling and an escaped plain-text fallback; other text files retain their plain-text view. Asset links respect folder hosting.
+- Collapsed explorer folders by default and added recursive document counts beside their names.
+- Saved before snapshot and incremental patch 0017. Focused syntax, copied-file integrity, and patch checks only; no builds or runtime tests.
+
+
 ### 0.5.1 - Folder hosting (2026-09-28)
 
 - Added a validated public-url startup option for an HTTPS hostname and optional proxy-stripped prefix; root hosting remains the default.

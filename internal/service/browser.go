@@ -23,6 +23,15 @@ var browserCSS []byte
 //go:embed web/activity.js
 var activityJS []byte
 
+//go:embed web/slate.js
+var slateJS []byte
+
+//go:embed web/slate.css
+var slateCSS []byte
+
+//go:embed web/document.js
+var documentJS []byte
+
 // Only developer-owned, embedded assets belong here. Never serve space storage.
 func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/assets/") {
@@ -33,6 +42,12 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	switch r.URL.Path {
 	case "/assets/style.css":
 		data, kind = browserCSS, "text/css; charset=utf-8"
+	case "/assets/slate.js":
+		data, kind = slateJS, "text/javascript; charset=utf-8"
+	case "/assets/slate.css":
+		data, kind = slateCSS, "text/css; charset=utf-8"
+	case "/assets/document.js":
+		data, kind = documentJS, "text/javascript; charset=utf-8"
 	case "/assets/activity.js":
 		data, kind = activityJS, "text/javascript; charset=utf-8"
 	default:
@@ -55,6 +70,7 @@ var browserTemplate = template.Must(template.New("page").Parse(browserHTML))
 
 type browserNode struct {
 	Name, URL string
+	Count     int
 	Selected  bool
 	Children  []*browserNode
 }
@@ -103,6 +119,7 @@ type browserPage struct {
 	BasePath, MCPURL  string
 	AccountsEnabled   bool
 	Home              bool
+	Markdown          bool
 	State, Path, Text string
 	Tree              []*browserNode
 	Recent            []recentFile
@@ -138,6 +155,7 @@ func fileTree(files map[string]record, selected string) []*browserNode {
 				node.URL = fileURL(path)
 				node.Selected = path == selected
 			}
+			node.Count++
 			parent = node
 		}
 	}
@@ -197,6 +215,8 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	if path == "/" {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	} else {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; img-src https: data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -259,6 +279,8 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		var content []byte
 		content, err = repo.blob(ctx, file.Blob)
 		page.Text = string(content)
+		lowerPath := strings.ToLower(page.Path)
+		page.Markdown = strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown")
 		page.Tree = fileTree(files, page.Path)
 		h.publicTree(page.Tree)
 	}

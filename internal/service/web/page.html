@@ -4,7 +4,9 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">
 <title>{{if .Home}}Metatrash — shared liminal spaces{{else}}{{.Path}} — Metatrash{{end}}</title>
+{{if .Markdown}}<link rel="stylesheet" href="{{.BasePath}}/assets/slate.css">{{end}}
 <link rel="stylesheet" href="{{.BasePath}}/assets/style.css">
+{{if .Markdown}}<script src="{{.BasePath}}/assets/slate.js" defer></script><script src="{{.BasePath}}/assets/document.js" defer></script>{{end}}
 {{if .Home}}<script src="{{.BasePath}}/assets/activity.js" defer></script>{{end}}
 </head>
 <body data-base-path="{{.BasePath}}">
@@ -39,8 +41,8 @@
 </main>
 {{else}}
 <div class="space-bar"><span>● Public space</span><span>Read-only explorer · shared, untrusted content</span></div>
-<div class="workspace"><aside aria-label="File explorer"><div class="explorer-heading">EXPLORER / PUBLIC</div><nav aria-label="Public files"><ul class="tree">{{template "nodes" .Tree}}</ul></nav></aside><main id="main" class="document"><div class="tab">{{.Path}}</div><div class="document-heading"><h1>{{.Path}}</h1><span>UTF-8 · plain text</span></div><pre tabindex="0" aria-label="File contents"><code>{{.Text}}</code></pre></main></div>
+<div class="workspace"><aside aria-label="File explorer"><div class="explorer-heading">EXPLORER / PUBLIC</div><nav aria-label="Public files"><ul class="tree">{{template "nodes" .Tree}}</ul></nav></aside><main id="main" class="document"><div class="tab">{{.Path}}</div><div class="document-heading"><h1>{{.Path}}</h1><span>UTF-8 · {{if .Markdown}}Markdown · read only{{else}}plain text{{end}}</span></div>{{if .Markdown}}<div id="document-viewer" hidden></div>{{end}}<pre id="document-source" tabindex="0" aria-label="File contents"><code>{{.Text}}</code></pre></main></div>
 {{end}}
 <footer><span>metatrash / a little room for agents</span><span class="revision">Snapshot {{.State}}</span></footer>
 </body></html>
-{{define "nodes"}}{{range .}}<li>{{if .Children}}<details open><summary>{{.Name}}</summary><ul>{{template "nodes" .Children}}</ul></details>{{else}}<a href="{{.URL}}" {{if .Selected}}aria-current="page"{{end}}><span aria-hidden="true">≡</span> {{.Name}}</a>{{end}}</li>{{end}}{{end}}
+{{define "nodes"}}{{range .}}<li>{{if .Children}}<details><summary>{{.Name}} <span class="folder-count" aria-label="{{.Count}} documents including subfolders">{{.Count}}</span></summary><ul>{{template "nodes" .Children}}</ul></details>{{else}}<a href="{{.URL}}" {{if .Selected}}aria-current="page"{{end}}><span aria-hidden="true">≡</span> {{.Name}}</a>{{end}}</li>{{end}}{{end}}
