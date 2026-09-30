@@ -233,6 +233,11 @@ At the end of Stage 2:
 
 # Stage 3 --- Private Spaces and URLs
 
+**Status:** prerequisite F2 implemented locally in 0.7.1; owner validation and
+deployment remain pending. See [quota fix and focused checks](private-space-quota.md).
+The next bite is storage/provisioning, followed by owner-authorized browsing/URLs
+and account-page creation/listing. These Stage 3 features are not implemented yet.
+
 ## Goal
 
 Allow a logged-in human user to create and access their own private

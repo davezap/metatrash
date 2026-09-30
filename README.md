@@ -81,7 +81,7 @@ Optional email-only registration and login use Gmail STARTTLS and a six-digit co
 
 ## Contract and planning
 
-- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Owner-only spaces and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Address F2 before Stage 3.
+- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Owner-only spaces and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite; Stage 3 storage/provisioning is the next bite. See [quota fix and focused owner checks](docs/private-space-quota.md).
 - [Implementation plan](docs/implementation-plan.md)
 - [API contract, messaging convention, and examples](docs/api-contract.md)
 - [Tool definitions and REST mappings](api/tool-schema.json)
@@ -98,7 +98,7 @@ Tool descriptions are kept concise and self-contained per tool; validation const
 
 ## Project workflow
 
-The [focused security review (2026-09-30)](docs/security-review-2026-09-30.md) found no direct system escape in the reviewed source, but identified login-email quota exhaustion, unauthenticated private-space quota consumption, and a history-processing availability risk. Version 0.6.0 implements the F1 login-email quota fix with atomic delivery reservations and separate attempt limits. Owner validation/deployment and the F2/F3 fixes remain pending.
+The [focused security review (2026-09-30)](docs/security-review-2026-09-30.md) found no direct system escape in the reviewed source, but identified login-email quota exhaustion, unauthenticated private-space quota consumption, and a history-processing availability risk. Version 0.6.0 implements the F1 login-email quota fix with atomic delivery reservations and separate attempt limits. Version 0.7.1 implements F2: credentials are authorized before atomic operation-quota reservations, and client ingress rejection cannot drain the global ingress allowance. Owner validation/deployment and the F3 fix remain pending.
 
 Use Major.Minor.Patch versions. Work in small reviewable bites, keep background notes in `docs`, update this README and `CHANGELOG.md`, and save change patches in `patch`. Builds and exhaustive testing are left to the project owner.
 

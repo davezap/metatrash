@@ -54,7 +54,7 @@ func (l *limiter) take(rules ...allowance) error {
 	return nil
 }
 
-// reserve charges all delivery rules atomically, or none. Admitted failures
+// reserve charges all supplied rules atomically, or none. Admitted failures
 // (including SMTP failures) keep their reservation; never refund concurrently.
 func (l *limiter) reserve(rules ...allowance) error {
 	l.mu.Lock()

@@ -128,7 +128,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	client := h.client(r)
 	// A separate ingress ceiling covers discovery, malformed routes, and authentication attempts.
-	if err := h.service.rates.take(allowance{"ingress", 2400, 60}, allowance{"ingress:" + client, 240, 60}); err != nil {
+	if err := h.service.rates.reserve(allowance{"ingress", 2400, 60}, allowance{"ingress:" + client, 240, 60}); err != nil {
 		sendError(w, err)
 		return
 	}

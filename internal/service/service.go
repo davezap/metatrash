@@ -134,53 +134,35 @@ func (s *Service) queued(ctx context.Context, fn func() (any, error)) (any, erro
 	}
 }
 
-// Access consumes shared counters before dispatch. Every adapter must call it once per operation.
+// Access authorizes before atomically reserving operation counters. Every adapter
+// must call it once per operation, behind the separate HTTP ingress limiter.
 func (s *Service) Access(space, key, client string, write bool) error {
-	g := s.config.Global.Rates
-	kind, globalLimit := "read", g.Reads
-	if write {
-		kind, globalLimit = "write", g.Writes
-	}
-	globalErr := s.rates.take(allowance{"global:" + kind, globalLimit, g.WindowSeconds})
 	sc, exists := s.config.Spaces[space]
-	var spaceErr error
-	if exists {
-		r := sc.Limits.Rates
-		clientLimit, spaceLimit := r.ClientReads, r.SpaceReads
-		if write {
-			clientLimit, spaceLimit = r.ClientWrites, r.SpaceWrites
-		}
-		spaceErr = s.rates.take(allowance{"space:" + space + ":" + kind, spaceLimit, r.WindowSeconds}, allowance{"client:" + space + ":" + kind + ":" + client, clientLimit, r.WindowSeconds})
-	}
 	if !exists {
-		if globalErr != nil {
-			return globalErr
-		}
 		return problem(401, "unauthorized", "A valid space key is required.")
 	}
 	if sc.Visibility == "private" {
 		canWrite := matchesKey(key, s.keys[space].WriteHashes)
 		canRead := matchesKey(key, s.keys[space].ReadHashes)
 		if !canRead && !canWrite {
-			if globalErr != nil {
-				return globalErr
-			}
 			return problem(401, "unauthorized", "A valid space key is required.")
 		}
 		if write && !canWrite {
-			if globalErr != nil {
-				return globalErr
-			}
 			return problem(403, "forbidden", "A write key is required.")
 		}
 	}
-	if globalErr != nil {
-		if spaceErr != nil && spaceErr.(*Error).RetryAfterSeconds > globalErr.(*Error).RetryAfterSeconds {
-			return spaceErr
-		}
-		return globalErr
+	g, r := s.config.Global.Rates, sc.Limits.Rates
+	kind, globalLimit := "read", g.Reads
+	clientLimit, spaceLimit := r.ClientReads, r.SpaceReads
+	if write {
+		kind, globalLimit = "write", g.Writes
+		clientLimit, spaceLimit = r.ClientWrites, r.SpaceWrites
 	}
-	return spaceErr
+	return s.rates.reserve(
+		allowance{"global:" + kind, globalLimit, g.WindowSeconds},
+		allowance{"space:" + space + ":" + kind, spaceLimit, r.WindowSeconds},
+		allowance{"client:" + space + ":" + kind + ":" + client, clientLimit, r.WindowSeconds},
+	)
 }
 
 // Dispatch is transport-independent. Call Access first with trusted transport credentials/client IP.

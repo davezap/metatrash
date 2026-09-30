@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 0.7.1 - Private-space quota prerequisite (2026-10-01)
+
+- Fixed security-review F2 before Stage 3: unknown spaces, invalid credentials, and read-key write attempts no longer consume operation quotas. REST and MCP share the corrected access boundary.
+- Reserve global, space, and client operation counters atomically. HTTP ingress counters also reserve together, preventing client-rejected attempts from draining the shared ingress allowance. Admitted downstream failures retain operation charges.
+- Updated the contract and documented focused owner checks. Stage 3 storage/provisioning, owner browsing/URLs, and account-page integration remain separate upcoming bites.
+- Saved before snapshot and incremental patch 0025. Go formatting, source review, and patch checks only; no builds, tests, database changes, or deployment.
+
+
 ### 0.7.0 - Public usernames and account page (2026-10-01)
 
 - Added one-time public username selection with normalization, URL-safe validation, reserved names, and a database unique index. Conditional writes prevent changes after selection and handle concurrent claims.
