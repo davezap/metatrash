@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 0.6.1 - MySQL logger build fix (2026-09-30)
+
+- Fixed the owner-reported build failure: `mysql.NopLogger` implements `mysql.Logger` through a pointer receiver, so connection configuration now uses `&mysql.NopLogger{}`.
+- Updated the migration guide to use 0.6.1. Saved before snapshot and incremental patch 0022. Verified the pinned driver's receiver declaration, formatting, and patch applicability; no builds or tests run.
+
 ### 0.6.0 - Database-backed human accounts (2026-09-30)
 
 - Replaced runtime JSON account persistence with MariaDB/MySQL, a versioned InnoDB schema, protected local connection configuration, and pinned Go MySQL driver 1.9.3. Accounts-enabled upgrades now require explicit database setup and migration; accounts-disabled operation remains database-free.

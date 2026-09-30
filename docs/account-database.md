@@ -1,4 +1,4 @@
-# Account database and migration — 0.6.0
+# Account database and migration — 0.6.1
 
 Stage 1 is implemented locally. The owner must build, prepare the server
 database, migrate, deploy, and perform the focused checks below. No live database
@@ -92,7 +92,7 @@ working password file. The existing systemd sandbox must be able to reach the
 socket; if it lives under `/tmp`, `PrivateTmp` may hide it. Prefer the server's
 normal socket under `/run` or `/var/lib`, or use loopback TCP.
 
-Build 0.6.0 using the existing owner build workflow, leaving the currently running
+Build 0.6.1 using the existing owner build workflow, leaving the currently running
 binary in place until the migration succeeds. From the checkout, the new binary
 is assumed to be `bin/metatrash` below. Apache routes do not change.
 
@@ -128,8 +128,8 @@ Make the owner-built binary available to the service user without changing the
 installed service binary yet:
 
 ```bash
-sudo install -o root -g metatrash -m 0750 bin/metatrash /var/lib/metatrash/metatrash-migrate-0.6.0
-sudo -u metatrash /var/lib/metatrash/metatrash-migrate-0.6.0 accounts-migrate \
+sudo install -o root -g metatrash -m 0750 bin/metatrash /var/lib/metatrash/metatrash-migrate-0.6.1
+sudo -u metatrash /var/lib/metatrash/metatrash-migrate-0.6.1 accounts-migrate \
   -database-config /etc/metatrash/account-database.json \
   -data /var/lib/metatrash
 ```
@@ -157,7 +157,7 @@ sudo systemctl start metatrash
 sudo systemctl status metatrash --no-pager
 ```
 
-Expect version `0.6.0`. Leave the legacy JSON file intact as a protected historical
+Expect version `0.6.1`. Leave the legacy JSON file intact as a protected historical
 source; it is no longer read by the service. Include the database in ongoing
 private backups, using the site's normal consistent InnoDB backup procedure.
 Back up before administrator account changes as well.

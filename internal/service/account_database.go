@@ -87,7 +87,7 @@ func openAccountDatabase(ctx context.Context, configPath string) (*accountDataba
 	driverConfig.WriteTimeout = 5 * time.Second
 	// Driver logs can include server-provided text. Return generic application
 	// errors instead of exposing connection details, email addresses, or secrets.
-	driverConfig.Logger = mysql.NopLogger{}
+	driverConfig.Logger = &mysql.NopLogger{}
 	connector, err := mysql.NewConnector(driverConfig)
 	if err != nil {
 		return nil, fmt.Errorf("invalid database connection settings")
