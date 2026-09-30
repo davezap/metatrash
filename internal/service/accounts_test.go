@@ -47,6 +47,29 @@ func (s *memoryAccountStore) ByID(_ context.Context, id string) (userAccount, bo
 
 func (s *memoryAccountStore) Close() error { return nil }
 
+func (s *memoryAccountStore) ChooseUsername(_ context.Context, id, value string) error {
+	if s.failure != nil {
+		return s.failure
+	}
+	username, err := normalizeUsername(value)
+	if err != nil {
+		return err
+	}
+	for _, user := range s.users {
+		if user.Username == username {
+			return problem(409, "conflict", "Username taken.")
+		}
+	}
+	for email, user := range s.users {
+		if user.ID == id && user.Username == "" {
+			user.Username = username
+			s.users[email] = user
+			return nil
+		}
+	}
+	return problem(409, "conflict", "Username already selected.")
+}
+
 func testAccounts(t *testing.T) (*Service, *string, *memoryAccountStore) {
 	t.Helper()
 	store := &memoryAccountStore{users: map[string]userAccount{}}
@@ -223,10 +246,43 @@ func TestAccountsHTTP(t *testing.T) {
 	if w := call("GET", "/account", "", nil, session); w.Code != 200 || !strings.Contains(w.Body.String(), "person@example.com") {
 		t.Fatal("account unavailable")
 	}
+	usernameForm := url.Values{"username": {"Dave-C"}, "csrf": {s.accounts.mac("username:" + session.Value)}}
+	if w := call("POST", "/account/username", "https://other.example", usernameForm, session); w.Code != 403 {
+		t.Fatal("cross-origin username selection accepted")
+	}
+	usernameForm.Set("csrf", s.accounts.mac("logout:"+session.Value))
+	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 403 {
+		t.Fatal("logout token accepted for username selection")
+	}
+	usernameForm.Set("csrf", s.accounts.mac("username:"+session.Value))
+	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
+		t.Fatal("username selection failed")
+	}
+	if w := call("GET", "/account", "", nil, session); !strings.Contains(w.Body.String(), "<strong>dave-c</strong>") || strings.Contains(w.Body.String(), "Save permanent username") {
+		t.Fatal("selected username not shown as fixed")
+	}
+	usernameForm.Set("username", "another-name")
+	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 409 {
+		t.Fatal("permanent username replaced")
+	}
 	if w := call("POST", "/logout", "https://metatrash.com", url.Values{"csrf": {s.accounts.mac("logout:" + session.Value)}}, session); w.Code != 303 {
 		t.Fatal("logout failed")
 	}
 	if w := call("GET", "/account", "", nil, session); w.Code != 303 {
 		t.Fatal("logged-out session accepted")
+	}
+	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
+		t.Fatal("logged-out username request not redirected")
+	}
+}
+
+func TestUsernameValidation(t *testing.T) {
+	for _, value := range []string{"ab", "a--b", "-abc", "abc-", "a_b", "a/b", "dávé", "public", " ADMIN ", strings.Repeat("a", 33)} {
+		if _, err := normalizeUsername(value); err == nil {
+			t.Errorf("accepted %q", value)
+		}
+	}
+	if value, err := normalizeUsername(" Dave-C "); err != nil || value != "dave-c" {
+		t.Fatal("normalization failed")
 	}
 }

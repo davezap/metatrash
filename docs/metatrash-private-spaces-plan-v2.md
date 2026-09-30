@@ -51,10 +51,7 @@ before Stage 3. F3 (recent-history processing) remains a separate follow-up.
 
 # Stage 1 --- Database Setup and User Migration
 
-**Status:** implemented locally in 0.6.0, with the prerequisite F1 fix. Owner
-build, database preparation/import, deployment, and validation remain pending.
-See [database setup, cutover, and recovery](account-database.md). Stages 2–4 are
-not implemented by this change.
+**Status:** complete per owner confirmation. Implemented in 0.6.0 with the F1 fix; 0.6.1 corrected the MySQL logger. See [database setup, cutover, and recovery](account-database.md).
 
 ## Goal
 
@@ -131,6 +128,10 @@ At the end of Stage 1:
 ------------------------------------------------------------------------
 
 # Stage 2 --- Human Login and Account Page Changes
+
+**Status:** implemented locally in 0.7.0; owner build, schema upgrade, deployment,
+and validation remain pending. See [public usernames and upgrade notes](public-usernames.md).
+Stages 3–4 remain deferred.
 
 ## Goal
 

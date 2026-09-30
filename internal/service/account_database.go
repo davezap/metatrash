@@ -19,6 +19,7 @@ import (
 type accountStore interface {
 	FindOrCreate(context.Context, string) (userAccount, error)
 	ByID(context.Context, string) (userAccount, bool, error)
+	ChooseUsername(context.Context, string, string) error
 	Close() error
 }
 
@@ -111,11 +112,15 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 	}
 	var version int
 	var source string
-	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 1 || source == "" {
+	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 2 || source == "" {
 		return fmt.Errorf("account schema/migration is not ready; follow docs/account-database.md")
 	}
+	var usernameIndex int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'metatrash_users' AND index_name = 'metatrash_users_username' AND non_unique = 0 AND column_name = 'username' AND seq_in_index = 1 AND sub_part IS NULL").Scan(&usernameIndex); err != nil || usernameIndex != 1 {
+		return fmt.Errorf("username unique index is required; follow docs/public-usernames.md")
+	}
 	// Validate persisted records at startup, including the preserved service cap.
-	rows, err := s.db.QueryContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users LIMIT 10001")
+	rows, err := s.db.QueryContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users LIMIT 10001")
 	if err != nil {
 		return fmt.Errorf("cannot read account database users")
 	}
@@ -123,7 +128,7 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 	count := 0
 	for rows.Next() {
 		count++
-		if _, err := scanAccount(rows); err != nil || count > maxAccountRecords {
+		if _, err := scanAccount(rows, true); err != nil || count > maxAccountRecords {
 			return fmt.Errorf("invalid account database records or account limit exceeded")
 		}
 	}
@@ -144,11 +149,23 @@ func (s *accountDatabase) checkEngines(ctx context.Context) error {
 
 type accountScanner interface{ Scan(...any) error }
 
-func scanAccount(row accountScanner) (userAccount, error) {
+func scanAccount(row accountScanner, withUsername ...bool) (userAccount, error) {
 	var user userAccount
 	var created string
-	if err := row.Scan(&user.ID, &user.Email, &created, &user.MaxPrivateSpaces); err != nil {
+	var username sql.NullString
+	fields := []any{&user.ID, &user.Email, &created, &user.MaxPrivateSpaces}
+	if len(withUsername) > 0 && withUsername[0] {
+		fields = append(fields, &username)
+	}
+	if err := row.Scan(fields...); err != nil {
 		return userAccount{}, err
+	}
+	user.Username = username.String
+	if username.Valid {
+		normalized, err := normalizeUsername(username.String)
+		if err != nil || normalized != username.String {
+			return userAccount{}, fmt.Errorf("invalid stored username")
+		}
 	}
 	var err error
 	user.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
@@ -166,7 +183,7 @@ func validAccount(user userAccount) bool {
 func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	user, err := scanAccount(s.db.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users WHERE user_id = ?", id))
+	user, err := scanAccount(s.db.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users WHERE user_id = ?", id), true)
 	if err == sql.ErrNoRows {
 		return userAccount{}, false, nil
 	}
@@ -181,8 +198,8 @@ func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, boo
 func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
 	var version int
 	var source string
-	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || version != 1 {
-		return "", fmt.Errorf("account schema version 1 is required")
+	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version != 1 && version != 2) {
+		return "", fmt.Errorf("account schema version 1 or 2 is required")
 	}
 	return source, nil
 }
@@ -207,7 +224,7 @@ func (s *accountDatabase) FindOrCreate(ctx context.Context, email string) (userA
 	if err != nil || source == "" {
 		return userAccount{}, fmt.Errorf("account database migration required")
 	}
-	user, err := scanAccount(tx.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users WHERE email = ?", email))
+	user, err := scanAccount(tx.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users WHERE email = ?", email), true)
 	if err == nil {
 		// Read-only path: the deferred rollback releases the registration lock.
 		return user, nil

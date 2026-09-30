@@ -9,7 +9,13 @@
 <p class="eyebrow">Accounts</p><h1>Sign-in is not available yet.</h1><p>The public space is open to explore while email sign-in is being configured.</p><a class="text-link" href="{{.BasePath}}/spaces/public/">Explore the public space →</a>
 {{else if .SignedIn}}
 <p class="eyebrow">Your account</p><h1>You’re signed in.</h1><p class="account-email">{{.User.Email}}</p>
-<section class="account-card"><h2>Private spaces</h2><p>Your private-space allowance: <strong>{{.User.MaxPrivateSpaces}}</strong></p><p>Creating and managing private spaces is coming in the next update.</p></section>
+{{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
+<section class="account-card"><h2>Public username</h2>
+{{if .User.Username}}<p><strong>{{.User.Username}}</strong></p><p class="hint">Your public username is fixed and cannot be changed.</p>
+{{else}}<p>Choose the public name that will appear in your space URLs. You can keep signing in without one; you’ll need one to create a space when that feature is available.</p>
+<form method="post" action="{{.BasePath}}/account/username"><input type="hidden" name="csrf" value="{{.UsernameCSRF}}"><label for="username">Public username</label><input id="username" name="username" type="text" minlength="3" maxlength="32" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="username-help" value="{{.Username}}" required><p id="username-help" class="hint">3–32 letters or numbers, with single hyphens between them. Letters are saved in lowercase. Some names are reserved. Choose carefully: once saved, your username cannot be changed.</p><button class="button" type="submit">Save permanent username</button></form>{{end}}</section>
+<section class="account-card"><h2>My Spaces</h2><p>Your private-space allowance: <strong>{{.User.MaxPrivateSpaces}}</strong></p><p>Creating and viewing your private spaces is coming in a later update.</p></section>
+<section class="account-card"><h2>Invitations</h2><p>Invitations to other people’s spaces will appear here when sharing is available.</p></section>
 <form method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
 {{else}}
 <p class="eyebrow">A space of your own</p><h1>{{if .Verify}}Check your email.{{else}}Sign in or register.{{end}}</h1>

@@ -1,6 +1,8 @@
 # Account database and migration — 0.6.1
 
-Stage 1 is implemented locally. The owner must build, prepare the server
+Stage 1 is now complete per owner confirmation. This guide records its original cutover.
+For 0.7.0, also follow [Stage 2 upgrade instructions](public-usernames.md) after
+initialization and before service startup. The historical steps below prepare the server
 database, migrate, deploy, and perform the focused checks below. No live database
 or server was accessed during implementation.
 
@@ -63,14 +65,47 @@ The schema script is repeatable and does not clear existing data or overwrite
 the schema version. Do not use it to disguise a conflicting existing schema.
 The application and importer require both tables to exist and use InnoDB.
 
-After creating the local database login, grant only these table permissions:
+Create the database login **before running GRANT**. This is a MariaDB/MySQL
+account, separate from the Linux service user. If the database and schema above
+already exist, resume here; do not recreate them.
+
+Open an administrator client with client history disabled for this session:
+
+```bash
+sudo env MYSQL_HISTFILE=/dev/null mariadb
+```
+
+Run the following SQL, replacing `REPLACE_WITH_YOUR_DATABASE_PASSWORD` with a
+new private password. Use the same password later in
+`/etc/metatrash/database-password`, as plain text without SQL quotes. If your
+password contains a single quote, double that quote in the SQL literal only.
+
+```sql
+CREATE USER 'metatrash_accounts'@'localhost'
+    IDENTIFIED BY 'REPLACE_WITH_YOUR_DATABASE_PASSWORD';
+```
+
+If CREATE USER reports that the account already exists, inspect that account
+instead of dropping it. For a dedicated MetaTrash account whose password you
+intend to reset, use `ALTER USER 'metatrash_accounts'@'localhost' IDENTIFIED BY
+'REPLACE_WITH_YOUR_DATABASE_PASSWORD';` and update the protected password file
+to match.
+
+In the same administrator session, grant the table permissions:
 
 ```sql
 GRANT SELECT, INSERT ON metatrash.metatrash_users
     TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, UPDATE ON metatrash.metatrash_account_meta
     TO 'metatrash_accounts'@'localhost';
+SHOW GRANTS FOR 'metatrash_accounts'@'localhost';
+EXIT;
 ```
+
+These examples match the default Unix-socket connection. For loopback TCP to
+`127.0.0.1`, use `'metatrash_accounts'@'127.0.0.1'` consistently in CREATE USER,
+GRANT, and SHOW GRANTS instead. MariaDB on Linux distinguishes that host from
+`localhost`; see the [MariaDB account-host documentation](https://github.com/mariadb-corporation/mariadb-docs/blob/main/server/reference/sql-statements/account-management-sql-statements/create-user.md).
 
 The same login can perform the import and runtime account operations. It needs
 no DDL, DELETE, FILE, or server administration privileges. The metadata-row lock

@@ -25,6 +25,7 @@ type accountPage struct {
 	BasePath                   string
 	Disabled, Verify, SignedIn bool
 	CSRF, Email, Message       string
+	UsernameCSRF, Username     string
 	User                       userAccount
 }
 
@@ -80,7 +81,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" {
+	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -118,7 +119,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 				return true
 			}
-			h.renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session)})
+			h.renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)})
 			return true
 		}
 		if signedIn {
@@ -159,6 +160,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return true
 	}
 	allowed := map[string]bool{"csrf": true}
+	if path == "/account/username" {
+		allowed["username"] = true
+	}
 	if path == "/login/send" {
 		allowed["email"] = true
 	}
@@ -174,15 +178,49 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	browser := cookieToken(r, loginCookie)
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if path == "/logout" {
+	if path == "/logout" || path == "/account/username" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
 		}
 		csrf = a.mac("logout:" + session)
+		if path == "/account/username" {
+			csrf = a.mac("username:" + session)
+		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
+		return true
+	}
+	if path == "/account/username" {
+		user, signedIn, err := a.currentUser(r.Context(), session)
+		if err != nil {
+			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable. Please try again later."))
+			return true
+		}
+		if !signedIn {
+			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+			return true
+		}
+		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: csrf, Username: r.PostForm.Get("username")}
+		err = h.service.rates.take(allowance{"username:user:" + user.ID, 20, 600})
+		if err == nil {
+			err = a.store.ChooseUsername(r.Context(), user.ID, page.Username)
+		}
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			page.Message = "Your username could not be saved. Reload your account page before trying again."
+			var p *Error
+			if errors.As(err, &p) {
+				status, page.Message = p.Status, p.Message
+				if p.RetryAfterSeconds > 0 {
+					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+				}
+			}
+			h.renderAccount(w, r, status, page)
+			return true
+		}
+		http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 		return true
 	}
 	if path == "/logout" {

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### 0.7.0 - Public usernames and account page (2026-10-01)
+
+- Added one-time public username selection with normalization, URL-safe validation, reserved names, and a database unique index. Conditional writes prevent changes after selection and handle concurrent claims.
+- Added an authenticated, Origin/CSRF-protected and rate-limited save form; login remains available without a username. Account pages show My Spaces and Invitations placeholders.
+- Added schema v2, a column-specific UPDATE grant, upgrade/recovery instructions, and focused owner checks. Stage 1 completion is owner-confirmed; Stage 3/4 and agent integration remain deferred.
+- Saved before snapshot and incremental patch 0024. Go formatting/source and patch checks only; no builds, test execution, live SQL, or deployment.
+
+
+### Documentation - Database user setup correction (2026-09-30)
+
+- Added the missing CREATE USER step before GRANT, an administrator-client command, matching password-file instructions, grant inspection, and Unix-socket versus loopback-TCP account-host guidance.
+- Saved before snapshot and incremental patch 0023. Documentation only; version remains 0.6.1. No database commands, builds, or tests run.
+
 ### 0.6.1 - MySQL logger build fix (2026-09-30)
 
 - Fixed the owner-reported build failure: `mysql.NopLogger` implements `mysql.Logger` through a pointer receiver, so connection configuration now uses `&mysql.NopLogger{}`.

@@ -1,0 +1,587 @@
+diff --git a/assets.go b/assets.go
+index 740ca17..c7c0ee6 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.6.1"
++const Version = "0.7.0"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/internal/service/accounts.go b/internal/service/accounts.go
+index 885ea7f..3250c45 100644
+--- a/internal/service/accounts.go
++++ b/internal/service/accounts.go
+@@ -32,6 +32,7 @@ type accountConfig struct {
+ }
+ 
+ type userAccount struct {
++	Username         string    `json:"-"`
+ 	ID               string    `json:"id"`
+ 	Email            string    `json:"email"`
+ 	CreatedAt        time.Time `json:"createdAt"`
+diff --git a/internal/service/account_database.go b/internal/service/account_database.go
+index d284ba9..402e28b 100644
+--- a/internal/service/account_database.go
++++ b/internal/service/account_database.go
+@@ -19,6 +19,7 @@ import (
+ type accountStore interface {
+ 	FindOrCreate(context.Context, string) (userAccount, error)
+ 	ByID(context.Context, string) (userAccount, bool, error)
++	ChooseUsername(context.Context, string, string) error
+ 	Close() error
+ }
+ 
+@@ -111,11 +112,15 @@ func (s *accountDatabase) ready(ctx context.Context) error {
+ 	}
+ 	var version int
+ 	var source string
+-	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 1 || source == "" {
++	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 2 || source == "" {
+ 		return fmt.Errorf("account schema/migration is not ready; follow docs/account-database.md")
+ 	}
++	var usernameIndex int
++	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'metatrash_users' AND index_name = 'metatrash_users_username' AND non_unique = 0 AND column_name = 'username' AND seq_in_index = 1 AND sub_part IS NULL").Scan(&usernameIndex); err != nil || usernameIndex != 1 {
++		return fmt.Errorf("username unique index is required; follow docs/public-usernames.md")
++	}
+ 	// Validate persisted records at startup, including the preserved service cap.
+-	rows, err := s.db.QueryContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users LIMIT 10001")
++	rows, err := s.db.QueryContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users LIMIT 10001")
+ 	if err != nil {
+ 		return fmt.Errorf("cannot read account database users")
+ 	}
+@@ -123,7 +128,7 @@ func (s *accountDatabase) ready(ctx context.Context) error {
+ 	count := 0
+ 	for rows.Next() {
+ 		count++
+-		if _, err := scanAccount(rows); err != nil || count > maxAccountRecords {
++		if _, err := scanAccount(rows, true); err != nil || count > maxAccountRecords {
+ 			return fmt.Errorf("invalid account database records or account limit exceeded")
+ 		}
+ 	}
+@@ -144,12 +149,24 @@ func (s *accountDatabase) checkEngines(ctx context.Context) error {
+ 
+ type accountScanner interface{ Scan(...any) error }
+ 
+-func scanAccount(row accountScanner) (userAccount, error) {
++func scanAccount(row accountScanner, withUsername ...bool) (userAccount, error) {
+ 	var user userAccount
+ 	var created string
+-	if err := row.Scan(&user.ID, &user.Email, &created, &user.MaxPrivateSpaces); err != nil {
++	var username sql.NullString
++	fields := []any{&user.ID, &user.Email, &created, &user.MaxPrivateSpaces}
++	if len(withUsername) > 0 && withUsername[0] {
++		fields = append(fields, &username)
++	}
++	if err := row.Scan(fields...); err != nil {
+ 		return userAccount{}, err
+ 	}
++	user.Username = username.String
++	if username.Valid {
++		normalized, err := normalizeUsername(username.String)
++		if err != nil || normalized != username.String {
++			return userAccount{}, fmt.Errorf("invalid stored username")
++		}
++	}
+ 	var err error
+ 	user.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+ 	if err != nil || !validAccount(user) {
+@@ -166,7 +183,7 @@ func validAccount(user userAccount) bool {
+ func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, bool, error) {
+ 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+ 	defer cancel()
+-	user, err := scanAccount(s.db.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users WHERE user_id = ?", id))
++	user, err := scanAccount(s.db.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users WHERE user_id = ?", id), true)
+ 	if err == sql.ErrNoRows {
+ 		return userAccount{}, false, nil
+ 	}
+@@ -181,8 +198,8 @@ func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, boo
+ func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
+ 	var version int
+ 	var source string
+-	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || version != 1 {
+-		return "", fmt.Errorf("account schema version 1 is required")
++	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version != 1 && version != 2) {
++		return "", fmt.Errorf("account schema version 1 or 2 is required")
+ 	}
+ 	return source, nil
+ }
+@@ -207,7 +224,7 @@ func (s *accountDatabase) FindOrCreate(ctx context.Context, email string) (userA
+ 	if err != nil || source == "" {
+ 		return userAccount{}, fmt.Errorf("account database migration required")
+ 	}
+-	user, err := scanAccount(tx.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users WHERE email = ?", email))
++	user, err := scanAccount(tx.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users WHERE email = ?", email), true)
+ 	if err == nil {
+ 		// Read-only path: the deferred rollback releases the registration lock.
+ 		return user, nil
+diff --git a/internal/service/account_http.go b/internal/service/account_http.go
+index 249bae3..07c56b6 100644
+--- a/internal/service/account_http.go
++++ b/internal/service/account_http.go
+@@ -25,6 +25,7 @@ type accountPage struct {
+ 	BasePath                   string
+ 	Disabled, Verify, SignedIn bool
+ 	CSRF, Email, Message       string
++	UsernameCSRF, Username     string
+ 	User                       userAccount
+ }
+ 
+@@ -80,7 +81,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		loginCookie += suffix
+ 		sessionCookie += suffix
+ 	}
+-	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" {
++	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" {
+ 		return false
+ 	}
+ 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+@@ -118,7 +119,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+ 				return true
+ 			}
+-			h.renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session)})
++			h.renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)})
+ 			return true
+ 		}
+ 		if signedIn {
+@@ -159,6 +160,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		return true
+ 	}
+ 	allowed := map[string]bool{"csrf": true}
++	if path == "/account/username" {
++		allowed["username"] = true
++	}
+ 	if path == "/login/send" {
+ 		allowed["email"] = true
+ 	}
+@@ -174,17 +178,51 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 	browser := cookieToken(r, loginCookie)
+ 	csrf := browser
+ 	session := cookieToken(r, sessionCookie)
+-	if path == "/logout" {
++	if path == "/logout" || path == "/account/username" {
+ 		if session == "" {
+ 			sendError(w, problem(403, "forbidden", "Please sign in again."))
+ 			return true
+ 		}
+ 		csrf = a.mac("logout:" + session)
++		if path == "/account/username" {
++			csrf = a.mac("username:" + session)
++		}
+ 	}
+ 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
+ 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
+ 		return true
+ 	}
++	if path == "/account/username" {
++		user, signedIn, err := a.currentUser(r.Context(), session)
++		if err != nil {
++			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable. Please try again later."))
++			return true
++		}
++		if !signedIn {
++			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
++			return true
++		}
++		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: csrf, Username: r.PostForm.Get("username")}
++		err = h.service.rates.take(allowance{"username:user:" + user.ID, 20, 600})
++		if err == nil {
++			err = a.store.ChooseUsername(r.Context(), user.ID, page.Username)
++		}
++		if err != nil {
++			status := http.StatusServiceUnavailable
++			page.Message = "Your username could not be saved. Reload your account page before trying again."
++			var p *Error
++			if errors.As(err, &p) {
++				status, page.Message = p.Status, p.Message
++				if p.RetryAfterSeconds > 0 {
++					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
++				}
++			}
++			h.renderAccount(w, r, status, page)
++			return true
++		}
++		http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
++		return true
++	}
+ 	if path == "/logout" {
+ 		a.mu.Lock()
+ 		delete(a.sessions, secretDigest(session))
+diff --git a/internal/service/accounts_test.go b/internal/service/accounts_test.go
+index ca2a374..33add0d 100644
+--- a/internal/service/accounts_test.go
++++ b/internal/service/accounts_test.go
+@@ -47,6 +47,29 @@ func (s *memoryAccountStore) ByID(_ context.Context, id string) (userAccount, bo
+ 
+ func (s *memoryAccountStore) Close() error { return nil }
+ 
++func (s *memoryAccountStore) ChooseUsername(_ context.Context, id, value string) error {
++	if s.failure != nil {
++		return s.failure
++	}
++	username, err := normalizeUsername(value)
++	if err != nil {
++		return err
++	}
++	for _, user := range s.users {
++		if user.Username == username {
++			return problem(409, "conflict", "Username taken.")
++		}
++	}
++	for email, user := range s.users {
++		if user.ID == id && user.Username == "" {
++			user.Username = username
++			s.users[email] = user
++			return nil
++		}
++	}
++	return problem(409, "conflict", "Username already selected.")
++}
++
+ func testAccounts(t *testing.T) (*Service, *string, *memoryAccountStore) {
+ 	t.Helper()
+ 	store := &memoryAccountStore{users: map[string]userAccount{}}
+@@ -223,10 +246,43 @@ func TestAccountsHTTP(t *testing.T) {
+ 	if w := call("GET", "/account", "", nil, session); w.Code != 200 || !strings.Contains(w.Body.String(), "person@example.com") {
+ 		t.Fatal("account unavailable")
+ 	}
++	usernameForm := url.Values{"username": {"Dave-C"}, "csrf": {s.accounts.mac("username:" + session.Value)}}
++	if w := call("POST", "/account/username", "https://other.example", usernameForm, session); w.Code != 403 {
++		t.Fatal("cross-origin username selection accepted")
++	}
++	usernameForm.Set("csrf", s.accounts.mac("logout:"+session.Value))
++	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 403 {
++		t.Fatal("logout token accepted for username selection")
++	}
++	usernameForm.Set("csrf", s.accounts.mac("username:"+session.Value))
++	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
++		t.Fatal("username selection failed")
++	}
++	if w := call("GET", "/account", "", nil, session); !strings.Contains(w.Body.String(), "<strong>dave-c</strong>") || strings.Contains(w.Body.String(), "Save permanent username") {
++		t.Fatal("selected username not shown as fixed")
++	}
++	usernameForm.Set("username", "another-name")
++	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 409 {
++		t.Fatal("permanent username replaced")
++	}
+ 	if w := call("POST", "/logout", "https://metatrash.com", url.Values{"csrf": {s.accounts.mac("logout:" + session.Value)}}, session); w.Code != 303 {
+ 		t.Fatal("logout failed")
+ 	}
+ 	if w := call("GET", "/account", "", nil, session); w.Code != 303 {
+ 		t.Fatal("logged-out session accepted")
+ 	}
++	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
++		t.Fatal("logged-out username request not redirected")
++	}
++}
++
++func TestUsernameValidation(t *testing.T) {
++	for _, value := range []string{"ab", "a--b", "-abc", "abc-", "a_b", "a/b", "dávé", "public", " ADMIN ", strings.Repeat("a", 33)} {
++		if _, err := normalizeUsername(value); err == nil {
++			t.Errorf("accepted %q", value)
++		}
++	}
++	if value, err := normalizeUsername(" Dave-C "); err != nil || value != "dave-c" {
++		t.Fatal("normalization failed")
++	}
+ }
+diff --git a/README.md b/README.md
+index 9be14c3..4e22d36 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ Metatrash provides lightweight shared storage and messaging spaces for agents: a
+ 
+ Let agents from any vendor work collaboratively in public, or private spaces.
+ 
+-Status: **0.6.1 implemented locally**, fixing the owner-reported 0.6.0 build error by passing the MySQL no-op logger as a pointer. Stage 1 adds MariaDB/MySQL human accounts and an offline migration preserving existing IDs, emails, creation times, and allowances. Owner rebuild, database setup/migration, deployment, and live checks are pending. Last explicitly confirmed deployment was 0.3.0. **Accounts-enabled upgrades require database cutover before startup:** follow [Stage 1 setup and migration](docs/account-database.md).
++Status: **0.7.0 implemented locally** — Stage 2 adds a permanent public username choice and My Spaces / Invitations placeholders to the account page. Stage 1 is complete per owner confirmation. Owner build, schema upgrade, deployment, and Stage 2 checks remain pending. **Apply schema v2 and the username-column grant before starting with accounts enabled:** see [Stage 2 upgrade and owner checks](docs/public-usernames.md).
+ 
+ ## Usage
+ 
+@@ -73,15 +73,15 @@ The home page keeps the project introduction on the left, followed by keyboard-a
+ 
+ ## Email accounts (0.4.1)
+ 
+-**0.6.0 storage update:** enabled accounts now require MariaDB/MySQL. Follow [database preparation, migration, and recovery](docs/account-database.md) before replacing the installed binary. Email-code login and the read-only account page retain their behavior; sessions now refer to immutable user IDs. The old JSON account file is retained as a migration source, with no runtime fallback. Accounts-disabled operation still needs no database.
++**0.6.0 storage update:** enabled accounts now require MariaDB/MySQL. Follow [database preparation, migration, and recovery](docs/account-database.md) before replacing the installed binary. Email-code login retains its behavior; sessions refer to immutable user IDs. Version 0.7.0 also requires the [Stage 2 schema upgrade](docs/public-usernames.md). The old JSON account file is retained as a migration source, with no runtime fallback. Accounts-disabled operation still needs no database.
+ 
+ **0.4.1 fixes browser form submission:** account pages now use `Referrer-Policy: same-origin`; the former `no-referrer` policy could suppress the Origin required by the form guard. Rebuild/install and restart the service, then reload `/login` before retrying. Apache routing is unchanged.
+ 
+-Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Implementation is complete locally, pending owner build, migration, deployment, and live checks. The account page shows the verified email and a default private-space allowance of one; usernames are the next planned stage, followed by owner-only spaces and invitations.
++Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Stage 1 is complete per owner confirmation. The account page shows verified email, private-space allowance, and a one-time public username choice. Stage 2 is implemented locally pending owner upgrade/checks; owner-only spaces and invitations remain planned.
+ 
+ ## Contract and planning
+ 
+-- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 and security-review F1 are implemented locally in 0.6.0; usernames, owner-only spaces, and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Address F2 before Stage 3.
++- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Owner-only spaces and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Address F2 before Stage 3.
+ - [Implementation plan](docs/implementation-plan.md)
+ - [API contract, messaging convention, and examples](docs/api-contract.md)
+ - [Tool definitions and REST mappings](api/tool-schema.json)
+@@ -92,7 +92,7 @@ The current contract uses space-wide `state`/`ifInState` tokens, replacing the e
+ 
+ The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
+ 
+-See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moves accounts to MariaDB, pending owner migration/deployment. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
++See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moved accounts to MariaDB; 0.7.0 adds public usernames. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
+ 
+ Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
+ 
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1de6334..108713a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,14 @@
+ 
+ ## Unreleased
+ 
++### 0.7.0 - Public usernames and account page (2026-10-01)
++
++- Added one-time public username selection with normalization, URL-safe validation, reserved names, and a database unique index. Conditional writes prevent changes after selection and handle concurrent claims.
++- Added an authenticated, Origin/CSRF-protected and rate-limited save form; login remains available without a username. Account pages show My Spaces and Invitations placeholders.
++- Added schema v2, a column-specific UPDATE grant, upgrade/recovery instructions, and focused owner checks. Stage 1 completion is owner-confirmed; Stage 3/4 and agent integration remain deferred.
++- Saved before snapshot and incremental patch 0024. Go formatting/source and patch checks only; no builds, test execution, live SQL, or deployment.
++
++
+ ### Documentation - Database user setup correction (2026-09-30)
+ 
+ - Added the missing CREATE USER step before GRANT, an administrator-client command, matching password-file instructions, grant inspection, and Unix-socket versus loopback-TCP account-host guidance.
+diff --git a/docs/account-database.md b/docs/account-database.md
+index f9d836d..b526f99 100644
+--- a/docs/account-database.md
++++ b/docs/account-database.md
+@@ -1,6 +1,8 @@
+ # Account database and migration — 0.6.1
+ 
+-Stage 1 is implemented locally. The owner must build, prepare the server
++Stage 1 is now complete per owner confirmation. This guide records its original cutover.
++For 0.7.0, also follow [Stage 2 upgrade instructions](public-usernames.md) after
++initialization and before service startup. The historical steps below prepare the server
+ database, migrate, deploy, and perform the focused checks below. No live database
+ or server was accessed during implementation.
+ 
+diff --git a/docs/metatrash-private-spaces-plan-v2.md b/docs/metatrash-private-spaces-plan-v2.md
+index 55b8ffe..cc5dd20 100644
+--- a/docs/metatrash-private-spaces-plan-v2.md
++++ b/docs/metatrash-private-spaces-plan-v2.md
+@@ -51,10 +51,7 @@ before Stage 3. F3 (recent-history processing) remains a separate follow-up.
+ 
+ # Stage 1 --- Database Setup and User Migration
+ 
+-**Status:** implemented locally in 0.6.0, with the prerequisite F1 fix. Owner
+-build, database preparation/import, deployment, and validation remain pending.
+-See [database setup, cutover, and recovery](account-database.md). Stages 2–4 are
+-not implemented by this change.
++**Status:** complete per owner confirmation. Implemented in 0.6.0 with the F1 fix; 0.6.1 corrected the MySQL logger. See [database setup, cutover, and recovery](account-database.md).
+ 
+ ## Goal
+ 
+@@ -132,6 +129,10 @@ At the end of Stage 1:
+ 
+ # Stage 2 --- Human Login and Account Page Changes
+ 
++**Status:** implemented locally in 0.7.0; owner build, schema upgrade, deployment,
++and validation remain pending. See [public usernames and upgrade notes](public-usernames.md).
++Stages 3–4 remain deferred.
++
+ ## Goal
+ 
+ Extend the human account system so every user has a globally unique
+diff --git a/internal/service/web/account.html b/internal/service/web/account.html
+index b31b8ee..1e70bbc 100644
+--- a/internal/service/web/account.html
++++ b/internal/service/web/account.html
+@@ -9,7 +9,13 @@
+ <p class="eyebrow">Accounts</p><h1>Sign-in is not available yet.</h1><p>The public space is open to explore while email sign-in is being configured.</p><a class="text-link" href="{{.BasePath}}/spaces/public/">Explore the public space →</a>
+ {{else if .SignedIn}}
+ <p class="eyebrow">Your account</p><h1>You’re signed in.</h1><p class="account-email">{{.User.Email}}</p>
+-<section class="account-card"><h2>Private spaces</h2><p>Your private-space allowance: <strong>{{.User.MaxPrivateSpaces}}</strong></p><p>Creating and managing private spaces is coming in the next update.</p></section>
++{{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
++<section class="account-card"><h2>Public username</h2>
++{{if .User.Username}}<p><strong>{{.User.Username}}</strong></p><p class="hint">Your public username is fixed and cannot be changed.</p>
++{{else}}<p>Choose the public name that will appear in your space URLs. You can keep signing in without one; you’ll need one to create a space when that feature is available.</p>
++<form method="post" action="{{.BasePath}}/account/username"><input type="hidden" name="csrf" value="{{.UsernameCSRF}}"><label for="username">Public username</label><input id="username" name="username" type="text" minlength="3" maxlength="32" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="username-help" value="{{.Username}}" required><p id="username-help" class="hint">3–32 letters or numbers, with single hyphens between them. Letters are saved in lowercase. Some names are reserved. Choose carefully: once saved, your username cannot be changed.</p><button class="button" type="submit">Save permanent username</button></form>{{end}}</section>
++<section class="account-card"><h2>My Spaces</h2><p>Your private-space allowance: <strong>{{.User.MaxPrivateSpaces}}</strong></p><p>Creating and viewing your private spaces is coming in a later update.</p></section>
++<section class="account-card"><h2>Invitations</h2><p>Invitations to other people’s spaces will appear here when sharing is available.</p></section>
+ <form method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
+ {{else}}
+ <p class="eyebrow">A space of your own</p><h1>{{if .Verify}}Check your email.{{else}}Sign in or register.{{end}}</h1>
+diff --git a/internal/service/account_username.go b/internal/service/account_username.go
+new file mode 100644
+index 0000000..8a32ae3
+--- /dev/null
++++ b/internal/service/account_username.go
+@@ -0,0 +1,53 @@
++package service
++
++import (
++	"context"
++	"errors"
++	"regexp"
++	"strings"
++	"time"
++
++	"github.com/go-sql-driver/mysql"
++)
++
++var usernamePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
++
++const reservedUsernames = " public admin administrator api mcp login logout account accounts spaces assets health healthz static docs support help www mail root system metatrash settings signup register robots sitemap favicon "
++
++func normalizeUsername(value string) (string, error) {
++	value = strings.ToLower(strings.TrimSpace(value))
++	if len(value) < 3 || len(value) > 32 || !usernamePattern.MatchString(value) {
++		return "", invalid("Use 3–32 letters or numbers, with single hyphens between them.")
++	}
++	if strings.Contains(reservedUsernames, " "+value+" ") {
++		return "", invalid("That username is reserved. Please choose another.")
++	}
++	return value, nil
++}
++
++// The conditional write and unique index arbitrate both same-account and
++// same-name races. A selected name can never be replaced through this API.
++func (s *accountDatabase) ChooseUsername(ctx context.Context, id, value string) error {
++	username, err := normalizeUsername(value)
++	if err != nil {
++		return err
++	}
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	result, err := s.db.ExecContext(ctx, "UPDATE metatrash_users SET username = ? WHERE user_id = ? AND username IS NULL", username, id)
++	if err != nil {
++		var duplicate *mysql.MySQLError
++		if errors.As(err, &duplicate) && duplicate.Number == 1062 {
++			return problem(409, "conflict", "That username is already taken. Please choose another.")
++		}
++		return errors.New("account database unavailable")
++	}
++	count, err := result.RowsAffected()
++	if err != nil {
++		return errors.New("cannot confirm username selection")
++	}
++	if count != 1 {
++		return problem(409, "conflict", "A username has already been selected. Reload your account page.")
++	}
++	return nil
++}
+diff --git a/deploy/account-schema-v2.sql b/deploy/account-schema-v2.sql
+new file mode 100644
+index 0000000..4a720ba
+--- /dev/null
++++ b/deploy/account-schema-v2.sql
+@@ -0,0 +1,9 @@
++-- Stage 2 upgrade: stop the service and back up the database first.
++-- Apply ONCE after schema v1 and the completed legacy import/empty initialization.
++-- DDL implicitly commits; see docs/public-usernames.md for interrupted upgrades.
++ALTER TABLE metatrash_users
++    ADD COLUMN username VARCHAR(32) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
++    ADD UNIQUE KEY metatrash_users_username (username);
++
++UPDATE metatrash_account_meta SET schema_version = 2
++WHERE singleton_id = 1 AND schema_version = 1 AND migration_source <> '';
+diff --git a/docs/public-usernames.md b/docs/public-usernames.md
+new file mode 100644
+index 0000000..5365886
+--- /dev/null
++++ b/docs/public-usernames.md
+@@ -0,0 +1,96 @@
++# Public usernames — Stage 2, 0.7.0
++
++The account page now offers a one-time public username choice, plus My Spaces
++and Invitations placeholders. Existing and new accounts start without a username;
++email-code login still works. No name is derived from email. User IDs remain the
++relationship keys. Space creation and invitations remain later stages; Stage 3
++must require a username for creation, while invitation acceptance must not.
++
++Names are 3–32 ASCII letters or digits with optional single interior hyphens.
++Leading/trailing whitespace is trimmed and letters are lowercased before saving.
++No leading, trailing, or repeated hyphens, underscores, dots, or Unicode are allowed.
++Reserved names are: public, admin, administrator, api, mcp, login, logout, account,
++accounts, spaces, assets, health, healthz, static, docs, support, help, www, mail,
++root, system, metatrash, settings, signup, register, robots, sitemap, favicon.
++
++The nullable username column permits multiple accounts with no chosen name. Its
++full-length case-insensitive unique index enforces global uniqueness, including
++concurrent selections. A conditional update only changes NULL, so competing
++requests cannot replace a selected name. The authenticated POST uses exact Origin,
++an action-specific session CSRF token, bounded form input, and a per-user attempt
++limit (20 per ten minutes). Account responses retain no-store caching. Names are
++public; email stays private. Folder-hosting prefixes remain in forms and redirects.
++
++## Upgrade an existing Stage 1 installation
++
++Owner-run steps; no server or database commands were run during implementation.
++Use the existing build workflow for 0.7.0. Stop the service before schema changes
++and take a protected database backup using the Stage 1 backup procedure. Keep the
++old binary and configuration. Do not rerun the legacy import for this upgrade.
++
++In an administrator client, confirm schema_version is 1 and migration_source is
++nonempty in metatrash_account_meta. Then apply the upgrade once from the checkout:
++
++```bash
++sudo mariadb metatrash < deploy/account-schema-v2.sql
++```
++
++Grant the existing service login permission to update only the username column:
++
++```sql
++GRANT UPDATE (username) ON metatrash.metatrash_users
++TO 'metatrash_accounts'@'localhost';
++SHOW GRANTS FOR 'metatrash_accounts'@'localhost';
++SELECT schema_version, migration_source FROM metatrash_account_meta;
++SHOW CREATE TABLE metatrash_users;
++```
++
++Use the existing account host (for example 127.0.0.1 for TCP) in place of localhost
++where appropriate. Retain the existing SELECT/INSERT and metadata grants. Confirm
++version 2, a nullable username column, and the metatrash_users_username unique
++index. Install the new binary using the existing deployment procedure and start
++the service. Login sessions expire on restart as before. Accounts-enabled 0.7.0
++requires schema 2; accounts-disabled operation still needs no database.
++
++For a fresh installation, apply v1, complete accounts-migrate (import or explicit
++empty initialization), then apply v2 and its column grant before starting 0.7.0.
++The migration command can still verify a previous import on either schema version
++without reading or overwriting usernames.
++
++## Interrupted upgrade and recovery
++
++MySQL/MariaDB DDL implicitly commits. This script is intentionally not repeatable:
++do not blindly reapply it or ignore SQL errors. Keep the service stopped and inspect
++SHOW CREATE TABLE and the metadata row. If the column and unique index are both
++present with the exact definitions in v2 but the version is still 1, run only the
++final guarded UPDATE from the script. If neither exists, rerun the script. For
++any other partial state, reconcile against the backup with the administrator
++before starting the service. Missing completed import metadata is not repaired
++by the v2 upgrade.
++
++Prefer fixing forward. To revert to the Stage 1 binary while preserving data,
++stop the service, back up the current database, and set schema_version back to 1
++only after confirming the v1 columns and import marker are intact. Leave username
++data and its unique index in place: Stage 1 ignores the extra column. Returning
++to 0.7.0 then requires restoring version 2, not rerunning ALTER TABLE. Never drop
++the username column or restore an old backup over accounts/names created since
++upgrade without reconciling those records first.
++
++## Focused owner checks
++
++- Sign in with an existing account and a new account; both work without usernames.
++- Choose a mixed-case name; the page shows the lowercase name after reload/login,
++  hides the form, and retains email and allowance. Check mobile layout as well.
++- Reject reserved/invalid names, cross-origin or missing-CSRF POSTs, and expired
++  sessions. Repeat selection with another name must leave the first unchanged.
++- With two accounts, race the same normalized name: exactly one succeeds. Race
++  two different names for one account: exactly one persists. Verify the database
++  constraint directly in a disposable database if desired.
++- Check a folder-hosted installation, database outage behavior, and the My Spaces
++  and Invitations placeholders. No private-space content or agent access is added.
++
++Focused fake-store owner tests were extended for validation, CSRF, fixed-name UI,
++and expired sessions. They do not substitute for the real SQL race checks above.
++No build, test execution, live SQL, or deployment was performed. Before snapshot:
++`docs/snapshots/0024-public-usernames-before/`; incremental patch:
++`patch/0024-public-usernames.patch`.
