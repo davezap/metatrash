@@ -1,5 +1,14 @@
 # Email accounts — 0.4.1
 
+**Current storage: 0.6.0.** Follow [database setup and migration](account-database.md)
+before an accounts-enabled upgrade. That guide supersedes this page's JSON-store
+administration and historical installation version. Email-code, cookie, and
+origin behavior below still applies. Sessions now identify accounts by immutable
+ID. Send admission reserves all delivery limits atomically, with a separate
+per-IP attempt limit; rejected admission does not consume shared delivery budget.
+Existing fake-mail checks now use fake storage; database persistence is checked
+separately using the owner cutover steps.
+
 This bite adds email-only registration/login and an authenticated account page. It does not create private spaces yet. Existing public, REST, and MCP behavior remains available without account configuration.
 
 ## Gmail configuration

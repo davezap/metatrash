@@ -108,7 +108,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			return true
 		}
 		session := cookieToken(r, sessionCookie)
-		user, signedIn := a.currentUser(session)
+		user, signedIn, err := a.currentUser(r.Context(), session)
+		if err != nil {
+			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
+			return true
+		}
 		if path == "/account" {
 			if !signedIn {
 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
@@ -212,7 +216,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			return true
 		}
 		emailKey := a.mac("email:" + email)
-		if err := h.service.rates.take(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
+		// Attempt limits remain independent; rejected delivery admission consumes no send budget.
+		if err := h.service.rates.take(allowance{"mail:attempt:" + client, 30, 600}); err != nil {
+			fail(err)
+			return true
+		}
+		if err := h.service.rates.reserve(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
 			fail(err)
 			return true
 		}
@@ -228,7 +237,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		fail(err)
 		return true
 	}
-	token, err := a.verify(browser, strings.TrimSpace(r.PostForm.Get("code")))
+	token, err := a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
 	if err != nil {
 		fail(err)
 		return true

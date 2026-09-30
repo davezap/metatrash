@@ -2,58 +2,81 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// Owner-run focused checks, with fake mail only; no SMTP network connection.
-func testAccounts(t *testing.T) (*Service, *string, string) {
+// Owner-run focused checks use fake mail and storage; SQL cutover checks are
+// documented separately in docs/account-database.md.
+type memoryAccountStore struct {
+	users   map[string]userAccount
+	failure error
+}
+
+func (s *memoryAccountStore) FindOrCreate(_ context.Context, email string) (userAccount, error) {
+	if s.failure != nil {
+		return userAccount{}, s.failure
+	}
+	if user, ok := s.users[email]; ok {
+		return user, nil
+	}
+	id, err := randomHex(16)
+	if err != nil {
+		return userAccount{}, err
+	}
+	user := userAccount{ID: id, Email: email, CreatedAt: time.Now().UTC(), MaxPrivateSpaces: 1}
+	s.users[email] = user
+	return user, nil
+}
+
+func (s *memoryAccountStore) ByID(_ context.Context, id string) (userAccount, bool, error) {
+	if s.failure != nil {
+		return userAccount{}, false, s.failure
+	}
+	for _, user := range s.users {
+		if user.ID == id {
+			return user, true, nil
+		}
+	}
+	return userAccount{}, false, nil
+}
+
+func (s *memoryAccountStore) Close() error { return nil }
+
+func testAccounts(t *testing.T) (*Service, *string, *memoryAccountStore) {
 	t.Helper()
-	dir := t.TempDir()
-	passwordPath := filepath.Join(dir, "smtp-password")
-	if err := os.WriteFile(passwordPath, []byte("test-only"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	cfg := accountConfig{Origin: "https://metatrash.com", SMTPHost: "smtp.gmail.com", SMTPPort: 587, SMTPUsername: "sender@example.com", SMTPFrom: "sender@example.com", SMTPPasswordFile: passwordPath}
-	b, _ := json.Marshal(cfg)
-	path := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(path, b, 0600); err != nil {
-		t.Fatal(err)
-	}
-	s := &Service{lockPath: filepath.Join(dir, ".service-lock"), rates: limiter{buckets: map[string]bucket{}}}
-	if err := s.EnableAccounts(path); err != nil {
-		t.Fatal(err)
-	}
+	store := &memoryAccountStore{users: map[string]userAccount{}}
+	s := &Service{rates: limiter{buckets: map[string]bucket{}}}
+	s.accounts = &accounts{config: accountConfig{Origin: "https://metatrash.com"}, store: store,
+		challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{},
+		secret: []byte("test-only-secret"), mailSlots: make(chan struct{}, 2)}
 	code := new(string)
 	s.accounts.send = func(_ context.Context, _, value string) error { *code = value; return nil }
-	return s, code, path
+	return s, code, store
 }
 
 func TestAccountsCodes(t *testing.T) {
-	s, code, configPath := testAccounts(t)
+	s, code, store := testAccounts(t)
 	a := s.accounts
 	browser := strings.Repeat("a", 64)
 	email := "person@example.com"
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	if len(a.users) != 0 {
+	if len(store.users) != 0 {
 		t.Fatal("unverified email created an account")
 	}
 	original := *code
 	for i := 0; i < 5; i++ {
-		if _, err := a.verify(browser, "wrong"); err == nil {
+		if _, err := a.verify(context.Background(), browser, "wrong"); err == nil {
 			t.Fatal("bad code accepted")
 		}
 	}
-	if _, err := a.verify(browser, original); err == nil {
+	if _, err := a.verify(context.Background(), browser, original); err == nil {
 		t.Fatal("code accepted after attempt limit")
 	}
 	if err := a.issue(context.Background(), browser, email); err != nil {
@@ -62,46 +85,62 @@ func TestAccountsCodes(t *testing.T) {
 	c := a.challenges[secretDigest(browser)]
 	c.Expires = time.Now().Add(-time.Second)
 	a.challenges[secretDigest(browser)] = c
-	if _, err := a.verify(browser, *code); err == nil {
+	if _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("expired code accepted")
 	}
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	token, err := a.verify(browser, *code)
+	token, err := a.verify(context.Background(), browser, *code)
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, ok := a.currentUser(token)
-	if !ok || user.Email != email || user.MaxPrivateSpaces != 1 {
+	user, ok, err := a.currentUser(context.Background(), token)
+	if err != nil || !ok || user.Email != email || user.MaxPrivateSpaces != 1 {
 		t.Fatal("missing verified account or incorrect allowance")
 	}
-	if _, err := a.verify(browser, *code); err == nil {
+	if _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("code replay accepted")
 	}
-	restarted := &Service{lockPath: s.lockPath}
-	if err := restarted.EnableAccounts(configPath); err != nil {
-		t.Fatal(err)
-	}
-	if restarted.accounts.users[email].ID != user.ID {
-		t.Fatal("account not persisted")
-	}
-	if _, ok := restarted.accounts.currentUser(token); ok {
+	restarted, _, _ := testAccounts(t)
+	restarted.accounts.store = store
+	if _, ok, _ := restarted.accounts.currentUser(context.Background(), token); ok {
 		t.Fatal("session survived restart")
 	}
 	// Signing in again must preserve admin overrides and account identity.
-	saved := a.users[email]
+	saved := store.users[email]
 	saved.MaxPrivateSpaces = 3
-	a.users[email] = saved
+	store.users[email] = saved
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.verify(browser, *code); err != nil {
+	if _, err := a.verify(context.Background(), browser, *code); err != nil {
 		t.Fatal(err)
 	}
-	if a.users[email].ID != user.ID || a.users[email].MaxPrivateSpaces != 3 {
+	if store.users[email].ID != user.ID || store.users[email].MaxPrivateSpaces != 3 {
 		t.Fatal("existing account overwritten")
 	}
+	// A session follows the immutable ID even if the account email changes.
+	delete(store.users, email)
+	saved.Email = "renamed@example.com"
+	store.users[saved.Email] = saved
+	if current, ok, err := a.currentUser(context.Background(), token); err != nil || !ok || current.ID != user.ID || current.Email != saved.Email {
+		t.Fatal("session identity depends on email")
+	}
+	store.failure = context.DeadlineExceeded
+	if _, ok, err := a.currentUser(context.Background(), token); err == nil || ok {
+		t.Fatal("database outage treated as a successful account read")
+	}
+	if err := a.issue(context.Background(), browser, email); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.verify(context.Background(), browser, *code); err == nil {
+		t.Fatal("database failure issued a session")
+	}
+	if _, exists := a.challenges[secretDigest(browser)]; exists {
+		t.Fatal("database failure left a reusable code")
+	}
+	store.failure = nil
 	a.send = func(context.Context, string, string) error { return context.DeadlineExceeded }
 	if err := a.issue(context.Background(), browser, email); err == nil {
 		t.Fatal("mail failure hidden")
@@ -164,6 +203,9 @@ func TestAccountsHTTP(t *testing.T) {
 	}
 	if w := call("POST", "/login/send", "https://metatrash.com", form, browser); w.Code != 429 {
 		t.Fatal("resend not throttled")
+	}
+	if s.rates.buckets["mail:global:day"].count != 1 {
+		t.Fatal("rejected resend consumed shared mail budget")
 	}
 	w = call("POST", "/login/verify", "https://metatrash.com", url.Values{"code": {*code}, "csrf": {browser.Value}}, browser)
 	if w.Code != 303 || w.Header().Get("Location") != "/account" {

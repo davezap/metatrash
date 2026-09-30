@@ -2,6 +2,20 @@
 
 ## Current human-interface expansion
 
+**0.6.0:** Stage 1 account database implementation and the prerequisite F1 fix
+are complete locally, pending owner build, database setup/migration, deployment,
+and checks. See [the cutover guide](account-database.md). Stages 2–4 remain planned.
+
+The [private spaces plan v2](metatrash-private-spaces-plan-v2.md) now governs
+the next account/private-space milestones: MariaDB migration preserving existing
+IDs and allowances, public usernames, owner-only spaces, then invitations and
+memberships. Human content browsing remains read-only; invited-user content
+permissions concern future agent access, whose implementation is deferred.
+Fix the recorded login-email quota issue before account expansion and the
+private-space quota issue before owner-only spaces. The former combined
+dashboard scope below is superseded; export, deletion, keys, and remote Git
+remain separate deferred bites.
+
 The owner confirmed 0.2.0 MCP smoke success. Version 0.3.0 implements the public home page and explorer; owner validation is pending. The new [human interface plan](human-interface.md) supersedes the earlier deferral of accounts and self-service spaces below. Email-code registration, an owner dashboard, private-space creation/deletion/HEAD ZIP export, key rotation, per-user allowances, and remote Git will be delivered in separate small bites.
 
 ## Purpose and scope

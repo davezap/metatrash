@@ -104,7 +104,14 @@ func (s *Service) worker() {
 }
 
 // Close is called once, after the HTTP server has stopped accepting requests.
-func (s *Service) Close() { close(s.stop); <-s.done; os.RemoveAll(s.lockPath) }
+func (s *Service) Close() {
+	close(s.stop)
+	<-s.done
+	if s.accounts != nil {
+		_ = s.accounts.store.Close()
+	}
+	os.RemoveAll(s.lockPath)
+}
 
 func (s *Service) queued(ctx context.Context, fn func() (any, error)) (any, error) {
 	j := job{ctx: ctx, run: fn, result: make(chan outcome, 1)}

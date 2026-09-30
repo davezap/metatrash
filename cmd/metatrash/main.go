@@ -26,6 +26,26 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "accounts-migrate" {
+		flags := flag.NewFlagSet("accounts-migrate", flag.ContinueOnError)
+		databaseConfig := flags.String("database-config", "", "Protected database configuration file (required)")
+		data := flags.String("data", "", "Service data directory containing accounts.json (required)")
+		empty := flags.Bool("empty", false, "Initialize an installation with no legacy accounts.json")
+		if err := flags.Parse(os.Args[2:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || *databaseConfig == "" || *data == "" {
+			return fmt.Errorf("accounts-migrate requires -database-config and -data, with optional -empty")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		count, err := service.MigrateAccounts(ctx, *databaseConfig, *data, *empty)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Account migration complete: %d legacy accounts imported or verified. Source file unchanged.\n", count)
+		return nil
+	}
 	if len(os.Args) == 2 && os.Args[1] == "keygen" {
 		key, digest, err := service.GenerateKey()
 		if err != nil {

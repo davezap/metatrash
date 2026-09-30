@@ -13,7 +13,26 @@ Email is the only registration field. The same flow registers a new user or logs
 
 Implemented Gmail STARTTLS on smtp.gmail.com:587 with david@204am.com as username/sender, protected password-file configuration, expiring single-use codes, bounded attempts, send throttles, origin/CSRF checks, secure sessions, and persistent verified accounts. See [email account setup and owner checks](email-accounts.md). The authenticated account page shows the allowance; private-space actions are next.
 
-## Following bite — private-space dashboard
+## Next milestones — private spaces plan v2
+
+Stage 1 is implemented locally in **0.6.0**, including the prerequisite F1 mail
+quota fix. Owner database preparation/migration, build, deployment, and validation
+remain pending; see [the account database guide](account-database.md). Stages 2–4
+remain planned.
+
+The [private spaces plan v2](metatrash-private-spaces-plan-v2.md) supersedes
+the combined dashboard bite below. Deliver database migration, usernames,
+owner-only spaces, and invitations/memberships in small patches. Preserve
+existing account IDs and per-user allowances. All human content browsing stays
+read-only; content permissions for invited users concern their agents, with
+agent integration deferred. Human owner/member roles govern space management.
+
+Fix security-review F1 before expanding accounts and F2 before private-space
+creation. Start implementation with Stage 1 only after F1. ZIP export, deletion,
+key management, and remote Git remain deferred rather than prerequisites for
+the four stages.
+
+## Deferred dashboard capabilities — earlier scope
 
 An authenticated owner can create or delete their private spaces, download a ZIP of the current HEAD contents, and generate or rotate access keys. Enforce ownership and per-user space allowance server-side, including concurrent creation requests. Preserve the existing separate read/write key model; reveal generated secrets once and store only digests. Rotation revokes old keys immediately. Require explicit confirmation for deletion. ZIP export must be tied to one authorized snapshot and must never contain account records or secrets.
 

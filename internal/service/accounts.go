@@ -7,14 +7,11 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math/big"
 	"net/mail"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,12 +22,13 @@ const sessionLifetime = 24 * time.Hour
 const maxAccountRecords = 10000
 
 type accountConfig struct {
-	Origin           string `json:"origin"`
-	SMTPHost         string `json:"smtpHost"`
-	SMTPPort         int    `json:"smtpPort"`
-	SMTPUsername     string `json:"smtpUsername"`
-	SMTPFrom         string `json:"smtpFrom"`
-	SMTPPasswordFile string `json:"smtpPasswordFile"`
+	Origin             string `json:"origin"`
+	SMTPHost           string `json:"smtpHost"`
+	SMTPPort           int    `json:"smtpPort"`
+	SMTPUsername       string `json:"smtpUsername"`
+	SMTPFrom           string `json:"smtpFrom"`
+	SMTPPasswordFile   string `json:"smtpPasswordFile"`
+	DatabaseConfigFile string `json:"databaseConfigFile"`
 }
 
 type userAccount struct {
@@ -54,15 +52,14 @@ type loginChallenge struct {
 }
 
 type accountSession struct {
-	Email   string
+	UserID  string
 	Expires time.Time
 }
 
 type accounts struct {
 	mu         sync.Mutex
 	config     accountConfig
-	path       string
-	users      map[string]userAccount
+	store      accountStore
 	challenges map[string]loginChallenge
 	sessions   map[string]accountSession
 	secret     []byte
@@ -133,63 +130,26 @@ func (s *Service) EnableAccounts(configPath string) error {
 	if passwordText == "" {
 		return fmt.Errorf("SMTP password file is empty")
 	}
-	a := &accounts{config: cfg, path: filepath.Join(filepath.Dir(s.lockPath), "accounts.json"), users: map[string]userAccount{}, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
+	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
 	if _, err := rand.Read(a.secret); err != nil {
 		return err
 	}
-	f, err := os.Open(a.path)
-	if err == nil {
-		defer f.Close()
-		b, err := io.ReadAll(io.LimitReader(f, 8*1024*1024+1))
-		if err != nil || len(b) > 8*1024*1024 {
-			return fmt.Errorf("account store exceeds limit or cannot be read")
-		}
-		var saved accountFile
-		if strictJSON(b, &saved) != nil || saved.Version != 1 || saved.Users == nil || len(saved.Users) > maxAccountRecords {
-			return fmt.Errorf("invalid account store")
-		}
-		ids := map[string]bool{}
-		for email, user := range saved.Users {
-			normalized, err := normalizeEmail(email)
-			if err != nil || normalized != email || user.Email != email || !idPattern.MatchString(user.ID) || ids[user.ID] || user.CreatedAt.IsZero() || user.MaxPrivateSpaces < 0 {
-				return fmt.Errorf("invalid account record")
-			}
-			ids[user.ID] = true
-		}
-		a.users = saved.Users
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read account store: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, err := openAccountDatabase(ctx, cfg.DatabaseConfigFile)
+	if err != nil {
+		return err
 	}
+	if err := store.ready(ctx); err != nil {
+		store.Close()
+		return err
+	}
+	a.store = store
 	a.send = func(ctx context.Context, email, code string) error {
 		return sendLoginMail(ctx, cfg, passwordText, email, code)
 	}
 	s.accounts = a
 	return nil
-}
-
-// Write to a sibling file and publish atomically before updating in-memory state.
-func (a *accounts) saveUsers(users map[string]userAccount) error {
-	b, err := json.MarshalIndent(accountFile{Version: 1, Users: users}, "", "  ")
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(a.path), ".accounts-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err = f.Write(append(b, '\n')); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), a.path)
 }
 
 // All callers hold mu. Expired entries are reclaimed and maps have hard caps.
@@ -247,7 +207,7 @@ func (a *accounts) issue(ctx context.Context, browser, email string) error {
 	return nil
 }
 
-func (a *accounts) verify(browser, code string) (string, error) {
+func (a *accounts) verify(ctx context.Context, browser, code string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := time.Now()
@@ -277,29 +237,15 @@ func (a *accounts) verify(browser, code string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, exists := a.users[c.Email]; !exists {
-		if len(a.users) >= maxAccountRecords {
-			return "", problem(503, "accounts_full", "Registration is temporarily unavailable.")
-		}
-		id, err := randomHex(16)
-		if err != nil {
-			return "", err
-		}
-		users := make(map[string]userAccount, len(a.users)+1)
-		for email, user := range a.users {
-			users[email] = user
-		}
-		users[c.Email] = userAccount{ID: id, Email: c.Email, CreatedAt: now.UTC(), MaxPrivateSpaces: 1}
-		if err := a.saveUsers(users); err != nil {
-			return "", problem(503, "account_unavailable", "We could not save your account. Please request a new code later.")
-		}
-		a.users = users
+	user, err := a.store.FindOrCreate(ctx, c.Email)
+	if err != nil {
+		return "", problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
 	}
 	// Bound active sessions per account; revoke the oldest when signing in again.
 	count, oldestKey := 0, ""
 	var oldest time.Time
 	for k, session := range a.sessions {
-		if session.Email == c.Email {
+		if session.UserID == user.ID {
 			count++
 			if oldestKey == "" || session.Expires.Before(oldest) {
 				oldest, oldestKey = session.Expires, k
@@ -309,7 +255,7 @@ func (a *accounts) verify(browser, code string) (string, error) {
 	if count >= 8 {
 		delete(a.sessions, oldestKey)
 	}
-	a.sessions[secretDigest(token)] = accountSession{Email: c.Email, Expires: now.Add(sessionLifetime)}
+	a.sessions[secretDigest(token)] = accountSession{UserID: user.ID, Expires: time.Now().Add(sessionLifetime)}
 	// A successful login also invalidates outstanding codes for this email.
 	for k, pending := range a.challenges {
 		if pending.Email == c.Email {
@@ -319,14 +265,13 @@ func (a *accounts) verify(browser, code string) (string, error) {
 	return token, nil
 }
 
-func (a *accounts) currentUser(token string) (userAccount, bool) {
+func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cleanup(time.Now())
 	session, ok := a.sessions[secretDigest(token)]
 	if !ok {
-		return userAccount{}, false
+		return userAccount{}, false, nil
 	}
-	user, ok := a.users[session.Email]
-	return user, ok
+	return a.store.ByID(ctx, session.UserID)
 }

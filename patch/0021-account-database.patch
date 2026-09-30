@@ -1,0 +1,1550 @@
+diff --git a/.gitignore b/.gitignore
+index bcee3d2..2df8eb2 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,7 +4,9 @@
+ /config/keys.json
+ /config/accounts.json
+ /config/smtp-password
++/config/account-database.json
++/config/database-password
+ *.exe
+ snapshots/
+ /notes
+-/Slate_Markdown_Components_v0.9.2-wire.1
+\ No newline at end of file
++/Slate_Markdown_Components_v0.9.2-wire.1
+diff --git a/README.md b/README.md
+index 11f8f84..d071765 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ Metatrash provides lightweight shared storage and messaging spaces for agents: a
+ 
+ Let agents from any vendor work collaboratively in public, or private spaces.
+ 
+-Status: **0.5.3 implemented locally**, including clean document URLs, the Slate read-only Markdown viewer and collapsed explorer folders with document counts. Owner build, deployment, and live checks are pending. Last explicitly confirmed deployment was 0.3.0.
++Status: **0.6.0 implemented locally**, adding MariaDB/MySQL human accounts and an offline migration preserving existing IDs, emails, creation times, and allowances. Owner build, database setup/migration, deployment, and live checks are pending. Last explicitly confirmed deployment was 0.3.0. **Accounts-enabled upgrades require database cutover before startup:** follow [Stage 1 setup and migration](docs/account-database.md).
+ 
+ ## Usage
+ 
+@@ -71,13 +71,15 @@ The home page keeps the project introduction on the left, followed by keyboard-a
+ 
+ ## Email accounts (0.4.1)
+ 
++**0.6.0 storage update:** enabled accounts now require MariaDB/MySQL. Follow [database preparation, migration, and recovery](docs/account-database.md) before replacing the installed binary. Email-code login and the read-only account page retain their behavior; sessions now refer to immutable user IDs. The old JSON account file is retained as a migration source, with no runtime fallback. Accounts-disabled operation still needs no database.
++
+ **0.4.1 fixes browser form submission:** account pages now use `Referrer-Policy: same-origin`; the former `no-referrer` policy could suppress the Origin required by the form guard. Rebuild/install and restart the service, then reload `/login` before retrying. Apache routing is unchanged.
+ 
+-Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md). No password is stored in this repository. Implementation is complete locally, pending owner build, deployment, and live checks. The account page shows the verified email and a default private-space allowance of one; private-space creation, deletion, export, and keys remain the next bite.
++Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Implementation is complete locally, pending owner build, migration, deployment, and live checks. The account page shows the verified email and a default private-space allowance of one; usernames are the next planned stage, followed by owner-only spaces and invitations.
+ 
+ ## Contract and planning
+ 
+-- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: preserve existing IDs and allowances in MariaDB, add usernames, then owner-only spaces and invitations. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Address security-review F1 before account expansion and F2 before Stage 3; the first account implementation bite is Stage 1 only.
++- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 and security-review F1 are implemented locally in 0.6.0; usernames, owner-only spaces, and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Address F2 before Stage 3.
+ - [Implementation plan](docs/implementation-plan.md)
+ - [API contract, messaging convention, and examples](docs/api-contract.md)
+ - [Tool definitions and REST mappings](api/tool-schema.json)
+@@ -88,13 +90,13 @@ The current contract uses space-wide `state`/`ifInState` tokens, replacing the e
+ 
+ The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
+ 
+-See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website is implemented in 0.3.0; email accounts are implemented in 0.4.0 pending owner deployment; private-space management is the next delivery bite. The embedded space README template now describes MCP as available; the existing public space retains its original README until an administrator updates it.
++See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moves accounts to MariaDB, pending owner migration/deployment. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
+ 
+ Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
+ 
+ ## Project workflow
+ 
+-The [focused security review (2026-09-30)](docs/security-review-2026-09-30.md) found no direct system escape in the reviewed source, but identified login-email quota exhaustion, unauthenticated private-space quota consumption, and a history-processing availability risk. Fixes and deployed-host verification remain pending; this documentation-only review leaves version 0.5.3 unchanged.
++The [focused security review (2026-09-30)](docs/security-review-2026-09-30.md) found no direct system escape in the reviewed source, but identified login-email quota exhaustion, unauthenticated private-space quota consumption, and a history-processing availability risk. Version 0.6.0 implements the F1 login-email quota fix with atomic delivery reservations and separate attempt limits. Owner validation/deployment and the F2/F3 fixes remain pending.
+ 
+ Use Major.Minor.Patch versions. Work in small reviewable bites, keep background notes in `docs`, update this README and `CHANGELOG.md`, and save change patches in `patch`. Builds and exhaustive testing are left to the project owner.
+ 
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 59b645f..66fa404 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,14 @@
+ 
+ ## Unreleased
+ 
++### 0.6.0 - Database-backed human accounts (2026-09-30)
++
++- Replaced runtime JSON account persistence with MariaDB/MySQL, a versioned InnoDB schema, protected local connection configuration, and pinned Go MySQL driver 1.9.3. Accounts-enabled upgrades now require explicit database setup and migration; accounts-disabled operation remains database-free.
++- Added the offline `accounts-migrate` command using the service data lock, transactional import/completion marker, exact ID/email/time/allowance preservation, duplicate/conflict rejection, repeat verification, and explicit empty initialization. The source JSON is never modified and is not a fallback store.
++- Retained email-code login and ephemeral sessions; sessions resolve users by immutable ID, existing account values survive login, and database outages fail closed. No private-space, username, membership, or agent integration work is included.
++- Implemented prerequisite security-review F1: separate mail-attempt throttles and atomic delivery-budget reservations prevent narrower rejections draining the global allowance. Admitted failures retain reservations; F2/F3 remain pending.
++- Added focused owner-run checks and database backup/cutover/recovery documentation. Saved before snapshot and incremental patch 0021. Formatting/syntax, source, JSON, and patch checks only; no builds, test execution, live SQL/SMTP, or deployment.
++
+ ### Documentation - Private spaces plan alignment (2026-09-30)
+ 
+ - Updated the private-spaces plan and linked roadmaps with identity/allowance-preserving migration, provisioning recovery, existing-key compatibility, ownership and invitation rules, and security-fix sequencing.
+diff --git a/assets.go b/assets.go
+index 57fcb25..5811c92 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.5.3"
++const Version = "0.6.0"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/go.mod b/go.mod
+index 7502436..dd0a036 100644
+--- a/go.mod
++++ b/go.mod
+@@ -3,8 +3,13 @@ module metatrash.com/metatrash
+ go 1.25.0
+ 
+ require (
++	github.com/go-sql-driver/mysql v1.9.3
+ 	github.com/google/jsonschema-go v0.4.3
+ 	github.com/modelcontextprotocol/go-sdk v1.8.0
++)
++
++require (
++	filippo.io/edwards25519 v1.1.0 // indirect
+ 	github.com/segmentio/asm v1.1.3 // indirect
+ 	github.com/segmentio/encoding v0.5.4 // indirect
+ 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+diff --git a/go.sum b/go.sum
+index 0869400..0b7b233 100644
+--- a/go.sum
++++ b/go.sum
+@@ -1,3 +1,7 @@
++filippo.io/edwards25519 v1.1.0 h1:FNf4tywRC1HmFuKW5xopWpigGjJKiJSV0Cqo0cJWDaA=
++filippo.io/edwards25519 v1.1.0/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
++github.com/go-sql-driver/mysql v1.9.3 h1:U/N249h2WzJ3Ukj8SowVFjdtZKfu9vlLZxjPXV1aweo=
++github.com/go-sql-driver/mysql v1.9.3/go.mod h1:qn46aNg1333BRMNU69Lq93t8du/dwxI64Gl8i5p1WMU=
+ github.com/google/jsonschema-go v0.4.3 h1:/DBOLZTfDow7pe2GmaJNhltueGTtDKICi8V8p+DQPd0=
+ github.com/google/jsonschema-go v0.4.3/go.mod h1:r5quNTdLOYEz95Ru18zA0ydNbBuYoo9tgaYcxEYhJVE=
+ github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtwfBpOTAI+Urx4=
+diff --git a/cmd/metatrash/main.go b/cmd/metatrash/main.go
+index b7b9d4b..823d7e3 100644
+--- a/cmd/metatrash/main.go
++++ b/cmd/metatrash/main.go
+@@ -26,6 +26,26 @@ func main() {
+ }
+ 
+ func run() error {
++	if len(os.Args) > 1 && os.Args[1] == "accounts-migrate" {
++		flags := flag.NewFlagSet("accounts-migrate", flag.ContinueOnError)
++		databaseConfig := flags.String("database-config", "", "Protected database configuration file (required)")
++		data := flags.String("data", "", "Service data directory containing accounts.json (required)")
++		empty := flags.Bool("empty", false, "Initialize an installation with no legacy accounts.json")
++		if err := flags.Parse(os.Args[2:]); err != nil {
++			return err
++		}
++		if flags.NArg() != 0 || *databaseConfig == "" || *data == "" {
++			return fmt.Errorf("accounts-migrate requires -database-config and -data, with optional -empty")
++		}
++		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
++		defer stop()
++		count, err := service.MigrateAccounts(ctx, *databaseConfig, *data, *empty)
++		if err != nil {
++			return err
++		}
++		fmt.Printf("Account migration complete: %d legacy accounts imported or verified. Source file unchanged.\n", count)
++		return nil
++	}
+ 	if len(os.Args) == 2 && os.Args[1] == "keygen" {
+ 		key, digest, err := service.GenerateKey()
+ 		if err != nil {
+diff --git a/config/accounts.example.json b/config/accounts.example.json
+index afe7950..41ed7c3 100644
+--- a/config/accounts.example.json
++++ b/config/accounts.example.json
+@@ -4,5 +4,6 @@
+   "smtpPort": 587,
+   "smtpUsername": "david@204am.com",
+   "smtpFrom": "david@204am.com",
+-  "smtpPasswordFile": "/etc/metatrash/smtp-password"
++  "smtpPasswordFile": "/etc/metatrash/smtp-password",
++  "databaseConfigFile": "/etc/metatrash/account-database.json"
+ }
+diff --git a/deploy/metatrash.service b/deploy/metatrash.service
+index c8ca9ed..4fac155 100644
+--- a/deploy/metatrash.service
++++ b/deploy/metatrash.service
+@@ -7,7 +7,8 @@ Type=simple
+ User=metatrash
+ Group=metatrash
+ WorkingDirectory=/var/lib/metatrash
+-# Optional: enable after configuring accounts.json and the SMTP password file.
++# Optional: enable after account database migration and SMTP configuration.
++# See docs/account-database.md before upgrading an accounts-enabled service.
+ # Environment=METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json
+ ExecStart=/usr/local/bin/metatrash -listen 127.0.0.1:8080 -data /var/lib/metatrash -config /etc/metatrash/spaces.json -keys /etc/metatrash/keys.json -trusted-proxies 127.0.0.1/32
+ Restart=on-failure
+diff --git a/internal/service/accounts.go b/internal/service/accounts.go
+index d0bbbd9..885ea7f 100644
+--- a/internal/service/accounts.go
++++ b/internal/service/accounts.go
+@@ -7,14 +7,11 @@ import (
+ 	"crypto/sha256"
+ 	"crypto/subtle"
+ 	"encoding/hex"
+-	"encoding/json"
+ 	"fmt"
+-	"io"
+ 	"math/big"
+ 	"net/mail"
+ 	"net/url"
+ 	"os"
+-	"path/filepath"
+ 	"strings"
+ 	"sync"
+ 	"time"
+@@ -25,12 +22,13 @@ const sessionLifetime = 24 * time.Hour
+ const maxAccountRecords = 10000
+ 
+ type accountConfig struct {
+-	Origin           string `json:"origin"`
+-	SMTPHost         string `json:"smtpHost"`
+-	SMTPPort         int    `json:"smtpPort"`
+-	SMTPUsername     string `json:"smtpUsername"`
+-	SMTPFrom         string `json:"smtpFrom"`
+-	SMTPPasswordFile string `json:"smtpPasswordFile"`
++	Origin             string `json:"origin"`
++	SMTPHost           string `json:"smtpHost"`
++	SMTPPort           int    `json:"smtpPort"`
++	SMTPUsername       string `json:"smtpUsername"`
++	SMTPFrom           string `json:"smtpFrom"`
++	SMTPPasswordFile   string `json:"smtpPasswordFile"`
++	DatabaseConfigFile string `json:"databaseConfigFile"`
+ }
+ 
+ type userAccount struct {
+@@ -54,15 +52,14 @@ type loginChallenge struct {
+ }
+ 
+ type accountSession struct {
+-	Email   string
++	UserID  string
+ 	Expires time.Time
+ }
+ 
+ type accounts struct {
+ 	mu         sync.Mutex
+ 	config     accountConfig
+-	path       string
+-	users      map[string]userAccount
++	store      accountStore
+ 	challenges map[string]loginChallenge
+ 	sessions   map[string]accountSession
+ 	secret     []byte
+@@ -133,63 +130,26 @@ func (s *Service) EnableAccounts(configPath string) error {
+ 	if passwordText == "" {
+ 		return fmt.Errorf("SMTP password file is empty")
+ 	}
+-	a := &accounts{config: cfg, path: filepath.Join(filepath.Dir(s.lockPath), "accounts.json"), users: map[string]userAccount{}, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
++	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
+ 	if _, err := rand.Read(a.secret); err != nil {
+ 		return err
+ 	}
+-	f, err := os.Open(a.path)
+-	if err == nil {
+-		defer f.Close()
+-		b, err := io.ReadAll(io.LimitReader(f, 8*1024*1024+1))
+-		if err != nil || len(b) > 8*1024*1024 {
+-			return fmt.Errorf("account store exceeds limit or cannot be read")
+-		}
+-		var saved accountFile
+-		if strictJSON(b, &saved) != nil || saved.Version != 1 || saved.Users == nil || len(saved.Users) > maxAccountRecords {
+-			return fmt.Errorf("invalid account store")
+-		}
+-		ids := map[string]bool{}
+-		for email, user := range saved.Users {
+-			normalized, err := normalizeEmail(email)
+-			if err != nil || normalized != email || user.Email != email || !idPattern.MatchString(user.ID) || ids[user.ID] || user.CreatedAt.IsZero() || user.MaxPrivateSpaces < 0 {
+-				return fmt.Errorf("invalid account record")
+-			}
+-			ids[user.ID] = true
+-		}
+-		a.users = saved.Users
+-	} else if !os.IsNotExist(err) {
+-		return fmt.Errorf("read account store: %w", err)
+-	}
+-	a.send = func(ctx context.Context, email, code string) error {
+-		return sendLoginMail(ctx, cfg, passwordText, email, code)
+-	}
+-	s.accounts = a
+-	return nil
+-}
+-
+-// Write to a sibling file and publish atomically before updating in-memory state.
+-func (a *accounts) saveUsers(users map[string]userAccount) error {
+-	b, err := json.MarshalIndent(accountFile{Version: 1, Users: users}, "", "  ")
+-	if err != nil {
+-		return err
+-	}
+-	f, err := os.CreateTemp(filepath.Dir(a.path), ".accounts-*")
++	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
++	defer cancel()
++	store, err := openAccountDatabase(ctx, cfg.DatabaseConfigFile)
+ 	if err != nil {
+ 		return err
+ 	}
+-	defer os.Remove(f.Name())
+-	if _, err = f.Write(append(b, '\n')); err != nil {
+-		_ = f.Close()
+-		return err
+-	}
+-	if err = f.Sync(); err != nil {
+-		_ = f.Close()
++	if err := store.ready(ctx); err != nil {
++		store.Close()
+ 		return err
+ 	}
+-	if err = f.Close(); err != nil {
+-		return err
++	a.store = store
++	a.send = func(ctx context.Context, email, code string) error {
++		return sendLoginMail(ctx, cfg, passwordText, email, code)
+ 	}
+-	return os.Rename(f.Name(), a.path)
++	s.accounts = a
++	return nil
+ }
+ 
+ // All callers hold mu. Expired entries are reclaimed and maps have hard caps.
+@@ -247,7 +207,7 @@ func (a *accounts) issue(ctx context.Context, browser, email string) error {
+ 	return nil
+ }
+ 
+-func (a *accounts) verify(browser, code string) (string, error) {
++func (a *accounts) verify(ctx context.Context, browser, code string) (string, error) {
+ 	a.mu.Lock()
+ 	defer a.mu.Unlock()
+ 	now := time.Now()
+@@ -277,29 +237,15 @@ func (a *accounts) verify(browser, code string) (string, error) {
+ 	if err != nil {
+ 		return "", err
+ 	}
+-	if _, exists := a.users[c.Email]; !exists {
+-		if len(a.users) >= maxAccountRecords {
+-			return "", problem(503, "accounts_full", "Registration is temporarily unavailable.")
+-		}
+-		id, err := randomHex(16)
+-		if err != nil {
+-			return "", err
+-		}
+-		users := make(map[string]userAccount, len(a.users)+1)
+-		for email, user := range a.users {
+-			users[email] = user
+-		}
+-		users[c.Email] = userAccount{ID: id, Email: c.Email, CreatedAt: now.UTC(), MaxPrivateSpaces: 1}
+-		if err := a.saveUsers(users); err != nil {
+-			return "", problem(503, "account_unavailable", "We could not save your account. Please request a new code later.")
+-		}
+-		a.users = users
++	user, err := a.store.FindOrCreate(ctx, c.Email)
++	if err != nil {
++		return "", problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
+ 	}
+ 	// Bound active sessions per account; revoke the oldest when signing in again.
+ 	count, oldestKey := 0, ""
+ 	var oldest time.Time
+ 	for k, session := range a.sessions {
+-		if session.Email == c.Email {
++		if session.UserID == user.ID {
+ 			count++
+ 			if oldestKey == "" || session.Expires.Before(oldest) {
+ 				oldest, oldestKey = session.Expires, k
+@@ -309,7 +255,7 @@ func (a *accounts) verify(browser, code string) (string, error) {
+ 	if count >= 8 {
+ 		delete(a.sessions, oldestKey)
+ 	}
+-	a.sessions[secretDigest(token)] = accountSession{Email: c.Email, Expires: now.Add(sessionLifetime)}
++	a.sessions[secretDigest(token)] = accountSession{UserID: user.ID, Expires: time.Now().Add(sessionLifetime)}
+ 	// A successful login also invalidates outstanding codes for this email.
+ 	for k, pending := range a.challenges {
+ 		if pending.Email == c.Email {
+@@ -319,14 +265,13 @@ func (a *accounts) verify(browser, code string) (string, error) {
+ 	return token, nil
+ }
+ 
+-func (a *accounts) currentUser(token string) (userAccount, bool) {
++func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, bool, error) {
+ 	a.mu.Lock()
+ 	defer a.mu.Unlock()
+ 	a.cleanup(time.Now())
+ 	session, ok := a.sessions[secretDigest(token)]
+ 	if !ok {
+-		return userAccount{}, false
++		return userAccount{}, false, nil
+ 	}
+-	user, ok := a.users[session.Email]
+-	return user, ok
++	return a.store.ByID(ctx, session.UserID)
+ }
+diff --git a/internal/service/account_http.go b/internal/service/account_http.go
+index cc0fc23..249bae3 100644
+--- a/internal/service/account_http.go
++++ b/internal/service/account_http.go
+@@ -108,7 +108,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 			return true
+ 		}
+ 		session := cookieToken(r, sessionCookie)
+-		user, signedIn := a.currentUser(session)
++		user, signedIn, err := a.currentUser(r.Context(), session)
++		if err != nil {
++			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
++			return true
++		}
+ 		if path == "/account" {
+ 			if !signedIn {
+ 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+@@ -212,7 +216,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 			return true
+ 		}
+ 		emailKey := a.mac("email:" + email)
+-		if err := h.service.rates.take(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
++		// Attempt limits remain independent; rejected delivery admission consumes no send budget.
++		if err := h.service.rates.take(allowance{"mail:attempt:" + client, 30, 600}); err != nil {
++			fail(err)
++			return true
++		}
++		if err := h.service.rates.reserve(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
+ 			fail(err)
+ 			return true
+ 		}
+@@ -228,7 +237,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		fail(err)
+ 		return true
+ 	}
+-	token, err := a.verify(browser, strings.TrimSpace(r.PostForm.Get("code")))
++	token, err := a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
+ 	if err != nil {
+ 		fail(err)
+ 		return true
+diff --git a/internal/service/accounts_test.go b/internal/service/accounts_test.go
+index 00125f9..ca2a374 100644
+--- a/internal/service/accounts_test.go
++++ b/internal/service/accounts_test.go
+@@ -2,58 +2,81 @@ package service
+ 
+ import (
+ 	"context"
+-	"encoding/json"
+ 	"net/http"
+ 	"net/http/httptest"
+ 	"net/url"
+-	"os"
+-	"path/filepath"
+ 	"strings"
+ 	"testing"
+ 	"time"
+ )
+ 
+-// Owner-run focused checks, with fake mail only; no SMTP network connection.
+-func testAccounts(t *testing.T) (*Service, *string, string) {
+-	t.Helper()
+-	dir := t.TempDir()
+-	passwordPath := filepath.Join(dir, "smtp-password")
+-	if err := os.WriteFile(passwordPath, []byte("test-only"), 0600); err != nil {
+-		t.Fatal(err)
++// Owner-run focused checks use fake mail and storage; SQL cutover checks are
++// documented separately in docs/account-database.md.
++type memoryAccountStore struct {
++	users   map[string]userAccount
++	failure error
++}
++
++func (s *memoryAccountStore) FindOrCreate(_ context.Context, email string) (userAccount, error) {
++	if s.failure != nil {
++		return userAccount{}, s.failure
+ 	}
+-	cfg := accountConfig{Origin: "https://metatrash.com", SMTPHost: "smtp.gmail.com", SMTPPort: 587, SMTPUsername: "sender@example.com", SMTPFrom: "sender@example.com", SMTPPasswordFile: passwordPath}
+-	b, _ := json.Marshal(cfg)
+-	path := filepath.Join(dir, "config.json")
+-	if err := os.WriteFile(path, b, 0600); err != nil {
+-		t.Fatal(err)
++	if user, ok := s.users[email]; ok {
++		return user, nil
+ 	}
+-	s := &Service{lockPath: filepath.Join(dir, ".service-lock"), rates: limiter{buckets: map[string]bucket{}}}
+-	if err := s.EnableAccounts(path); err != nil {
+-		t.Fatal(err)
++	id, err := randomHex(16)
++	if err != nil {
++		return userAccount{}, err
+ 	}
++	user := userAccount{ID: id, Email: email, CreatedAt: time.Now().UTC(), MaxPrivateSpaces: 1}
++	s.users[email] = user
++	return user, nil
++}
++
++func (s *memoryAccountStore) ByID(_ context.Context, id string) (userAccount, bool, error) {
++	if s.failure != nil {
++		return userAccount{}, false, s.failure
++	}
++	for _, user := range s.users {
++		if user.ID == id {
++			return user, true, nil
++		}
++	}
++	return userAccount{}, false, nil
++}
++
++func (s *memoryAccountStore) Close() error { return nil }
++
++func testAccounts(t *testing.T) (*Service, *string, *memoryAccountStore) {
++	t.Helper()
++	store := &memoryAccountStore{users: map[string]userAccount{}}
++	s := &Service{rates: limiter{buckets: map[string]bucket{}}}
++	s.accounts = &accounts{config: accountConfig{Origin: "https://metatrash.com"}, store: store,
++		challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{},
++		secret: []byte("test-only-secret"), mailSlots: make(chan struct{}, 2)}
+ 	code := new(string)
+ 	s.accounts.send = func(_ context.Context, _, value string) error { *code = value; return nil }
+-	return s, code, path
++	return s, code, store
+ }
+ 
+ func TestAccountsCodes(t *testing.T) {
+-	s, code, configPath := testAccounts(t)
++	s, code, store := testAccounts(t)
+ 	a := s.accounts
+ 	browser := strings.Repeat("a", 64)
+ 	email := "person@example.com"
+ 	if err := a.issue(context.Background(), browser, email); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if len(a.users) != 0 {
++	if len(store.users) != 0 {
+ 		t.Fatal("unverified email created an account")
+ 	}
+ 	original := *code
+ 	for i := 0; i < 5; i++ {
+-		if _, err := a.verify(browser, "wrong"); err == nil {
++		if _, err := a.verify(context.Background(), browser, "wrong"); err == nil {
+ 			t.Fatal("bad code accepted")
+ 		}
+ 	}
+-	if _, err := a.verify(browser, original); err == nil {
++	if _, err := a.verify(context.Background(), browser, original); err == nil {
+ 		t.Fatal("code accepted after attempt limit")
+ 	}
+ 	if err := a.issue(context.Background(), browser, email); err != nil {
+@@ -62,46 +85,62 @@ func TestAccountsCodes(t *testing.T) {
+ 	c := a.challenges[secretDigest(browser)]
+ 	c.Expires = time.Now().Add(-time.Second)
+ 	a.challenges[secretDigest(browser)] = c
+-	if _, err := a.verify(browser, *code); err == nil {
++	if _, err := a.verify(context.Background(), browser, *code); err == nil {
+ 		t.Fatal("expired code accepted")
+ 	}
+ 	if err := a.issue(context.Background(), browser, email); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	token, err := a.verify(browser, *code)
++	token, err := a.verify(context.Background(), browser, *code)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	user, ok := a.currentUser(token)
+-	if !ok || user.Email != email || user.MaxPrivateSpaces != 1 {
++	user, ok, err := a.currentUser(context.Background(), token)
++	if err != nil || !ok || user.Email != email || user.MaxPrivateSpaces != 1 {
+ 		t.Fatal("missing verified account or incorrect allowance")
+ 	}
+-	if _, err := a.verify(browser, *code); err == nil {
++	if _, err := a.verify(context.Background(), browser, *code); err == nil {
+ 		t.Fatal("code replay accepted")
+ 	}
+-	restarted := &Service{lockPath: s.lockPath}
+-	if err := restarted.EnableAccounts(configPath); err != nil {
+-		t.Fatal(err)
+-	}
+-	if restarted.accounts.users[email].ID != user.ID {
+-		t.Fatal("account not persisted")
+-	}
+-	if _, ok := restarted.accounts.currentUser(token); ok {
++	restarted, _, _ := testAccounts(t)
++	restarted.accounts.store = store
++	if _, ok, _ := restarted.accounts.currentUser(context.Background(), token); ok {
+ 		t.Fatal("session survived restart")
+ 	}
+ 	// Signing in again must preserve admin overrides and account identity.
+-	saved := a.users[email]
++	saved := store.users[email]
+ 	saved.MaxPrivateSpaces = 3
+-	a.users[email] = saved
++	store.users[email] = saved
+ 	if err := a.issue(context.Background(), browser, email); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if _, err := a.verify(browser, *code); err != nil {
++	if _, err := a.verify(context.Background(), browser, *code); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if a.users[email].ID != user.ID || a.users[email].MaxPrivateSpaces != 3 {
++	if store.users[email].ID != user.ID || store.users[email].MaxPrivateSpaces != 3 {
+ 		t.Fatal("existing account overwritten")
+ 	}
++	// A session follows the immutable ID even if the account email changes.
++	delete(store.users, email)
++	saved.Email = "renamed@example.com"
++	store.users[saved.Email] = saved
++	if current, ok, err := a.currentUser(context.Background(), token); err != nil || !ok || current.ID != user.ID || current.Email != saved.Email {
++		t.Fatal("session identity depends on email")
++	}
++	store.failure = context.DeadlineExceeded
++	if _, ok, err := a.currentUser(context.Background(), token); err == nil || ok {
++		t.Fatal("database outage treated as a successful account read")
++	}
++	if err := a.issue(context.Background(), browser, email); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := a.verify(context.Background(), browser, *code); err == nil {
++		t.Fatal("database failure issued a session")
++	}
++	if _, exists := a.challenges[secretDigest(browser)]; exists {
++		t.Fatal("database failure left a reusable code")
++	}
++	store.failure = nil
+ 	a.send = func(context.Context, string, string) error { return context.DeadlineExceeded }
+ 	if err := a.issue(context.Background(), browser, email); err == nil {
+ 		t.Fatal("mail failure hidden")
+@@ -165,6 +204,9 @@ func TestAccountsHTTP(t *testing.T) {
+ 	if w := call("POST", "/login/send", "https://metatrash.com", form, browser); w.Code != 429 {
+ 		t.Fatal("resend not throttled")
+ 	}
++	if s.rates.buckets["mail:global:day"].count != 1 {
++		t.Fatal("rejected resend consumed shared mail budget")
++	}
+ 	w = call("POST", "/login/verify", "https://metatrash.com", url.Values{"code": {*code}, "csrf": {browser.Value}}, browser)
+ 	if w.Code != 303 || w.Header().Get("Location") != "/account" {
+ 		t.Fatal("login failed")
+diff --git a/internal/service/rate.go b/internal/service/rate.go
+index c3d4d40..4e3803a 100644
+--- a/internal/service/rate.go
++++ b/internal/service/rate.go
+@@ -53,3 +53,50 @@ func (l *limiter) take(rules ...allowance) error {
+ 	}
+ 	return nil
+ }
++
++// reserve charges all delivery rules atomically, or none. Admitted failures
++// (including SMTP failures) keep their reservation; never refund concurrently.
++func (l *limiter) reserve(rules ...allowance) error {
++	l.mu.Lock()
++	defer l.mu.Unlock()
++	now := time.Now().Unix()
++	if len(l.buckets) >= 8192 {
++		for key, b := range l.buckets {
++			if b.until <= now {
++				delete(l.buckets, key)
++			}
++		}
++	}
++	pending := make(map[string]bucket, len(rules))
++	wait, additional := 0, 0
++	for _, rule := range rules {
++		b, staged := pending[rule.key]
++		if !staged {
++			var exists bool
++			b, exists = l.buckets[rule.key]
++			if !exists {
++				additional++
++			}
++		}
++		if b.until <= now {
++			b = bucket{until: (now/int64(rule.window) + 1) * int64(rule.window)}
++		}
++		if b.count >= rule.limit {
++			if left := int(b.until - now); left > wait {
++				wait = left
++			}
++		}
++		b.count++
++		pending[rule.key] = b
++	}
++	if len(l.buckets)+additional > 16384 && wait < 1 {
++		wait = 1
++	}
++	if wait > 0 {
++		return &Error{Status: 429, Code: "rate_limited", Message: "Rate limit reached.", RetryAfterSeconds: wait}
++	}
++	for key, b := range pending {
++		l.buckets[key] = b
++	}
++	return nil
++}
+diff --git a/internal/service/service.go b/internal/service/service.go
+index 10d27bc..205d022 100644
+--- a/internal/service/service.go
++++ b/internal/service/service.go
+@@ -104,7 +104,14 @@ func (s *Service) worker() {
+ }
+ 
+ // Close is called once, after the HTTP server has stopped accepting requests.
+-func (s *Service) Close() { close(s.stop); <-s.done; os.RemoveAll(s.lockPath) }
++func (s *Service) Close() {
++	close(s.stop)
++	<-s.done
++	if s.accounts != nil {
++		_ = s.accounts.store.Close()
++	}
++	os.RemoveAll(s.lockPath)
++}
+ 
+ func (s *Service) queued(ctx context.Context, fn func() (any, error)) (any, error) {
+ 	j := job{ctx: ctx, run: fn, result: make(chan outcome, 1)}
+diff --git a/docs/email-accounts.md b/docs/email-accounts.md
+index 09c6c2c..e5fb0dc 100644
+--- a/docs/email-accounts.md
++++ b/docs/email-accounts.md
+@@ -1,5 +1,14 @@
+ # Email accounts — 0.4.1
+ 
++**Current storage: 0.6.0.** Follow [database setup and migration](account-database.md)
++before an accounts-enabled upgrade. That guide supersedes this page's JSON-store
++administration and historical installation version. Email-code, cookie, and
++origin behavior below still applies. Sessions now identify accounts by immutable
++ID. Send admission reserves all delivery limits atomically, with a separate
++per-IP attempt limit; rejected admission does not consume shared delivery budget.
++Existing fake-mail checks now use fake storage; database persistence is checked
++separately using the owner cutover steps.
++
+ This bite adds email-only registration/login and an authenticated account page. It does not create private spaces yet. Existing public, REST, and MCP behavior remains available without account configuration.
+ 
+ ## Gmail configuration
+diff --git a/docs/implementation-plan.md b/docs/implementation-plan.md
+index 9e8a3fa..9ead0a9 100644
+--- a/docs/implementation-plan.md
++++ b/docs/implementation-plan.md
+@@ -2,6 +2,10 @@
+ 
+ ## Current human-interface expansion
+ 
++**0.6.0:** Stage 1 account database implementation and the prerequisite F1 fix
++are complete locally, pending owner build, database setup/migration, deployment,
++and checks. See [the cutover guide](account-database.md). Stages 2–4 remain planned.
++
+ The [private spaces plan v2](metatrash-private-spaces-plan-v2.md) now governs
+ the next account/private-space milestones: MariaDB migration preserving existing
+ IDs and allowances, public usernames, owner-only spaces, then invitations and
+diff --git a/docs/human-interface.md b/docs/human-interface.md
+index 0a79b09..614c4e8 100644
+--- a/docs/human-interface.md
++++ b/docs/human-interface.md
+@@ -15,6 +15,11 @@ Implemented Gmail STARTTLS on smtp.gmail.com:587 with david@204am.com as usernam
+ 
+ ## Next milestones — private spaces plan v2
+ 
++Stage 1 is implemented locally in **0.6.0**, including the prerequisite F1 mail
++quota fix. Owner database preparation/migration, build, deployment, and validation
++remain pending; see [the account database guide](account-database.md). Stages 2–4
++remain planned.
++
+ The [private spaces plan v2](metatrash-private-spaces-plan-v2.md) supersedes
+ the combined dashboard bite below. Deliver database migration, usernames,
+ owner-only spaces, and invitations/memberships in small patches. Preserve
+diff --git a/docs/metatrash-private-spaces-plan-v2.md b/docs/metatrash-private-spaces-plan-v2.md
+index e466bf9..55b8ffe 100644
+--- a/docs/metatrash-private-spaces-plan-v2.md
++++ b/docs/metatrash-private-spaces-plan-v2.md
+@@ -51,6 +51,11 @@ before Stage 3. F3 (recent-history processing) remains a separate follow-up.
+ 
+ # Stage 1 --- Database Setup and User Migration
+ 
++**Status:** implemented locally in 0.6.0, with the prerequisite F1 fix. Owner
++build, database preparation/import, deployment, and validation remain pending.
++See [database setup, cutover, and recovery](account-database.md). Stages 2–4 are
++not implemented by this change.
++
+ ## Goal
+ 
+ Introduce MariaDB/MySQL as the control-plane database and migrate the
+diff --git a/docs/security-review-2026-09-30.md b/docs/security-review-2026-09-30.md
+index 42edb79..ba58280 100644
+--- a/docs/security-review-2026-09-30.md
++++ b/docs/security-review-2026-09-30.md
+@@ -1,5 +1,11 @@
+ # Focused security review — 2026-09-30
+ 
++**Follow-up in 0.6.0:** F1 is addressed locally through separate mail-attempt
++limits and atomic delivery reservations; owner validation/deployment remains
++pending. Admitted failures retain reservations. F2/F3 remain open. See
++[account database delivery and focused checks](account-database.md). The review
++and source locations below describe the original 0.5.3 snapshot.
++
+ Reviewed local version 0.5.3, base commit `9795ed0232eab6d4a5ca3ba56d85d2b7ee36ddb3`. This is a source review of the Go service, REST/MCP adapters, account flow, embedded viewer, and deployment examples. Existing snapshots and patches are historical material, not active application code. No builds, test suites, live attacks, email sends, or deployment changes were performed. Findings below are based on code tracing, not runtime reproduction. Application version remains 0.5.3.
+ 
+ ## System escape assessment
+diff --git a/config/account-database.example.json b/config/account-database.example.json
+new file mode 100644
+index 0000000..00fef86
+--- /dev/null
++++ b/config/account-database.example.json
+@@ -0,0 +1,7 @@
++{
++  "network": "unix",
++  "address": "/var/lib/mysql/mysql.sock",
++  "database": "metatrash",
++  "username": "metatrash_accounts",
++  "passwordFile": "/etc/metatrash/database-password"
++}
+diff --git a/deploy/account-schema-v1.sql b/deploy/account-schema-v1.sql
+new file mode 100644
+index 0000000..9c0ae22
+--- /dev/null
++++ b/deploy/account-schema-v1.sql
+@@ -0,0 +1,22 @@
++-- Apply to a dedicated, empty MetaTrash database as its schema administrator.
++-- DDL is intentionally separate from the transactional account import.
++-- Re-running this script preserves existing tables and migration state.
++CREATE TABLE IF NOT EXISTS metatrash_account_meta (
++    singleton_id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
++    schema_version INT UNSIGNED NOT NULL,
++    migration_source VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT ''
++) ENGINE=InnoDB;
++
++CREATE TABLE IF NOT EXISTS metatrash_users (
++    user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
++    email VARCHAR(254) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    -- RFC3339Nano UTC preserves existing Go timestamp precision exactly.
++    created_at VARCHAR(35) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    max_private_spaces BIGINT UNSIGNED NOT NULL DEFAULT 1,
++    UNIQUE KEY metatrash_users_email (email)
++) ENGINE=InnoDB;
++
++INSERT INTO metatrash_account_meta (singleton_id, schema_version, migration_source)
++SELECT 1, 1, '' WHERE NOT EXISTS (
++    SELECT 1 FROM metatrash_account_meta WHERE singleton_id = 1
++);
+diff --git a/internal/service/account_database.go b/internal/service/account_database.go
+new file mode 100644
+index 0000000..011818b
+--- /dev/null
++++ b/internal/service/account_database.go
+@@ -0,0 +1,234 @@
++package service
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"path/filepath"
++	"strings"
++	"time"
++
++	"github.com/go-sql-driver/mysql"
++)
++
++// Only persistent account operations live here. Login challenges and sessions
++// stay ephemeral. A test store can exercise the email flow without a database.
++type accountStore interface {
++	FindOrCreate(context.Context, string) (userAccount, error)
++	ByID(context.Context, string) (userAccount, bool, error)
++	Close() error
++}
++
++type accountDatabaseConfig struct {
++	Network      string `json:"network"`
++	Address      string `json:"address"`
++	Database     string `json:"database"`
++	Username     string `json:"username"`
++	PasswordFile string `json:"passwordFile"`
++}
++
++type accountDatabase struct{ db *sql.DB }
++
++func readLimitedFile(path string, limit int64) ([]byte, error) {
++	f, err := os.Open(path)
++	if err != nil {
++		return nil, err
++	}
++	defer f.Close()
++	b, err := io.ReadAll(io.LimitReader(f, limit+1))
++	if err != nil || int64(len(b)) > limit {
++		return nil, fmt.Errorf("file cannot be read or exceeds limit")
++	}
++	return b, nil
++}
++
++func openAccountDatabase(ctx context.Context, configPath string) (*accountDatabase, error) {
++	if configPath == "" {
++		return nil, fmt.Errorf("accounts require databaseConfigFile; follow docs/account-database.md before upgrading")
++	}
++	b, err := readLimitedFile(configPath, 16*1024)
++	if err != nil {
++		return nil, fmt.Errorf("cannot read account database configuration")
++	}
++	var cfg accountDatabaseConfig
++	if strictJSON(b, &cfg) != nil || cfg.Database == "" || cfg.Username == "" || cfg.PasswordFile == "" {
++		return nil, fmt.Errorf("invalid account database configuration")
++	}
++	// Stage 1 uses the database already on this host. Remote DB/TLS configuration
++	// is deliberately not exposed, nor are arbitrary DSN flags or SQL parameters.
++	switch cfg.Network {
++	case "unix":
++		if !filepath.IsAbs(cfg.Address) {
++			return nil, fmt.Errorf("database Unix socket must be an absolute path")
++		}
++	case "tcp":
++		host, port, err := net.SplitHostPort(cfg.Address)
++		if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || port == "" {
++			return nil, fmt.Errorf("database TCP address must use a loopback IP and port")
++		}
++	default:
++		return nil, fmt.Errorf("database network must be unix or tcp")
++	}
++	password, err := readLimitedFile(cfg.PasswordFile, 4096)
++	if err != nil || len(strings.TrimSpace(string(password))) == 0 {
++		return nil, fmt.Errorf("cannot read database password or password is empty")
++	}
++	driverConfig := mysql.NewConfig()
++	driverConfig.User = cfg.Username
++	driverConfig.Passwd = strings.TrimRight(string(password), "\r\n")
++	driverConfig.Net = cfg.Network
++	driverConfig.Addr = cfg.Address
++	driverConfig.DBName = cfg.Database
++	driverConfig.Timeout = 5 * time.Second
++	driverConfig.ReadTimeout = 5 * time.Second
++	driverConfig.WriteTimeout = 5 * time.Second
++	// Driver logs can include server-provided text. Return generic application
++	// errors instead of exposing connection details, email addresses, or secrets.
++	driverConfig.Logger = mysql.NopLogger{}
++	connector, err := mysql.NewConnector(driverConfig)
++	if err != nil {
++		return nil, fmt.Errorf("invalid database connection settings")
++	}
++	db := sql.OpenDB(connector)
++	db.SetMaxOpenConns(4)
++	db.SetMaxIdleConns(4)
++	db.SetConnMaxLifetime(3 * time.Minute)
++	if err := db.PingContext(ctx); err != nil {
++		db.Close()
++		return nil, fmt.Errorf("account database unavailable; check server, credentials, and grants")
++	}
++	return &accountDatabase{db: db}, nil
++}
++
++func (s *accountDatabase) Close() error { return s.db.Close() }
++
++func (s *accountDatabase) ready(ctx context.Context) error {
++	if err := s.checkEngines(ctx); err != nil {
++		return err
++	}
++	var version int
++	var source string
++	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 1 || source == "" {
++		return fmt.Errorf("account schema/migration is not ready; follow docs/account-database.md")
++	}
++	// Validate persisted records at startup, including the preserved service cap.
++	rows, err := s.db.QueryContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users LIMIT 10001")
++	if err != nil {
++		return fmt.Errorf("cannot read account database users")
++	}
++	defer rows.Close()
++	count := 0
++	for rows.Next() {
++		count++
++		if _, err := scanAccount(rows); err != nil || count > maxAccountRecords {
++			return fmt.Errorf("invalid account database records or account limit exceeded")
++		}
++	}
++	if rows.Err() != nil {
++		return fmt.Errorf("cannot read account database users")
++	}
++	return nil
++}
++
++func (s *accountDatabase) checkEngines(ctx context.Context) error {
++	var count int
++	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('metatrash_account_meta', 'metatrash_users') AND engine = 'InnoDB'").Scan(&count)
++	if err != nil || count != 2 {
++		return fmt.Errorf("both account schema tables must exist and use InnoDB")
++	}
++	return nil
++}
++
++type accountScanner interface{ Scan(...any) error }
++
++func scanAccount(row accountScanner) (userAccount, error) {
++	var user userAccount
++	var created string
++	if err := row.Scan(&user.ID, &user.Email, &created, &user.MaxPrivateSpaces); err != nil {
++		return userAccount{}, err
++	}
++	var err error
++	user.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
++	if err != nil || !validAccount(user) {
++		return userAccount{}, fmt.Errorf("invalid stored account")
++	}
++	return user, nil
++}
++
++func validAccount(user userAccount) bool {
++	email, err := normalizeEmail(user.Email)
++	return err == nil && email == user.Email && idPattern.MatchString(user.ID) && !user.CreatedAt.IsZero() && user.MaxPrivateSpaces >= 0
++}
++
++func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, bool, error) {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	user, err := scanAccount(s.db.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users WHERE user_id = ?", id))
++	if err == sql.ErrNoRows {
++		return userAccount{}, false, nil
++	}
++	if err != nil {
++		return userAccount{}, false, fmt.Errorf("account database unavailable")
++	}
++	return user, true, nil
++}
++
++// Lock the singleton metadata row for all registrations and imports, so the
++// account cap and unique identities hold even across concurrent connections.
++func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
++	var version int
++	var source string
++	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || version != 1 {
++		return "", fmt.Errorf("account schema version 1 is required")
++	}
++	return source, nil
++}
++
++func insertAccount(ctx context.Context, tx *sql.Tx, user userAccount) error {
++	_, err := tx.ExecContext(ctx, "INSERT INTO metatrash_users (user_id, email, created_at, max_private_spaces) VALUES (?, ?, ?, ?)", user.ID, user.Email, user.CreatedAt.UTC().Format(time.RFC3339Nano), user.MaxPrivateSpaces)
++	return err
++}
++
++func (s *accountDatabase) FindOrCreate(ctx context.Context, email string) (userAccount, error) {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	if normalized, err := normalizeEmail(email); err != nil || normalized != email {
++		return userAccount{}, fmt.Errorf("invalid normalized email")
++	}
++	tx, err := s.db.BeginTx(ctx, nil)
++	if err != nil {
++		return userAccount{}, fmt.Errorf("account database unavailable")
++	}
++	defer tx.Rollback()
++	source, err := lockAccountMeta(ctx, tx)
++	if err != nil || source == "" {
++		return userAccount{}, fmt.Errorf("account database migration required")
++	}
++	user, err := scanAccount(tx.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users WHERE email = ?", email))
++	if err == nil {
++		// Read-only path: the deferred rollback releases the registration lock.
++		return user, nil
++	}
++	if err != sql.ErrNoRows {
++		return userAccount{}, fmt.Errorf("cannot read account")
++	}
++	var count int
++	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_users").Scan(&count); err != nil || count >= maxAccountRecords {
++		return userAccount{}, fmt.Errorf("registration unavailable or account limit reached")
++	}
++	id, err := randomHex(16)
++	if err != nil {
++		return userAccount{}, err
++	}
++	user = userAccount{ID: id, Email: email, CreatedAt: time.Now().UTC(), MaxPrivateSpaces: 1}
++	if err := insertAccount(ctx, tx, user); err != nil {
++		return userAccount{}, fmt.Errorf("cannot create account")
++	}
++	if err := tx.Commit(); err != nil {
++		return userAccount{}, fmt.Errorf("cannot commit account")
++	}
++	return user, nil
++}
+diff --git a/internal/service/account_migration.go b/internal/service/account_migration.go
+new file mode 100644
+index 0000000..f3f5f4f
+--- /dev/null
++++ b/internal/service/account_migration.go
+@@ -0,0 +1,168 @@
++package service
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"strconv"
++	"time"
++)
++
++// Reject duplicate JSON object keys before unmarshalling, so an import cannot
++// silently discard a conflicting account or field through last-value-wins.
++func uniqueJSONKeys(decoder *json.Decoder) error {
++	token, err := decoder.Token()
++	if err != nil {
++		return err
++	}
++	delim, compound := token.(json.Delim)
++	if !compound {
++		return nil
++	}
++	switch delim {
++	case '{':
++		seen := map[string]bool{}
++		for decoder.More() {
++			key, err := decoder.Token()
++			if err != nil {
++				return err
++			}
++			name, ok := key.(string)
++			if !ok || seen[name] {
++				return fmt.Errorf("duplicate or invalid JSON key")
++			}
++			seen[name] = true
++			if err := uniqueJSONKeys(decoder); err != nil {
++				return err
++			}
++		}
++	case '[':
++		for decoder.More() {
++			if err := uniqueJSONKeys(decoder); err != nil {
++				return err
++			}
++		}
++	default:
++		return fmt.Errorf("unexpected JSON delimiter")
++	}
++	_, err = decoder.Token()
++	return err
++}
++
++func decodeLegacyAccounts(b []byte) (accountFile, error) {
++	var saved accountFile
++	decoder := json.NewDecoder(bytes.NewReader(b))
++	if err := uniqueJSONKeys(decoder); err != nil {
++		return saved, fmt.Errorf("invalid account JSON or duplicate keys")
++	}
++	if _, err := decoder.Token(); err != io.EOF {
++		return saved, fmt.Errorf("unexpected data after account JSON")
++	}
++	if strictJSON(b, &saved) != nil || saved.Version != 1 || saved.Users == nil || len(saved.Users) > maxAccountRecords {
++		return saved, fmt.Errorf("invalid legacy account store")
++	}
++	ids := map[string]bool{}
++	for email, user := range saved.Users {
++		if email != user.Email || !validAccount(user) || ids[user.ID] {
++			return accountFile{}, fmt.Errorf("invalid or conflicting legacy account record")
++		}
++		ids[user.ID] = true
++	}
++	return saved, nil
++}
++
++// MigrateAccounts runs offline, sharing the service's data-directory lock.
++// It never provisions Git repositories, changes the source, or sends mail.
++func MigrateAccounts(ctx context.Context, configPath, dataDir string, empty bool) (int, error) {
++	dataDir, err := filepath.Abs(dataDir)
++	if err != nil {
++		return 0, err
++	}
++	if err := os.MkdirAll(dataDir, 0700); err != nil {
++		return 0, err
++	}
++	lock := filepath.Join(dataDir, ".service-lock")
++	if err := os.Mkdir(lock, 0700); err != nil {
++		return 0, fmt.Errorf("data directory locked; stop the service before migration (do not remove a live lock)")
++	}
++	defer os.RemoveAll(lock)
++	if err := os.WriteFile(filepath.Join(lock, "pid"), []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
++		return 0, err
++	}
++	sourcePath := filepath.Join(dataDir, "accounts.json")
++	saved := accountFile{Version: 1, Users: map[string]userAccount{}}
++	fingerprint := "empty"
++	if empty {
++		if _, err := os.Lstat(sourcePath); !os.IsNotExist(err) {
++			return 0, fmt.Errorf("empty initialization requires no existing accounts.json; import the existing file instead")
++		}
++	} else {
++		b, err := readLimitedFile(sourcePath, 8*1024*1024)
++		if err != nil {
++			return 0, fmt.Errorf("cannot read legacy accounts.json; use -empty only for an installation with no existing accounts")
++		}
++		saved, err = decodeLegacyAccounts(b)
++		if err != nil {
++			return 0, err
++		}
++		fingerprint = secretDigest(string(b))
++	}
++	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
++	defer cancel()
++	store, err := openAccountDatabase(ctx, configPath)
++	if err != nil {
++		return 0, err
++	}
++	defer store.Close()
++	return store.importAccounts(ctx, saved, fingerprint)
++}
++
++func (s *accountDatabase) importAccounts(ctx context.Context, saved accountFile, fingerprint string) (int, error) {
++	if err := s.checkEngines(ctx); err != nil {
++		return 0, err
++	}
++	tx, err := s.db.BeginTx(ctx, nil)
++	if err != nil {
++		return 0, fmt.Errorf("cannot begin account migration")
++	}
++	defer tx.Rollback()
++	previous, err := lockAccountMeta(ctx, tx)
++	if err != nil {
++		return 0, err
++	}
++	if previous != "" && previous != fingerprint {
++		return 0, fmt.Errorf("database was initialized from a different source; refusing to merge or overwrite accounts")
++	}
++	var count int
++	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_users").Scan(&count); err != nil {
++		return 0, fmt.Errorf("cannot inspect migration destination")
++	}
++	if previous == "" && count != 0 {
++		return 0, fmt.Errorf("initial migration requires an empty users table; refusing to overwrite existing records")
++	}
++	for _, user := range saved.Users {
++		if previous != "" {
++			existing, err := scanAccount(tx.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces FROM metatrash_users WHERE user_id = ?", user.ID))
++			if err != nil || existing.Email != user.Email || !existing.CreatedAt.Equal(user.CreatedAt) || existing.MaxPrivateSpaces != user.MaxPrivateSpaces {
++				return 0, fmt.Errorf("imported account differs from source; no records changed")
++			}
++			continue
++		}
++		if err := insertAccount(ctx, tx, user); err != nil {
++			return 0, fmt.Errorf("account import failed; transaction rolled back")
++		}
++	}
++	if previous == "" {
++		if _, err := tx.ExecContext(ctx, "UPDATE metatrash_account_meta SET migration_source = ? WHERE singleton_id = 1", fingerprint); err != nil {
++			return 0, fmt.Errorf("cannot mark migration complete")
++		}
++	}
++	if err := tx.Commit(); err != nil {
++		return 0, fmt.Errorf("migration commit could not be confirmed; safely rerun with the same source")
++	}
++	return len(saved.Users), nil
++}
+diff --git a/internal/service/account_migration_test.go b/internal/service/account_migration_test.go
+new file mode 100644
+index 0000000..562bbc8
+--- /dev/null
++++ b/internal/service/account_migration_test.go
+@@ -0,0 +1,75 @@
++package service
++
++import (
++	"encoding/json"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func TestAccountsMigrationValidation(t *testing.T) {
++	created, err := time.Parse(time.RFC3339Nano, "2026-09-27T13:14:15.123456789Z")
++	if err != nil {
++		t.Fatal(err)
++	}
++	user := userAccount{ID: strings.Repeat("a", 32), Email: "person@example.com", CreatedAt: created, MaxPrivateSpaces: 7}
++	source, err := json.Marshal(accountFile{Version: 1, Users: map[string]userAccount{user.Email: user}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	saved, err := decodeLegacyAccounts(source)
++	if err != nil || saved.Users[user.Email] != user {
++		t.Fatal("migration changed identity, timestamp, or allowance")
++	}
++	for _, invalid := range []string{
++		strings.Replace(string(source), `"version":1`, `"version":1,"version":1`, 1),
++		strings.Replace(string(source), `"version":1`, `"version":2`, 1),
++		strings.Replace(string(source), `"maxPrivateSpaces":7`, `"maxPrivateSpaces":-1`, 1),
++		strings.Replace(string(source), user.Email, "different@example.com", 1),
++		string(source) + `{}`,
++	} {
++		if _, err := decodeLegacyAccounts([]byte(invalid)); err == nil {
++			t.Fatal("invalid migration source accepted")
++		}
++	}
++	other := user
++	other.Email = "other@example.com"
++	duplicate, _ := json.Marshal(accountFile{Version: 1, Users: map[string]userAccount{user.Email: user, other.Email: other}})
++	if _, err := decodeLegacyAccounts(duplicate); err == nil {
++		t.Fatal("duplicate account IDs accepted")
++	}
++}
++
++func TestAccountsMailReservation(t *testing.T) {
++	l := limiter{buckets: map[string]bucket{}}
++	global := allowance{"global", 7, 3600}
++	email := allowance{"email", 1, 3600}
++	if err := l.reserve(global, email); err != nil {
++		t.Fatal(err)
++	}
++	for i := 0; i < 20; i++ {
++		if err := l.reserve(global, email); err == nil {
++			t.Fatal("email limit not enforced")
++		}
++	}
++	if l.buckets[global.key].count != 1 {
++		t.Fatal("rejected requests consumed shared delivery budget")
++	}
++	var admitted atomic.Int32
++	var workers sync.WaitGroup
++	for i := 0; i < 20; i++ {
++		workers.Add(1)
++		go func() {
++			defer workers.Done()
++			if l.reserve(global) == nil {
++				admitted.Add(1)
++			}
++		}()
++	}
++	workers.Wait()
++	if admitted.Load() != 6 || l.buckets[global.key].count != 7 {
++		t.Fatal("concurrent reservations exceeded or lost the remaining budget")
++	}
++}
+diff --git a/docs/account-database.md b/docs/account-database.md
+new file mode 100644
+index 0000000..0841d09
+--- /dev/null
++++ b/docs/account-database.md
+@@ -0,0 +1,228 @@
++# Account database and migration — 0.6.0
++
++Stage 1 is implemented locally. The owner must build, prepare the server
++database, migrate, deploy, and perform the focused checks below. No live database
++or server was accessed during implementation.
++
++MariaDB/MySQL now stores human accounts. Git still stores space content and
++history. Existing account IDs, normalized verified emails, creation instants
++(including nanoseconds), and private-space allowances are retained. New accounts
++keep the default allowance of one. No usernames, private-space creation,
++memberships, browser content editing, or agent authentication changes are added.
++
++## Storage and configuration
++
++The versioned schema is [account-schema-v1.sql](../deploy/account-schema-v1.sql).
++Both tables use InnoDB. `metatrash_users.user_id` is the immutable primary key;
++normalized email has a unique index. `created_at` stores RFC3339Nano UTC text to
++avoid truncating existing Go timestamp precision. `metatrash_account_meta`
++records schema version 1 and the completed import's SHA-256 source fingerprint
++(or `empty` for explicit first-time initialization).
++
++The account configuration gains one required field when accounts are enabled:
++
++```json
++"databaseConfigFile": "/etc/metatrash/account-database.json"
++```
++
++Use [account-database.example.json](../config/account-database.example.json)
++for the separate database configuration. Set the actual socket path reported
++by your server, not an assumed path. The example uses `/var/lib/mysql/mysql.sock`.
++Alternatively use `"network": "tcp"` and `"address": "127.0.0.1:3306"` with
++matching local database grants. Stage 1 accepts only Unix sockets or literal
++loopback TCP addresses; remote database connections are outside this bite.
++
++Database and SMTP passwords stay in separate protected files outside Git and
++the document root. The database password file contains the password followed
++optionally by a newline. Connection parameters are constructed through the
++pinned [Go MySQL driver](https://github.com/go-sql-driver/mysql/tree/v1.9.3), not
++through arbitrary DSN options. Pool size is four with bounded connection/query
++timeouts. Driver/server errors are not printed with credentials or account data.
++
++## Prepare the database before maintenance
++
++Use the existing local MariaDB/MySQL installation. From an administrator client,
++check the server and socket (`SELECT VERSION(); SHOW VARIABLES LIKE 'socket';`).
++Create a **dedicated** database named `metatrash` and a local login named
++`metatrash_accounts` with a new private password. Use your usual protected
++administration method; keep the password out of shell arguments and history.
++The steps below assume those names and local administrator socket authentication;
++adjust to the server's existing administration method if necessary.
++
++```sql
++CREATE DATABASE metatrash CHARACTER SET utf8mb4;
++```
++
++Apply the schema from the checkout as an administrator:
++
++```bash
++sudo mariadb metatrash < deploy/account-schema-v1.sql
++```
++
++The schema script is repeatable and does not clear existing data or overwrite
++the schema version. Do not use it to disguise a conflicting existing schema.
++The application and importer require both tables to exist and use InnoDB.
++
++After creating the local database login, grant only these table permissions:
++
++```sql
++GRANT SELECT, INSERT ON metatrash.metatrash_users
++    TO 'metatrash_accounts'@'localhost';
++GRANT SELECT, UPDATE ON metatrash.metatrash_account_meta
++    TO 'metatrash_accounts'@'localhost';
++```
++
++The same login can perform the import and runtime account operations. It needs
++no DDL, DELETE, FILE, or server administration privileges. The metadata-row lock
++serializes registration/import and protects the 10,000-account cap. Use an
++administrator for allowance updates; the service never overwrites an existing
++user during login.
++
++Create protected configuration files on first setup, then edit the socket,
++database/login names, and password locally:
++
++```bash
++sudo install -o root -g metatrash -m 0640 config/account-database.example.json /etc/metatrash/account-database.json
++sudo install -o root -g metatrash -m 0640 /dev/null /etc/metatrash/database-password
++sudoedit /etc/metatrash/account-database.json /etc/metatrash/database-password
++```
++
++The empty-password-file command is **first setup only**; do not overwrite a
++working password file. The existing systemd sandbox must be able to reach the
++socket; if it lives under `/tmp`, `PrivateTmp` may hide it. Prefer the server's
++normal socket under `/run` or `/var/lib`, or use loopback TCP.
++
++Build 0.6.0 using the existing owner build workflow, leaving the currently running
++binary in place until the migration succeeds. From the checkout, the new binary
++is assumed to be `bin/metatrash` below. Apache routes do not change.
++
++## Maintenance, backup, and cutover
++
++Stop the service to prevent any old JSON account writes. Keep it stopped until
++the new database-backed binary is installed. Confirm it is stopped before
++continuing:
++
++```bash
++sudo systemctl stop metatrash
++sudo systemctl is-active metatrash
++```
++
++Expect `inactive`. Use the actual service data directory throughout; these
++examples use `/var/lib/metatrash`. Take a private backup of `accounts.json`,
++`/etc/metatrash`, and the installed binary. For example, with a new backup path:
++
++```bash
++backup_dir="/var/backups/metatrash-accounts-$(date +%Y%m%d-%H%M%S)"
++sudo install -d -o root -g root -m 0700 "$backup_dir"
++sudo cp -a /etc/metatrash "$backup_dir/config"
++sudo cp -a /usr/local/bin/metatrash "$backup_dir/metatrash-before"
++sudo cp -a /var/lib/metatrash/accounts.json "$backup_dir/accounts.json"
++```
++
++If this is genuinely a fresh installation with no `accounts.json`, omit that
++last copy and use the explicit `-empty` initialization below. A missing file on
++an existing installation is an error to investigate, not an empty account set.
++Keep these account/configuration backups separate from public repositories.
++
++Make the owner-built binary available to the service user without changing the
++installed service binary yet:
++
++```bash
++sudo install -o root -g metatrash -m 0750 bin/metatrash /var/lib/metatrash/metatrash-migrate-0.6.0
++sudo -u metatrash /var/lib/metatrash/metatrash-migrate-0.6.0 accounts-migrate \
++  -database-config /etc/metatrash/account-database.json \
++  -data /var/lib/metatrash
++```
++
++Only for an installation with **no** legacy account file, append `-empty` to
++that command. It refuses to ignore an existing file, even an empty one.
++
++The importer shares the service's `.service-lock`. A live lock stops migration;
++never remove it while either process is running. Import does not touch Git,
++send email, or modify the JSON source. The first import requires an empty users
++table. Accounts and the completion marker commit in one transaction. If interrupted
++before commit they roll back; after an uncertain commit, rerun the same command
++with the unchanged source to verify the imported records. A different source,
++duplicate identity, invalid record, or changed imported value is rejected.
++Later-added database users are not deleted by verification of the original import.
++
++After success, add `databaseConfigFile` to the **existing**
++`/etc/metatrash/accounts.json`, preserving its SMTP/origin configuration. Then:
++
++```bash
++sudoedit /etc/metatrash/accounts.json
++sudo install -o root -g root -m 0755 bin/metatrash /usr/local/bin/metatrash
++/usr/local/bin/metatrash version
++sudo systemctl start metatrash
++sudo systemctl status metatrash --no-pager
++```
++
++Expect version `0.6.0`. Leave the legacy JSON file intact as a protected historical
++source; it is no longer read by the service. Include the database in ongoing
++private backups, using the site's normal consistent InnoDB backup procedure.
++Back up before administrator account changes as well.
++
++Accounts remain optional: without `-accounts-config` or its environment setting,
++public/REST/MCP operation requires no database. With accounts enabled, missing
++configuration, unavailable DB, unsupported schema, or incomplete migration causes
++startup failure. At runtime an account DB outage returns a generic 503 for
++authenticated account reads/login verification, with no JSON fallback. Login
++codes may still be requested; verification cannot succeed until storage returns.
++
++## Recovery and administration
++
++If migration fails before cutover, keep the source unchanged, correct the
++configuration/schema problem, and retry. If necessary, restore the saved binary
++and account configuration before restarting the old version. That version does
++not recognize `databaseConfigFile`.
++
++Before any database-backed account writes have happened, the saved JSON is a
++valid rollback source. **After cutover has accepted new accounts or allowance
++changes, do not restart an old binary against the stale JSON file.** Stop writes,
++back up the current database, and repair/restore the database-backed version.
++If a binary downgrade becomes necessary, first export and reconcile all current
++database accounts into a validated version-1 JSON store, retaining IDs, emails,
++creation times, and allowances, then restore the old configuration/binary. An
++automatic reverse exporter is outside Stage 1; prefer forward recovery.
++
++To change an allowance, use an administrator transaction against the immutable
++`user_id`, updating only `max_private_spaces` to a nonnegative integer. Do not
++edit legacy JSON; account-page reads now see database values. Do not edit IDs,
++change schema/migration markers, or assign existing bearer-key spaces to accounts.
++
++## Focused owner checks
++
++Optional fake-mail/store and import-validation checks (no SMTP or SQL server):
++
++```bash
++go test ./internal/service -run '^TestAccounts(Codes|HTTP|MigrationValidation|MailReservation)$' -count=1
++```
++
++These cover code handling, immutable session identity, storage-failure behavior,
++source validation, and atomic mail-budget reservations. They do not verify the
++SQL driver, grants, schema, or database transaction behavior.
++
++On a disposable local database first, apply the schema and import a small
++version-1 fixture with a known ID, nanosecond timestamp, and non-default allowance.
++Confirm exact preservation, rerun successfully, and verify that a changed source
++or an existing conflicting destination is rejected without changing records.
++Confirm that startup refuses a schema without a completed migration marker.
++
++After actual cutover, compare the imported count and a known ID/allowance privately;
++sign in with that existing email, sign out, and sign in again. Register one new
++account and confirm allowance one, then restart and confirm accounts persist while
++sessions expire. Confirm public browsing and existing REST/MCP still work. Keep
++live mail checks small. On a disposable instance, interrupt DB access and confirm
++account reads/verification fail without modifying JSON or issuing a session.
++
++The F1 fix keeps per-IP attempt throttling (30 requests per ten minutes) separate
++from atomic delivery reservations. Rejections by narrower delivery limits consume
++none of the send budgets. Once admitted, SMTP failures and busy-mail responses
++retain their reservation; counters are never refunded. Existing per-email/IP/day
++delivery ceilings remain unchanged. F2 and F3 remain pending separate work.
++
++Assistant validation: Go formatting/syntax parsing, source review, example JSON
++parsing, and incremental patch checks only. No project build, automated test run,
++SMTP send, database connection/import, deployment, or live verification.
++Before snapshot: `docs/snapshots/0021-account-database-before/`.
++Incremental patch: `patch/0021-account-database.patch`.

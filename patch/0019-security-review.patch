@@ -1,0 +1,100 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5fc131b..f93c3df 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,11 @@
+ 
+ ## Unreleased
+ 
++### Documentation - Focused security review (2026-09-30)
++
++- Reviewed system-escape boundaries and recorded availability findings, recommended fixes, and host-isolation limitations in `docs/security-review-2026-09-30.md`.
++- No runtime source changes; version remains 0.5.3. Saved before snapshot and incremental patch 0019. No builds, test execution, live attacks, or deployment.
++
+ ### 0.5.3 - Clean document URLs (2026-09-29)
+ 
+ - Serve public documents at `/spaces/public/<file-path>` and use these links in the explorer and initial/refreshed recent activity.
+diff --git a/README.md b/README.md
+index a79ac0a..4452e5f 100644
+--- a/README.md
++++ b/README.md
+@@ -93,6 +93,8 @@ Tool descriptions are kept concise and self-contained per tool; validation const
+ 
+ ## Project workflow
+ 
++The [focused security review (2026-09-30)](docs/security-review-2026-09-30.md) found no direct system escape in the reviewed source, but identified login-email quota exhaustion, unauthenticated private-space quota consumption, and a history-processing availability risk. Fixes and deployed-host verification remain pending; this documentation-only review leaves version 0.5.3 unchanged.
++
+ Use Major.Minor.Patch versions. Work in small reviewable bites, keep background notes in `docs`, update this README and `CHANGELOG.md`, and save change patches in `patch`. Builds and exhaustive testing are left to the project owner.
+ 
+ ## Hosting under a folder (0.5.1)
+diff --git a/docs/security-review-2026-09-30.md b/docs/security-review-2026-09-30.md
+new file mode 100644
+index 0000000..42edb79
+--- /dev/null
++++ b/docs/security-review-2026-09-30.md
+@@ -0,0 +1,65 @@
++# Focused security review — 2026-09-30
++
++Reviewed local version 0.5.3, base commit `9795ed0232eab6d4a5ca3ba56d85d2b7ee36ddb3`. This is a source review of the Go service, REST/MCP adapters, account flow, embedded viewer, and deployment examples. Existing snapshots and patches are historical material, not active application code. No builds, test suites, live attacks, email sends, or deployment changes were performed. Findings below are based on code tracing, not runtime reproduction. Application version remains 0.5.3.
++
++## System escape assessment
++
++**No direct remote command execution, arbitrary host-file access, or root escalation path was identified in the reviewed application code.** This is a scoped finding, not certification that the application or deployed host is secure.
++
++- `internal/service/git.go:26-46`: the only application subprocess launcher invokes Git with an argument array, without a shell. Hooks and commit signing are disabled; inherited Git overrides and system/global Git configuration are suppressed. Repository-local configuration remains trusted administrative state.
++- `internal/service/config.go:68` and `types.go:88`: paths have bounded length/depth and ASCII segments starting with an alphanumeric character. Absolute paths, dot/dot-dot segments, backslashes, control characters, leading option dashes, `.git`, `.gitattributes`, and `.metatrash` segments are rejected.
++- `internal/service/git.go:135-170`: text goes through standard input into bare-repository blobs. User documents are never checked out, interpreted, or executed. Tree entries use regular-file mode `100644`, not symlink or executable modes. Object destinations derive from Git-generated storage entries rather than submitted document paths.
++- Revisions and blob IDs are restricted to hexadecimal hashes; historical revisions must be ancestors of the space head. Cursors have HMAC protection and are bound to the space and operation. Both adapters check space credentials before dispatch.
++- The website serves an explicit embedded-asset allowlist. Server templates escape document text; Markdown rendering escapes HTML and attributes. CSP limits script execution to same-origin assets. No working browser-to-host execution chain was found.
++- SMTP connects to administrator-configured destinations and requires verified STARTTLS. No server-side fetch of document-supplied URLs was found.
++- `deploy/metatrash.service:7-21` runs as the dedicated `metatrash` user, with no-new-privileges, a read-only system view, protected home directories, and a designated writable data directory. These are examples; deployed settings were not inspected.
++
++## Findings
++
++### F1 — High: rejected requests can exhaust all login email allowance
++
++**Locations:** `internal/service/account_http.go:215`; `internal/service/rate.go:33-51`.
++
++The mail limiter processes the shared 100-per-day bucket before the IP and email buckets. It increments every eligible bucket even when another rule rejects the request. A single unauthenticated client can submit 100 otherwise well-formed send requests with its own valid login cookie/CSRF value, configured Origin, and a valid email address. Most sends will be rejected by the narrower limits, but all consume the global allowance. This fits within the 240-per-minute ingress ceiling. New login emails then fail for everyone until the next UTC-aligned daily bucket, potentially nearly 24 hours. Existing sessions continue to work; this does not bypass login or execute code.
++
++**Recommended small fix:** retain a separate attempt limiter, but reserve the shared delivery allowance only after all narrower admission checks pass. Check and reserve the full set atomically under the limiter lock. Decide explicitly how failed SMTP delivery affects the allowance. Do not simply refund counters after concurrent operations.
++
++**Focused owner check:** repeated sends blocked by the email/IP limit must not consume the shared delivery budget; concurrent admitted sends must still obey its ceiling.
++
++### F2 — Medium: invalid credentials can drain private-space operation quotas
++
++**Locations:** `internal/service/service.go:137-166`; `internal/service/rate.go:33-51`.
++
++`Access` debits the global and named-space operation budgets before checking the private key. With a known or guessed private-space name, requests carrying no valid credential can exhaust its write allowance. Under the example defaults, 60 such attempts can consume a private space's 60-per-minute write allowance even though the per-client write allowance is only 20, because rejection does not stop other bucket debits. Legitimate writers are then denied. Separate global counters allow interference across spaces too. No private data disclosure or authentication bypass was identified.
++
++**Recommended fix:** keep ingress/authentication-attempt limits before authentication, then authenticate and authorize before charging the successful-operation space budget. Combine admission checks so a per-client rejection cannot consume another user's operation allowance. Apply the shared change to REST and MCP.
++
++**Focused owner check:** invalid-key traffic must remain rate-limited without exhausting a legitimate private writer's operation allowance.
++
++### F3 — Medium, workload-dependent: recent activity can repeatedly scan long histories
++
++**Locations:** `internal/service/browser.go:171-212`; `internal/service/git.go:26-46`.
++
++Recent activity launches successive `git log --skip=N --max-count=100` processes until it discovers ten distinct files, or all current files. Repeated changes to one file push other files deep into history, forcing progressively deeper traversals for each homepage/recent request. Each request starts again, and reads have no explicit concurrent-Git limit. Public writers can create this history through allowed writes, then public readers can trigger expensive scans. A 15-second request deadline, ingress/operation rate limits, and repository quotas constrain exposure, but do not provide a small work budget or cache results. Actual host impact has not been measured, so service exhaustion is a risk rather than a demonstrated crash.
++
++**Recommended fix:** cache recent activity by immutable head hash; cap history scanned per request and allow a shorter result; bound concurrent Git readers. A maintained recent-file index could be a later change.
++
++## Host isolation and other follow-up observations
++
++These are hardening recommendations or review limitations, not demonstrated remote escapes:
++
++- The systemd example does not explicitly cap memory, CPU, or tasks. Add measured resource limits and an empty capability bounding set after checking compatibility. Consider kernel/device and address-family restrictions. SMTP needs outbound connectivity, so a blanket network denial would break accounts.
++- Code execution as the service user, if a future vulnerability enables it, would still expose all that user's space data and readable configuration/SMTP credentials. The current service is not a per-space OS sandbox. Root escalation was not established. Keep the service binary and configuration root-owned and data outside Apache's document root.
++- Repository provisioning checks the top-level directory, and quota walks reject symlinks, but existing repository internals/configuration are not an adversarial-import boundary. Local filesystem tampering or future Git push/import support changes the threat model. Do not enable untrusted repository import without another review.
++- Markdown `safeUrl` (`internal/service/web/slate.js:1755`) uses a scheme denylist. Prefer an explicit parsed-protocol allowlist for links/images, rejecting control characters. Existing CSP provides another barrier; no working XSS was demonstrated. External HTTPS images are permitted and may disclose a reader's IP to the image host; these are browser requests, not server SSRF.
++- Shared agent-readable documents can contain malicious instructions. Downstream agents must treat those documents as untrusted data; this service cannot enforce the tools or system permissions of consuming agents. No automatic execution of document instructions exists in the reviewed server.
++- No installed Go, Git, Apache, operating-system, or dependency vulnerability scan was performed. `go.mod` minimum versions do not identify deployed compiler/runtime patch levels. Confirm installed versions and run a separate dependency/advisory pass before claiming supply-chain coverage.
++- Security-event logging is sparse: unexpected failures are logged, but there is no dedicated audit trail for rejected authentication and quota abuse. Add bounded structured events without bearer keys, cookies, codes, document bodies, or SMTP secrets.
++
++## Suggested order
++
++First fix F1 as a small change; next separate attempt and operation quota accounting for F2. Then address F3 and verify the deployed systemd/Apache isolation settings. No runtime source changes were made during this review.
++
++## OWASP references
++
++The availability findings align with [OWASP API4:2023 — Unrestricted Resource Consumption](https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/). Host isolation/configuration checks align with [OWASP A02:2025 — Security Misconfiguration](https://top10.owasp.org/2025/A02_2025-Security_Misconfiguration/). This focused review is not full OWASP or ASVS compliance verification.

@@ -4,5 +4,6 @@
   "smtpPort": 587,
   "smtpUsername": "david@204am.com",
   "smtpFrom": "david@204am.com",
-  "smtpPasswordFile": "/etc/metatrash/smtp-password"
+  "smtpPasswordFile": "/etc/metatrash/smtp-password",
+  "databaseConfigFile": "/etc/metatrash/account-database.json"
 }

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### 0.6.0 - Database-backed human accounts (2026-09-30)
+
+- Replaced runtime JSON account persistence with MariaDB/MySQL, a versioned InnoDB schema, protected local connection configuration, and pinned Go MySQL driver 1.9.3. Accounts-enabled upgrades now require explicit database setup and migration; accounts-disabled operation remains database-free.
+- Added the offline `accounts-migrate` command using the service data lock, transactional import/completion marker, exact ID/email/time/allowance preservation, duplicate/conflict rejection, repeat verification, and explicit empty initialization. The source JSON is never modified and is not a fallback store.
+- Retained email-code login and ephemeral sessions; sessions resolve users by immutable ID, existing account values survive login, and database outages fail closed. No private-space, username, membership, or agent integration work is included.
+- Implemented prerequisite security-review F1: separate mail-attempt throttles and atomic delivery-budget reservations prevent narrower rejections draining the global allowance. Admitted failures retain reservations; F2/F3 remain pending.
+- Added focused owner-run checks and database backup/cutover/recovery documentation. Saved before snapshot and incremental patch 0021. Formatting/syntax, source, JSON, and patch checks only; no builds, test execution, live SQL/SMTP, or deployment.
+
+### Documentation - Private spaces plan alignment (2026-09-30)
+
+- Updated the private-spaces plan and linked roadmaps with identity/allowance-preserving migration, provisioning recovery, existing-key compatibility, ownership and invitation rules, and security-fix sequencing.
+- Clarified read-only content access for all humans; invited-user content permissions concern future agent access, whose implementation remains deferred. Retained export, deletion, key management, and remote Git as later bites.
+- Saved before snapshot and incremental patch 0020. Documentation-only change; version remains 0.5.3. No builds or tests run.
+
+### Documentation - Focused security review (2026-09-30)
+
+- Reviewed system-escape boundaries and recorded availability findings, recommended fixes, and host-isolation limitations in `docs/security-review-2026-09-30.md`.
+- No runtime source changes; version remains 0.5.3. Saved before snapshot and incremental patch 0019. No builds, test execution, live attacks, or deployment.
+
 ### 0.5.3 - Clean document URLs (2026-09-29)
 
 - Serve public documents at `/spaces/public/<file-path>` and use these links in the explorer and initial/refreshed recent activity.

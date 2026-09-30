@@ -1,0 +1,7 @@
+{
+  "network": "unix",
+  "address": "/var/lib/mysql/mysql.sock",
+  "database": "metatrash",
+  "username": "metatrash_accounts",
+  "passwordFile": "/etc/metatrash/database-password"
+}
