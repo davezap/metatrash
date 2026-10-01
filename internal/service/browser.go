@@ -116,6 +116,8 @@ func (h *httpAdapter) serveRecent(w http.ResponseWriter, r *http.Request, client
 }
 
 type browserPage struct {
+	Private           bool
+	SpaceName         string
 	BasePath, MCPURL  string
 	AccountsEnabled   bool
 	Home              bool
@@ -133,7 +135,7 @@ func fileURL(path string) string {
 	return "/spaces/public/" + strings.Join(parts, "/")
 }
 
-func fileTree(files map[string]record, selected string) []*browserNode {
+func fileTree(files map[string]record, selected string, spaceRoot ...string) []*browserNode {
 	root := &browserNode{}
 	paths := make([]string, 0, len(files))
 	for path := range files {
@@ -157,6 +159,9 @@ func fileTree(files map[string]record, selected string) []*browserNode {
 			}
 			if i == len(parts)-1 {
 				node.URL = fileURL(path)
+				if len(spaceRoot) > 0 {
+					node.URL = spaceRoot[0] + strings.TrimPrefix(node.URL, "/spaces/public/")
+				}
 				node.Selected = path == selected
 			}
 			node.Count++

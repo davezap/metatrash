@@ -112,7 +112,7 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 	}
 	var version int
 	var source string
-	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 3 || source == "" {
+	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 4 || source == "" {
 		return fmt.Errorf("account schema/migration is not ready; follow docs/account-database.md")
 	}
 	var usernameIndex int
@@ -120,6 +120,9 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 		return fmt.Errorf("username unique index is required; follow docs/public-usernames.md")
 	}
 	if err := s.checkOwnedSpaceSchema(ctx); err != nil {
+		return err
+	}
+	if err := s.checkHumanMembershipSchema(ctx); err != nil {
 		return err
 	}
 	// Validate persisted records at startup, including the preserved service cap.
@@ -201,8 +204,8 @@ func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, boo
 func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
 	var version int
 	var source string
-	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version != 1 && version != 2 && version != 3) {
-		return "", fmt.Errorf("account schema version 1, 2 or 3 is required")
+	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version < 1 || version > 4) {
+		return "", fmt.Errorf("account schema version 1 through 4 is required")
 	}
 	return source, nil
 }

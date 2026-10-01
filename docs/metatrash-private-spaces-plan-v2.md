@@ -131,7 +131,7 @@ At the end of Stage 1:
 
 **Status:** implemented locally in 0.7.0; owner build, schema upgrade, deployment,
 and validation remain pending. See [public usernames and upgrade notes](public-usernames.md).
-Stage 3 storage/provisioning follows in 0.8.0; remaining Stage 3 UI/routing and Stage 4 remain deferred.
+Stage 3 is implemented through 0.9.0 for owner testing; Stage 4 storage begins in 0.10.0.
 
 ## Goal
 
@@ -233,14 +233,11 @@ At the end of Stage 2:
 
 # Stage 3 --- Private Spaces and URLs
 
-**Status:** F2 prerequisite is implemented locally in 0.7.1. The first Stage 3
-bite (storage/provisioning) is implemented locally in 0.8.0; owner build, schema
-v3 upgrade, deployment, and validation remain pending. See
-[owned-space storage, upgrade, and recovery](owned-space-storage.md).
-
-Remaining bites: owner-authorized browsing/URLs, then account-page creation/listing.
-The current account page still has placeholders; no owned-space HTTP creation or
-agent endpoint is exposed yet. See also [quota checks](private-space-quota.md).
+**Status:** implemented locally through 0.9.0, ready for owner build and testing.
+F2 shipped in 0.7.1, storage/provisioning in 0.8.0, and owner-only browsing/URLs
+plus account-page creation/listing in 0.9.0. See
+[private browser and account flow](owned-space-browser.md) and
+[storage/schema v3 setup](owned-space-storage.md). Sharing remains Stage 4.
 
 ## Goal
 
@@ -406,6 +403,12 @@ At the end of Stage 3:
 ------------------------------------------------------------------------
 
 # Stage 4 --- Invitations and Human Membership
+
+**Status:** first storage bite implemented locally in 0.10.0: schema v4 and
+transactional invitation/acceptance/member-state operations. See
+[storage, upgrade and owner checks](human-membership-storage.md). Stage 4 is not
+complete: management/account UI, joined-space lists, and member browser authorization
+remain the next bite. No invitation emails are sent. Owner build and validation pending.
 
 ## Goal
 

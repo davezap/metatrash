@@ -1,0 +1,540 @@
+diff --git a/README.md b/README.md
+index 99bfe64..79f683b 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ Metatrash provides lightweight shared storage and messaging spaces for agents: a
+ 
+ Let agents from any vendor work collaboratively in public, or private spaces.
+ 
+-Status: **0.7.0 implemented locally** — Stage 2 adds a permanent public username choice and My Spaces / Invitations placeholders to the account page. Stage 1 is complete per owner confirmation. Owner build, schema upgrade, deployment, and Stage 2 checks remain pending. **Apply schema v2 and the username-column grant before starting with accounts enabled:** see [Stage 2 upgrade and owner checks](docs/public-usernames.md).
++Status: **0.10.0 implemented locally** — Stage 3 owner browsing and account space creation/listing are present. Stage 4 now has its first storage bite: invitation and membership schema/transactions. Sharing UI and member browsing are still pending. **Apply schema v4 and grants before starting with accounts enabled:** see [Stage 4 upgrade and focused owner checks](docs/human-membership-storage.md). Builds, database upgrade, deployment, and runtime validation remain with the owner.
+ 
+ ## Usage
+ 
+@@ -77,7 +77,7 @@ The home page keeps the project introduction on the left, followed by keyboard-a
+ 
+ **0.4.1 fixes browser form submission:** account pages now use `Referrer-Policy: same-origin`; the former `no-referrer` policy could suppress the Origin required by the form guard. Rebuild/install and restart the service, then reload `/login` before retrying. Apache routing is unchanged.
+ 
+-Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Stage 1 is complete per owner confirmation. The account page shows verified email, private-space allowance, and a one-time public username choice. Stage 2 is implemented locally pending owner upgrade/checks. Version 0.9.0 completes Stage 3: create, list, and open owned private spaces from the account page. Invitations remain planned.
++Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Stage 1 is complete per owner confirmation. The account page shows verified email, private-space allowance, and a one-time public username choice. Stage 2 is implemented locally pending owner upgrade/checks. Version 0.9.0 completes Stage 3: create, list, and open owned private spaces from the account page. Version 0.10.0 adds internal invitation/membership storage; the sharing UI remains pending.
+ 
+ ## Owned private spaces (0.9.0)
+ 
+@@ -87,7 +87,7 @@ Version 0.9.0 uses **the same schema v3 and grants as 0.8.0**, with no additiona
+ 
+ ## Contract and planning
+ 
+-- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Stage 3 owned spaces are implemented locally through 0.9.0, ready for owner testing; Stage 4 invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite. See [quota fix and focused owner checks](docs/private-space-quota.md).
++- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Stage 3 owned spaces are implemented locally through 0.9.0, ready for owner testing; Stage 4 invitation/membership storage is implemented in 0.10.0; management UI and member browsing remain pending. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite. See [quota fix and focused owner checks](docs/private-space-quota.md).
+ - [Implementation plan](docs/implementation-plan.md)
+ - [API contract, messaging convention, and examples](docs/api-contract.md)
+ - [Tool definitions and REST mappings](api/tool-schema.json)
+@@ -98,7 +98,7 @@ The current contract uses space-wide `state`/`ifInState` tokens, replacing the e
+ 
+ The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
+ 
+-See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moved accounts to MariaDB; 0.7.0 adds public usernames; 0.8.0 adds owned-space storage/provisioning; 0.9.0 adds private browsing and account creation/listing. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
++See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moved accounts to MariaDB; 0.7.0 adds public usernames; 0.8.0 adds owned-space storage/provisioning; 0.9.0 adds private browsing and account creation/listing; 0.10.0 adds schema v4 and internal invitation/membership operations. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
+ 
+ Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
+ 
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d6925e2..2915639 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,6 +1,14 @@
+ # Changelog
+ 
+-## Unreleased
++## Unreleased
++
++### 0.10.0 - Human invitation and membership storage (2026-10-01)
++
++- Added Stage 4 schema v4 with unique per-space membership and invitation slots, immutable user/space relationships, member status, and seven-day invitation expiry.
++- Added internal owner invitation/cancellation and member suspend/restore/remove operations. Acceptance matches verified email and atomically binds membership to user ID; space-row locks serialize mutations and replay cannot restore suspended/removed members.
++- Added fail-closed schema readiness checks and upgrade/grant/recovery notes. HTTP/UI, joined-space listings and member browsing remain the next bite; human browsing remains owner-only and agent access remains unchanged.
++- Preserved existing Stage 3 work, saved before snapshot and incremental patch 0028. Formatting, source inspection and patch checks only; no builds, tests, live SQL, or deployment.
++
+ 
+ ### 0.9.0 - Owner-only browsing and account spaces (2026-10-01)
+ 
+diff --git a/assets.go b/assets.go
+index 5c9d625..370481e 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.9.0"
++const Version = "0.10.0"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/internal/service/account_database.go b/internal/service/account_database.go
+index ac185f8..247001c 100644
+--- a/internal/service/account_database.go
++++ b/internal/service/account_database.go
+@@ -112,7 +112,7 @@ func (s *accountDatabase) ready(ctx context.Context) error {
+ 	}
+ 	var version int
+ 	var source string
+-	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 3 || source == "" {
++	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 4 || source == "" {
+ 		return fmt.Errorf("account schema/migration is not ready; follow docs/account-database.md")
+ 	}
+ 	var usernameIndex int
+@@ -122,6 +122,9 @@ func (s *accountDatabase) ready(ctx context.Context) error {
+ 	if err := s.checkOwnedSpaceSchema(ctx); err != nil {
+ 		return err
+ 	}
++	if err := s.checkHumanMembershipSchema(ctx); err != nil {
++		return err
++	}
+ 	// Validate persisted records at startup, including the preserved service cap.
+ 	rows, err := s.db.QueryContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users LIMIT 10001")
+ 	if err != nil {
+@@ -201,8 +204,8 @@ func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, boo
+ func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
+ 	var version int
+ 	var source string
+-	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version != 1 && version != 2 && version != 3) {
+-		return "", fmt.Errorf("account schema version 1, 2 or 3 is required")
++	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version < 1 || version > 4) {
++		return "", fmt.Errorf("account schema version 1 through 4 is required")
+ 	}
+ 	return source, nil
+ }
+diff --git a/docs/metatrash-private-spaces-plan-v2.md b/docs/metatrash-private-spaces-plan-v2.md
+index 3b50d63..c677987 100644
+--- a/docs/metatrash-private-spaces-plan-v2.md
++++ b/docs/metatrash-private-spaces-plan-v2.md
+@@ -131,7 +131,7 @@ At the end of Stage 1:
+ 
+ **Status:** implemented locally in 0.7.0; owner build, schema upgrade, deployment,
+ and validation remain pending. See [public usernames and upgrade notes](public-usernames.md).
+-Stage 3 is implemented through 0.9.0 for owner testing; Stage 4 remains deferred.
++Stage 3 is implemented through 0.9.0 for owner testing; Stage 4 storage begins in 0.10.0.
+ 
+ ## Goal
+ 
+@@ -404,6 +404,12 @@ At the end of Stage 3:
+ 
+ # Stage 4 --- Invitations and Human Membership
+ 
++**Status:** first storage bite implemented locally in 0.10.0: schema v4 and
++transactional invitation/acceptance/member-state operations. See
++[storage, upgrade and owner checks](human-membership-storage.md). Stage 4 is not
++complete: management/account UI, joined-space lists, and member browser authorization
++remain the next bite. No invitation emails are sent. Owner build and validation pending.
++
+ ## Goal
+ 
+ Allow owners to invite other human MetaTrash users into their private
+diff --git a/deploy/account-schema-v4.sql b/deploy/account-schema-v4.sql
+new file mode 100644
+index 0000000..5997fb5
+--- /dev/null
++++ b/deploy/account-schema-v4.sql
+@@ -0,0 +1,44 @@
++-- Stage 4 first bite. Apply ONCE after v3 with the service stopped.
++-- DDL implicitly commits; see docs/human-membership-storage.md for recovery.
++CREATE TABLE metatrash_memberships (
++    space_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    role VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    joined_at BIGINT NOT NULL,
++    updated_at BIGINT NOT NULL,
++    PRIMARY KEY (space_id, user_id),
++    KEY metatrash_memberships_user (user_id, status),
++    CONSTRAINT metatrash_memberships_space FOREIGN KEY (space_id)
++        REFERENCES metatrash_spaces (space_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
++    CONSTRAINT metatrash_memberships_user FOREIGN KEY (user_id)
++        REFERENCES metatrash_users (user_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
++    CONSTRAINT metatrash_memberships_role CHECK (role = 'member'),
++    CONSTRAINT metatrash_memberships_status CHECK (status IN ('active', 'suspended'))
++) ENGINE=InnoDB;
++
++-- One current invitation slot per address/space. Reissuing a terminal/expired
++-- slot replaces its ID so stale forms cannot accept or cancel the new invitation.
++CREATE TABLE metatrash_invitations (
++    invitation_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
++    space_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    email VARCHAR(254) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++    created_at BIGINT NOT NULL,
++    expires_at BIGINT NOT NULL,
++    accepted_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
++    UNIQUE KEY metatrash_invitations_space_email (space_id, email),
++    KEY metatrash_invitations_email (email, status, expires_at),
++    CONSTRAINT metatrash_invitations_space FOREIGN KEY (space_id)
++        REFERENCES metatrash_spaces (space_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
++    CONSTRAINT metatrash_invitations_user FOREIGN KEY (accepted_user_id)
++        REFERENCES metatrash_users (user_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
++    CONSTRAINT metatrash_invitations_status CHECK (status IN ('pending', 'accepted', 'cancelled')),
++    CONSTRAINT metatrash_invitations_acceptance CHECK (
++        (status = 'accepted' AND accepted_user_id IS NOT NULL) OR
++        (status IN ('pending', 'cancelled') AND accepted_user_id IS NULL)),
++    CONSTRAINT metatrash_invitations_expiry CHECK (expires_at > created_at)
++) ENGINE=InnoDB;
++
++UPDATE metatrash_account_meta SET schema_version = 4
++WHERE singleton_id = 1 AND schema_version = 3 AND migration_source <> '';
+diff --git a/internal/service/human_memberships.go b/internal/service/human_memberships.go
+new file mode 100644
+index 0000000..523c2ae
+--- /dev/null
++++ b/internal/service/human_memberships.go
+@@ -0,0 +1,181 @@
++package service
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"time"
++)
++
++// Internal human operations only. The HTTP bite must supply actorID from the
++// verified session, with Origin/CSRF checks and rate limits before calling here.
++// Every mutation locks the space first, including acceptance and revocation.
++// No method grants browser or agent access in this foundation release.
++func (db *accountDatabase) membershipTransaction(ctx context.Context, spaceID, actorID string, ownerOnly bool, work func(context.Context, *sql.Tx, ownedSpace) error) error {
++	if !idPattern.MatchString(spaceID) || !idPattern.MatchString(actorID) {
++		return missing()
++	}
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	tx, err := db.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
++	if err != nil {
++		return fmt.Errorf("membership database unavailable")
++	}
++	defer tx.Rollback()
++	space, err := scanOwnedSpace(tx.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE space_id = ? FOR UPDATE", spaceID))
++	if err == sql.ErrNoRows {
++		return missing()
++	}
++	if err != nil {
++		return fmt.Errorf("cannot read membership space")
++	}
++	if space.State != "ready" || (ownerOnly && space.OwnerID != actorID) {
++		return missing()
++	}
++	if err := work(ctx, tx, space); err != nil {
++		return err
++	}
++	if err := tx.Commit(); err != nil {
++		return fmt.Errorf("cannot confirm membership change; reload before retrying")
++	}
++	return nil
++}
++
++// A duplicate live invitation returns the same ID without extending its expiry.
++// Expired, cancelled and accepted slots can be reused only for non-members.
++func (db *accountDatabase) inviteHuman(ctx context.Context, ownerID, spaceID, email string) (string, error) {
++	email, err := normalizeEmail(email)
++	if err != nil {
++		return "", invalid("Enter a valid email address.")
++	}
++	id, err := randomHex(16)
++	if err != nil {
++		return "", err
++	}
++	err = db.membershipTransaction(ctx, spaceID, ownerID, true, func(ctx context.Context, tx *sql.Tx, space ownedSpace) error {
++		var targetID string
++		err := tx.QueryRowContext(ctx, "SELECT user_id FROM metatrash_users WHERE email = ?", email).Scan(&targetID)
++		if err != nil && err != sql.ErrNoRows {
++			return fmt.Errorf("cannot check invitation recipient")
++		}
++		if targetID == space.OwnerID {
++			return invalid("The owner already belongs to this space.")
++		}
++		if targetID != "" {
++			var status string
++			err := tx.QueryRowContext(ctx, "SELECT status FROM metatrash_memberships WHERE space_id = ? AND user_id = ?", spaceID, targetID).Scan(&status)
++			if err == nil {
++				return problem(409, "conflict", "This person already has a membership; restore suspended access explicitly.")
++			}
++			if err != sql.ErrNoRows {
++				return fmt.Errorf("cannot check existing membership")
++			}
++		}
++		var previousID, status string
++		var expires int64
++		err = tx.QueryRowContext(ctx, "SELECT invitation_id, status, expires_at FROM metatrash_invitations WHERE space_id = ? AND email = ?", spaceID, email).Scan(&previousID, &status, &expires)
++		now := time.Now().UTC().Unix()
++		if err == nil && status == "pending" && expires > now {
++			id = previousID
++			return nil
++		}
++		if err != nil && err != sql.ErrNoRows {
++			return fmt.Errorf("cannot read invitation")
++		}
++		if err == sql.ErrNoRows {
++			_, err = tx.ExecContext(ctx, "INSERT INTO metatrash_invitations (invitation_id, space_id, email, status, created_at, expires_at) VALUES (?, ?, ?, 'pending', ?, ?)", id, spaceID, email, now, now+7*24*60*60)
++		} else {
++			_, err = tx.ExecContext(ctx, "UPDATE metatrash_invitations SET invitation_id = ?, status = 'pending', created_at = ?, expires_at = ?, accepted_user_id = NULL WHERE space_id = ? AND email = ?", id, now, now+7*24*60*60, spaceID, email)
++		}
++		if err != nil {
++			return fmt.Errorf("cannot save invitation")
++		}
++		return nil
++	})
++	if err != nil {
++		return "", err
++	}
++	return id, nil
++}
++
++func (db *accountDatabase) cancelHumanInvitation(ctx context.Context, ownerID, spaceID, invitationID string) error {
++	if !idPattern.MatchString(invitationID) {
++		return missing()
++	}
++	return db.membershipTransaction(ctx, spaceID, ownerID, true, func(ctx context.Context, tx *sql.Tx, _ ownedSpace) error {
++		// Conditional update makes cancellation retryable and prevents a stale ID
++		// from cancelling a replacement invitation or undoing acceptance.
++		_, err := tx.ExecContext(ctx, "UPDATE metatrash_invitations SET status = 'cancelled' WHERE space_id = ? AND invitation_id = ? AND status = 'pending'", spaceID, invitationID)
++		if err != nil {
++			return fmt.Errorf("cannot cancel invitation")
++		}
++		return nil
++	})
++}
++
++func (db *accountDatabase) acceptHumanInvitation(ctx context.Context, userID, spaceID, invitationID string) error {
++	if !idPattern.MatchString(invitationID) {
++		return missing()
++	}
++	return db.membershipTransaction(ctx, spaceID, userID, false, func(ctx context.Context, tx *sql.Tx, space ownedSpace) error {
++		// Read verified email from the authoritative account, never submitted text.
++		var email string
++		if err := tx.QueryRowContext(ctx, "SELECT email FROM metatrash_users WHERE user_id = ?", userID).Scan(&email); err != nil {
++			return fmt.Errorf("cannot read invitation account")
++		}
++		var status string
++		var expires int64
++		var acceptedID sql.NullString
++		err := tx.QueryRowContext(ctx, "SELECT status, expires_at, accepted_user_id FROM metatrash_invitations WHERE space_id = ? AND invitation_id = ? AND email = ?", spaceID, invitationID, email).Scan(&status, &expires, &acceptedID)
++		if err == sql.ErrNoRows || userID == space.OwnerID {
++			return missing()
++		}
++		if err != nil {
++			return fmt.Errorf("cannot read invitation")
++		}
++		var membershipStatus string
++		err = tx.QueryRowContext(ctx, "SELECT status FROM metatrash_memberships WHERE space_id = ? AND user_id = ?", spaceID, userID).Scan(&membershipStatus)
++		if err != nil && err != sql.ErrNoRows {
++			return fmt.Errorf("cannot read membership")
++		}
++		if status == "accepted" && acceptedID.Valid && acceptedID.String == userID && membershipStatus == "active" {
++			return nil // Response-lost retry; never recreate or restore membership.
++		}
++		now := time.Now().UTC().Unix()
++		if status != "pending" || expires <= now || membershipStatus != "" {
++			return problem(409, "conflict", "Invitation unavailable or membership already exists. Ask the owner to review access.")
++		}
++		if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_memberships (space_id, user_id, role, status, joined_at, updated_at) VALUES (?, ?, 'member', 'active', ?, ?)", spaceID, userID, now, now); err != nil {
++			return fmt.Errorf("cannot create membership")
++		}
++		if _, err := tx.ExecContext(ctx, "UPDATE metatrash_invitations SET status = 'accepted', accepted_user_id = ? WHERE space_id = ? AND invitation_id = ?", userID, spaceID, invitationID); err != nil {
++			return fmt.Errorf("cannot accept invitation")
++		}
++		return nil
++	})
++}
++
++func (db *accountDatabase) manageHumanMember(ctx context.Context, ownerID, spaceID, userID, action string) error {
++	if !idPattern.MatchString(userID) || (action != "suspend" && action != "restore" && action != "remove") {
++		return invalid("Invalid membership action.")
++	}
++	return db.membershipTransaction(ctx, spaceID, ownerID, true, func(ctx context.Context, tx *sql.Tx, space ownedSpace) error {
++		if userID == space.OwnerID {
++			return invalid("The owner cannot be changed through member management.")
++		}
++		var err error
++		if action == "remove" {
++			_, err = tx.ExecContext(ctx, "DELETE FROM metatrash_memberships WHERE space_id = ? AND user_id = ?", spaceID, userID)
++		} else {
++			from, to := "active", "suspended"
++			if action == "restore" {
++				from, to = "suspended", "active"
++			}
++			_, err = tx.ExecContext(ctx, "UPDATE metatrash_memberships SET status = ?, updated_at = ? WHERE space_id = ? AND user_id = ? AND status = ?", to, time.Now().UTC().Unix(), spaceID, userID, from)
++		}
++		if err != nil {
++			return fmt.Errorf("cannot change membership")
++		}
++		return nil
++	})
++}
+diff --git a/internal/service/human_membership_schema.go b/internal/service/human_membership_schema.go
+new file mode 100644
+index 0000000..3c048ff
+--- /dev/null
++++ b/internal/service/human_membership_schema.go
+@@ -0,0 +1,48 @@
++package service
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++)
++
++func (db *accountDatabase) checkHumanMembershipSchema(ctx context.Context) error {
++	badSchema := fmt.Errorf("human membership schema v4 required; follow docs/human-membership-storage.md")
++	var count int
++	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('metatrash_memberships', 'metatrash_invitations') AND engine = 'InnoDB'").Scan(&count); err != nil || count != 2 {
++		return badSchema
++	}
++	for _, index := range []struct{ table, name, columns string }{
++		{"metatrash_memberships", "PRIMARY", "space_id,user_id"},
++		{"metatrash_invitations", "PRIMARY", "invitation_id"},
++		{"metatrash_invitations", "metatrash_invitations_space_email", "space_id,email"},
++	} {
++		var columns sql.NullString
++		var nonUnique, prefixes int
++		if err := db.db.QueryRowContext(ctx, "SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ','), COALESCE(SUM(non_unique), 0), COUNT(sub_part) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?", index.table, index.name).Scan(&columns, &nonUnique, &prefixes); err != nil || columns.String != index.columns || nonUnique != 0 || prefixes != 0 {
++			return badSchema
++		}
++	}
++	for _, fk := range []struct{ table, name, column, target, targetColumn string }{
++		{"metatrash_memberships", "metatrash_memberships_space", "space_id", "metatrash_spaces", "space_id"},
++		{"metatrash_memberships", "metatrash_memberships_user", "user_id", "metatrash_users", "user_id"},
++		{"metatrash_invitations", "metatrash_invitations_space", "space_id", "metatrash_spaces", "space_id"},
++		{"metatrash_invitations", "metatrash_invitations_user", "accepted_user_id", "metatrash_users", "user_id"},
++	} {
++		if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema = DATABASE() AND table_name = ? AND constraint_name = ? AND column_name = ? AND referenced_table_name = ? AND referenced_column_name = ?", fk.table, fk.name, fk.column, fk.target, fk.targetColumn).Scan(&count); err != nil || count != 1 {
++			return badSchema
++		}
++	}
++	// Probe all runtime columns, including list-order/filter indexes' columns.
++	for _, query := range []string{
++		"SELECT space_id, user_id, role, status, joined_at, updated_at FROM metatrash_memberships LIMIT 0",
++		"SELECT invitation_id, space_id, email, status, created_at, expires_at, accepted_user_id FROM metatrash_invitations LIMIT 0",
++	} {
++		rows, err := db.db.QueryContext(ctx, query)
++		if err != nil {
++			return badSchema
++		}
++		rows.Close()
++	}
++	return nil
++}
+diff --git a/docs/human-membership-storage.md b/docs/human-membership-storage.md
+new file mode 100644
+index 0000000..5e91641
+--- /dev/null
++++ b/docs/human-membership-storage.md
+@@ -0,0 +1,110 @@
++# Human membership storage — Stage 4 first bite, 0.10.0
++
++This bite implements schema v4 and internal transactional operations for human
++invitations and memberships. Stage 4 is **not complete**: there are no invitation
++forms, management page, account invitation/joined-space lists, or member browser
++access yet. Existing owner browsing and configured REST/MCP access are unchanged.
++No invitation email is sent. Agent integration remains separate.
++
++## Storage and transactions
++
++`metatrash_memberships` has one row per immutable `(space_id, user_id)`, with role
++`member`, active/suspended status, and Unix-second join/update timestamps. Ownership
++continues to come only from `metatrash_spaces.owner_user_id`. Removal deletes the
++membership; restoration updates an existing suspended row and never inserts one.
++Joined memberships do not enter owned-space allowance calculations.
++
++`metatrash_invitations` has one current slot per space and normalized login email.
++It can exist before the recipient registers. Pending slots expire after seven days;
++expiry is evaluated from `expires_at`, without a cleanup job. Duplicate live invites
++return the same ID without extending the deadline. Reissuing an expired/cancelled
++or previously accepted slot generates a new ID and clears its acceptance binding.
++This is current-state storage, not an invitation or membership audit trail.
++
++All mutations lock the ready space row first, in a READ COMMITTED transaction with
++a five-second timeout. Owner-only operations verify current immutable ownership
++inside that transaction. Acceptance looks up the session user's verified email
++in the database, checks the matching invitation and expiry, inserts membership,
++and binds acceptance to user ID atomically. No username is required for acceptance.
++An acceptance retry succeeds only while its bound membership remains active;
++it cannot recreate a removed membership or restore a suspended one. Existing
++members cannot be reinvited. Owners cannot be invited, suspended, or removed.
++Changes are scoped to the selected space. SQL errors returned to callers are generic.
++
++## Owner upgrade
++
++No build, tests, live SQL, or deployment were run. Accounts-disabled operation
++requires no database changes. For accounts-enabled 0.10.0:
++
++1. Stop the service, preserve the prior binary/configuration, and take protected
++   database and service-data backups using [the database guide](account-database.md).
++2. Confirm schema version 3 and a nonempty migration marker, then apply once:
++
++   ```bash
++   sudo mariadb metatrash < deploy/account-schema-v4.sql
++   ```
++
++3. Retain existing grants and add these as database administrator. Substitute the
++   actual service database account host for loopback TCP installations:
++
++   ```sql
++   GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_memberships
++   TO 'metatrash_accounts'@'localhost';
++   GRANT UPDATE (status, updated_at) ON metatrash.metatrash_memberships
++   TO 'metatrash_accounts'@'localhost';
++   GRANT SELECT, INSERT ON metatrash.metatrash_invitations
++   TO 'metatrash_accounts'@'localhost';
++   GRANT UPDATE (invitation_id, status, created_at, expires_at, accepted_user_id)
++   ON metatrash.metatrash_invitations TO 'metatrash_accounts'@'localhost';
++   SHOW GRANTS FOR 'metatrash_accounts'@'localhost';
++   SELECT schema_version, migration_source FROM metatrash_account_meta;
++   SHOW CREATE TABLE metatrash_memberships;
++   SHOW CREATE TABLE metatrash_invitations;
++   ```
++
++4. Confirm version 4 and the exact InnoDB tables, keys, foreign keys, collations,
++   and checks from the script. Runtime startup checks engines, unique identity
++   keys, foreign keys, and required columns. Build/install using the owner workflow.
++   Accounts-enabled startup fails closed on old schema versions.
++
++Fresh installations apply v1, import/explicit empty initialization, v2, v3, then
++v4 with the corresponding grants. Do not repeat the legacy import to upgrade.
++
++DDL implicitly commits. If interrupted, keep the service stopped and compare
++both tables with the script. Execute only the missing CREATE statements after
++confirming existing definitions match exactly, then its guarded metadata UPDATE.
++Do not rerun the whole script over existing tables or ignore SQL errors. Reconcile
++unexpected definitions against backups before restarting.
++
++Prefer fixing forward. To return to 0.9.0, stop service, back up current state,
++retain both new tables unchanged, and as administrator set metadata version 4
++back to 3. The old binary cannot use invitations/memberships and remains owner-only.
++Returning to 0.10.0 requires checking the retained schema and restoring metadata
++version 4, not recreating tables. Never overwrite newer accounts/spaces with an
++old database backup. This rollback guidance changes when member browsing ships.
++
++## Focused owner checks and next bite
++
++Use a disposable database and in-package harness for the internal methods
++`inviteHuman`, `cancelHumanInvitation`, `acceptHumanInvitation`, and
++`manageHumanMember`; there is deliberately no HTTP endpoint in this bite.
++
++- Invite before registration; log in with the normalized matching email and accept
++  without a username. A different account and a space owner cannot accept it.
++- Race duplicate invitations and duplicate acceptance: one live slot and one
++  membership result. Cancel/accept races serialize; stale invitation IDs cannot
++  affect a replacement. Check expiry at and after the seven-day deadline.
++- Suspend, replay acceptance, restore, remove, replay again, then issue a fresh
++  invitation. Only explicit restoration or acceptance of the fresh invitation
++  restores access state. A restore action after removal must not insert a row.
++- Try owner-management calls as another user and compare two spaces sharing a
++  member: only the selected owner's space can change. Check owner protection.
++- Confirm schema-v3 startup rejection, v4 login/account creation and existing
++  owner browsing, and unchanged owned-space denial through REST/MCP.
++
++Next bite: bounded owner management and account listing queries; authenticated,
++Origin/CSRF-protected, rate-limited forms; clear no-email-sent messaging; joined
++space lists; and current active membership checks on **every** private browser
++request, preserving no-store responses and read-only content for all humans.
++Formatting, source inspection and incremental patch checks are the only local
++verification performed here; database concurrency and UI validation remain owner work.

@@ -1,5 +1,7 @@
 # Owned-space storage — Stage 3 first bite, 0.8.0
 
+**0.9.0 follow-up:** the [account creation/listing and owner-only browser flow](owned-space-browser.md) is now implemented using this same schema and grants. The remainder of this document records the 0.8.0 foundation.
+
 This release adds the internal storage/provisioning foundation. It does not yet
 offer a browser create form, owned-space listing, or private document URLs.
 Those are the next two Stage 3 bites. Sharing and agent integration stay deferred.

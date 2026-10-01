@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### 0.10.0 - Human invitation and membership storage (2026-10-01)
+
+- Added Stage 4 schema v4 with unique per-space membership and invitation slots, immutable user/space relationships, member status, and seven-day invitation expiry.
+- Added internal owner invitation/cancellation and member suspend/restore/remove operations. Acceptance matches verified email and atomically binds membership to user ID; space-row locks serialize mutations and replay cannot restore suspended/removed members.
+- Added fail-closed schema readiness checks and upgrade/grant/recovery notes. HTTP/UI, joined-space listings and member browsing remain the next bite; human browsing remains owner-only and agent access remains unchanged.
+- Preserved existing Stage 3 work, saved before snapshot and incremental patch 0028. Formatting, source inspection and patch checks only; no builds, tests, live SQL, or deployment.
+
+
+### 0.9.0 - Owner-only browsing and account spaces (2026-10-01)
+
+- Completed the Stage 3 human flow: create/list/open owned spaces from Your account, with allowance display and retries for unfinished creation. Creation takes ownership from the session and uses existing transactional allowance enforcement.
+- Added owner-authorized `/spaces/{username}/{space-slug}/` and document routes with the existing read-only viewer, private explorer labels, no-store/no-referrer/noindex responses, and hosting-prefix support. Public routes/recent activity remain public-only; owned-space REST/MCP access remains blocked.
+- Protected creation with exact Host/Origin, action-specific session CSRF, bounded form fields, and per-user attempt limits. Private reads reserve operation quotas after ownership checks. No new schema, grants, or Apache changes beyond 0.8.0.
+- Updated README, plan, and browser documentation. Saved before snapshot and incremental patch 0027. Formatting, source review, and patch consistency only; no builds, tests, live SQL, or deployment. Owner runs testing; Stage 4 remains deferred.
+
+
 ### 0.8.0 - Owned-space storage and provisioning (2026-10-01)
 
 - Added schema v3 for immutable space IDs, owner user-ID relationships, names, private visibility, creation metadata, fixed owner-unique slugs, and provisioning state. Accounts-enabled startup now requires v3 and validates its storage constraints.

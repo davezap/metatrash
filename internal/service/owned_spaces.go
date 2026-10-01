@@ -122,9 +122,9 @@ func (db *accountDatabase) reserveOwnedSpace(ctx context.Context, ownerID, id, n
 	return space, nil
 }
 
-// Internal foundation for a future authenticated account handler. ownerID must
+// Creation for the authenticated account handler. ownerID must
 // come from the resolved human session, never a submitted form or agent input.
-// No HTTP or MCP adapter exposes this method in this bite.
+// Only the human account form exposes creation; agent adapters cannot call it.
 func (s *Service) createOwnedSpace(ctx context.Context, ownerID, name, slug string) (ownedSpace, error) {
 	name, slug, err := normalizeSpaceName(name, slug)
 	if err != nil {

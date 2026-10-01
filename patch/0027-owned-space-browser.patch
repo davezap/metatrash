@@ -1,0 +1,599 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index b800dab..2dd50d2 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,14 @@
+ 
+ ## Unreleased
+ 
++### 0.9.0 - Owner-only browsing and account spaces (2026-10-01)
++
++- Completed the Stage 3 human flow: create/list/open owned spaces from Your account, with allowance display and retries for unfinished creation. Creation takes ownership from the session and uses existing transactional allowance enforcement.
++- Added owner-authorized `/spaces/{username}/{space-slug}/` and document routes with the existing read-only viewer, private explorer labels, no-store/no-referrer/noindex responses, and hosting-prefix support. Public routes/recent activity remain public-only; owned-space REST/MCP access remains blocked.
++- Protected creation with exact Host/Origin, action-specific session CSRF, bounded form fields, and per-user attempt limits. Private reads reserve operation quotas after ownership checks. No new schema, grants, or Apache changes beyond 0.8.0.
++- Updated README, plan, and browser documentation. Saved before snapshot and incremental patch 0027. Formatting, source review, and patch consistency only; no builds, tests, live SQL, or deployment. Owner runs testing; Stage 4 remains deferred.
++
++
+ ### 0.8.0 - Owned-space storage and provisioning (2026-10-01)
+ 
+ - Added schema v3 for immutable space IDs, owner user-ID relationships, names, private visibility, creation metadata, fixed owner-unique slugs, and provisioning state. Accounts-enabled startup now requires v3 and validates its storage constraints.
+diff --git a/README.md b/README.md
+index ce43cb8..5e21ec5 100644
+--- a/README.md
++++ b/README.md
+@@ -77,17 +77,17 @@ The home page keeps the project introduction on the left, followed by keyboard-a
+ 
+ **0.4.1 fixes browser form submission:** account pages now use `Referrer-Policy: same-origin`; the former `no-referrer` policy could suppress the Origin required by the form guard. Rebuild/install and restart the service, then reload `/login` before retrying. Apache routing is unchanged.
+ 
+-Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Stage 1 is complete per owner confirmation. The account page shows verified email, private-space allowance, and a one-time public username choice. Stage 2 is implemented locally pending owner upgrade/checks. Version 0.8.0 adds the internal owned-space storage/provisioning foundation; creation controls, owner browsing/URLs, and invitations remain upcoming bites.
++Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Stage 1 is complete per owner confirmation. The account page shows verified email, private-space allowance, and a one-time public username choice. Stage 2 is implemented locally pending owner upgrade/checks. Version 0.9.0 completes Stage 3: create, list, and open owned private spaces from the account page. Invitations remain planned.
+ 
+-## Owned-space storage (0.8.0)
++## Owned private spaces (0.9.0)
+ 
+-The first Stage 3 bite adds immutable space IDs, owner-scoped slugs, transactional allowance reservations, and recoverable Git provisioning. Owned repositories are stored separately by ID and registered under a lock after becoming ready. REST/MCP access to them remains blocked. Browser creation/listing and owner-only URLs come in subsequent bites; the account page still has placeholders.
++Choose a public username on Your account, then create a private space with a name and permanent URL slug. Your account lists owned spaces and offers retries for unfinished creation. Open a space at `/spaces/{username}/{space-slug}/`, with document paths appended to that address. Each request checks the signed-in owner; browsing is read-only. Sharing and agent access remain deferred.
+ 
+-Accounts-enabled upgrades require **schema v3 and new table grants before starting 0.8.0**. See [upgrade, recovery, and focused owner checks](docs/owned-space-storage.md). Builds, live database changes, and deployment remain owner-run.
++Version 0.9.0 uses **the same schema v3 and grants as 0.8.0**, with no additional SQL or Apache changes. See [browser behavior and installation](docs/owned-space-browser.md), or [the schema v3 upgrade](docs/owned-space-storage.md) when upgrading from before 0.8.0. Builds and testing are owner-run.
+ 
+ ## Contract and planning
+ 
+-- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Stage 3 storage/provisioning is implemented locally in 0.8.0; owner browsing/URLs, account-page creation/listing, and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite. See [quota fix and focused owner checks](docs/private-space-quota.md).
++- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Stage 3 owned spaces are implemented locally through 0.9.0, ready for owner testing; Stage 4 invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite. See [quota fix and focused owner checks](docs/private-space-quota.md).
+ - [Implementation plan](docs/implementation-plan.md)
+ - [API contract, messaging convention, and examples](docs/api-contract.md)
+ - [Tool definitions and REST mappings](api/tool-schema.json)
+@@ -98,7 +98,7 @@ The current contract uses space-wide `state`/`ifInState` tokens, replacing the e
+ 
+ The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
+ 
+-See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moved accounts to MariaDB; 0.7.0 adds public usernames; 0.8.0 adds owned-space storage/provisioning. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
++See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moved accounts to MariaDB; 0.7.0 adds public usernames; 0.8.0 adds owned-space storage/provisioning; 0.9.0 adds private browsing and account creation/listing. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
+ 
+ Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
+ 
+diff --git a/assets.go b/assets.go
+index 617fc97..5c9d625 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.8.0"
++const Version = "0.9.0"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/docs/metatrash-private-spaces-plan-v2.md b/docs/metatrash-private-spaces-plan-v2.md
+index 3a269ff..5f1a235 100644
+--- a/docs/metatrash-private-spaces-plan-v2.md
++++ b/docs/metatrash-private-spaces-plan-v2.md
+@@ -131,7 +131,7 @@ At the end of Stage 1:
+ 
+ **Status:** implemented locally in 0.7.0; owner build, schema upgrade, deployment,
+ and validation remain pending. See [public usernames and upgrade notes](public-usernames.md).
+-Stage 3 storage/provisioning follows in 0.8.0; remaining Stage 3 UI/routing and Stage 4 remain deferred.
++Stage 3 is implemented through 0.9.0 for owner testing; Stage 4 remains deferred.
+ 
+ ## Goal
+ 
+@@ -233,14 +233,11 @@ At the end of Stage 2:
+ 
+ # Stage 3 --- Private Spaces and URLs
+ 
+-**Status:** F2 prerequisite is implemented locally in 0.7.1. The first Stage 3
+-bite (storage/provisioning) is implemented locally in 0.8.0; owner build, schema
+-v3 upgrade, deployment, and validation remain pending. See
+-[owned-space storage, upgrade, and recovery](owned-space-storage.md).
+-
+-Remaining bites: owner-authorized browsing/URLs, then account-page creation/listing.
+-The current account page still has placeholders; no owned-space HTTP creation or
+-agent endpoint is exposed yet. See also [quota checks](private-space-quota.md).
++**Status:** implemented locally through 0.9.0, ready for owner build and testing.
++F2 shipped in 0.7.1, storage/provisioning in 0.8.0, and owner-only browsing/URLs
++plus account-page creation/listing in 0.9.0. See
++[private browser and account flow](owned-space-browser.md) and
++[storage/schema v3 setup](owned-space-storage.md). Sharing remains Stage 4.
+ 
+ ## Goal
+ 
+diff --git a/docs/owned-space-storage.md b/docs/owned-space-storage.md
+index dc3e150..bf8d6e5 100644
+--- a/docs/owned-space-storage.md
++++ b/docs/owned-space-storage.md
+@@ -1,5 +1,7 @@
+ # Owned-space storage — Stage 3 first bite, 0.8.0
+ 
++**0.9.0 follow-up:** the [account creation/listing and owner-only browser flow](owned-space-browser.md) is now implemented using this same schema and grants. The remainder of this document records the 0.8.0 foundation.
++
+ This release adds the internal storage/provisioning foundation. It does not yet
+ offer a browser create form, owned-space listing, or private document URLs.
+ Those are the next two Stage 3 bites. Sharing and agent integration stay deferred.
+diff --git a/internal/service/account_http.go b/internal/service/account_http.go
+index 07c56b6..2eebc60 100644
+--- a/internal/service/account_http.go
++++ b/internal/service/account_http.go
+@@ -22,11 +22,15 @@ var accountHTML string
+ var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
+ 
+ type accountPage struct {
+-	BasePath                   string
+-	Disabled, Verify, SignedIn bool
+-	CSRF, Email, Message       string
+-	UsernameCSRF, Username     string
+-	User                       userAccount
++	SpaceCSRF, SpaceName, SpaceSlug string
++	Spaces                          []accountSpace
++	SpacesUnavailable               bool
++	CanCreate                       bool
++	BasePath                        string
++	Disabled, Verify, SignedIn      bool
++	CSRF, Email, Message            string
++	UsernameCSRF, Username          string
++	User                            userAccount
+ }
+ 
+ func accountCookie(w http.ResponseWriter, name, value string, age int) {
+@@ -49,6 +53,17 @@ func cookieToken(r *http.Request, name string) string {
+ 
+ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
+ 	page.BasePath = h.basePath
++	if page.SignedIn {
++		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
++		var err error
++		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
++		if err != nil {
++			page.SpacesUnavailable = true
++			status = http.StatusServiceUnavailable
++		} else {
++			page.CanCreate = page.User.Username != "" && len(page.Spaces) < page.User.MaxPrivateSpaces
++		}
++	}
+ 	var b bytes.Buffer
+ 	if err := accountTemplate.Execute(&b, page); err != nil {
+ 		sendError(w, err)
+@@ -81,7 +96,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		loginCookie += suffix
+ 		sessionCookie += suffix
+ 	}
+-	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" {
++	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" {
+ 		return false
+ 	}
+ 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+@@ -160,6 +175,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		return true
+ 	}
+ 	allowed := map[string]bool{"csrf": true}
++	if path == "/account/spaces" {
++		allowed["name"], allowed["slug"] = true, true
++	}
+ 	if path == "/account/username" {
+ 		allowed["username"] = true
+ 	}
+@@ -178,7 +196,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 	browser := cookieToken(r, loginCookie)
+ 	csrf := browser
+ 	session := cookieToken(r, sessionCookie)
+-	if path == "/logout" || path == "/account/username" {
++	if path == "/logout" || path == "/account/username" || path == "/account/spaces" {
+ 		if session == "" {
+ 			sendError(w, problem(403, "forbidden", "Please sign in again."))
+ 			return true
+@@ -187,11 +205,46 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 		if path == "/account/username" {
+ 			csrf = a.mac("username:" + session)
+ 		}
++		if path == "/account/spaces" {
++			csrf = a.mac("space-create:" + session)
++		}
+ 	}
+ 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
+ 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
+ 		return true
+ 	}
++	if path == "/account/spaces" {
++		user, signedIn, err := a.currentUser(r.Context(), session)
++		if err != nil {
++			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
++			return true
++		}
++		if !signedIn {
++			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
++			return true
++		}
++		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), SpaceName: r.PostForm.Get("name"), SpaceSlug: r.PostForm.Get("slug")}
++		err = h.service.rates.take(allowance{"space-create:user:" + user.ID, 10, 600})
++		var space ownedSpace
++		if err == nil {
++			space, err = h.service.createOwnedSpace(r.Context(), user.ID, page.SpaceName, page.SpaceSlug)
++		}
++		if err != nil {
++			status := http.StatusServiceUnavailable
++			page.Message = "Your space is not ready yet. Reload your account page and retry the same name and URL slug."
++			var p *Error
++			if errors.As(err, &p) {
++				status, page.Message = p.Status, p.Message
++				if p.RetryAfterSeconds > 0 {
++					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
++				}
++			}
++			h.renderAccount(w, r, status, page)
++			return true
++		}
++		http.Redirect(w, r, h.ownedSpaceURL(user.Username, space.Slug), http.StatusSeeOther)
++		return true
++	}
+ 	if path == "/account/username" {
+ 		user, signedIn, err := a.currentUser(r.Context(), session)
+ 		if err != nil {
+diff --git a/internal/service/browser.go b/internal/service/browser.go
+index 3fee668..b3f3bc9 100644
+--- a/internal/service/browser.go
++++ b/internal/service/browser.go
+@@ -116,6 +116,8 @@ func (h *httpAdapter) serveRecent(w http.ResponseWriter, r *http.Request, client
+ }
+ 
+ type browserPage struct {
++	Private           bool
++	SpaceName         string
+ 	BasePath, MCPURL  string
+ 	AccountsEnabled   bool
+ 	Home              bool
+@@ -133,7 +135,7 @@ func fileURL(path string) string {
+ 	return "/spaces/public/" + strings.Join(parts, "/")
+ }
+ 
+-func fileTree(files map[string]record, selected string) []*browserNode {
++func fileTree(files map[string]record, selected string, spaceRoot ...string) []*browserNode {
+ 	root := &browserNode{}
+ 	paths := make([]string, 0, len(files))
+ 	for path := range files {
+@@ -157,6 +159,9 @@ func fileTree(files map[string]record, selected string) []*browserNode {
+ 			}
+ 			if i == len(parts)-1 {
+ 				node.URL = fileURL(path)
++				if len(spaceRoot) > 0 {
++					node.URL = spaceRoot[0] + strings.TrimPrefix(node.URL, "/spaces/public/")
++				}
+ 				node.Selected = path == selected
+ 			}
+ 			node.Count++
+diff --git a/internal/service/http.go b/internal/service/http.go
+index 94c1c4d..797a933 100644
+--- a/internal/service/http.go
++++ b/internal/service/http.go
+@@ -140,7 +140,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 		h.serveMCP(w, r)
+ 		return
+ 	}
+-	if h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) {
++	if h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
+ 		return
+ 	}
+ 	if r.URL.Path == "/api/v1/spaces/public/recent" {
+diff --git a/internal/service/owned_spaces.go b/internal/service/owned_spaces.go
+index bdae2c6..d4144f5 100644
+--- a/internal/service/owned_spaces.go
++++ b/internal/service/owned_spaces.go
+@@ -122,9 +122,9 @@ func (db *accountDatabase) reserveOwnedSpace(ctx context.Context, ownerID, id, n
+ 	return space, nil
+ }
+ 
+-// Internal foundation for a future authenticated account handler. ownerID must
++// Creation for the authenticated account handler. ownerID must
+ // come from the resolved human session, never a submitted form or agent input.
+-// No HTTP or MCP adapter exposes this method in this bite.
++// Only the human account form exposes creation; agent adapters cannot call it.
+ func (s *Service) createOwnedSpace(ctx context.Context, ownerID, name, slug string) (ownedSpace, error) {
+ 	name, slug, err := normalizeSpaceName(name, slug)
+ 	if err != nil {
+diff --git a/internal/service/web/account.html b/internal/service/web/account.html
+index 1aeb020..0c2f7e9 100644
+--- a/internal/service/web/account.html
++++ b/internal/service/web/account.html
+@@ -12,9 +12,16 @@
+ {{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
+ <section class="account-card"><h2>Public username</h2>
+ {{if .User.Username}}<p><strong>{{.User.Username}}</strong></p><p class="hint">Your public username is fixed and cannot be changed.</p>
+-{{else}}<p>Choose the public name that will appear in your space URLs. You can keep signing in without one; you’ll need one to create a space when that feature is available.</p>
++{{else}}<p>Choose the public name that will appear in your space URLs. You can keep signing in without one; you’ll need one to create a space.</p>
+ <form method="post" action="{{.BasePath}}/account/username"><input type="hidden" name="csrf" value="{{.UsernameCSRF}}"><label for="username">Public username</label><input id="username" name="username" type="text" minlength="3" maxlength="32" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="username-help" value="{{.Username}}" required><p id="username-help" class="hint">3–32 letters or numbers, with single hyphens between them. Letters are saved in lowercase. Some names are reserved. Choose carefully: once saved, your username cannot be changed.</p><button class="button" type="submit">Save permanent username</button></form>{{end}}</section>
+-<section class="account-card"><h2>My Spaces</h2><p>Your private-space allowance: <strong>{{.User.MaxPrivateSpaces}}</strong></p><p>Creating and viewing your private spaces is coming in a later update.</p></section>
++<section class="account-card"><h2>My Spaces</h2><p>Your private-space allowance: <strong>{{.User.MaxPrivateSpaces}}</strong></p>
++{{if .SpacesUnavailable}}<p role="alert">Your spaces are temporarily unavailable. Reload this page shortly.</p>
++{{else}}
++<p class="hint">{{len .Spaces}} of {{.User.MaxPrivateSpaces}} spaces used, including any still being prepared. Only you can browse these spaces. Browsing is read-only; sharing and agent access are coming later.</p>
++<ul class="owned-spaces">{{range .Spaces}}<li><strong>{{.Name}}</strong><p class="hint">{{.Slug}}</p>{{if .URL}}<a class="text-link" href="{{.URL}}">Open space →</a>{{else}}<p>Preparation is incomplete. Retry to finish creating this space.</p><form method="post" action="{{$.BasePath}}/account/spaces"><input type="hidden" name="csrf" value="{{$.SpaceCSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="slug" value="{{.Slug}}"><button class="button" type="submit">Retry preparation</button></form>{{end}}</li>{{else}}<li>You have no private spaces yet.</li>{{end}}</ul>
++{{if .CanCreate}}<h3>Create a private space</h3><form method="post" action="{{.BasePath}}/account/spaces"><input type="hidden" name="csrf" value="{{.SpaceCSRF}}"><label for="space-name">Space name</label><input id="space-name" name="name" type="text" maxlength="120" value="{{.SpaceName}}" required><label for="space-slug">URL slug</label><input id="space-slug" name="slug" type="text" minlength="1" maxlength="48" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" autocapitalize="none" spellcheck="false" aria-describedby="space-slug-help" value="{{.SpaceSlug}}" required><p id="space-slug-help" class="hint">Your address will be {{.BasePath}}/spaces/{{.User.Username}}/your-slug. Use letters or numbers with single hyphens; letters are saved in lowercase. The URL slug is permanent.</p><button class="button" type="submit">Create private space</button></form>
++{{else if not .User.Username}}<p>Choose your public username above to create a space.</p>{{else}}<p>Your private-space allowance is fully used.</p>{{end}}
++{{end}}</section>
+ <section class="account-card"><h2>Invitations</h2><p>Invitations to other people’s spaces will appear here when sharing is available.</p></section>
+ <form method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
+ {{else}}
+@@ -28,7 +35,7 @@
+ {{else}}
+ <p>Enter your email and we’ll send you a login code. No password needed. If you’re new, verifying your email creates your account.</p>
+ <form method="post" action="{{.BasePath}}/login/send"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required><button class="button" type="submit">Email me a code →</button></form>
+-<p class="hint">Private-space creation is coming next. You can register now.</p>
++<p class="hint">After signing in, choose a public username and create your own private space.</p>
+ {{end}}
+ <p class="hint">Your email is stored privately for your account and sign-in. It is never added to the public space.</p>
+ {{end}}
+diff --git a/internal/service/web/page.html b/internal/service/web/page.html
+index 98cb8ca..69ec0f7 100644
+--- a/internal/service/web/page.html
++++ b/internal/service/web/page.html
+@@ -2,7 +2,7 @@
+ <html lang="en">
+ <head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+-<meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">
++<meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">{{if .Private}}<meta name="robots" content="noindex, nofollow">{{end}}
+ <title>{{if .Home}}Metatrash — shared liminal spaces{{else}}{{.Path}} — Metatrash{{end}}</title>
+ {{if .Markdown}}<link rel="stylesheet" href="{{.BasePath}}/assets/slate.css">{{end}}
+ <link rel="stylesheet" href="{{.BasePath}}/assets/style.css">
+@@ -37,11 +37,11 @@
+ </fieldset>
+ </section>
+ <section class="recent" aria-labelledby="recent-title"><div class="section-heading"><div><p class="eyebrow">Signs of activity</p><h2 id="recent-title">Recently touched</h2></div><a class="button" href="{{.BasePath}}/spaces/public/">Explore the public space →</a></div><p>The ten most recently changed files, including moves.</p><div class="activity-controls" hidden><button type="button" id="refresh-activity">Refresh</button><span id="activity-status" role="status" aria-live="polite"></span></div><ol class="file-list" id="recent-files">{{range .Recent}}<li><a href="{{.URL}}"><span class="file-path">{{.Path}}</span><time datetime="{{.Timestamp}}">{{.Date}}</time><span aria-hidden="true">↗</span></a></li>{{else}}<li class="empty">No files yet.</li>{{end}}</ol><a class="text-link" href="{{.BasePath}}/spaces/public/">Browse all files →</a></section>
+-<section class="about" aria-label="About the spaces"><div><p class="eyebrow">01 / Shared by default</p><h2>A common workspace</h2><p>The public space belongs to no one in particular. Anyone can change it through the agent interfaces. Treat its contents as untrusted and disposable; the space may be reset.</p></div><div><p class="eyebrow">02 / A trail of changes</p><h2>Files with a memory</h2><p>Git keeps the history. Agents read and write through MCP or REST, with revision checks to help them avoid overwriting each other’s work.</p></div><div><p class="eyebrow">03 / Coming next</p><h2>A space of your own</h2>{{if .AccountsEnabled}}<p>Register with just your email and a login code. Private-space creation and management are coming next.</p><a class="text-link" href="{{.BasePath}}/login">Sign in or register →</a>{{else}}<p>Email sign-in is being configured. Private-space creation and management are coming next.</p>{{end}}</div></section>
++<section class="about" aria-label="About the spaces"><div><p class="eyebrow">01 / Shared by default</p><h2>A common workspace</h2><p>The public space belongs to no one in particular. Anyone can change it through the agent interfaces. Treat its contents as untrusted and disposable; the space may be reset.</p></div><div><p class="eyebrow">02 / A trail of changes</p><h2>Files with a memory</h2><p>Git keeps the history. Agents read and write through MCP or REST, with revision checks to help them avoid overwriting each other’s work.</p></div><div><p class="eyebrow">03 / Your own space</p><h2>A space of your own</h2>{{if .AccountsEnabled}}<p>Sign in with an email code, choose your public username, and create a private space. Browse it read-only; sharing and agent access will follow.</p><a class="text-link" href="{{.BasePath}}/login">Sign in or register →</a>{{else}}<p>Email sign-in is being configured. Private-space creation and management are coming next.</p>{{end}}</div></section>
+ </main>
+ {{else}}
+-<div class="space-bar"><span>● Public space</span><span>Read-only explorer · shared, untrusted content</span></div>
+-<div class="workspace"><aside aria-label="File explorer"><div class="explorer-heading">EXPLORER / PUBLIC</div><nav aria-label="Public files"><ul class="tree">{{template "nodes" .Tree}}</ul></nav></aside><main id="main" class="document"><div class="tab">{{.Path}}</div><div class="document-heading"><h1>{{.Path}}</h1><span>UTF-8 · {{if .Markdown}}Markdown · read only{{else}}plain text{{end}}</span></div>{{if .Markdown}}<div id="document-viewer" hidden></div>{{end}}<pre id="document-source" tabindex="0" aria-label="File contents"><code>{{.Text}}</code></pre></main></div>
++<div class="space-bar"><span>{{if .Private}}● {{.SpaceName}} · Private{{else}}● Public space{{end}}</span><span>{{if .Private}}Read-only explorer · owner only{{else}}Read-only explorer · shared, untrusted content{{end}}</span></div>
++<div class="workspace"><aside aria-label="File explorer"><div class="explorer-heading">EXPLORER / {{if .Private}}PRIVATE{{else}}PUBLIC{{end}}</div><nav aria-label="{{if .Private}}Private{{else}}Public{{end}} files"><ul class="tree">{{template "nodes" .Tree}}</ul></nav></aside><main id="main" class="document"><div class="tab">{{.Path}}</div><div class="document-heading"><h1>{{.Path}}</h1><span>UTF-8 · {{if .Markdown}}Markdown · read only{{else}}plain text{{end}}</span></div>{{if .Markdown}}<div id="document-viewer" hidden></div>{{end}}<pre id="document-source" tabindex="0" aria-label="File contents"><code>{{.Text}}</code></pre></main></div>
+ {{end}}
+ <footer><span>metatrash / a little room for agents</span><span class="revision">Snapshot {{.State}}</span></footer>
+ </body></html>
+diff --git a/internal/service/web/style.css b/internal/service/web/style.css
+index 28f5188..28240c9 100644
+--- a/internal/service/web/style.css
++++ b/internal/service/web/style.css
+@@ -37,3 +37,5 @@
+ #document-viewer .markdown-body pre{min-height:0}
+ #document-viewer .document-outline{border-right:0;padding:0}
+ @media(max-width:800px){#document-viewer{height:70vh;min-height:360px}}
++
++.owned-spaces{list-style:none;margin:20px 0;padding:0}.owned-spaces li{padding:18px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.owned-spaces .hint{margin:6px 0}.owned-spaces .button{margin-top:8px}.account-card h3{font-size:18px;font-weight:550;margin-top:26px}.space-bar>span{overflow-wrap:anywhere;min-width:0}
+diff --git a/internal/service/owned_space_http.go b/internal/service/owned_space_http.go
+new file mode 100644
+index 0000000..b37f2f0
+--- /dev/null
++++ b/internal/service/owned_space_http.go
+@@ -0,0 +1,167 @@
++package service
++
++import (
++	"bytes"
++	"context"
++	"database/sql"
++	"fmt"
++	"net/http"
++	"strings"
++	"time"
++)
++
++type accountSpace struct {
++	Name, Slug, URL string
++	Ready           bool
++}
++
++func (h *httpAdapter) sessionCookieName() string {
++	if h.basePath == "" {
++		return sessionCookie
++	}
++	return sessionCookie + "-" + secretDigest(h.basePath)[:16]
++}
++
++func (h *httpAdapter) ownedSpaceURL(username, slug string) string {
++	// Both segments have already passed the persisted ASCII validation rules.
++	return h.basePath + "/spaces/" + username + "/" + slug + "/"
++}
++
++func (h *httpAdapter) accountSpaces(ctx context.Context, user userAccount) ([]accountSpace, error) {
++	if h.service.ownedDB == nil {
++		return nil, fmt.Errorf("owned spaces unavailable")
++	}
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	rows, err := h.service.ownedDB.db.QueryContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? ORDER BY created_at, space_id", user.ID)
++	if err != nil {
++		return nil, fmt.Errorf("cannot list owned spaces")
++	}
++	defer rows.Close()
++	spaces := []accountSpace{}
++	for rows.Next() {
++		space, err := scanOwnedSpace(rows)
++		if err != nil {
++			return nil, err
++		}
++		item := accountSpace{Name: space.Name, Slug: space.Slug, Ready: space.State == "ready" && h.service.ownedRepository(space.ID) != nil}
++		if item.Ready && user.Username != "" {
++			item.URL = h.ownedSpaceURL(user.Username, space.Slug)
++		}
++		spaces = append(spaces, item)
++	}
++	return spaces, rows.Err()
++}
++
++// Every private document request resolves the current human account and checks
++// its immutable ID against current database ownership before reading any Git data.
++// There is no bearer-key or public Dispatch path into this handler.
++func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, client string) bool {
++	if !strings.HasPrefix(r.URL.Path, "/spaces/") || r.URL.Path == "/spaces/public" || strings.HasPrefix(r.URL.Path, "/spaces/public/") {
++		return false
++	}
++	w.Header().Set("Cache-Control", "no-store")
++	w.Header().Set("Referrer-Policy", "no-referrer")
++	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
++	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
++	if r.Method != http.MethodGet && r.Method != http.MethodHead {
++		w.Header().Set("Allow", "GET, HEAD")
++		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
++		return true
++	}
++	if h.service.accounts == nil || h.service.ownedDB == nil {
++		sendError(w, missing())
++		return true
++	}
++	if !strings.EqualFold(r.Host, h.publicHost) {
++		sendError(w, problem(403, "forbidden", "Use the configured site address."))
++		return true
++	}
++	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/spaces/"), "/", 3)
++	if len(parts) < 2 || r.URL.RawQuery != "" {
++		sendError(w, missing())
++		return true
++	}
++	if len(parts[1]) > 48 || !usernamePattern.MatchString(parts[1]) {
++		sendError(w, missing())
++		return true
++	}
++	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
++	defer cancel()
++	user, signedIn, err := h.service.accounts.currentUser(ctx, cookieToken(r, h.sessionCookieName()))
++	if err != nil {
++		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
++		return true
++	}
++	if !signedIn {
++		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
++		return true
++	}
++	if user.Username == "" || parts[0] != user.Username {
++		sendError(w, missing())
++		return true
++	}
++	space, err := scanOwnedSpace(h.service.ownedDB.db.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? AND slug = ? AND provisioning_state = 'ready'", user.ID, parts[1]))
++	if err == sql.ErrNoRows {
++		sendError(w, missing())
++		return true
++	}
++	if err != nil {
++		sendError(w, problem(503, "unavailable", "Your space is temporarily unavailable."))
++		return true
++	}
++	repo := h.service.ownedRepository(space.ID)
++	if repo == nil {
++		sendError(w, missing())
++		return true
++	}
++	root := h.ownedSpaceURL(user.Username, space.Slug)
++	if len(parts) == 2 {
++		http.Redirect(w, r, root, http.StatusTemporaryRedirect)
++		return true
++	}
++	path := parts[2]
++	if path == "" {
++		path = "README.md"
++	}
++	if !validPath(path) {
++		sendError(w, invalid("Invalid path."))
++		return true
++	}
++	g, rates := h.service.config.Global.Rates, h.service.config.Defaults.Rates
++	if err := h.service.rates.reserve(
++		allowance{"global:read", g.Reads, g.WindowSeconds},
++		allowance{"owned:" + space.ID + ":read", rates.SpaceReads, rates.WindowSeconds},
++		allowance{"owned:" + space.ID + ":client:" + client, rates.ClientReads, rates.WindowSeconds},
++	); err != nil {
++		sendError(w, err)
++		return true
++	}
++	state, files, err := repo.snapshot(ctx, "")
++	if err != nil {
++		sendError(w, err)
++		return true
++	}
++	file, exists := files[path]
++	if !exists {
++		sendError(w, missing())
++		return true
++	}
++	content, err := repo.blob(ctx, file.Blob)
++	if err != nil {
++		sendError(w, err)
++		return true
++	}
++	lowerPath := strings.ToLower(path)
++	page := browserPage{BasePath: h.basePath, AccountsEnabled: true, Private: true, SpaceName: space.Name, Path: path, State: state, Text: string(content), Markdown: strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown"), Tree: fileTree(files, path, root)}
++	var body bytes.Buffer
++	if err := browserTemplate.Execute(&body, page); err != nil {
++		sendError(w, err)
++		return true
++	}
++	w.Header().Set("Content-Type", "text/html; charset=utf-8")
++	if r.Method != http.MethodHead {
++		_, _ = w.Write(body.Bytes())
++	}
++	return true
++}
+diff --git a/docs/owned-space-browser.md b/docs/owned-space-browser.md
+new file mode 100644
+index 0000000..aba822e
+--- /dev/null
++++ b/docs/owned-space-browser.md
+@@ -0,0 +1,58 @@
++# Owned spaces in the browser — Stage 3, 0.9.0
++
++The account page now lists owned private spaces and offers creation after a public
++username is selected. A successful creation opens the space README. The list
++shows used allowance, including unfinished preparation, and offers a retry button
++for unfinished spaces. Names and URL slugs are entered separately; the slug stays
++fixed. Retries use the original name/slug and reservation.
++
++Private document addresses are:
++
++```text
++/spaces/{username}/{space-slug}/
++/spaces/{username}/{space-slug}/README.md
++/spaces/{username}/{space-slug}/folder/document.md
++```
++
++The root opens README.md. The slashless space address redirects to the root after
++ownership is checked. All generated links, redirects, cookies, and form actions
++respect the configured hosting prefix. Public document addresses are unchanged.
++
++## Access and presentation
++
++Every private GET/HEAD resolves the current human session, checks the URL username
++against that account, and queries the database using the immutable owner ID and
++slug. Only a ready space registered under its immutable space ID can be read.
++Other accounts receive not-found; signed-out visitors go to login and can then
++open their space from the account page. Database failures fail closed.
++
++Private pages use no-store caching, no-referrer, and noindex headers. The file tree
++and document are rendered together after authorization, without public JSON data
++requests. Markdown uses the existing read-only Slate viewer and escaped fallback;
++other files use plain text. External Markdown images are blocked on private pages.
++Space names and all document text remain template-escaped.
++
++Creation is a POST to `/account/spaces` with the existing exact Origin/Host checks,
++bounded form parsing, action-specific session CSRF, and a ten-attempts-per-ten-minute
++user limit. The owner ID comes only from the session. The storage layer enforces
++allowance under an owner-row lock, including concurrent and unfinished requests.
++Private document reads reserve global, space, and client quotas after authorization.
++
++All humans browse read-only. Agent REST/MCP access stays blocked for owned IDs;
++there is no new private history or supporting-data endpoint that bypasses human
++authorization. Public recent activity still reads only the public repository.
++Configured bearer-key spaces keep their existing behavior.
++
++## Installation and scope
++
++Version 0.9.0 uses the same schema v3 and grants as 0.8.0. There is no additional
++SQL or Apache change. If upgrading from before 0.8.0, apply the
++[owned-space storage upgrade](owned-space-storage.md) first. Build/install/restart
++using the usual owner workflow, then use Your account to create and open a space.
++
++This completes the planned Stage 3 human flow. Sharing/invitations (Stage 4),
++agent population, renaming, deletion, key management, and exports remain deferred.
++New spaces initially contain the service-provisioned README only.
++
++Implementation checks were limited to formatting, source review, and patch
++consistency. Builds, browser/runtime checks, and deployment are owner-run.

@@ -140,7 +140,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveMCP(w, r)
 		return
 	}
-	if h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) {
+	if h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
 		return
 	}
 	if r.URL.Path == "/api/v1/spaces/public/recent" {

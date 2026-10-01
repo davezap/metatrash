@@ -37,3 +37,5 @@
 #document-viewer .markdown-body pre{min-height:0}
 #document-viewer .document-outline{border-right:0;padding:0}
 @media(max-width:800px){#document-viewer{height:70vh;min-height:360px}}
+
+.owned-spaces{list-style:none;margin:20px 0;padding:0}.owned-spaces li{padding:18px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.owned-spaces .hint{margin:6px 0}.owned-spaces .button{margin-top:8px}.account-card h3{font-size:18px;font-weight:550;margin-top:26px}.space-bar>span{overflow-wrap:anywhere;min-width:0}

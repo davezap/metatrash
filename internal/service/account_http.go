@@ -22,11 +22,15 @@ var accountHTML string
 var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 
 type accountPage struct {
-	BasePath                   string
-	Disabled, Verify, SignedIn bool
-	CSRF, Email, Message       string
-	UsernameCSRF, Username     string
-	User                       userAccount
+	SpaceCSRF, SpaceName, SpaceSlug string
+	Spaces                          []accountSpace
+	SpacesUnavailable               bool
+	CanCreate                       bool
+	BasePath                        string
+	Disabled, Verify, SignedIn      bool
+	CSRF, Email, Message            string
+	UsernameCSRF, Username          string
+	User                            userAccount
 }
 
 func accountCookie(w http.ResponseWriter, name, value string, age int) {
@@ -49,6 +53,17 @@ func cookieToken(r *http.Request, name string) string {
 
 func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
 	page.BasePath = h.basePath
+	if page.SignedIn {
+		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
+		var err error
+		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
+		if err != nil {
+			page.SpacesUnavailable = true
+			status = http.StatusServiceUnavailable
+		} else {
+			page.CanCreate = page.User.Username != "" && len(page.Spaces) < page.User.MaxPrivateSpaces
+		}
+	}
 	var b bytes.Buffer
 	if err := accountTemplate.Execute(&b, page); err != nil {
 		sendError(w, err)
@@ -81,7 +96,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" {
+	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -160,6 +175,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return true
 	}
 	allowed := map[string]bool{"csrf": true}
+	if path == "/account/spaces" {
+		allowed["name"], allowed["slug"] = true, true
+	}
 	if path == "/account/username" {
 		allowed["username"] = true
 	}
@@ -178,7 +196,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	browser := cookieToken(r, loginCookie)
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if path == "/logout" || path == "/account/username" {
+	if path == "/logout" || path == "/account/username" || path == "/account/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -187,9 +205,44 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if path == "/account/username" {
 			csrf = a.mac("username:" + session)
 		}
+		if path == "/account/spaces" {
+			csrf = a.mac("space-create:" + session)
+		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
+		return true
+	}
+	if path == "/account/spaces" {
+		user, signedIn, err := a.currentUser(r.Context(), session)
+		if err != nil {
+			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
+			return true
+		}
+		if !signedIn {
+			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+			return true
+		}
+		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), SpaceName: r.PostForm.Get("name"), SpaceSlug: r.PostForm.Get("slug")}
+		err = h.service.rates.take(allowance{"space-create:user:" + user.ID, 10, 600})
+		var space ownedSpace
+		if err == nil {
+			space, err = h.service.createOwnedSpace(r.Context(), user.ID, page.SpaceName, page.SpaceSlug)
+		}
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			page.Message = "Your space is not ready yet. Reload your account page and retry the same name and URL slug."
+			var p *Error
+			if errors.As(err, &p) {
+				status, page.Message = p.Status, p.Message
+				if p.RetryAfterSeconds > 0 {
+					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+				}
+			}
+			h.renderAccount(w, r, status, page)
+			return true
+		}
+		http.Redirect(w, r, h.ownedSpaceURL(user.Username, space.Slug), http.StatusSeeOther)
 		return true
 	}
 	if path == "/account/username" {
