@@ -145,6 +145,10 @@ func (s *Service) EnableAccounts(configPath string) error {
 		store.Close()
 		return err
 	}
+	if err := s.loadOwnedSpaces(ctx, store); err != nil {
+		store.Close()
+		return err
+	}
 	a.store = store
 	a.send = func(ctx context.Context, email, code string) error {
 		return sendLoginMail(ctx, cfg, passwordText, email, code)

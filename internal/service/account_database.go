@@ -112,12 +112,15 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 	}
 	var version int
 	var source string
-	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 2 || source == "" {
+	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 3 || source == "" {
 		return fmt.Errorf("account schema/migration is not ready; follow docs/account-database.md")
 	}
 	var usernameIndex int
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'metatrash_users' AND index_name = 'metatrash_users_username' AND non_unique = 0 AND column_name = 'username' AND seq_in_index = 1 AND sub_part IS NULL").Scan(&usernameIndex); err != nil || usernameIndex != 1 {
 		return fmt.Errorf("username unique index is required; follow docs/public-usernames.md")
+	}
+	if err := s.checkOwnedSpaceSchema(ctx); err != nil {
+		return err
 	}
 	// Validate persisted records at startup, including the preserved service cap.
 	rows, err := s.db.QueryContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users LIMIT 10001")
@@ -198,8 +201,8 @@ func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, boo
 func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
 	var version int
 	var source string
-	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version != 1 && version != 2) {
-		return "", fmt.Errorf("account schema version 1 or 2 is required")
+	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version != 1 && version != 2 && version != 3) {
+		return "", fmt.Errorf("account schema version 1, 2 or 3 is required")
 	}
 	return source, nil
 }

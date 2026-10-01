@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -28,16 +29,20 @@ type outcome struct {
 }
 
 type Service struct {
-	accounts  *accounts
-	config    Config
-	keys      map[string]Keys
-	repos     map[string]*repository
-	rates     limiter
-	cursorKey []byte
-	queue     chan job
-	stop      chan struct{}
-	done      chan struct{}
-	lockPath  string
+	ownedMu    sync.RWMutex
+	ownedRepos map[string]*repository
+	ownedRoot  string
+	ownedDB    *accountDatabase
+	accounts   *accounts
+	config     Config
+	keys       map[string]Keys
+	repos      map[string]*repository
+	rates      limiter
+	cursorKey  []byte
+	queue      chan job
+	stop       chan struct{}
+	done       chan struct{}
+	lockPath   string
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -70,7 +75,7 @@ func Open(ctx context.Context, configPath, keysPath, dataDir string, readme []by
 	if err = os.MkdirAll(reposPath, 0700); err != nil {
 		return nil, err
 	}
-	s := &Service{config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), queue: make(chan job, c.Global.MaxQueuedWrites), stop: make(chan struct{}), done: make(chan struct{}), lockPath: lock}
+	s := &Service{ownedRepos: map[string]*repository{}, ownedRoot: filepath.Join(dataDir, "owned-repos"), config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), queue: make(chan job, c.Global.MaxQueuedWrites), stop: make(chan struct{}), done: make(chan struct{}), lockPath: lock}
 	if _, err = rand.Read(s.cursorKey); err != nil {
 		return nil, err
 	}
@@ -137,6 +142,10 @@ func (s *Service) queued(ctx context.Context, fn func() (any, error)) (any, erro
 // Access authorizes before atomically reserving operation counters. Every adapter
 // must call it once per operation, behind the separate HTTP ingress limiter.
 func (s *Service) Access(space, key, client string, write bool) error {
+	// Account-owned repositories are never agent-accessible in this stage.
+	if s.ownedRepository(space) != nil {
+		return problem(403, "forbidden", "Agent access to account-owned spaces is not available.")
+	}
 	sc, exists := s.config.Spaces[space]
 	if !exists {
 		return problem(401, "unauthorized", "A valid space key is required.")

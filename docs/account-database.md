@@ -2,7 +2,7 @@
 
 Stage 1 is now complete per owner confirmation. This guide records its original cutover.
 For 0.7.0, also follow [Stage 2 upgrade instructions](public-usernames.md) after
-initialization and before service startup. The historical steps below prepare the server
+initialization and before service startup. For 0.8.0, also apply [schema v3 and its grants](owned-space-storage.md). The historical steps below prepare the server
 database, migrate, deploy, and perform the focused checks below. No live database
 or server was accessed during implementation.
 

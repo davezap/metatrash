@@ -73,15 +73,21 @@ The home page keeps the project introduction on the left, followed by keyboard-a
 
 ## Email accounts (0.4.1)
 
-**0.6.0 storage update:** enabled accounts now require MariaDB/MySQL. Follow [database preparation, migration, and recovery](docs/account-database.md) before replacing the installed binary. Email-code login retains its behavior; sessions refer to immutable user IDs. Version 0.7.0 also requires the [Stage 2 schema upgrade](docs/public-usernames.md). The old JSON account file is retained as a migration source, with no runtime fallback. Accounts-disabled operation still needs no database.
+**0.6.0 storage update:** enabled accounts now require MariaDB/MySQL. Follow [database preparation, migration, and recovery](docs/account-database.md) before replacing the installed binary. Email-code login retains its behavior; sessions refer to immutable user IDs. Version 0.7.0 also requires the [Stage 2 schema upgrade](docs/public-usernames.md); 0.8.0 requires [schema v3 and the owned-space storage upgrade](docs/owned-space-storage.md). The old JSON account file is retained as a migration source, with no runtime fallback. Accounts-disabled operation still needs no database.
 
 **0.4.1 fixes browser form submission:** account pages now use `Referrer-Policy: same-origin`; the former `no-referrer` policy could suppress the Origin required by the form guard. Rebuild/install and restart the service, then reload `/login` before retrying. Apache routing is unchanged.
 
-Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Stage 1 is complete per owner confirmation. The account page shows verified email, private-space allowance, and a one-time public username choice. Stage 2 is implemented locally pending owner upgrade/checks; owner-only spaces and invitations remain planned.
+Optional email-only registration and login use Gmail STARTTLS and a six-digit code. Configure the protected server files and enable the account routes using [email account setup](docs/email-accounts.md) and the 0.6.0 database guide above. No password is stored in this repository. Stage 1 is complete per owner confirmation. The account page shows verified email, private-space allowance, and a one-time public username choice. Stage 2 is implemented locally pending owner upgrade/checks. Version 0.8.0 adds the internal owned-space storage/provisioning foundation; creation controls, owner browsing/URLs, and invitations remain upcoming bites.
+
+## Owned-space storage (0.8.0)
+
+The first Stage 3 bite adds immutable space IDs, owner-scoped slugs, transactional allowance reservations, and recoverable Git provisioning. Owned repositories are stored separately by ID and registered under a lock after becoming ready. REST/MCP access to them remains blocked. Browser creation/listing and owner-only URLs come in subsequent bites; the account page still has placeholders.
+
+Accounts-enabled upgrades require **schema v3 and new table grants before starting 0.8.0**. See [upgrade, recovery, and focused owner checks](docs/owned-space-storage.md). Builds, live database changes, and deployment remain owner-run.
 
 ## Contract and planning
 
-- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Owner-only spaces and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite; Stage 3 storage/provisioning is the next bite. See [quota fix and focused owner checks](docs/private-space-quota.md).
+- [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Stage 3 storage/provisioning is implemented locally in 0.8.0; owner browsing/URLs, account-page creation/listing, and invitations remain planned. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite. See [quota fix and focused owner checks](docs/private-space-quota.md).
 - [Implementation plan](docs/implementation-plan.md)
 - [API contract, messaging convention, and examples](docs/api-contract.md)
 - [Tool definitions and REST mappings](api/tool-schema.json)
@@ -92,7 +98,7 @@ The current contract uses space-wide `state`/`ifInState` tokens, replacing the e
 
 The target is Amazon Linux 2023 with Apache proxying to one Go service on localhost. Building requires Go 1.25+ and the pinned official MCP Go SDK; Git is required at runtime. Configured spaces are provisioned on startup; private keys are stored as SHA-256 digests outside repositories.
 
-See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moved accounts to MariaDB; 0.7.0 adds public usernames. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
+See [server bring-up](docs/server-bring-up.md) for the existing installation and [MCP bring-up](docs/mcp-bring-up.md) for the Linux server upgrade, separate Windows PowerShell/Linux testing commands, and optional smoke check. `/mcp` exposes read/write/list/move/history through stateless Streamable HTTP, with the same permissions, revision checks, and per-space rate/storage controls as REST. The public website was introduced in 0.3.0 and email accounts in 0.4.0; 0.6.0 moved accounts to MariaDB; 0.7.0 adds public usernames; 0.8.0 adds owned-space storage/provisioning. The embedded space README template describes MCP as available; the existing public space retains its original README until an administrator updates it.
 
 Tool descriptions are kept concise and self-contained per tool; validation constraints remain explicit in the schema.
 

@@ -131,7 +131,7 @@ At the end of Stage 1:
 
 **Status:** implemented locally in 0.7.0; owner build, schema upgrade, deployment,
 and validation remain pending. See [public usernames and upgrade notes](public-usernames.md).
-Stages 3–4 remain deferred.
+Stage 3 storage/provisioning follows in 0.8.0; remaining Stage 3 UI/routing and Stage 4 remain deferred.
 
 ## Goal
 
@@ -233,10 +233,14 @@ At the end of Stage 2:
 
 # Stage 3 --- Private Spaces and URLs
 
-**Status:** prerequisite F2 implemented locally in 0.7.1; owner validation and
-deployment remain pending. See [quota fix and focused checks](private-space-quota.md).
-The next bite is storage/provisioning, followed by owner-authorized browsing/URLs
-and account-page creation/listing. These Stage 3 features are not implemented yet.
+**Status:** F2 prerequisite is implemented locally in 0.7.1. The first Stage 3
+bite (storage/provisioning) is implemented locally in 0.8.0; owner build, schema
+v3 upgrade, deployment, and validation remain pending. See
+[owned-space storage, upgrade, and recovery](owned-space-storage.md).
+
+Remaining bites: owner-authorized browsing/URLs, then account-page creation/listing.
+The current account page still has placeholders; no owned-space HTTP creation or
+agent endpoint is exposed yet. See also [quota checks](private-space-quota.md).
 
 ## Goal
 

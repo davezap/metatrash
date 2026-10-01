@@ -1,5 +1,7 @@
 # Public usernames — Stage 2, 0.7.0
 
+**0.8.0 follow-up:** after v2, apply [the owned-space schema v3 upgrade](owned-space-storage.md) before starting an accounts-enabled 0.8.0 binary. The instructions below describe the original 0.7.0 upgrade.
+
 The account page now offers a one-time public username choice, plus My Spaces
 and Invitations placeholders. Existing and new accounts start without a username;
 email-code login still works. No name is derived from email. User IDs remain the

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 0.8.0 - Owned-space storage and provisioning (2026-10-01)
+
+- Added schema v3 for immutable space IDs, owner user-ID relationships, names, private visibility, creation metadata, fixed owner-unique slugs, and provisioning state. Accounts-enabled startup now requires v3 and validates its storage constraints.
+- Added internal creation with username requirements and owner-row locking around allowance reservations. Pending work counts toward existing administrator-configured allowances; same-name/slug retries reuse the original ID.
+- Provision owned Git repositories under ID-derived paths through the existing write queue; register only ready repositories in a separate synchronized map. Restart retries pending creation and refuses to recreate missing ready repositories. Failed attempts retain allowance until safely reconciled.
+- Explicitly deny owned-space agent access at the shared service boundary; preserve configured spaces. Browser routes, account creation/listing controls, invitations, and agent integration remain deferred.
+- Documented schema/grants, interrupted upgrade, recovery, and focused owner checks. Saved before snapshot and incremental patch 0026. Formatting, source review, and patch checks only; no builds, tests, live SQL, or deployment.
+
+
 ### 0.7.1 - Private-space quota prerequisite (2026-10-01)
 
 - Fixed security-review F2 before Stage 3: unknown spaces, invalid credentials, and read-key write attempts no longer consume operation quotas. REST and MCP share the corrected access boundary.
