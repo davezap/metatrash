@@ -21,7 +21,7 @@ type ownedSpace struct {
 }
 
 const ownedSpaceColumns = "space_id, owner_user_id, name, slug, provisioning_state, created_at, visibility"
-const ownedSpaceREADME = "# Private space\n\nThis space belongs to its human owner. Human browsing is read-only.\nAgent access and sharing are not available yet.\n"
+const ownedSpaceREADME = "# Private space\n\nThis space belongs to its human owner. Human browsing is read-only.\nThe owner can invite people through Your account. Agent access is not available yet.\n"
 
 func (db *accountDatabase) checkOwnedSpaceSchema(ctx context.Context) error {
 	var count int

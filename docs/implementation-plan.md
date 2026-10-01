@@ -2,9 +2,7 @@
 
 ## Current human-interface expansion
 
-**0.6.0:** Stage 1 account database implementation and the prerequisite F1 fix
-are complete locally, pending owner build, database setup/migration, deployment,
-and checks. See [the cutover guide](account-database.md). Stages 2–4 remain planned.
+**0.11.0:** Stage 1 is owner-confirmed complete. Stage 2 usernames and Stage 3 owned spaces are implemented locally; Stage 4 now includes invitation/member controls, account acceptance/joined-space listings, and read-only member browsing on the existing 0.10.0 backend. Owner build and two-account validation remain pending. See [human sharing checks](human-membership-ui.md). Agent integration remains deferred.
 
 The [private spaces plan v2](metatrash-private-spaces-plan-v2.md) now governs
 the next account/private-space milestones: MariaDB migration preserving existing

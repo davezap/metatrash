@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 0.11.0 - Human sharing and member browsing (2026-10-01)
+
+- Added owner sharing controls for email invitations, cancellation, member identity/status, and suspension/restoration/removal, using the existing transactional backend. The owner remains separate and cannot be removed through member controls.
+- Added verified-email invitation acceptance and joined-space listings on Your account, including acceptance without a public username and suspended-access labels. Joined spaces do not consume owned-space allowance; no invitation emails are sent.
+- Extended read-only private browsing to current active members at the owner's existing URLs. Authentication, exact Host/Origin, action-specific session CSRF, bounded forms, per-user mutation throttles, private response headers and authorization-before-read-quota checks are preserved. REST/MCP access is unchanged.
+- Uses existing schema v4/grants. Sharing queries have deadlines and display at most 200 entries per list. Updated README, plan status and owner check notes; saved before snapshot and incremental patch 0029.
+- Brief source/formatting and patch checks only; no builds, tests, SQL, or deployment. Two-account runtime validation remains with the owner.
+
 ### 0.10.0 - Human invitation and membership storage (2026-10-01)
 
 - Added Stage 4 schema v4 with unique per-space membership and invitation slots, immutable user/space relationships, member status, and seven-day invitation expiry.

@@ -22,6 +22,11 @@ var accountHTML string
 var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 
 type accountPage struct {
+	Sharing                         *humanSharingPage
+	Invitations                     []humanInvitation
+	Joined                          []joinedHumanSpace
+	MembershipUnavailable           bool
+	MembershipCSRF                  map[string]string
 	SpaceCSRF, SpaceName, SpaceSlug string
 	Spaces                          []accountSpace
 	SpacesUnavailable               bool
@@ -54,6 +59,18 @@ func cookieToken(r *http.Request, name string) string {
 func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
 	page.BasePath = h.basePath
 	if page.SignedIn {
+		page.MembershipCSRF = make(map[string]string)
+		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove"} {
+			page.MembershipCSRF[action] = h.service.accounts.mac("membership:" + action + ":" + cookieToken(r, h.sessionCookieName()))
+		}
+		if page.Sharing == nil {
+			var membershipErr error
+			page.Invitations, page.Joined, membershipErr = h.accountMemberships(r.Context(), page.User)
+			if membershipErr != nil {
+				page.MembershipUnavailable = true
+				status = http.StatusServiceUnavailable
+			}
+		}
 		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
 		var err error
 		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
@@ -90,13 +107,17 @@ func (a *accounts) loginPage(browser string) accountPage {
 
 func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
+	sharingID := strings.TrimPrefix(path, "/account/sharing/")
+	sharingRoute := strings.HasPrefix(path, "/account/sharing/") && idPattern.MatchString(sharingID)
+	membershipAction := strings.TrimPrefix(path, "/account/membership/")
+	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove")
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
 		suffix := "-" + secretDigest(h.basePath)[:16]
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" {
+	if !sharingRoute && !membershipRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -117,7 +138,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, invalid("Account routes do not accept query parameters."))
 		return true
 	}
-	if path == "/login" || path == "/account" {
+	if path == "/login" || path == "/account" || sharingRoute {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
@@ -129,12 +150,20 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
 			return true
 		}
-		if path == "/account" {
+		if path == "/account" || sharingRoute {
 			if !signedIn {
 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 				return true
 			}
-			h.renderAccount(w, r, 200, accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)})
+			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)}
+			if sharingRoute {
+				page.Sharing, err = h.humanSharing(r.Context(), user, sharingID)
+				if err != nil {
+					sendError(w, err)
+					return true
+				}
+			}
+			h.renderAccount(w, r, 200, page)
 			return true
 		}
 		if signedIn {
@@ -175,6 +204,17 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return true
 	}
 	allowed := map[string]bool{"csrf": true}
+	if membershipRoute {
+		allowed["space"] = true
+		switch membershipAction {
+		case "invite":
+			allowed["email"] = true
+		case "cancel", "accept":
+			allowed["invitation"] = true
+		default:
+			allowed["member"] = true
+		}
+	}
 	if path == "/account/spaces" {
 		allowed["name"], allowed["slug"] = true, true
 	}
@@ -196,12 +236,15 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	browser := cookieToken(r, loginCookie)
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if path == "/logout" || path == "/account/username" || path == "/account/spaces" {
+	if membershipRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
 		}
 		csrf = a.mac("logout:" + session)
+		if membershipRoute {
+			csrf = a.mac("membership:" + membershipAction + ":" + session)
+		}
 		if path == "/account/username" {
 			csrf = a.mac("username:" + session)
 		}
@@ -211,6 +254,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
+		return true
+	}
+	if membershipRoute {
+		h.submitHumanMembership(w, r, session, membershipAction)
 		return true
 	}
 	if path == "/account/spaces" {

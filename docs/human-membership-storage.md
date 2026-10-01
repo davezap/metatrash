@@ -1,10 +1,6 @@
 # Human membership storage — Stage 4 first bite, 0.10.0
 
-This bite implements schema v4 and internal transactional operations for human
-invitations and memberships. Stage 4 is **not complete**: there are no invitation
-forms, management page, account invitation/joined-space lists, or member browser
-access yet. Existing owner browsing and configured REST/MCP access are unchanged.
-No invitation email is sent. Agent integration remains separate.
+This 0.10.0 storage bite implements schema v4 and transactional operations for human invitations and memberships. Version 0.11.0 adds [the human sharing flow and member browsing](human-membership-ui.md) on this same schema and grants. No invitation email is sent. Agent integration remains separate.
 
 ## Storage and transactions
 
@@ -102,9 +98,4 @@ Use a disposable database and in-package harness for the internal methods
 - Confirm schema-v3 startup rejection, v4 login/account creation and existing
   owner browsing, and unchanged owned-space denial through REST/MCP.
 
-Next bite: bounded owner management and account listing queries; authenticated,
-Origin/CSRF-protected, rate-limited forms; clear no-email-sent messaging; joined
-space lists; and current active membership checks on **every** private browser
-request, preserving no-store responses and read-only content for all humans.
-Formatting, source inspection and incremental patch checks are the only local
-verification performed here; database concurrency and UI validation remain owner work.
+The human HTTP/UI bite is implemented in 0.11.0; see [behavior and owner checks](human-membership-ui.md). Formatting, source inspection and incremental patch checks are the only local verification; database concurrency and UI validation remain owner work.

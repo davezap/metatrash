@@ -11,8 +11,8 @@ import (
 )
 
 type accountSpace struct {
-	Name, Slug, URL string
-	Ready           bool
+	ID, Name, Slug, URL string
+	Ready               bool
 }
 
 func (h *httpAdapter) sessionCookieName() string {
@@ -44,7 +44,7 @@ func (h *httpAdapter) accountSpaces(ctx context.Context, user userAccount) ([]ac
 		if err != nil {
 			return nil, err
 		}
-		item := accountSpace{Name: space.Name, Slug: space.Slug, Ready: space.State == "ready" && h.service.ownedRepository(space.ID) != nil}
+		item := accountSpace{ID: space.ID, Name: space.Name, Slug: space.Slug, Ready: space.State == "ready" && h.service.ownedRepository(space.ID) != nil}
 		if item.Ready && user.Username != "" {
 			item.URL = h.ownedSpaceURL(user.Username, space.Slug)
 		}
@@ -54,7 +54,7 @@ func (h *httpAdapter) accountSpaces(ctx context.Context, user userAccount) ([]ac
 }
 
 // Every private document request resolves the current human account and checks
-// its immutable ID against current database ownership before reading any Git data.
+// its immutable ID against current ownership or active membership before Git reads.
 // There is no bearer-key or public Dispatch path into this handler.
 func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, client string) bool {
 	if !strings.HasPrefix(r.URL.Path, "/spaces/") || r.URL.Path == "/spaces/public" || strings.HasPrefix(r.URL.Path, "/spaces/public/") {
@@ -97,11 +97,11 @@ func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, 
 		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return true
 	}
-	if user.Username == "" || parts[0] != user.Username {
+	if len(parts[0]) > 32 || !usernamePattern.MatchString(parts[0]) {
 		sendError(w, missing())
 		return true
 	}
-	space, err := scanOwnedSpace(h.service.ownedDB.db.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? AND slug = ? AND provisioning_state = 'ready'", user.ID, parts[1]))
+	space, err := scanOwnedSpace(h.service.ownedDB.db.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = (SELECT user_id FROM metatrash_users WHERE username = ?) AND slug = ? AND provisioning_state = 'ready' AND (owner_user_id = ? OR EXISTS (SELECT 1 FROM metatrash_memberships m WHERE m.space_id = metatrash_spaces.space_id AND m.user_id = ? AND m.status = 'active'))", parts[0], parts[1], user.ID, user.ID))
 	if err == sql.ErrNoRows {
 		sendError(w, missing())
 		return true
@@ -115,7 +115,7 @@ func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, 
 		sendError(w, missing())
 		return true
 	}
-	root := h.ownedSpaceURL(user.Username, space.Slug)
+	root := h.ownedSpaceURL(parts[0], space.Slug)
 	if len(parts) == 2 {
 		http.Redirect(w, r, root, http.StatusTemporaryRedirect)
 		return true

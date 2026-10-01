@@ -131,7 +131,7 @@ At the end of Stage 1:
 
 **Status:** implemented locally in 0.7.0; owner build, schema upgrade, deployment,
 and validation remain pending. See [public usernames and upgrade notes](public-usernames.md).
-Stage 3 is implemented through 0.9.0 for owner testing; Stage 4 storage begins in 0.10.0.
+Stage 3 is implemented through 0.9.0; Stage 4 storage is in 0.10.0 and its human flow in 0.11.0, pending owner testing.
 
 ## Goal
 
@@ -404,11 +404,7 @@ At the end of Stage 3:
 
 # Stage 4 --- Invitations and Human Membership
 
-**Status:** first storage bite implemented locally in 0.10.0: schema v4 and
-transactional invitation/acceptance/member-state operations. See
-[storage, upgrade and owner checks](human-membership-storage.md). Stage 4 is not
-complete: management/account UI, joined-space lists, and member browser authorization
-remain the next bite. No invitation emails are sent. Owner build and validation pending.
+**Status:** implemented locally through 0.11.0: schema v4 and transactional operations from 0.10.0, plus owner sharing controls, account invitation acceptance/joined-space listings, and read-only active-member browsing. See [storage and upgrade](human-membership-storage.md) and [human flow and two-account checks](human-membership-ui.md). No invitation emails are sent; agent integration remains deferred. Owner build and runtime validation are pending.
 
 ## Goal
 

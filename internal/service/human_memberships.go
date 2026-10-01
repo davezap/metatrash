@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// Internal human operations only. The HTTP bite must supply actorID from the
+// Human operations only. The HTTP handler supplies actorID from the
 // verified session, with Origin/CSRF checks and rate limits before calling here.
 // Every mutation locks the space first, including acceptance and revocation.
-// No method grants browser or agent access in this foundation release.
+// Browser access checks current active membership; agent access remains separate.
 func (db *accountDatabase) membershipTransaction(ctx context.Context, spaceID, actorID string, ownerOnly bool, work func(context.Context, *sql.Tx, ownedSpace) error) error {
 	if !idPattern.MatchString(spaceID) || !idPattern.MatchString(actorID) {
 		return missing()
