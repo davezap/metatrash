@@ -1,12 +1,12 @@
 {
-  "schemaVersion": "0.3.0",
+  "schemaVersion": "0.4.0",
   "status": "implemented",
   "description": "Git-backed text storage; messaging via file conventions.",
   "mcp": {
     "endpoint": "/mcp",
     "tools": "tools/list exposes tools only; tools/call uses the shared service.",
     "accountEndpoint": "/mcp/account",
-    "accountTools": "The OAuth endpoint adds the spaces tool; space arguments are 'public' or IDs returned by spaces."
+    "accountTools": "The OAuth endpoint adds the spaces tool. Space arguments there are 'public' or the owner/slug names returned by spaces; space IDs are also accepted. Results name owned spaces by owner/slug. The anonymous /mcp endpoint accepts configured space names only."
   },
   "authentication": {
     "public": "No key required.",
@@ -27,7 +27,8 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
           },
           "path": {
             "type": "string",
@@ -52,7 +53,7 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
           },
           "state": {
             "type": "string",
@@ -116,7 +117,8 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
           },
           "path": {
             "type": "string",
@@ -153,7 +155,7 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
           },
           "oldState": {
             "type": "string",
@@ -223,7 +225,8 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
           },
           "prefix": {
             "type": "string",
@@ -253,7 +256,7 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
           },
           "state": {
             "type": "string",
@@ -323,7 +326,8 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
           },
           "from": {
             "type": "string",
@@ -358,7 +362,7 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
           },
           "oldState": {
             "type": "string",
@@ -420,7 +424,8 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
           },
           "id": {
             "type": "string",
@@ -449,7 +454,7 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
           },
           "state": {
             "type": "string",
@@ -566,7 +571,7 @@
     "spaces": {
       "method": "GET",
       "path": "/api/v1/account/spaces",
-      "note": "OAuth only. Operation routes are also available as /api/v1/account/spaces/{space}/..."
+      "note": "OAuth only. Operation routes are also available as /api/v1/account/spaces/{space}/... where {space} is public, an ID, or {owner}/{slug}."
     }
   },
   "errorSchema": {
@@ -620,7 +625,7 @@
   "accountTools": [
     {
       "name": "spaces",
-      "description": "List the spaces this connection can use and its access to each. Pass a returned space value to the other tools.",
+      "description": "List the spaces this connection can use and its access to each. Pass a returned space value (owner/slug) to the other tools.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false
@@ -640,8 +645,13 @@
               "properties": {
                 "space": {
                   "type": "string",
-                  "pattern": "^[a-z0-9][a-z0-9-]{0,47}$",
-                  "description": "Value for the space argument."
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+                  "description": "Value for the space argument: owner/slug, or public."
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$",
+                  "description": "Immutable space ID, also accepted as the space argument; absent for the public space."
                 },
                 "name": {
                   "type": "string"

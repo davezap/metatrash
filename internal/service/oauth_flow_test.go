@@ -35,6 +35,10 @@ type oauthWorld struct {
 	member  userAccount
 	ownedID string
 	joinID  string
+	// ownedName and joinName are the owner/slug names agents use.
+	ownedName string
+	joinName  string
+	joinSlug  string
 }
 
 func randomName(t *testing.T, prefix string) string {
@@ -96,11 +100,14 @@ func newOAuthWorld(t *testing.T) *oauthWorld {
 		t.Fatal(err)
 	}
 	w.ownedID = space.ID
+	w.ownedName = w.owner.Username + "/" + space.Slug
 	shared, err := s.createOwnedSpace(ctx, w.member.ID, "Shared plans", randomName(t, "plans-"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	w.joinID = shared.ID
+	w.joinName = w.member.Username + "/" + shared.Slug
+	w.joinSlug = shared.Slug
 	invitation, err := db.inviteHuman(ctx, w.member.ID, shared.ID, w.owner.Email)
 	if err != nil {
 		t.Fatal(err)

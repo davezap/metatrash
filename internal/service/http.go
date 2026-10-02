@@ -208,20 +208,20 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(auth) == 2 && strings.EqualFold(auth[0], "Bearer") {
 		key = auth[1]
 	}
-	h.serveRESTOperation(w, r, space, parts[4], "", func(write bool) (*repository, error) {
+	h.serveRESTOperation(w, r, parts[4], "", func(write bool) (*repository, string, error) {
 		if err := h.service.Access(space, key, client, write); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return h.service.repos[space], nil
+		return h.service.repos[space], space, nil
 	})
 }
 
 // serveRESTOperation maps one REST route to an operation, runs the
 // transport's access check once (before quotas and Git) and dispatches to the
-// repository that check admitted.
+// repository that check admitted, under the canonical space name it returns.
 // On the OAuth resource, metadataPath is set and an insufficient_scope denial
 // carries an RFC 6750 challenge.
-func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request, space, resource, metadataPath string, access func(write bool) (*repository, error)) {
+func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request, resource, metadataPath string, access func(write bool) (*repository, string, error)) {
 	op, allow := "", "GET"
 	switch resource {
 	case "file":
@@ -254,7 +254,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	write := op == "write" || op == "move"
-	repo, err := access(write)
+	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
 		if metadataPath != "" && errors.As(err, &p) && p.Code == "insufficient_scope" {

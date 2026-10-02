@@ -18,6 +18,15 @@ consent page's space chooser pre-filled with the current choices, editing the
 live connection in place with the same checks as consent and applying to the
 app's next operation. Add a hint that new spaces are added there.
 
+Also agreed for 0.15.1:
+
+- ~~**Agents don't need the 32-hex ID.**~~ Done, unreleased (see CHANGELOG):
+  `owner/slug` names, IDs still accepted. Bare slugs were dropped on purpose:
+  their meaning changes as spaces are connected.
+- **One field when creating a space.** The user enters only a name and the slug
+  is derived from it. Both columns stay, so separate slugs can return later. A
+  name that gives an invalid or already used slug is reported on the name field.
+
 ## Owner checks still to run
 
 - A read-only space refuses writes from a connected app.

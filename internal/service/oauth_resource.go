@@ -94,7 +94,8 @@ func (h *httpAdapter) serveMCPAccount(w http.ResponseWriter, r *http.Request) {
 // serveAccountREST is the OAuth-protected REST resource (D2):
 // GET /api/v1/account/spaces lists connected spaces and
 // /api/v1/account/spaces/{space}/{file,files,history,move} mirror the
-// anonymous routes with the same access check as MCP.
+// anonymous routes with the same access check as MCP. {space} is "public", an
+// ID, or owner/slug as two path segments.
 func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, client string) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
@@ -103,7 +104,7 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/account/"), "/")
-	if !(len(parts) == 1 && parts[0] == "spaces") && !(len(parts) == 3 && parts[0] == "spaces") {
+	if parts[0] != "spaces" || len(parts) == 2 || len(parts) > 4 {
 		sendError(w, missing())
 		return
 	}
@@ -139,12 +140,15 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 		sendJSON(w, 200, value)
 		return
 	}
-	space := parts[1]
-	if !spacePattern.MatchString(space) {
+	space, resource := parts[1], parts[2]
+	if len(parts) == 4 {
+		space, resource = parts[1]+"/"+parts[2], parts[3]
+	}
+	if !spaceRefPattern.MatchString(space) {
 		sendError(w, missing())
 		return
 	}
-	h.serveRESTOperation(w, r, space, parts[2], metadataPath, func(write bool) (*repository, error) {
+	h.serveRESTOperation(w, r, resource, metadataPath, func(write bool) (*repository, string, error) {
 		return h.service.agentSpaceAccess(r.Context(), id, space, client, write)
 	})
 }

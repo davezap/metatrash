@@ -39,7 +39,7 @@ type mcpInput struct {
 	To         string  `json:"to"`
 }
 
-const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value as the space argument of read, list, history, write and move. Writes need ifInState from a read or list of the same space."
+const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value (owner/slug, or public) as the space argument of read, list, history, write and move. Writes need ifInState from a read or list of the same space."
 
 // mcpHandler builds the anonymous /mcp server, or with account set the OAuth
 // /mcp/account server, which adds the spaces tool and checks every operation
@@ -120,11 +120,12 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			write := op == "write" || op == "move"
 			var repo *repository
 			var err error
+			space := args.Space
 			if account {
 				if identity.oauth == nil {
 					return mcpFailure(problem(401, "unauthorized", "Missing transport credentials.")), nil
 				}
-				repo, err = h.service.agentSpaceAccess(ctx, *identity.oauth, args.Space, identity.client, write)
+				repo, space, err = h.service.agentSpaceAccess(ctx, *identity.oauth, args.Space, identity.client, write)
 			} else {
 				err = h.service.Access(args.Space, identity.key, identity.client, write)
 				repo = h.service.repos[args.Space]
@@ -144,7 +145,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			}
 			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
 				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, From: args.From, To: args.To}
-			value, err := h.service.dispatchRepository(ctx, repo, args.Space, op, in)
+			value, err := h.service.dispatchRepository(ctx, repo, space, op, in)
 			if err != nil {
 				return mcpFailure(err), nil
 			}

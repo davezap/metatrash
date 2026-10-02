@@ -132,12 +132,14 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 		t.Fatalf("tools: %v", list.result)
 	}
 	spaces := w.tool(token, "spaces", map[string]any{}, "")["spaces"].([]any)
-	access := map[string]string{}
+	access, ids := map[string]string{}, map[string]any{}
 	for _, item := range spaces {
 		m := item.(map[string]any)
 		access[m["space"].(string)] = m["access"].(string)
+		ids[m["space"].(string)] = m["id"]
 	}
-	if len(spaces) != 3 || access["public"] != "read_write" || access[w.ownedID] != "read_write" || access[w.joinID] != "read_write" {
+	if len(spaces) != 3 || access["public"] != "read_write" || access[w.ownedName] != "read_write" || access[w.joinName] != "read_write" ||
+		ids["public"] != nil || ids[w.ownedName] != w.ownedID || ids[w.joinName] != w.joinID {
 		t.Fatalf("spaces: %v", spaces)
 	}
 	w.tool(token, "spaces", map[string]any{"x": 1}, "invalid_request")
@@ -160,6 +162,30 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.tool(token, "list", map[string]any{"space": otherSpace.ID}, "not_found")
+	w.tool(token, "list", map[string]any{"space": other.Username + "/" + otherSpace.Slug}, "not_found")
+	if e := w.tool(token, "list", map[string]any{"space": "nobody/none"}, "not_found")["error"].(map[string]any); !strings.Contains(e["message"].(string), "Call spaces") {
+		t.Fatalf("not_found does not point to spaces: %v", e)
+	}
+
+	// Space names: owner/slug and the ID reach the same space; results and
+	// cursors use the owner/slug name. A bare slug is refused with a hint.
+	byName := w.tool(token, "read", map[string]any{"space": w.joinName, "path": "README.md"}, "")
+	if byName["space"] != w.joinName {
+		t.Fatalf("read by name: %v", byName["space"])
+	}
+	if byID := w.tool(token, "read", map[string]any{"space": w.joinID, "path": "README.md"}, ""); byID["space"] != w.joinName || byID["state"] != byName["state"] {
+		t.Fatalf("read by ID: %v", byID)
+	}
+	if e := w.tool(token, "read", map[string]any{"space": w.joinSlug, "path": "README.md"}, "not_found")["error"].(map[string]any); !strings.Contains(e["message"].(string), "owner/"+w.joinSlug) {
+		t.Fatalf("bare slug hint: %v", e)
+	}
+	page := w.tool(token, "list", map[string]any{"space": w.ownedID, "limit": 1}, "")
+	if page["space"] != w.ownedName || page["nextCursor"] == nil {
+		t.Fatalf("list by ID: %v", page)
+	}
+	w.tool(token, "list", map[string]any{"space": w.ownedName, "limit": 1, "cursor": page["nextCursor"]}, "")
+	w.tool(token, "list", map[string]any{"space": w.joinName + "/x"}, "not_found")
+
 	// The anonymous endpoint still cannot reach owned spaces.
 	anon := w.mcp("", "tools/call", map[string]any{"name": "list", "arguments": map[string]any{"space": w.ownedID}}, "/mcp")
 	if e, _ := anon.value["error"].(map[string]any); !anon.isError || e["code"] != "forbidden" {
@@ -174,7 +200,7 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	}
 	joinedState = w.tool(token, "list", map[string]any{"space": w.joinID}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.joinID, "path": "denied.md", "text": "x", "ifInState": joinedState}, "insufficient_scope")
-	if spaces := w.tool(token, "spaces", map[string]any{}, "")["spaces"].([]any); !strings.Contains(mustJSON(spaces), `"access":"read_only","name":"Shared plans"`) {
+	if spaces := w.tool(token, "spaces", map[string]any{}, "")["spaces"].([]any); !strings.Contains(mustJSON(spaces), `"access":"read_only","id":"`+w.joinID+`","name":"Shared plans"`) {
 		t.Fatalf("reduced permission not listed: %v", spaces)
 	}
 	// Suspension blocks the next operation; restoration brings consent back.
@@ -203,6 +229,15 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	}
 	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinID+"/file?path=README.md", ""); res.Code != 200 {
 		t.Fatalf("REST read: %d %s", res.Code, res.Body)
+	}
+	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinName+"/file?path=README.md", ""); res.Code != 200 || !strings.Contains(res.Body.String(), `"space":"`+w.joinName+`"`) {
+		t.Fatalf("REST read by owner/slug: %d %s", res.Code, res.Body)
+	}
+	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinSlug+"/files", ""); res.Code != 404 {
+		t.Fatalf("REST bare slug: %d %s", res.Code, res.Body)
+	}
+	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinID, ""); res.Code != 404 {
+		t.Fatalf("REST two-segment path: %d", res.Code)
 	}
 	body := `{"text":"x","ifInState":"` + memberState.(string) + `"}`
 	if res := w.rest(restToken, "PUT", "/api/v1/account/spaces/"+w.joinID+"/file?path=y.md", body); res.Code != 403 || !strings.Contains(res.Header().Get("WWW-Authenticate"), `error="insufficient_scope"`) {

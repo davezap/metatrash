@@ -25,7 +25,8 @@ and open checks are in the [roadmap](docs/roadmap.md).
      and write.
    - `https://metatrash.com/mcp`: the public space only, no sign-in.
 3. In chat, click **+** and enable the connector. On the account connector, ask
-   Claude to call the `spaces` tool first; it lists the spaces and their IDs.
+   Claude to call the `spaces` tool first; it lists the spaces by `owner/slug`
+   name (e.g. `dave-zap/bartco`), the form every tool takes.
 
 A starting prompt:
 

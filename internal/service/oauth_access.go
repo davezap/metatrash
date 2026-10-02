@@ -4,12 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
 
-// connectedSpace is one space an OAuth connection can currently use.
+// spaceRefPattern is the shape of a space argument on the OAuth endpoints:
+// a configured name ("public"), a 32-hex ID, or owner/slug. Bare slugs pass
+// this check only so that agentSpaceAccess can explain the owner/slug form.
+var spaceRefPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$`)
+
+// connectedSpace is one space an OAuth connection can currently use. Space is
+// the owner/slug name agents pass back ("public" for the public space); ID is
+// the immutable space ID, which is also accepted.
 type connectedSpace struct {
 	Space  string `json:"space"`
+	ID     string `json:"id,omitempty"`
 	Name   string `json:"name"`
 	Owner  string `json:"owner"`
 	Access string `json:"access"`
@@ -44,48 +54,75 @@ func effectiveAccess(id oauthIdentity, consent, ownerID string, status, memberPe
 // runs once per operation, before quotas and Git: the public space follows its
 // anonymous rules; owned spaces need consent ∩ current ownership or active
 // membership ∩ the member permission ∩ token scope. Configured key-protected
-// spaces are never reachable with OAuth (D3). Space IDs select a repository;
-// they never grant authority.
-func (s *Service) agentSpaceAccess(ctx context.Context, id oauthIdentity, space, client string, write bool) (*repository, error) {
-	notConnected := problem(404, "not_found", "Space not found or not connected to this app.")
+// spaces are never reachable with OAuth (D3). Space references select a
+// repository; they never grant authority.
+//
+// An owned space is named owner/slug (as in /spaces/{owner}/{slug}/) or by its
+// ID. Only spaces connected to this grant are matched, so unconnected spaces
+// stay indistinguishable from missing ones. It returns the canonical name
+// (owner/slug, or the configured name) used in results and cursors.
+func (s *Service) agentSpaceAccess(ctx context.Context, id oauthIdentity, space, client string, write bool) (*repository, string, error) {
+	notConnected := problem(404, "not_found", "Space not found or not connected to this app. Call spaces to list the spaces this connection can use.")
 	if sc, configured := s.config.Spaces[space]; configured {
 		if sc.Visibility != "public" {
-			return nil, notConnected
+			return nil, "", notConnected
 		}
 		if err := s.Access(space, "", client, write); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return s.repos[space], nil
+		return s.repos[space], space, nil
 	}
-	repo := s.ownedRepository(space)
-	if repo == nil || s.ownedDB == nil || !idPattern.MatchString(space) {
-		return nil, notConnected
+	if s.ownedDB == nil || !spaceRefPattern.MatchString(space) {
+		return nil, "", notConnected
+	}
+	const base = `SELECT s.space_id, COALESCE(u.username, ''), s.slug, gs.permission, s.owner_user_id, m.status, m.agent_permission FROM metatrash_oauth_grant_spaces gs JOIN metatrash_spaces s ON s.space_id = gs.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id LEFT JOIN metatrash_memberships m ON m.space_id = gs.space_id AND m.user_id = ? WHERE gs.grant_id = ? AND s.provisioning_state = 'ready'`
+	var query string
+	args := []any{id.UserID, id.GrantID}
+	if owner, slug, full := strings.Cut(space, "/"); full {
+		if len(owner) > 32 || !usernamePattern.MatchString(owner) || !usernamePattern.MatchString(slug) {
+			return nil, "", notConnected
+		}
+		query = base + ` AND u.username = ? AND s.slug = ?`
+		args = append(args, owner, slug)
+	} else if idPattern.MatchString(space) {
+		query = base + ` AND gs.space_id = ?`
+		args = append(args, space)
+	} else {
+		return nil, "", problem(404, "not_found", fmt.Sprintf("Space %q not found. Name private spaces as owner/slug, for example owner/%s. Call spaces to list the spaces this connection can use.", space, space))
 	}
 	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	var consent, ownerID string
+	var spaceID, username, slug, consent, ownerID string
 	var status, permission sql.NullString
-	err := s.ownedDB.db.QueryRowContext(lookup, `SELECT gs.permission, s.owner_user_id, m.status, m.agent_permission FROM metatrash_oauth_grant_spaces gs JOIN metatrash_spaces s ON s.space_id = gs.space_id LEFT JOIN metatrash_memberships m ON m.space_id = gs.space_id AND m.user_id = ? WHERE gs.grant_id = ? AND gs.space_id = ? AND s.provisioning_state = 'ready'`, id.UserID, id.GrantID, space).Scan(&consent, &ownerID, &status, &permission)
+	err := s.ownedDB.db.QueryRowContext(lookup, query, args...).Scan(&spaceID, &username, &slug, &consent, &ownerID, &status, &permission)
 	if err == sql.ErrNoRows {
-		return nil, notConnected
+		return nil, "", notConnected
 	}
 	if err != nil {
-		return nil, fmt.Errorf("agent authorization unavailable")
+		return nil, "", fmt.Errorf("agent authorization unavailable")
+	}
+	repo := s.ownedRepository(spaceID)
+	if repo == nil {
+		return nil, "", notConnected
 	}
 	if ownerID != id.UserID && status.Valid && status.String == "suspended" {
-		return nil, problem(403, "forbidden", "Your access to this space is suspended by its owner.")
+		return nil, "", problem(403, "forbidden", "Your access to this space is suspended by its owner.")
 	}
 	access := effectiveAccess(id, consent, ownerID, status, permission)
 	if access == "" {
-		return nil, notConnected
+		return nil, "", notConnected
 	}
 	if write && access != "read_write" {
-		return nil, problem(403, "insufficient_scope", "This app has read-only access to this space.")
+		return nil, "", problem(403, "insufficient_scope", "This app has read-only access to this space.")
 	}
-	if err := s.reserveOwnedOperation(space, client, write); err != nil {
-		return nil, err
+	if err := s.reserveOwnedOperation(spaceID, client, write); err != nil {
+		return nil, "", err
 	}
-	return repo, nil
+	name := spaceID
+	if username != "" {
+		name = username + "/" + slug
+	}
+	return repo, name, nil
 }
 
 // listConnectedSpaces returns the public space and every consented space the
@@ -97,20 +134,24 @@ func (s *Service) listConnectedSpaces(ctx context.Context, id oauthIdentity) (co
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	rows, err := s.ownedDB.db.QueryContext(ctx, `SELECT s.space_id, s.name, COALESCE(u.username, ''), gs.permission, s.owner_user_id, m.status, m.agent_permission FROM metatrash_oauth_grant_spaces gs JOIN metatrash_spaces s ON s.space_id = gs.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id LEFT JOIN metatrash_memberships m ON m.space_id = gs.space_id AND m.user_id = ? WHERE gs.grant_id = ? AND s.provisioning_state = 'ready' ORDER BY s.name, s.space_id LIMIT 200`, id.UserID, id.GrantID)
+	rows, err := s.ownedDB.db.QueryContext(ctx, `SELECT s.space_id, s.slug, s.name, COALESCE(u.username, ''), gs.permission, s.owner_user_id, m.status, m.agent_permission FROM metatrash_oauth_grant_spaces gs JOIN metatrash_spaces s ON s.space_id = gs.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id LEFT JOIN metatrash_memberships m ON m.space_id = gs.space_id AND m.user_id = ? WHERE gs.grant_id = ? AND s.provisioning_state = 'ready' ORDER BY s.name, s.space_id LIMIT 200`, id.UserID, id.GrantID)
 	if err != nil {
 		return result, fmt.Errorf("cannot list connected spaces")
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var item connectedSpace
-		var consent, ownerID string
+		var slug, consent, ownerID string
 		var status, permission sql.NullString
-		if err := rows.Scan(&item.Space, &item.Name, &item.Owner, &consent, &ownerID, &status, &permission); err != nil {
+		if err := rows.Scan(&item.ID, &slug, &item.Name, &item.Owner, &consent, &ownerID, &status, &permission); err != nil {
 			return result, fmt.Errorf("cannot list connected spaces")
 		}
-		if item.Access = effectiveAccess(id, consent, ownerID, status, permission); item.Access == "" || s.ownedRepository(item.Space) == nil {
+		if item.Access = effectiveAccess(id, consent, ownerID, status, permission); item.Access == "" || s.ownedRepository(item.ID) == nil {
 			continue
+		}
+		item.Space = item.ID
+		if item.Owner != "" {
+			item.Space = item.Owner + "/" + slug
 		}
 		result.Spaces = append(result.Spaces, item)
 	}

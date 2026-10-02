@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 0.15.1 (in progress) - Space names for agents (2026-10-03)
+
+- On `/mcp/account` and `/api/v1/account/`, the `space` argument accepts `owner/slug` (e.g. `dave-zap/bartco`, matching `/spaces/{owner}/{slug}/`), the 32-hex ID, or `public`. A bare slug returns `not_found` with a hint to use `owner/slug`; bare slugs are not accepted because their meaning would change as spaces are connected. Only the connection's consented spaces are matched, so unconnected spaces still look missing.
+- `spaces` returns `space` as `owner/slug` and adds `id`. Results and list/history cursors name private spaces by `owner/slug` whichever form was passed.
+- `not_found` now tells agents to call `spaces`. Account REST accepts `{owner}/{slug}` as two path segments.
+- Tool schema 0.4.0: the space pattern allows one `/` (the anonymous `/mcp` still only reaches configured spaces). Server instructions updated.
+- MariaDB integration test covers names, IDs, the bare-slug hint, cursors across forms and REST. No new SQL.
+
 ### Documentation - Workspace cleanup (2026-10-02)
 
 - Replaced 23 per-release documents with current-state docs: `architecture.md`, `deployment.md`, `oauth.md` and `roadmap.md`. The API contract and security review were refreshed; the old files remain in git history.

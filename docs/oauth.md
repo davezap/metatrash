@@ -41,7 +41,7 @@ routes return 404.
 | `/oauth/token` | Code exchange and refresh |
 | `/oauth/revoke` | RFC 7009 revocation |
 | `/mcp/account` | MCP: the five tools plus `spaces` |
-| `/api/v1/account/spaces` and `/api/v1/account/spaces/{space}/{file,files,history,move}` | REST |
+| `/api/v1/account/spaces` and `/api/v1/account/spaces/{space}/{file,files,history,move}` (`{space}` may be `{owner}/{slug}`) | REST |
 
 Scopes are `spaces:read` and `spaces:write`; which spaces is stored with the
 consent, not in the scope. Discovery, token and revoke endpoints allow
@@ -82,7 +82,11 @@ One check per operation, before quotas, size checks and Git:
 - `public`: the anonymous rules.
 - Owned space: consent for this connection ∩ ready space ∩ ownership or active
   membership ∩ owner's member app permission ∩ token scope.
-- Unconnected, unknown or key-protected space: `not_found`. Suspended member:
+- The space is named by `public`, `owner/slug` or its ID; a bare slug is
+  `not_found` with a hint. Matching only looks at this connection's consented
+  spaces.
+- Unconnected, unknown or key-protected space: `not_found`, pointing the agent
+  at `spaces`. Suspended member:
   `forbidden`. Removed member: their consent rows are deleted by cascade, so
   `not_found`, and re-invitation does not restore it without new consent.
 - A write without read/write access: 403 `insufficient_scope` (REST also sends a
