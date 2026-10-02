@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"mime"
@@ -40,6 +41,9 @@ type oauthPending struct {
 	RedirectURI, State, Challenge, Resource string
 	WantWrite                               bool
 	Expires                                 time.Time
+	// NewSpaceID is a space created from this request's setup step; consent
+	// preselects it.
+	NewSpaceID string
 }
 
 // oauthCode is a single-use authorization code, kept in memory until expiry so
@@ -139,6 +143,12 @@ type oauthPage struct {
 	CSRF, LogoutCSRF               string
 	WantWrite                      bool
 	Spaces                         []oauthConsentSpace
+	// First-space setup on the consent page, for accounts with no space yet.
+	Setup, NeedUsername       bool
+	SetupCSRF, AddressBase    string
+	Username, UsernameError   string
+	SpaceName, SpaceNameError string
+	NewSpaceName, NewSpaceRef string
 }
 
 func (h *httpAdapter) renderOAuth(w http.ResponseWriter, status int, page oauthPage, formTarget string) {
@@ -172,7 +182,7 @@ func (h *httpAdapter) serveOAuth(w http.ResponseWriter, r *http.Request, client 
 	}
 	switch path {
 	case "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/mcp/account", "/.well-known/oauth-protected-resource/api/v1/account":
-	case "/oauth/authorize", "/oauth/consent", "/oauth/token", "/oauth/revoke":
+	case "/oauth/authorize", "/oauth/consent", "/oauth/setup", "/oauth/token", "/oauth/revoke":
 	default:
 		return false
 	}
@@ -192,6 +202,8 @@ func (h *httpAdapter) serveOAuth(w http.ResponseWriter, r *http.Request, client 
 		} else {
 			h.oauthConsentPage(w, r)
 		}
+	case "/oauth/setup":
+		h.oauthSetupSubmit(w, r)
 	case "/oauth/token":
 		h.oauthToken(w, r, client)
 	case "/oauth/revoke":
@@ -394,7 +406,17 @@ func (h *httpAdapter) oauthConsentPage(w http.ResponseWriter, r *http.Request) {
 	h.renderConsent(w, r, 200, user, session, pending, "")
 }
 
+func (h *httpAdapter) setupCSRF(session string, pending *oauthPending) string {
+	return h.service.accounts.mac("oauth-setup:" + session + ":" + pending.ID)
+}
+
 func (h *httpAdapter) renderConsent(w http.ResponseWriter, r *http.Request, status int, user userAccount, session string, pending *oauthPending, message string) {
+	h.renderConsentPage(w, r, status, user, session, pending, oauthPage{Message: message})
+}
+
+// renderConsentPage renders consent; page carries any message and the setup
+// form's values and field errors.
+func (h *httpAdapter) renderConsentPage(w http.ResponseWriter, r *http.Request, status int, user userAccount, session string, pending *oauthPending, page oauthPage) {
 	db := h.service.ownedDB
 	if db == nil {
 		h.oauthErrorPage(w, 503, "Spaces are temporarily unavailable", "Please try again shortly.")
@@ -410,8 +432,9 @@ func (h *httpAdapter) renderConsent(w http.ResponseWriter, r *http.Request, stat
 		h.oauthErrorPage(w, 503, "Spaces are temporarily unavailable", "Please try again shortly.")
 		return
 	}
-	page := oauthPage{Mode: "consent", Title: "Connect " + pending.Client.Name, Message: message, ClientName: pending.Client.Name, ClientHost: pending.Client.Host, Email: user.Email,
-		CSRF: h.consentCSRF(session, pending), LogoutCSRF: h.service.accounts.mac("logout:" + session), WantWrite: pending.WantWrite}
+	page.Mode, page.Title, page.ClientName, page.ClientHost, page.Email = "consent", "Connect "+pending.Client.Name, pending.Client.Name, pending.Client.Host, user.Email
+	page.CSRF, page.LogoutCSRF, page.WantWrite = h.consentCSRF(session, pending), h.service.accounts.mac("logout:"+session), pending.WantWrite
+	owned := 0
 	for _, space := range spaces {
 		item := oauthConsentSpace{accessibleSpace: space, Choice: "none", WriteAllowed: space.CanWrite && pending.WantWrite}
 		if choice, ok := previous[space.ID]; ok {
@@ -420,7 +443,27 @@ func (h *httpAdapter) renderConsent(w http.ResponseWriter, r *http.Request, stat
 				item.Choice = "read_only"
 			}
 		}
+		if space.ID == pending.NewSpaceID {
+			page.NewSpaceName, page.NewSpaceRef = space.Name, space.Owner+"/"+space.Slug
+			if item.Choice == "none" {
+				item.Choice = "read_only"
+				if item.WriteAllowed {
+					item.Choice = "read_write"
+				}
+			}
+		}
+		if space.Owned {
+			owned++
+		}
 		page.Spaces = append(page.Spaces, item)
+	}
+	// New accounts can choose a username and create their first space here.
+	if owned == 0 && user.MaxPrivateSpaces > 0 {
+		page.Setup, page.NeedUsername, page.SetupCSRF = true, user.Username == "", h.setupCSRF(session, pending)
+		page.AddressBase = h.basePath + "/spaces/your-username"
+		if user.Username != "" {
+			page.AddressBase = h.basePath + "/spaces/" + user.Username
+		}
 	}
 	h.renderOAuth(w, status, page, redirectSource(pending.RedirectURI))
 }
@@ -772,4 +815,108 @@ func (h *httpAdapter) oauthRevoke(w http.ResponseWriter, r *http.Request, client
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
+}
+
+// oauthSetupSubmit is the consent page's first-space step for new accounts:
+// choose a public username if needed, then create a space whose slug is
+// derived from its name. It uses the same rules and limits as Your account,
+// is bound to the pending request and session, and returns to consent with
+// the new space preselected and the request's ten minutes restarted.
+func (h *httpAdapter) oauthSetupSubmit(w http.ResponseWriter, r *http.Request) {
+	o := h.oauth
+	a := h.service.accounts
+	if r.Header.Get("Origin") != h.publicOrigin {
+		sendError(w, problem(403, "forbidden", "Please submit the form from this site."))
+		return
+	}
+	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || kind != "application/x-www-form-urlencoded" || r.URL.RawQuery != "" || r.Method != http.MethodPost {
+		sendError(w, problem(415, "invalid_request", "Use a form submission."))
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2048)
+	if err := r.ParseForm(); err != nil {
+		sendError(w, invalid("Invalid or oversized form."))
+		return
+	}
+	for key, values := range r.PostForm {
+		if len(values) != 1 || (key != "csrf" && key != "username" && key != "name") {
+			sendError(w, invalid("Unknown or duplicate form field."))
+			return
+		}
+	}
+	browser := cookieToken(r, h.oauthCookieName())
+	pending := o.pendingFor(browser)
+	if pending == nil {
+		h.oauthErrorPage(w, 400, "This connection request expired", "Connection requests last ten minutes and work only in the browser where they started. Anything you created was saved.")
+		return
+	}
+	session := cookieToken(r, h.sessionCookieName())
+	if session == "" || subtle.ConstantTimeCompare([]byte(h.setupCSRF(session, pending)), []byte(r.PostForm.Get("csrf"))) != 1 {
+		sendError(w, problem(403, "forbidden", "This form expired. Return to your app and connect again."))
+		return
+	}
+	user, signedIn, err := a.currentUser(r.Context(), session)
+	if err != nil || !signedIn {
+		h.oauthErrorPage(w, 403, "Please sign in again", "Your session ended. Return to your app and connect again.")
+		return
+	}
+	page := oauthPage{Username: r.PostForm.Get("username"), SpaceName: r.PostForm.Get("name")}
+	fail := func(err error, field *string) {
+		status, message := http.StatusServiceUnavailable, "Your space could not be created. Please try again."
+		var p *Error
+		if errors.As(err, &p) {
+			status, message = p.Status, p.Message
+			if p.RetryAfterSeconds > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+			}
+		}
+		if field != nil && p != nil && (p.Code == "invalid_request" || p.Code == "conflict") {
+			*field = message
+		} else {
+			page.Message = message
+		}
+		if current, ok, err := a.currentUser(r.Context(), session); err == nil && ok {
+			user = current
+		}
+		h.renderConsentPage(w, r, status, user, session, pending, page)
+	}
+	if err := h.service.rates.take(allowance{"space-create:user:" + user.ID, 10, 600}); err != nil {
+		fail(err, nil)
+		return
+	}
+	if user.Username == "" {
+		err := h.service.rates.take(allowance{"username:user:" + user.ID, 20, 600})
+		if err == nil {
+			err = a.store.ChooseUsername(r.Context(), user.ID, page.Username)
+		}
+		if err != nil {
+			fail(err, &page.UsernameError)
+			return
+		}
+		if user, signedIn, err = a.currentUser(r.Context(), session); err != nil || !signedIn || user.Username == "" {
+			fail(fmt.Errorf("cannot reload account"), nil)
+			return
+		}
+	}
+	slug, err := h.deriveNewSpaceSlug(r.Context(), user, page.SpaceName)
+	if err == nil {
+		var space ownedSpace
+		if space, err = h.service.createOwnedSpace(r.Context(), user.ID, page.SpaceName, slug); err == nil {
+			now := o.now()
+			o.mu.Lock()
+			if current := o.pending[secretDigest(browser)]; current != nil && current.ID == pending.ID {
+				current.NewSpaceID = space.ID
+				current.Expires = now.Add(pendingLifetime)
+			}
+			o.mu.Unlock()
+			http.SetCookie(w, &http.Cookie{Name: h.oauthCookieName(), Value: browser, Path: "/", MaxAge: int(pendingLifetime / time.Second), Expires: now.Add(pendingLifetime), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+			http.Redirect(w, r, h.basePath+"/oauth/consent", http.StatusSeeOther)
+			return
+		}
+	}
+	if p := (*Error)(nil); errors.As(err, &p) && p.Code == "conflict" {
+		err = problem(409, "conflict", "You already have a space at "+h.basePath+"/spaces/"+user.Username+"/"+slug+". Choose a different name.")
+	}
+	fail(err, &page.SpaceNameError)
 }

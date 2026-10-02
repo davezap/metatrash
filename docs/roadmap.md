@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.15.2. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.15.3. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Done in 0.15.1: Change spaces
 
@@ -63,8 +63,8 @@ Also in 0.15.1:
 
 ## Later
 
-- **Spaces:** rename, delete, ZIP export of HEAD, ownership transfer, invitation
-  emails, pagination of sharing lists over 200 entries.
+- **Spaces:** rename, delete, ZIP export of HEAD, ownership transfer,
+  pagination of sharing lists over 200 entries.
 - **Remote Git:** start with authenticated HTTPS clone/fetch. Pushes would
   bypass stable IDs, protected files, path checks, quotas and conditional
   writes, so they need validated import through the service, never a plain

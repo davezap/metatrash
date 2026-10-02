@@ -13,16 +13,25 @@
 {{else if eq .Mode "signin"}}
 <h1>Sign in to connect {{.ClientName}}</h1>
 <p><strong>{{.ClientName}}</strong> <span class="hint">({{.ClientHost}})</span> is asking to connect to Metatrash. Sign in with your email to choose which spaces it can use. You will come back here after signing in.</p>
-<a class="button" href="{{.BasePath}}/login">Sign in with email →</a>
+<p>New to Metatrash? Use the same button: entering the code we email you creates your account, and you can set up your first space on the next page.</p>
+<a class="button" href="{{.BasePath}}/login">Sign in or create an account →</a>
 {{else if eq .Mode "consent"}}
 <h1>Connect {{.ClientName}}?</h1>
 <p><strong>{{.ClientName}}</strong> <span class="hint">({{.ClientHost}})</span> is asking to use Metatrash as <strong class="account-email">{{.Email}}</strong>.</p>
 {{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
+{{if .NewSpaceName}}<p class="notice" role="status">Your space <strong>{{.NewSpaceName}}</strong> ({{.NewSpaceRef}}) is ready and selected below. Choose <strong>Connect</strong> to finish.</p>{{end}}
+{{if .Setup}}<section class="account-card"><h2>Create your first space</h2>
+<p class="hint">A private space is where {{.ClientName}} can keep notes and files for you. Only you can see it unless you invite someone.{{if .NeedUsername}} First choose a public username: it appears in your space addresses and cannot be changed.{{end}}</p>
+<form method="post" action="{{.BasePath}}/oauth/setup"><input type="hidden" name="csrf" value="{{.SetupCSRF}}">
+{{if .NeedUsername}}<label for="setup-username">Public username</label><input id="setup-username" name="username" type="text" minlength="3" maxlength="32" autocapitalize="none" spellcheck="false" autocomplete="username" value="{{.Username}}" required aria-describedby="{{if .UsernameError}}setup-username-error {{end}}setup-username-help"{{if .UsernameError}} aria-invalid="true" autofocus{{end}}>{{if .UsernameError}}<p id="setup-username-error" class="form-error field-error" role="alert">{{.UsernameError}}</p>{{end}}<p id="setup-username-help" class="hint">3–32 letters or numbers, with single hyphens between them.</p>{{end}}
+<label for="setup-name">Space name</label><input id="setup-name" name="name" type="text" maxlength="120" value="{{.SpaceName}}" required aria-describedby="{{if .SpaceNameError}}setup-name-error {{end}}setup-name-help"{{if .SpaceNameError}} aria-invalid="true" autofocus{{end}}>{{if .SpaceNameError}}<p id="setup-name-error" class="form-error field-error" role="alert">{{.SpaceNameError}}</p>{{end}}<p id="setup-name-help" class="hint">The address is made from the name, so “Project notes” becomes {{.AddressBase}}/project-notes. The address is permanent.</p>
+<button class="button" type="submit">Create space</button></form>
+<p class="hint">Or skip this and connect below with just the public space{{if .Spaces}} and the spaces you have joined{{end}}. You can create a space later on Your account and add it with Change spaces.</p></section>{{end}}
 <form method="post" action="{{.BasePath}}/oauth/consent">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <section class="account-card"><h2>Choose spaces</h2>
 <p class="hint">The app can always use the public space, as anyone can. Choose which private spaces it may also use. Nothing is shared unless you choose it here.{{if not .WantWrite}} This app asked for read-only access.{{end}}</p>
-<ul class="owned-spaces consent-spaces">{{range .Spaces}}<li><label for="s-{{.ID}}"><strong>{{.Name}}</strong> <span class="hint">{{if .Owned}}your space{{else}}owner: {{.Owner}}{{end}} · {{.Slug}}</span></label>
+<ul class="owned-spaces consent-spaces">{{range .Spaces}}<li><label for="s-{{.ID}}"><strong>{{.Name}}</strong> <span class="hint">{{.Owner}}/{{.Slug}}{{if .Owned}} · your space{{end}}</span></label>
 <select id="s-{{.ID}}" name="s-{{.ID}}"><option value="none"{{if eq .Choice "none"}} selected{{end}}>Not connected</option><option value="read_only"{{if eq .Choice "read_only"}} selected{{end}}>Read only</option>{{if .WriteAllowed}}<option value="read_write"{{if eq .Choice "read_write"}} selected{{end}}>Read and write</option>{{end}}</select>
 {{if not .WriteAllowed}}<p class="hint">{{if .Owned}}Read only because the app asked for read-only access.{{else}}Read only: set by the space owner{{if not $.WantWrite}} or requested by the app{{end}}.{{end}}</p>{{end}}</li>{{else}}<li>You have no private spaces yet. You can still connect the public space.</li>{{end}}</ul>
 <p class="hint">You can add or remove spaces later with Change spaces on Your account, without reconnecting, or revoke this connection there. A space owner can reduce or remove access, which applies immediately.</p></section>

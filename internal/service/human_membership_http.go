@@ -148,11 +148,16 @@ func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Reque
 		sendError(w, problem(503, "unavailable", "Sharing is temporarily unavailable."))
 		return
 	}
+	notice := ""
 	err = h.service.rates.take(allowance{"membership:user:" + user.ID, 30, 600})
 	if err == nil {
 		switch action {
 		case "invite":
-			_, err = db.inviteHuman(r.Context(), user.ID, spaceID, r.PostForm.Get("email"))
+			var invitationID string
+			invitationID, err = db.inviteHuman(r.Context(), user.ID, spaceID, r.PostForm.Get("email"))
+			if err == nil {
+				notice = h.emailInvitation(r.Context(), user, spaceID, invitationID)
+			}
 		case "cancel":
 			err = db.cancelHumanInvitation(r.Context(), user.ID, spaceID, r.PostForm.Get("invitation"))
 		case "accept":
@@ -184,9 +189,76 @@ func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Reque
 		h.renderAccount(w, r, status, page)
 		return
 	}
+	if notice != "" {
+		accountCookie(w, h.noticeCookieName(), notice, 60)
+	}
 	target := h.basePath + "/account"
 	if action != "accept" {
 		target += "/sharing/" + spaceID
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// Notices are fixed keys carried across the post-redirect in a short-lived cookie;
+// account routes take no query parameters.
+var accountNotices = map[string]string{
+	"invite-sent":    "Invitation emailed. They sign in with that address and accept from Your account.",
+	"invite-limited": "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
+	"invite-failed":  "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
+}
+
+func (h *httpAdapter) noticeCookieName() string {
+	if h.basePath == "" {
+		return noticeCookie
+	}
+	return noticeCookie + "-" + secretDigest(h.basePath)[:16]
+}
+
+// takeNotice reads and clears the notice cookie; unknown values are ignored.
+func (h *httpAdapter) takeNotice(w http.ResponseWriter, r *http.Request) string {
+	cookie, err := r.Cookie(h.noticeCookieName())
+	if err != nil {
+		return ""
+	}
+	accountCookie(w, h.noticeCookieName(), "", -1)
+	return accountNotices[cookie.Value]
+}
+
+// emailInvitation runs after the invitation is committed and returns a notice
+// key. The invitation stands whatever happens to the email. Limits: one email
+// per space and address an hour, a few per address a day across all spaces, and
+// a daily cap per owner, so the form cannot be used to flood an inbox. SMTP
+// errors may contain addresses or credentials; never log them.
+func (h *httpAdapter) emailInvitation(ctx context.Context, owner userAccount, spaceID, invitationID string) string {
+	a := h.service.accounts
+	db := h.service.ownedDB
+	if a == nil || a.sendInvite == nil || db == nil {
+		return "invite-failed"
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	var email, name, slug string
+	var expires int64
+	err := db.db.QueryRowContext(queryCtx, `SELECT i.email, s.name, s.slug, i.expires_at FROM metatrash_invitations i JOIN metatrash_spaces s ON s.space_id = i.space_id WHERE i.invitation_id = ? AND i.space_id = ? AND i.status = 'pending' AND s.owner_user_id = ?`, invitationID, spaceID, owner.ID).Scan(&email, &name, &slug, &expires)
+	cancel()
+	if err != nil {
+		return "invite-failed"
+	}
+	if err := h.service.rates.reserve(
+		allowance{"invite-mail:" + spaceID + ":" + email, 1, 3600},
+		allowance{"invite-mail:to:" + email, 5, 86400},
+		allowance{"invite-mail:owner:" + owner.ID, 50, 86400},
+	); err != nil {
+		return "invite-limited"
+	}
+	select {
+	case a.mailSlots <- struct{}{}:
+		defer func() { <-a.mailSlots }()
+	default:
+		return "invite-failed"
+	}
+	m := invitationMail{Owner: owner.Username, SpaceName: name, SpaceAddress: owner.Username + "/" + slug, Email: email, Expires: time.Unix(expires, 0)}
+	if err := a.sendInvite(ctx, email, m); err != nil {
+		return "invite-failed"
+	}
+	return "invite-sent"
 }

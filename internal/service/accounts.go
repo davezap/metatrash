@@ -67,6 +67,8 @@ type accounts struct {
 	secret     []byte
 	mailSlots  chan struct{}
 	send       func(context.Context, string, string) error
+	// sendInvite emails an invitation; nil when accounts are not configured.
+	sendInvite func(context.Context, string, invitationMail) error
 	// oauth is nil unless the account configuration enables OAuth agent access.
 	oauth *oauthSettings
 }
@@ -167,6 +169,9 @@ func (s *Service) EnableAccounts(configPath string) error {
 	a.store = store
 	a.send = func(ctx context.Context, email, code string) error {
 		return sendLoginMail(ctx, cfg, passwordText, email, code)
+	}
+	a.sendInvite = func(ctx context.Context, email string, m invitationMail) error {
+		return sendMail(ctx, cfg, passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
 	}
 	s.accounts = a
 	return nil

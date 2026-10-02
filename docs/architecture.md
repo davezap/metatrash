@@ -79,9 +79,13 @@ CSRF value, bounded form fields and a per-user attempt limit.
 
 ## Sharing
 
-- On **Manage sharing**, the owner invites by email (no email is sent; the
-  recipient signs in with that address and accepts on Your account). Invitations
-  expire after seven days.
+- On **Manage sharing**, the owner invites by email. Once the invitation is
+  saved, an email (fixed subject, plain text) tells the recipient to sign in
+  with that address and accept on Your account; it carries no token or link
+  that grants anything. The invitation stands if the email fails, and the page
+  says so. Inviting the same address again resends it. Email limits: one per
+  space and address an hour, five per address a day, 50 per owner a day.
+  Invitations expire after seven days.
 - Members are active or suspended; removal deletes the row and needs a new
   invitation to return. Joined spaces do not count against the member's
   allowance.

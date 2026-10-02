@@ -57,7 +57,15 @@ cross-origin reads without cookies.
    browser by a `__Host-metatrash-oauth` cookie (SameSite=Lax). A short
    same-site "Continue" page then loads `/oauth/consent`, because the sign-in
    cookies are SameSite=Strict and are not sent on the cross-site arrival.
-3. **Sign in** with the email code if needed; login returns to consent.
+3. **Sign in** with the email code if needed; login returns to consent. A new
+   email address creates the account at this point.
+   - **First space.** If the account owns no space and has allowance, consent
+     first offers *Create your first space* (`POST /oauth/setup`, bound to the
+     session and the pending request): a public username if none is chosen yet,
+     and a space name whose slug is derived as on Your account, with the same
+     rules, rate limits and name-field errors. Success returns to consent with
+     the new space preselected (read and write if the app asked for write) and
+     restarts the request's ten minutes. It can be skipped.
 4. **Consent.** Shows the app name and host, the signed-in email, and every
    ready owned space and active joined space as *Not connected*, *Read only* or
    *Read and write* (the last only if the app asked for `spaces:write` and the

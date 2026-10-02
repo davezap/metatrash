@@ -144,7 +144,9 @@ func (w *oauthWorld) session(user userAccount) *http.Cookie {
 	return &http.Cookie{Name: sessionCookie, Value: token}
 }
 
-var csrfPattern = regexp.MustCompile(`name="csrf" value="([0-9a-f]{64})"`)
+// csrfPattern finds the consent form's token (the page can also hold the
+// first-space setup form and the sign-out form).
+var csrfPattern = regexp.MustCompile(`action="/oauth/consent">\s*<input type="hidden" name="csrf" value="([0-9a-f]{64})"`)
 
 func pkcePair(t *testing.T) (string, string) {
 	verifier, err := newOAuthToken("")

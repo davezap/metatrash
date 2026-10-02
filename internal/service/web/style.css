@@ -44,3 +44,4 @@
 .account-panel .field-error{margin:10px 0 0;font-size:14px}.account-panel input[aria-invalid=true]{border-color:#e5a78e}
 .usage-note code{font-family:ui-monospace,Consolas,monospace;color:var(--text);overflow-wrap:anywhere}
 .copyable{cursor:pointer}.copyable:hover{color:var(--accent)}.copyable:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.endpoint.copyable::after{content:"Copy";float:right;margin-left:12px;font:600 12px system-ui,sans-serif;color:var(--accent)}.endpoint.copied{border-color:var(--accent)}.endpoint.copied::after{content:"Copied \2713"}.copy-status{font-size:13px;font-weight:600;color:var(--accent)}.copy-status:not(:empty){margin-left:6px}.endpoint+.copy-status:not(:empty){display:block;margin:6px 0 0}.copy-status.copy-failed{color:#ffd8c8}
+.account-panel .notice{padding:14px;border:1px solid var(--accent);border-radius:4px;background:#263024;color:var(--text)}

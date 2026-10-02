@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.4 - Invitation emails (2026-10-03)
+
+- Inviting someone on Manage sharing now emails them: who invited them, the space name and owner/slug address, how to accept (sign in with that address at /login, which creates an account if needed, then Accept on Your account) and the expiry. The email holds no token or accept link; acceptance still checks the signed-in verified email.
+- Sent after the invitation commits. If the email fails or is limited, the invitation stands and the sharing page says so. A short-lived notice cookie carries the result across the redirect (account routes take no query parameters); unknown values are ignored.
+- Inviting the same address again while pending resends the email. Limits: one per space and address an hour, five per address a day across all spaces, 50 per owner a day. Uses the login mail concurrency slots.
+- Mail sending shared between login codes and invitations (`sendMail`); bodies are now quoted-printable UTF-8 so space names with macrons arrive intact. Owner and space names have control characters removed and appear only in the body; the subject is fixed.
+- The Invite someone text no longer says no email is sent; the button reads Send invitation.
+- Unit tests of the message (headers, encoding, name sanitising) and a MariaDB test of the invite form (email sent, resend limited, failure notice, invitation kept).
+
+## 0.15.3 - Guided first space when connecting an app, click to copy (2026-10-03)
+
+- Connecting an app without an account: the sign-in page now says it also creates an account ("Sign in or create an account"). On the consent page, an account that owns no space gets **Create your first space**: a public username (if not chosen yet) and a space name, with the derived address shown. Errors appear on the username or name field. On success the page returns with the new space created, selected (read and write if the app asked for write) and announced; one click on Connect finishes. Skippable.
+- `POST /oauth/setup`: exact Origin, form-only, 2 KiB, known fields only, CSRF bound to the session and the pending request, the same username and space-creation rules and rate limits as Your account. Creating the space restarts the request's ten-minute timer (server and cookie) so sign-up does not run it out.
+- Home page: clicking a connector address (or Enter/Space on it) copies it and shows "Copied to clipboard" under it, announced to screen readers; the box label turns to "Copied ✓". If the browser refuses the clipboard, the address is selected and the message says to press Ctrl+C. New `/assets/copy.js` (same-origin script, allowed by the existing policy); without JavaScript the addresses stay selectable text.
+- The consent list names spaces as owner/slug.
+- MariaDB integration test of the whole path for a brand-new account (sign-in wording, setup offered, CSRF and field checks, username and name errors, preselection, approve, token, write), and that accounts with a space are not offered setup.
+
 ## 0.15.2 - One name field when creating a space (2026-10-03)
 
 - The create form asks only for a name. The slug is derived from it: lowercase a–z and 0–9, common accented letters and te reo Māori macrons folded (Ōtautahi → `otautahi`), apostrophes dropped, other runs of characters as one hyphen, cut to 48 characters at a word break. The address example under the field shows the rule.
@@ -7,7 +24,6 @@
 - The `slug` column stays separate, so stored addresses never change if the rule does. Retry preparation still sends the stored slug, so an interrupted space finishes at the address it reserved.
 - Unit test of the slug rule and a MariaDB test of the form (derived address, name-field errors, duplicate names, idempotent retry). No new SQL.
 - Home page: the Claude and ChatGPT instructions now use the sign-in address `/mcp/account` (sign in, choose spaces, public space included), with `/mcp` noted as the no-sign-in public-only option and Change spaces mentioned. The prompt note explains `spaces` and `owner/slug` names, and the "Your own space" panel no longer says agent access is coming. Falls back to the old `/mcp` instructions when OAuth is off.
-- Home page: clicking a connector address (or Enter/Space on it) copies it and shows "Copied to clipboard" under it, announced to screen readers; the box label turns to "Copied ✓". If the browser refuses the clipboard, the address is selected and the message says to press Ctrl+C. New `/assets/copy.js` (same-origin script, allowed by the existing policy); without JavaScript the addresses stay selectable text.
 
 ## 0.15.1 - Change spaces and owner/slug space names (2026-10-03)
 

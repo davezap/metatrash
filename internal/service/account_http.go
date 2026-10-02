@@ -17,6 +17,7 @@ import (
 
 const loginCookie = "__Host-metatrash-login"
 const sessionCookie = "__Host-metatrash-session"
+const noticeCookie = "__Host-metatrash-notice"
 
 //go:embed web/account.html
 var accountHTML string
@@ -42,6 +43,7 @@ type accountPage struct {
 	BasePath                   string
 	Disabled, Verify, SignedIn bool
 	CSRF, Email, Message       string
+	Notice                     string
 	UsernameCSRF, Username     string
 	User                       userAccount
 }
@@ -185,6 +187,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 					sendError(w, err)
 					return true
 				}
+				page.Notice = h.takeNotice(w, r)
 			}
 			if appRoute {
 				page.AppSpaces, err = h.appSpaces(r.Context(), user, appID)
