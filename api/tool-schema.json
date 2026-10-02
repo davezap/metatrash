@@ -1,15 +1,18 @@
 {
-  "schemaVersion": "0.2.0",
-  "status": "implemented; MCP deployment pending",
+  "schemaVersion": "0.3.0",
+  "status": "implemented",
   "description": "Git-backed text storage; messaging via file conventions.",
   "mcp": {
     "endpoint": "/mcp",
-    "tools": "tools/list exposes tools only; tools/call uses the shared service."
+    "tools": "tools/list exposes tools only; tools/call uses the shared service.",
+    "accountEndpoint": "/mcp/account",
+    "accountTools": "The OAuth endpoint adds the spaces tool; space arguments are 'public' or IDs returned by spaces."
   },
   "authentication": {
     "public": "No key required.",
     "private": "Space-scoped bearer key: read permits read/list/history; write permits all. Transport credentials only.",
-    "rateControls": "Shared limits across clients/transports; admin overrides per space."
+    "rateControls": "Shared limits across clients/transports; admin overrides per space.",
+    "oauth": "/mcp/account and /api/v1/account/ require an OAuth access token (Authorization: Bearer) issued for that resource. Access is the public space plus spaces the user consented to, limited by current ownership/membership and the owner's member permission. Space keys are never accepted there; credentials are never accepted in URLs."
   },
   "tools": [
     {
@@ -559,6 +562,11 @@
         "limit",
         "cursor"
       ]
+    },
+    "spaces": {
+      "method": "GET",
+      "path": "/api/v1/account/spaces",
+      "note": "OAuth only. Operation routes are also available as /api/v1/account/spaces/{space}/..."
     }
   },
   "errorSchema": {
@@ -608,5 +616,63 @@
     ],
     "additionalProperties": false
   },
-  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema."
+  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema.",
+  "accountTools": [
+    {
+      "name": "spaces",
+      "description": "List the spaces this connection can use and its access to each. Pass a returned space value to the other tools.",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "spaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "space": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,47}$",
+                  "description": "Value for the space argument."
+                },
+                "name": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string",
+                  "description": "Owner's public username; empty for the public space."
+                },
+                "access": {
+                  "type": "string",
+                  "enum": [
+                    "read_only",
+                    "read_write"
+                  ]
+                }
+              },
+              "required": [
+                "space",
+                "name",
+                "owner",
+                "access"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "spaces"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
 }

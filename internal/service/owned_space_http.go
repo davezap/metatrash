@@ -128,12 +128,7 @@ func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, 
 		sendError(w, invalid("Invalid path."))
 		return true
 	}
-	g, rates := h.service.config.Global.Rates, h.service.config.Defaults.Rates
-	if err := h.service.rates.reserve(
-		allowance{"global:read", g.Reads, g.WindowSeconds},
-		allowance{"owned:" + space.ID + ":read", rates.SpaceReads, rates.WindowSeconds},
-		allowance{"owned:" + space.ID + ":client:" + client, rates.ClientReads, rates.WindowSeconds},
-	); err != nil {
+	if err := h.service.reserveOwnedOperation(space.ID, client, false); err != nil {
 		sendError(w, err)
 		return true
 	}

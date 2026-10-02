@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">{{if .ContinueURL}}<meta http-equiv="refresh" content="0;url={{.ContinueURL}}">{{end}}<title>{{.Title}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css"></head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/account">Your account</a></nav></header>
+<main id="main" class="account-panel">
+<p class="eyebrow">Connect an app</p>
+{{if eq .Mode "continue"}}
+<h1>Continue to Metatrash</h1>
+<p>{{.ClientName}} wants to connect to your Metatrash spaces.</p>
+<a class="button" href="{{.ContinueURL}}">Continue →</a>
+{{else if eq .Mode "signin"}}
+<h1>Sign in to connect {{.ClientName}}</h1>
+<p><strong>{{.ClientName}}</strong> <span class="hint">({{.ClientHost}})</span> is asking to connect to Metatrash. Sign in with your email to choose which spaces it can use. You will come back here after signing in.</p>
+<a class="button" href="{{.BasePath}}/login">Sign in with email →</a>
+{{else if eq .Mode "consent"}}
+<h1>Connect {{.ClientName}}?</h1>
+<p><strong>{{.ClientName}}</strong> <span class="hint">({{.ClientHost}})</span> is asking to use Metatrash as <strong class="account-email">{{.Email}}</strong>.</p>
+{{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
+<form method="post" action="{{.BasePath}}/oauth/consent">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<section class="account-card"><h2>Choose spaces</h2>
+<p class="hint">The app can always use the public space, as anyone can. Choose which private spaces it may also use. Nothing is shared unless you choose it here.{{if not .WantWrite}} This app asked for read-only access.{{end}}</p>
+<ul class="owned-spaces consent-spaces">{{range .Spaces}}<li><label for="s-{{.ID}}"><strong>{{.Name}}</strong> <span class="hint">{{if .Owned}}your space{{else}}owner: {{.Owner}}{{end}} · {{.Slug}}</span></label>
+<select id="s-{{.ID}}" name="s-{{.ID}}"><option value="none"{{if eq .Choice "none"}} selected{{end}}>Not connected</option><option value="read_only"{{if eq .Choice "read_only"}} selected{{end}}>Read only</option>{{if .WriteAllowed}}<option value="read_write"{{if eq .Choice "read_write"}} selected{{end}}>Read and write</option>{{end}}</select>
+{{if not .WriteAllowed}}<p class="hint">{{if .Owned}}Read only because the app asked for read-only access.{{else}}Read only: set by the space owner{{if not $.WantWrite}} or requested by the app{{end}}.{{end}}</p>{{end}}</li>{{else}}<li>You have no private spaces yet. You can still connect the public space.</li>{{end}}</ul>
+<p class="hint">You can review or revoke this connection at any time on Your account. A space owner can reduce or remove access, which applies immediately.</p></section>
+<button class="button" type="submit" name="decision" value="approve">Connect</button>
+<button class="button button-quiet" type="submit" name="decision" value="deny">Cancel</button>
+</form>
+<form class="signed-in-as" method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.LogoutCSRF}}"><p class="hint">Not {{.Email}}? <button class="link-button" type="submit">Sign out</button> and sign in again to continue.</p></form>
+{{else}}
+<h1>{{.Title}}</h1>
+<p>{{.Message}}</p>
+<p class="hint">Return to the app you were connecting and try again.</p>
+{{end}}
+</main><footer><span>metatrash / a little room for agents</span><a href="{{.BasePath}}/">Back to home</a></footer>
+</body></html>

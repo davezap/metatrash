@@ -142,9 +142,10 @@ func (s *Service) queued(ctx context.Context, fn func() (any, error)) (any, erro
 // Access authorizes before atomically reserving operation counters. Every adapter
 // must call it once per operation, behind the separate HTTP ingress limiter.
 func (s *Service) Access(space, key, client string, write bool) error {
-	// Account-owned repositories are never agent-accessible in this stage.
+	// Owned repositories are never reachable through this configured-space entry
+	// point, with or without a key. OAuth access uses ownedAgentAccess instead.
 	if s.ownedRepository(space) != nil {
-		return problem(403, "forbidden", "Agent access to account-owned spaces is not available.")
+		return problem(403, "forbidden", "Account-owned spaces are available to agents only through OAuth at /mcp/account.")
 	}
 	sc, exists := s.config.Spaces[space]
 	if !exists {
@@ -175,10 +176,16 @@ func (s *Service) Access(space, key, client string, write bool) error {
 }
 
 // Dispatch is transport-independent. Call Access first with trusted transport credentials/client IP.
+// It reaches configured spaces only; owned spaces use dispatchRepository after agentAccess.
 func (s *Service) Dispatch(ctx context.Context, space, op string, in Input) (any, error) {
+	return s.dispatchRepository(ctx, s.repos[space], space, op, in)
+}
+
+// dispatchRepository runs one operation on the repository that the caller's
+// access check admitted. The space name is used only for results and cursors.
+func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, op string, in Input) (any, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	r := s.repos[space]
 	if r == nil {
 		return nil, missing()
 	}
@@ -203,7 +210,7 @@ func (s *Service) Dispatch(ctx context.Context, space, op string, in Input) (any
 		result.File.File, result.File.Text = f.File, string(b)
 		return result, nil
 	case "list", "history":
-		return s.page(ctx, space, op, in)
+		return s.page(ctx, r, space, op, in)
 	case "write", "move":
 		if !hashPattern.MatchString(in.IfInState) {
 			return nil, invalid("ifInState must be a commit hash from read/list.")
@@ -229,14 +236,13 @@ func (s *Service) Dispatch(ctx context.Context, space, op string, in Input) (any
 				return nil, problem(403, "protected_file", "README.md is immutable.")
 			}
 		}
-		return s.queued(ctx, func() (any, error) { return s.mutate(ctx, space, op, in) })
+		return s.queued(ctx, func() (any, error) { return s.mutate(ctx, r, space, op, in) })
 	default:
 		return nil, invalid("Unknown operation.")
 	}
 }
 
-func (s *Service) mutate(ctx context.Context, space, op string, in Input) (any, error) {
-	r := s.repos[space]
+func (s *Service) mutate(ctx context.Context, r *repository, space, op string, in Input) (any, error) {
 	head, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return nil, err
@@ -325,7 +331,7 @@ func (s *Service) encodeCursor(c cursor) *string {
 	return &token
 }
 
-func (s *Service) page(ctx context.Context, space, op string, in Input) (any, error) {
+func (s *Service) page(ctx context.Context, r *repository, space, op string, in Input) (any, error) {
 	if in.Limit == 0 {
 		in.Limit = 50
 	}
@@ -365,7 +371,6 @@ func (s *Service) page(ctx context.Context, space, op string, in Input) (any, er
 		}
 		c = saved
 	}
-	r := s.repos[space]
 	state, files, err := r.snapshot(ctx, c.State)
 	if err != nil {
 		return nil, err
@@ -436,4 +441,22 @@ func (s *Service) page(ctx context.Context, space, op string, in Input) (any, er
 		result.NextCursor = s.encodeCursor(c)
 	}
 	return result, nil
+}
+
+// reserveOwnedOperation charges owned-space read or write quotas after the
+// caller has authorized the operation. Human browsing and agent reads share the
+// same owned-space read buckets.
+func (s *Service) reserveOwnedOperation(space, client string, write bool) error {
+	g, rates := s.config.Global.Rates, s.config.Defaults.Rates
+	kind, globalLimit, spaceLimit, clientLimit := "read", g.Reads, rates.SpaceReads, rates.ClientReads
+	clientBucket := "owned:" + space + ":client:" + client
+	if write {
+		kind, globalLimit, spaceLimit, clientLimit = "write", g.Writes, rates.SpaceWrites, rates.ClientWrites
+		clientBucket = "owned:" + space + ":write:client:" + client
+	}
+	return s.rates.reserve(
+		allowance{"global:" + kind, globalLimit, g.WindowSeconds},
+		allowance{"owned:" + space + ":" + kind, spaceLimit, rates.WindowSeconds},
+		allowance{clientBucket, clientLimit, rates.WindowSeconds},
+	)
 }

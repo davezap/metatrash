@@ -5,5 +5,13 @@
   "smtpUsername": "david@204am.com",
   "smtpFrom": "david@204am.com",
   "smtpPasswordFile": "/etc/metatrash/smtp-password",
-  "databaseConfigFile": "/etc/metatrash/account-database.json"
+  "databaseConfigFile": "/etc/metatrash/account-database.json",
+  "oauth": {
+    "enabled": false,
+    "clientHosts": ["claude.ai", "chatgpt.com"],
+    "accessTokenMinutes": 60,
+    "refreshTokenDays": 30,
+    "codeSeconds": 60,
+    "grantIdleDays": 90
+  }
 }

@@ -21,9 +21,12 @@ type httpAdapter struct {
 	schema       []byte
 	proxies      []*net.IPNet
 	mcp          http.Handler
+	mcpAccount   http.Handler
 	basePath     string
 	publicOrigin string
 	publicHost   string
+	// oauth is nil unless accounts are enabled with oauth.enabled.
+	oauth *oauthServer
 }
 
 func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...string) (http.Handler, error) {
@@ -62,9 +65,18 @@ func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...
 		}
 		h.proxies = append(h.proxies, subnet)
 	}
-	h.mcp, err = h.mcpHandler(schema)
+	if s.accounts != nil && s.accounts.oauth != nil {
+		h.oauth = newOAuthServer(*s.accounts.oauth, h.publicOrigin+h.basePath)
+	}
+	h.mcp, err = h.mcpHandler(schema, false)
 	if err != nil {
 		return nil, err
+	}
+	if h.oauth != nil {
+		h.mcpAccount, err = h.mcpHandler(schema, true)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return h, nil
 }
@@ -136,11 +148,21 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sendError(w, invalid("Request URL too long."))
 		return
 	}
+	// Credentials never belong in URLs (MCP authorization spec): refuse a key
+	// query parameter on every route rather than risk it reaching logs or links.
+	if credentialInQuery(r.URL.RawQuery) {
+		sendError(w, invalid("Credentials belong in the Authorization header, never in the URL."))
+		return
+	}
 	if r.URL.Path == "/mcp" {
 		h.serveMCP(w, r)
 		return
 	}
-	if h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
+	if r.URL.Path == "/mcp/account" {
+		h.serveMCPAccount(w, r)
+		return
+	}
+	if h.serveOAuth(w, r, client) || h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
 		return
 	}
 	if r.URL.Path == "/api/v1/spaces/public/recent" {
@@ -171,22 +193,35 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(h.schema)
 		return
 	}
+	if r.URL.Path == "/api/v1/account" || strings.HasPrefix(r.URL.Path, "/api/v1/account/") {
+		h.serveAccountREST(w, r, client)
+		return
+	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	if len(parts) != 5 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "spaces" {
 		sendError(w, missing())
 		return
 	}
-	space, resource := parts[3], parts[4]
-	write := r.Method != http.MethodGet && r.Method != http.MethodHead
+	space := parts[3]
 	key := ""
 	auth := strings.Fields(r.Header.Get("Authorization"))
 	if len(auth) == 2 && strings.EqualFold(auth[0], "Bearer") {
 		key = auth[1]
 	}
-	if err := h.service.Access(space, key, client, write); err != nil {
-		sendError(w, err)
-		return
-	}
+	h.serveRESTOperation(w, r, space, parts[4], "", func(write bool) (*repository, error) {
+		if err := h.service.Access(space, key, client, write); err != nil {
+			return nil, err
+		}
+		return h.service.repos[space], nil
+	})
+}
+
+// serveRESTOperation maps one REST route to an operation, runs the
+// transport's access check once (before quotas and Git) and dispatches to the
+// repository that check admitted.
+// On the OAuth resource, metadataPath is set and an insufficient_scope denial
+// carries an RFC 6750 challenge.
+func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request, space, resource, metadataPath string, access func(write bool) (*repository, error)) {
 	op, allow := "", "GET"
 	switch resource {
 	case "file":
@@ -218,6 +253,17 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
+	write := op == "write" || op == "move"
+	repo, err := access(write)
+	if err != nil {
+		var p *Error
+		if metadataPath != "" && errors.As(err, &p) && p.Code == "insufficient_scope" {
+			h.oauthChallenge(w, metadataPath, p)
+			return
+		}
+		sendError(w, err)
+		return
+	}
 	in, err := parseQuery(r.URL.RawQuery, op)
 	if err != nil {
 		sendError(w, err)
@@ -229,8 +275,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sendError(w, problem(415, "invalid_request", "Use application/json."))
 			return
 		}
-		max := h.service.config.Spaces[space].Limits.Storage.MaxRequestBytes
-		r.Body = http.MaxBytesReader(w, r.Body, max)
+		r.Body = http.MaxBytesReader(w, r.Body, repo.limits.MaxRequestBytes)
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			var tooLarge *http.MaxBytesError
@@ -246,7 +291,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	value, err := h.service.Dispatch(r.Context(), space, op, in)
+	value, err := h.service.dispatchRepository(r.Context(), repo, space, op, in)
 	if err != nil {
 		sendError(w, err)
 		return
@@ -256,6 +301,22 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status = 201
 	}
 	sendJSON(w, status, value)
+}
+
+// credentialInQuery reports a key or access_token parameter, including
+// percent-encoded names and semicolon-separated pairs.
+func credentialInQuery(raw string) bool {
+	for _, pair := range strings.FieldsFunc(raw, func(r rune) bool { return r == '&' || r == ';' }) {
+		name, _, _ := strings.Cut(pair, "=")
+		if decoded, err := url.QueryUnescape(name); err == nil {
+			name = decoded
+		}
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "key" || name == "access_token" {
+			return true
+		}
+	}
+	return false
 }
 
 func parseQuery(raw, op string) (Input, error) {

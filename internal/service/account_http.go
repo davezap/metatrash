@@ -22,6 +22,10 @@ var accountHTML string
 var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 
 type accountPage struct {
+	OAuthEnabled                    bool
+	AppConnectURL, AppsCSRF         string
+	Apps                            []connectedApp
+	AppsUnavailable                 bool
 	Sharing                         *humanSharingPage
 	Invitations                     []humanInvitation
 	Joined                          []joinedHumanSpace
@@ -60,7 +64,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 	page.BasePath = h.basePath
 	if page.SignedIn {
 		page.MembershipCSRF = make(map[string]string)
-		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove"} {
+		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove", "agent"} {
 			page.MembershipCSRF[action] = h.service.accounts.mac("membership:" + action + ":" + cookieToken(r, h.sessionCookieName()))
 		}
 		if page.Sharing == nil {
@@ -69,6 +73,18 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 			if membershipErr != nil {
 				page.MembershipUnavailable = true
 				status = http.StatusServiceUnavailable
+			}
+		}
+		if h.oauth != nil {
+			page.OAuthEnabled = true
+			page.AppConnectURL = h.oauth.mcpResource
+			page.AppsCSRF = h.service.accounts.mac("apps-revoke:" + cookieToken(r, h.sessionCookieName()))
+			if page.Sharing == nil {
+				var appsErr error
+				if page.Apps, appsErr = h.connectedApps(r.Context(), page.User); appsErr != nil {
+					page.AppsUnavailable = true
+					status = http.StatusServiceUnavailable
+				}
 			}
 		}
 		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
@@ -110,14 +126,14 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	sharingID := strings.TrimPrefix(path, "/account/sharing/")
 	sharingRoute := strings.HasPrefix(path, "/account/sharing/") && idPattern.MatchString(sharingID)
 	membershipAction := strings.TrimPrefix(path, "/account/membership/")
-	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove")
+	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove" || membershipAction == "agent")
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
 		suffix := "-" + secretDigest(h.basePath)[:16]
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" {
+	if !sharingRoute && !membershipRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/apps/revoke" {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -211,6 +227,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			allowed["email"] = true
 		case "cancel", "accept":
 			allowed["invitation"] = true
+		case "agent":
+			allowed["member"], allowed["permission"] = true, true
 		default:
 			allowed["member"] = true
 		}
@@ -220,6 +238,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if path == "/account/username" {
 		allowed["username"] = true
+	}
+	if path == "/account/apps/revoke" {
+		allowed["grant"] = true
 	}
 	if path == "/login/send" {
 		allowed["email"] = true
@@ -236,7 +257,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	browser := cookieToken(r, loginCookie)
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" {
+	if membershipRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/apps/revoke" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -251,6 +272,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if path == "/account/spaces" {
 			csrf = a.mac("space-create:" + session)
 		}
+		if path == "/account/apps/revoke" {
+			csrf = a.mac("apps-revoke:" + session)
+		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
@@ -258,6 +282,40 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if membershipRoute {
 		h.submitHumanMembership(w, r, session, membershipAction)
+		return true
+	}
+	if path == "/account/apps/revoke" {
+		user, signedIn, err := a.currentUser(r.Context(), session)
+		if err != nil {
+			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
+			return true
+		}
+		if !signedIn {
+			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+			return true
+		}
+		if h.oauth == nil || h.service.ownedDB == nil {
+			sendError(w, missing())
+			return true
+		}
+		err = h.service.rates.take(allowance{"apps:user:" + user.ID, 30, 600})
+		if err == nil {
+			err = h.service.ownedDB.revokeConnection(r.Context(), user.ID, r.PostForm.Get("grant"))
+		}
+		if err != nil {
+			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The connection could not be revoked. Reload before retrying."}
+			status := http.StatusServiceUnavailable
+			var p *Error
+			if errors.As(err, &p) {
+				status, page.Message = p.Status, p.Message
+				if p.RetryAfterSeconds > 0 {
+					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+				}
+			}
+			h.renderAccount(w, r, status, page)
+			return true
+		}
+		http.Redirect(w, r, h.basePath+"/account#connected-apps", http.StatusSeeOther)
 		return true
 	}
 	if path == "/account/spaces" {
@@ -386,6 +444,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	a.mu.Unlock()
 	accountCookie(w, sessionCookie, token, int(sessionLifetime/time.Second))
 	accountCookie(w, loginCookie, "", -1)
+	// Continue an app connection that sent this browser to sign in. The pending
+	// request lives server-side; the browser only holds its random cookie.
+	if h.oauth != nil && h.oauth.pendingFor(cookieToken(r, h.oauthCookieName())) != nil {
+		http.Redirect(w, r, h.basePath+"/oauth/consent", http.StatusSeeOther)
+		return true
+	}
 	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 	return true
 }

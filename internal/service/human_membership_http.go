@@ -16,7 +16,7 @@ type joinedHumanSpace struct {
 	Name, Owner, URL, Status string
 }
 type humanMember struct {
-	ID, Email, Username, Status string
+	ID, Email, Username, Status, AgentPermission string
 }
 type humanSharingPage struct {
 	ID, Name, URL string
@@ -110,14 +110,14 @@ func (h *httpAdapter) humanSharing(ctx context.Context, user userAccount, spaceI
 	if err != nil {
 		return nil, err
 	}
-	rows, err = h.service.ownedDB.db.QueryContext(ctx, `SELECT m.user_id, u.email, COALESCE(u.username, ''), m.status FROM metatrash_memberships m JOIN metatrash_users u ON u.user_id = m.user_id WHERE m.space_id = ? ORDER BY m.joined_at, m.user_id LIMIT 200`, space.ID)
+	rows, err = h.service.ownedDB.db.QueryContext(ctx, `SELECT m.user_id, u.email, COALESCE(u.username, ''), m.status, m.agent_permission FROM metatrash_memberships m JOIN metatrash_users u ON u.user_id = m.user_id WHERE m.space_id = ? ORDER BY m.joined_at, m.user_id LIMIT 200`, space.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var item humanMember
-		if err := rows.Scan(&item.ID, &item.Email, &item.Username, &item.Status); err != nil {
+		if err := rows.Scan(&item.ID, &item.Email, &item.Username, &item.Status, &item.AgentPermission); err != nil {
 			return nil, err
 		}
 		page.Members = append(page.Members, item)
@@ -157,6 +157,8 @@ func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Reque
 			err = db.cancelHumanInvitation(r.Context(), user.ID, spaceID, r.PostForm.Get("invitation"))
 		case "accept":
 			err = db.acceptHumanInvitation(r.Context(), user.ID, spaceID, r.PostForm.Get("invitation"))
+		case "agent":
+			err = db.setMemberAgentPermission(r.Context(), user.ID, spaceID, r.PostForm.Get("member"), r.PostForm.Get("permission"))
 		default:
 			err = db.manageHumanMember(r.Context(), user.ID, spaceID, r.PostForm.Get("member"), action)
 		}

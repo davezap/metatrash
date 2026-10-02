@@ -22,6 +22,12 @@ One global `public` space is fully open for reads and permitted mutations, withi
 
 REST and remote MCP carry space-scoped bearer credentials through the transport, never tool arguments or URLs. A write key also permits reads. A read key cannot write or move. Private unknown spaces and invalid/missing keys return the same unauthorized response. Check access before disclosing files, revisions, IDs, or conflicts. Private HTTP responses use `Cache-Control: no-store`. Keys do not change backend configuration.
 
+### OAuth agent access (0.14.0)
+
+Account-owned private spaces are reached only through OAuth, at the MCP endpoint `/mcp/account` and the REST routes under `/api/v1/account/` (each is its own protected resource; a token works only where it was issued). Requests carry `Authorization: Bearer <access token>`; without a valid token the response is 401 with `WWW-Authenticate: Bearer resource_metadata="…", scope="spaces:read spaces:write"` (plus `error="invalid_token"` for a bad or expired token). The MCP endpoint adds a `spaces` tool and REST adds `GET /api/v1/account/spaces`; both list the public space and the connected private spaces with `read_only` or `read_write` access. Other operations take the same arguments as the anonymous routes, with `space` set to `public` or a listed space ID.
+
+Effective access is the user's consent for that app intersected with current ownership or active membership, the owner's per-member app permission and the token scope, checked once per operation before quotas and Git. Unconnected, unknown and key-protected spaces return `not_found`; suspended membership returns `forbidden`; a write without read/write access returns 403 `insufficient_scope` (REST adds an RFC 6750 challenge). The public space keeps its anonymous rules. Space keys are never accepted on OAuth routes, and `key` or `access_token` query parameters are refused on every route. See [OAuth protected endpoints](oauth-protected-endpoints.md).
+
 ## Files, identity, and paths
 
 A file has `id`, `path`, UTF-8 `bytes`, and `protected`; read also returns `text`. Assign a random 32-character lowercase hexadecimal ID on creation. It survives edits and moves; a new file at a previously vacated path gets a new ID. IDs are unique within a space and never grant access.

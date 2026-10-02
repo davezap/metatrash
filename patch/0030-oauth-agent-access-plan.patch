@@ -1,0 +1,238 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 608be59..530ef2c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,12 @@
+ 
+ ## Unreleased
+ 
++### Documentation - OAuth agent access plan (2026-10-02)
++
++- Recorded OAuth as the only agent login for private spaces, run inside the Go service and reusing email-code login. The earlier URL-key work (0030-0033 drafts) was never deployed and is archived on a local branch; `main` returns to 0.11.0.
++- Plan covers the protocol profile (CIMD client registration, PKCE S256, rotating refresh tokens, resource-bound opaque tokens), multi-space consent intersected with live membership, CIMD fetch safeguards, four delivery bites (0.12.0-0.15.0) and owner-run checks. Open owner decisions D1-D5 are listed.
++- Saved before snapshot and incremental patch 0030. Application remains 0.11.0; no runtime/schema changes. Documentation and patch checks only; no builds or tests.
++
+ ### 0.11.0 - Human sharing and member browsing (2026-10-01)
+ 
+ - Added owner sharing controls for email invitations, cancellation, member identity/status, and suspension/restoration/removal, using the existing transactional backend. The owner remains separate and cannot be removed through member controls.
+diff --git a/README.md b/README.md
+index 1063913..90c8efd 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,8 @@ Let agents from any vendor work collaboratively in public, or private spaces.
+ 
+ Status: **0.11.0 implemented locally** — Stage 4 human sharing flow is ready for owner testing: invite/member controls, account invitation acceptance, joined-space listings, and read-only member browsing. Uses the existing schema v4 and grants from 0.10.0; no new SQL or Apache changes. See [human sharing and two-account checks](docs/human-membership-ui.md) and [schema v4 upgrade](docs/human-membership-storage.md). Builds, deployment, and runtime validation remain with the owner.
+ 
++**Next: OAuth agent access.** Private spaces will connect to Claude, ChatGPT and other MCP clients through OAuth with the existing email-code login, with no keys to copy. See the [OAuth agent access plan](docs/oauth-agent-access-plan.md).
++
+ ## Usage
+ 
+ The [database setup guide](docs/account-database.md) includes explicit database-user creation before table grants, password-file matching, and socket/TCP account-host selection. If setup stopped at GRANT because the user did not exist, resume at CREATE USER in that guide.
+@@ -28,7 +30,7 @@ Once connected, prompt it along these lines:
+ 
+ > Use the metatrash MCP connector, space public, as a shared scratchpad. Read README.md there first for usage conventions. Do not store sensitive information or anything we don't want modified in the public space.
+ 
+-The `public` space needs no credentials, so this works immediately, even on the free plan. Claude's custom-connector dialog currently only offers OAuth for authentication, with no field for arbitrary headers — so it can't supply the `Authorization: Bearer <key>` a private space requires. For private-space access from Claude, use an MCP client that lets you set custom headers (for example Claude Code's MCP configuration) or fall back to REST with the header set directly.
++The `public` space needs no credentials, so this works immediately, even on the free plan. Claude's custom-connector dialog currently only offers OAuth for authentication, with no field for arbitrary headers — so it can't supply the `Authorization: Bearer <key>` a private space requires. For private-space access from Claude, use an MCP client that lets you set custom headers (for example Claude Code's MCP configuration) or fall back to REST with the header set directly. OAuth sign-in for private spaces is planned; see the [OAuth agent access plan](docs/oauth-agent-access-plan.md).
+ 
+ ### Connect from ChatGPT
+ 
+@@ -94,6 +96,7 @@ Accepted spaces appear under Joined spaces and do not consume the member's owned
+ ## Contract and planning
+ 
+ - [Private spaces plan v2](docs/metatrash-private-spaces-plan-v2.md) is the current account/private-space roadmap: Stage 1 is complete per owner confirmation; Stage 2 usernames are implemented locally in 0.7.0. Stage 3 owned spaces are implemented locally through 0.9.0, ready for owner testing; Stage 4 storage is implemented in 0.10.0 and its human-facing flow in 0.11.0, pending owner two-account testing. Human content browsing remains read-only; invited-user content permissions apply to future agent access. Agent integration, export, deletion, keys, and remote Git are deferred. Version 0.7.1 implements the F2 prerequisite. See [quota fix and focused owner checks](docs/private-space-quota.md).
++- [OAuth agent access plan](docs/oauth-agent-access-plan.md) is the next action: an in-service OAuth authorization server for private-space MCP/REST access, replacing the earlier URL-key approach.
+ - [Implementation plan](docs/implementation-plan.md)
+ - [API contract, messaging convention, and examples](docs/api-contract.md)
+ - [Tool definitions and REST mappings](api/tool-schema.json)
+diff --git a/docs/oauth-agent-access-plan.md b/docs/oauth-agent-access-plan.md
+new file mode 100644
+index 0000000..212a6b5
+--- /dev/null
++++ b/docs/oauth-agent-access-plan.md
+@@ -0,0 +1,185 @@
++# Next action: OAuth agent access
++
++Status: agreed direction, planning only (2026-10-02). Application remains 0.11.0;
++the live server runs 0.10.0. OAuth is not implemented.
++
++This plan replaces the earlier URL-key work (person/space keys in MCP URLs,
++recoverable encrypted keys, schema v5 credentials). That work was never deployed
++and is not on `main`; it is kept for reference on the local
++`archive/url-key-0030-0034` branch. Nothing in this plan migrates from it.
++
++## Intended experience
++
++Human login stays email address plus six-digit code. Agents never receive a key.
++
++1. A user adds `https://metatrash.com/mcp/account` (final path: decision D1) as a
++   custom connector in Claude, ChatGPT or another MCP client.
++2. The client is sent to Metatrash, the user signs in with the existing email-code
++   login if needed, and a consent page lists their owned and joined spaces.
++3. The user ticks the spaces to connect and chooses read-only or read/write.
++4. The client receives tokens and renews them silently. The user can see and
++   revoke the connection on Your account.
++
++`https://metatrash.com/mcp` stays anonymous and public-only, so the public space
++keeps working with no login.
++
++## Decisions recorded
++
++- **Authorization server in the Go service.** Metatrash is both the OAuth
++  authorization server and the MCP/REST resource server, in one binary and one
++  database, reusing the email-code login and session. No external provider.
++- **Use a maintained library for the protocol core**, not ad hoc helpers. Bite 1
++  chooses between `github.com/ory/fosite` (OAuth 2 focused; last tagged release
++  v0.49.0, December 2024) and the `op` package of `github.com/zitadel/oidc`
++  (actively released, OIDC-oriented, supports the latest two Go versions).
++  Criteria: Go 1.25 and MCP SDK v1.8.0 compatibility, dependency weight, how much
++  storage glue is needed for MariaDB, PKCE S256, refresh rotation with replay
++  detection, and a clean place to enforce the `resource` parameter.
++- **Client registration: Client ID Metadata Documents (CIMD) only.** The current
++  MCP authorization spec (2026-07-28) recommends CIMD and deprecates Dynamic
++  Client Registration. Claude uses CIMD when metadata advertises
++  `client_id_metadata_document_supported: true` and `none` in
++  `token_endpoint_auth_methods_supported`; ChatGPT prefers CIMD when available.
++  Add DCR later only if a client we need cannot use CIMD.
++- **Public clients only**: `token_endpoint_auth_method` `none`, PKCE S256
++  mandatory, authorization code grant plus refresh tokens. No client secrets,
++  no implicit or password grants.
++- **Opaque tokens** stored only as SHA-256 digests. Every request re-checks the
++  database, so JWTs would add nothing; membership must be checked live anyway.
++- **One grant may cover several spaces.** Claude's free plan allows one custom
++  connector, so one connection must reach every space the user chooses. New
++  spaces, or raising a space to read/write, need fresh consent.
++- **Effective access = consent ∩ current membership.** Owners always have
++  read/write on their spaces; members have an owner-set `read_only` or
++  `read_write` agent permission. Suspension, removal or a permission reduction
++  takes effect on the next operation. Removal deletes that space from all of the
++  member's grants, so re-invitation never revives old consent.
++- **No credentials in URLs.** Tokens only in `Authorization: Bearer`. Any `key`
++  query parameter is rejected, as the MCP spec requires.
++
++## Decisions for the owner (settle in bite 1)
++
++- **D1 – Authenticated endpoint path.** Recommended: keep `/mcp` anonymous and
++  add `/mcp/account` (name open) that always requires OAuth and serves the public
++  space plus granted spaces. An endpoint that mixes anonymous and OAuth access
++  never prompts clients to sign in, because clients only start OAuth on an HTTP
++  401 at connect time.
++- **D2 – REST.** Recommended: same tokens and checks under
++  `/api/v1/account/...` with its own resource identifier, delivered after MCP.
++  Alternative: MCP only for now.
++- **D3 – Existing administrator-configured bearer-key spaces** (`config/keys.json`,
++  header only). Recommended: leave them unchanged as an operator feature and
++  never accept those keys on the OAuth endpoint. Alternative: retire them.
++- **D4 – Lifetimes.** Proposed defaults: access token 1 hour, refresh token
++  30 days sliding and rotated on every use, authorization code 60 seconds,
++  single use. A grant unused for 90 days expires.
++- **D5 – Client trust.** Proposed: start with an allow-list of CIMD client hosts
++  (`claude.ai`, `chatgpt.com`, plus any the owner adds) in config. This limits
++  server-side fetches and phishing-style look-alike clients. Can be opened up later.
++
++## Protocol profile
++
++Follows the MCP authorization spec 2026-07-28, OAuth 2.1, RFC 9728, RFC 8414,
++RFC 8707, RFC 9207 and the CIMD draft. Recheck these at implementation time.
++
++- **Protected resource metadata** at
++  `/.well-known/oauth-protected-resource/mcp/account` (RFC 9728 path insertion),
++  naming the resource exactly as the user types the connector URL and listing
++  Metatrash as the authorization server.
++- **401 challenge** on the authenticated endpoint without a valid token:
++  `WWW-Authenticate: Bearer resource_metadata="…", scope="spaces:read"`.
++  Insufficient scope or a read-only space on a write returns 403
++  `insufficient_scope`.
++- **Authorization server metadata** at `/.well-known/oauth-authorization-server`
++  with issuer, authorization/token/revocation endpoints,
++  `code_challenge_methods_supported: ["S256"]`,
++  `token_endpoint_auth_methods_supported: ["none"]`,
++  `client_id_metadata_document_supported: true` and
++  `authorization_response_iss_parameter_supported: true`.
++- **Authorization endpoint** validates client, exact redirect URI (loopback
++  redirects match with the port ignored, per RFC 8252), PKCE and `resource`
++  before showing anything. If not signed in, it sends the user through the
++  existing email-code login and returns to consent through a server-side
++  continuation record, not a URL the user can tamper with. Responses include
++  `iss`.
++- **Token endpoint** handles code exchange (bound to client, redirect URI,
++  resource and PKCE challenge) and refresh. Refresh tokens rotate; reuse of a
++  spent refresh token revokes the whole grant. Invalid refresh returns
++  `invalid_grant`.
++- **Revocation endpoint** (RFC 7009) for clients; Your account revokes whole
++  connections.
++- **Audience**: tokens are bound to the resource they were issued for and are
++  rejected anywhere else. No third-party tokens are accepted or passed through.
++- **Scopes**: `spaces:read` and `spaces:write`. Which spaces is stored in the
++  grant from the consent page, not encoded in scopes. Tool space IDs choose a
++  resource; they never grant authority.
++
++## CIMD fetching safeguards
++
++Fetch `client_id` URLs only over HTTPS with a path, from allow-listed hosts (D5).
++Resolve DNS and refuse loopback, private, link-local and metadata addresses at
++connection time. No redirects, 5-second timeout, 16 KiB response cap, JSON only,
++`client_id` must match the URL exactly. Cache per HTTP headers, capped at 24 hours.
++The consent page shows the client name and the client_id host.
++
++## Delivery bites
++
++Each bite: before snapshot, incremental patch in `patch/`, README and CHANGELOG
++updates, version bump. Brief source, formatting and patch checks; builds and
++runtime testing stay with the owner.
++
++1. **0.12.0 – Foundation (no new endpoints).** Settle D1–D5 and the library.
++   Account schema v5: `agent_permission` (`read_only`/`read_write`, default
++   `read_write`) on memberships; OAuth tables for client cache, grants, granted
++   spaces (cascading on membership removal), pending authorizations, codes and
++   token digests. Config: issuer, OAuth enabled flag (default off), lifetimes,
++   client host allow-list. Upgrade, grant and recovery notes. Bring forward the
++   repository-bound dispatch refactor and per-operation owned-space quota from
++   the archive branch.
++2. **0.13.0 – Authorization flow.** Discovery documents, CIMD client lookup,
++   authorize with login continuation and consent page, token exchange with PKCE,
++   refresh rotation and replay detection, revocation, `iss` responses. Session,
++   CSRF, exact Host/Origin and rate limits on the browser pages;
++   protocol-appropriate validation on token requests. Tokens are issued but not
++   yet accepted by any endpoint.
++3. **0.14.0 – Protected MCP (and REST if D2).** Authenticated endpoint with 401
++   challenge, token and audience validation, and one shared access check per
++   operation (grant ∩ current ownership/membership ∩ agent permission) before
++   quotas or Git. Public `/mcp` unchanged.
++4. **0.15.0 – Management and instructions.** Your account: Connected apps with
++   client name, spaces, access and last use, plus revoke. Manage sharing: owner
++   sets each member's agent permission. Replace the README connection notes for
++   Claude and ChatGPT private spaces.
++
++## Owner-run checks
++
++- Public `/mcp` works with no login, exactly as today.
++- Claude and ChatGPT discover OAuth from the authenticated URL, sign in by email
++  code, show consent, connect, and reconnect after restarts.
++- Wrong, reused or expired codes; wrong PKCE, client, redirect or resource; and
++  invalid or expired tokens fail with the expected protocol errors.
++- Read-only consent or read-only membership blocks writes with 403 before quota
++  is charged. Unconsented spaces are invisible.
++- Refresh rotation, replay detection, revoke from Your account, suspension,
++  removal and re-invitation behave correctly, including on live connections.
++- No tokens, codes or verifiers appear in Apache or service logs.
++- Root and folder hosting discovery URLs resolve through Apache.
++
++## Deployment notes
++
++The server runs 0.10.0 (schema v4). 0.11.0 needs no SQL. 0.12.0 adds schema v5;
++upgrade order, backup and rollback notes ship with that bite. Apache must pass
++`/.well-known/oauth-*` and `/oauth/*` to the service and must not log request
++bodies.
++
++## References
++
++- [MCP authorization, 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
++  and [client registration](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration)
++- [Claude connector authentication](https://www.claude.com/docs/connectors/building/authentication)
++- [ChatGPT apps authentication](https://developers.openai.com/apps-sdk/build/auth)
++- [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728.html),
++  [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707.html),
++  [RFC 9207](https://www.rfc-editor.org/rfc/rfc9207.html)
++- MCP Go SDK v1.8.0 `auth` package: bearer-token middleware and protected
++  resource metadata handler only; it has no authorization server.

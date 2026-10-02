@@ -1,0 +1,2677 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index aab5dce..41d5b13 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,14 @@
+ 
+ ## Unreleased
+ 
++### 0.13.0 - OAuth authorization server (2026-10-02)
++
++- Added RFC 8414 authorization server metadata and RFC 9728 protected resource metadata for `/mcp/account` and `/api/v1/account`, with CIMD, S256-only PKCE, public clients only and `iss` responses (RFC 9207). All OAuth routes exist only with `oauth.enabled`.
++- Added Client ID Metadata Document lookup from allow-listed hosts: canonical HTTPS client IDs, no proxy or redirects, public-address-only connections on port 443, 5-second timeout, 16 KiB JSON cap, strict document checks, header-driven cache capped at 24 hours.
++- Added `/oauth/authorize` with exact redirect matching (loopback ports ignored), a browser-bound pending request held server-side, a same-site continuation step so SameSite=Strict sign-in works, email-code sign-in continuation, and a consent page to choose read-only or read/write per owned or joined space. Approval re-checks ownership, membership and member permissions in one transaction.
++- Added `/oauth/token` (single-use 60-second codes bound to client, redirect, resource and PKCE; refresh rotation with replay revocation of the whole connection; scope narrowing only) and `/oauth/revoke` (RFC 7009). Tokens are opaque and stored as SHA-256 digests; nothing accepts them until 0.14.0. No new SQL.
++- Unit tests for every protocol rule plus a MariaDB integration test of the full flow; documented Apache folder-hosting discovery lines. See docs/oauth-authorization.md. Saved before snapshot and incremental patch 0032.
++
+ ### 0.12.0 - OAuth foundation: schema v5 and configuration (2026-10-02)
+ 
+ - Settled the OAuth plan's owner decisions D1-D5 as recommended. Library check: `ory/fosite` (no release since December 2024, heavy dependencies, no `resource`/CIMD) and `zitadel/oidc` (Go 1.26 from v3.51.9, OIDC-first) did not fit; owner chose a focused in-house implementation with no new module dependencies.
+diff --git a/README.md b/README.md
+index 1792b43..7d9f53a 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ Metatrash provides lightweight shared storage and messaging spaces for agents: a
+ 
+ Let agents from any vendor work collaboratively in public, or private spaces.
+ 
+-Status: **0.12.0 implemented locally** — OAuth agent access is being delivered in bites. 0.12.0 adds account schema v5 and OAuth configuration (off by default) with no new endpoints. **Apply schema v5 and its grants before starting with accounts enabled:** see [OAuth foundation](docs/oauth-foundation.md). The 0.11.0 human sharing flow is unchanged ([human sharing checks](docs/human-membership-ui.md)).
++Status: **0.13.0 implemented locally** — OAuth agent access is being delivered in bites: 0.12.0 added account schema v5 and OAuth configuration ([OAuth foundation](docs/oauth-foundation.md); **apply schema v5 and its grants before starting with accounts enabled**), and 0.13.0 adds the [authorization server](docs/oauth-authorization.md) (sign-in, consent and tokens; off unless `oauth.enabled`). No endpoint accepts the tokens until 0.14.0. The 0.11.0 human sharing flow is unchanged ([human sharing checks](docs/human-membership-ui.md)).
+ 
+ **Next: OAuth agent access.** Private spaces will connect to Claude, ChatGPT and other MCP clients through OAuth with the existing email-code login, with no keys to copy. See the [OAuth agent access plan](docs/oauth-agent-access-plan.md).
+ 
+diff --git a/assets.go b/assets.go
+index 9e06923..986aeb8 100644
+--- a/assets.go
++++ b/assets.go
+@@ -2,7 +2,7 @@ package metatrash
+ 
+ import _ "embed"
+ 
+-const Version = "0.12.0"
++const Version = "0.13.0"
+ 
+ //go:embed api/tool-schema.json
+ var ToolSchema []byte
+diff --git a/deploy/apache-metatrash.conf.example b/deploy/apache-metatrash.conf.example
+index 658009b..ed2461f 100644
+--- a/deploy/apache-metatrash.conf.example
++++ b/deploy/apache-metatrash.conf.example
+@@ -22,3 +22,7 @@ ProxyPassReverse / http://127.0.0.1:8080/
+ # ProxyPass        /metatrash/ http://127.0.0.1:8080/
+ # ProxyPassReverse /metatrash/ http://127.0.0.1:8080/
+ # Both sides must end in /; Apache strips the external prefix before proxying.
++# With OAuth enabled under a folder, also pass root discovery (RFC 8414/9728):
++# ProxyPass        /.well-known/oauth-authorization-server/metatrash http://127.0.0.1:8080/.well-known/oauth-authorization-server
++# ProxyPass        /.well-known/oauth-protected-resource/metatrash/ http://127.0.0.1:8080/.well-known/oauth-protected-resource/
++# Never log request bodies or Authorization headers (OAuth codes and tokens).
+diff --git a/docs/folder-hosting.md b/docs/folder-hosting.md
+index cb7e1ec..28b52d3 100644
+--- a/docs/folder-hosting.md
++++ b/docs/folder-hosting.md
+@@ -20,6 +20,8 @@ Use matching trailing slashes. The redirect handles the bare folder address. Do
+ 
+ Apache removes /metatrash/ from incoming paths; Go still receives /, /login, /mcp, /api/v1/... and so on. Go adds the prefix to outward links and redirects. Do not configure the proxy to preserve the prefix too. Direct loopback page rendering will contain the configured external prefix; use the public URL for browser checks. Direct loopback health checks remain at /healthz.
+ 
++With OAuth agent access enabled, also add the two root discovery ProxyPass lines from [OAuth authorization](oauth-authorization.md#apache) so clients can find the issuer `https://mydomain.com/metatrash`.
++
+ The external MCP endpoint is https://mydomain.com/metatrash/mcp and REST endpoints begin https://mydomain.com/metatrash/api/v1/. MCP permits the configured public host and origin, plus the existing local development hosts. Host preservation remains required. The public prefix does not change space paths or API arguments.
+ 
+ If email accounts are enabled, set their origin to https://mydomain.com, WITHOUT /metatrash/. Browsers send an origin without a path. Startup rejects a mismatch with public-url. Existing Origin and CSRF validation stay enabled. Account forms and redirects use the prefix.
+diff --git a/docs/oauth-agent-access-plan.md b/docs/oauth-agent-access-plan.md
+index 71a6d85..5aa0478 100644
+--- a/docs/oauth-agent-access-plan.md
++++ b/docs/oauth-agent-access-plan.md
+@@ -1,8 +1,8 @@
+ # Next action: OAuth agent access
+ 
+-Status: in delivery (2026-10-02). D1–D5 accepted as recommended. Bite 1
+-(0.12.0, [schema v5 and configuration](oauth-foundation.md)) is implemented; the
+-live server runs 0.10.0.
++Status: in delivery (2026-10-02). D1–D5 accepted as recommended. Implemented:
++bite 1 (0.12.0, [schema v5 and configuration](oauth-foundation.md)) and bite 2
++(0.13.0, [authorization server](oauth-authorization.md)). The live server runs 0.10.0.
+ 
+ This plan replaces the earlier URL-key work (person/space keys in MCP URLs,
+ recoverable encrypted keys, schema v5 credentials). That work was never deployed
+diff --git a/docs/oauth-authorization.md b/docs/oauth-authorization.md
+new file mode 100644
+index 0000000..67b3d6f
+--- /dev/null
++++ b/docs/oauth-authorization.md
+@@ -0,0 +1,144 @@
++# OAuth authorization server — 0.13.0
++
++Second bite of the [OAuth agent access plan](oauth-agent-access-plan.md), on the
++[schema v5 foundation](oauth-foundation.md). Metatrash now acts as an OAuth 2.1
++authorization server for MCP clients. Tokens are issued but **no endpoint
++accepts them yet**; the protected MCP endpoint arrives in 0.14.0. No new SQL.
++
++Everything below exists only when accounts are enabled and the account
++configuration has `"oauth": {"enabled": true}`. Otherwise these routes return
++404 exactly as before.
++
++## Endpoints
++
++Paths are relative to the public URL (for example `https://metatrash.com`).
++
++| Path | Purpose |
++| --- | --- |
++| `/.well-known/oauth-authorization-server` | RFC 8414 metadata; issuer is the public URL |
++| `/.well-known/oauth-protected-resource/mcp/account` | RFC 9728 metadata for resource `…/mcp/account` |
++| `/.well-known/oauth-protected-resource/api/v1/account` | RFC 9728 metadata for resource `…/api/v1/account` (REST, D2) |
++| `/oauth/authorize` | Authorization endpoint (GET) |
++| `/oauth/consent` | Sign-in continuation and consent page (GET, POST) |
++| `/oauth/token` | Code exchange and refresh (POST, form) |
++| `/oauth/revoke` | RFC 7009 revocation (POST, form) |
++
++Authorization server metadata advertises `S256` only, `none` client
++authentication only, `client_id_metadata_document_supported: true` and
++`authorization_response_iss_parameter_supported: true`. Scopes are
++`spaces:read` and `spaces:write`. Discovery documents and the token and
++revocation endpoints allow cross-origin reads (`Access-Control-Allow-Origin: *`,
++no cookies) for browser-based MCP tools.
++
++## Flow
++
++1. **Authorize.** The client is identified by its Client ID Metadata Document
++   URL. Before anything is sent back to the client, Metatrash checks the URL
++   shape and allow-listed host, fetches and validates the document, and requires
++   the `redirect_uri` to match a registered one exactly (loopback `http` redirect
++   URIs match with the port ignored, RFC 8252). Problems at this stage show an
++   error page and never redirect. Later problems (response type, PKCE S256,
++   unknown `resource`, `prompt=none`, request objects, repeated parameters)
++   redirect with `error`, `state` and `iss`. A missing `resource` means the MCP
++   resource; unknown scope values are ignored.
++2. **Continuation.** The validated request is kept in service memory for ten
++   minutes, bound to this browser by a random `__Host-metatrash-oauth` cookie
++   (SameSite=Lax; one pending request per browser). The response is a short
++   "Continue" page that refreshes to `/oauth/consent`. That extra same-site step
++   is needed because sign-in cookies are SameSite=Strict and are not sent on the
++   cross-site navigation from Claude or ChatGPT. Nothing about the request is in
++   a URL the user could edit.
++3. **Sign in.** If not signed in, the page names the app and links to the
++   existing email-code login. After a successful code, login returns to the
++   consent page instead of Your account.
++4. **Consent.** The page shows the app name and its client host, the signed-in
++   email (with a sign-out link), and every ready owned space and active joined
++   space. Each space is *Not connected*, *Read only* or *Read and write*.
++   Read and write is offered only when the app asked for `spaces:write` and the
++   user owns the space or the owner allows read/write for members. The public
++   space is always available, as it is anonymously. Previous choices for the same
++   app are preselected. The form is protected by exact Origin, a CSRF value bound
++   to both the session and this pending request, and a per-account rate limit.
++5. **Approve or cancel.** Cancel redirects with `access_denied`. Approve re-checks
++   ownership or active membership and member permissions inside one transaction
++   (locking spaces in ID order like membership changes), then creates or replaces
++   the single connection for this account, app and resource. A single-use code
++   valid for `codeSeconds` (default 60) is returned with `state` and `iss`. The
++   consent page's CSP allows the form to redirect only to that app's origin.
++6. **Token.** Code exchange requires the same `client_id` and `redirect_uri`, a
++   `code_verifier` matching the S256 challenge, and (if sent) the same `resource`.
++   A code is spent by its first use, successful or not; presenting it again
++   revokes the tokens issued with it. Responses carry `access_token` (`mt_at_…`),
++   `refresh_token` (`mt_rt_…`), `expires_in`, `scope` and `Cache-Control: no-store`.
++   Only SHA-256 digests are stored.
++7. **Refresh.** Each refresh token works once. It returns a new pair and extends
++   the connection's idle expiry. A spent refresh token presented again revokes
++   the whole connection (consent and all tokens). A refresh may narrow the scope,
++   never widen it, and is limited by the connection's current consent.
++8. **Revoke.** Revoking an access token deletes it; revoking a refresh token
++   deletes every token of that connection but keeps consent. Unknown tokens and
++   other clients' tokens are ignored (RFC 7009 always answers 200).
++
++Public clients only: requests with an `Authorization` header or `client_secret`
++get `invalid_client`. Unsupported grants get `unsupported_grant_type`.
++Expired tokens and idle-expired connections are purged at most every ten minutes.
++
++## Client metadata fetching (D5)
++
++Only `https://<allow-listed host>/<path>` client IDs are fetched: no port, query,
++fragment, credentials, encoded or dot segments, and the URL must already be in
++that exact form. The fetch uses no proxy, connects only to public addresses on
++port 443 (loopback, private, link-local and metadata addresses, shared and
++documentation ranges are refused when connecting, after DNS resolution), follows
++no redirects, times out after five seconds and reads at most 16 KiB of
++`application/json`. The document's `client_id` must equal the URL; it must not
++contain a secret, must use `none` authentication if it says, must allow the code
++grant and code responses if it lists them, and must list 1–20 redirect URIs
++(https, loopback http, or a private-use scheme; never `javascript:`, `data:` and
++similar). The display name falls back to the host if missing or containing
++control characters. Results are cached per `Cache-Control` for at most 24 hours;
++failures are cached for one minute; at most four fetches run at once.
++
++## Apache
++
++Root hosting needs no change: the catch-all proxy already passes
++`/.well-known/oauth-*` and `/oauth/*` to the service. Apache's default access
++log records request lines only; authorization codes travel in the `Location`
++header and tokens in POST bodies, so neither is logged. Do not enable body or
++header logging (for example `mod_dumpio` or `mod_log_forensic`) on this host.
++
++Folder hosting (for example `-public-url https://mydomain.com/metatrash/`) makes
++the issuer `https://mydomain.com/metatrash`. Clients find its metadata by RFC 8414
++path insertion at the domain root, so add these lines beside the folder's
++ProxyPass rules:
++
++```apache
++ProxyPass        /.well-known/oauth-authorization-server/metatrash http://127.0.0.1:8080/.well-known/oauth-authorization-server
++ProxyPass        /.well-known/oauth-protected-resource/metatrash/ http://127.0.0.1:8080/.well-known/oauth-protected-resource/
++```
++
++## Checks
++
++Built, vetted and tested with Go 1.25.1. Unit tests cover client ID shape,
++document validation, redirect matching, the address filter (including real
++dials to refused addresses), cache lifetimes, resource and scope handling,
++discovery, authorization request errors (error page versus redirect, `state`
++and `iss`), the continuation cookie, and token request validation.
++
++An integration test against MariaDB 10.11 with the documented runtime grants
++runs the whole flow: consent listing, approval, wrong redirect URI, spent and
++reused codes, wrong PKCE verifier, resource binding, refresh rotation, narrowed
++and widened scope, replay revocation, client revocation, removal of a member
++deleting their consent, refusal to consent to a removed membership, cancel, and
++sign-in continuation back to consent. Run it with
++`METATRASH_TEST_DB_CONFIG=<database config> go test ./internal/service` against a
++freshly created, disposable database.
++
++Owner checks after deploying with `oauth.enabled`:
++
++- `curl https://metatrash.com/.well-known/oauth-authorization-server` returns the
++  metadata above; with OAuth disabled it returns 404.
++- An `/oauth/authorize` URL with an unknown `client_id` or redirect shows an
++  error page and does not redirect.
++- End-to-end checks with Claude and ChatGPT start with 0.14.0, whose protected
++  endpoint is what makes those apps begin this flow.
+diff --git a/internal/service/account_http.go b/internal/service/account_http.go
+index bd5d677..e781e7c 100644
+--- a/internal/service/account_http.go
++++ b/internal/service/account_http.go
+@@ -386,6 +386,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
+ 	a.mu.Unlock()
+ 	accountCookie(w, sessionCookie, token, int(sessionLifetime/time.Second))
+ 	accountCookie(w, loginCookie, "", -1)
++	// Continue an app connection that sent this browser to sign in. The pending
++	// request lives server-side; the browser only holds its random cookie.
++	if h.oauth != nil && h.oauth.pendingFor(cookieToken(r, h.oauthCookieName())) != nil {
++		http.Redirect(w, r, h.basePath+"/oauth/consent", http.StatusSeeOther)
++		return true
++	}
+ 	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
+ 	return true
+ }
+diff --git a/internal/service/db_integration_test.go b/internal/service/db_integration_test.go
+index 168881e..68d6a17 100644
+--- a/internal/service/db_integration_test.go
++++ b/internal/service/db_integration_test.go
+@@ -11,6 +11,8 @@ import (
+ // v5 with the documented runtime grants. Set METATRASH_TEST_DB_CONFIG to the
+ // path of an account database configuration file to run them; they are skipped
+ // otherwise. Never point this at a production database: tests create rows.
++// Recreate the database before each run; owned spaces from an earlier run point
++// at repositories that no longer exist and stop the service from loading.
+ func testDatabase(t *testing.T) *accountDatabase {
+ 	t.Helper()
+ 	path := os.Getenv("METATRASH_TEST_DB_CONFIG")
+diff --git a/internal/service/http.go b/internal/service/http.go
+index 797a933..655832c 100644
+--- a/internal/service/http.go
++++ b/internal/service/http.go
+@@ -24,6 +24,8 @@ type httpAdapter struct {
+ 	basePath     string
+ 	publicOrigin string
+ 	publicHost   string
++	// oauth is nil unless accounts are enabled with oauth.enabled.
++	oauth *oauthServer
+ }
+ 
+ func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...string) (http.Handler, error) {
+@@ -62,6 +64,9 @@ func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...
+ 		}
+ 		h.proxies = append(h.proxies, subnet)
+ 	}
++	if s.accounts != nil && s.accounts.oauth != nil {
++		h.oauth = newOAuthServer(*s.accounts.oauth, h.publicOrigin+h.basePath)
++	}
+ 	h.mcp, err = h.mcpHandler(schema)
+ 	if err != nil {
+ 		return nil, err
+@@ -140,7 +145,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 		h.serveMCP(w, r)
+ 		return
+ 	}
+-	if h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
++	if h.serveOAuth(w, r, client) || h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
+ 		return
+ 	}
+ 	if r.URL.Path == "/api/v1/spaces/public/recent" {
+diff --git a/internal/service/oauth_clients.go b/internal/service/oauth_clients.go
+new file mode 100644
+index 0000000..0778a4f
+--- /dev/null
++++ b/internal/service/oauth_clients.go
+@@ -0,0 +1,381 @@
++package service
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"io"
++	"mime"
++	"net"
++	"net/http"
++	"net/netip"
++	"net/url"
++	"regexp"
++	"strconv"
++	"strings"
++	"sync"
++	"syscall"
++	"time"
++	"unicode"
++	"unicode/utf8"
++
++	"metatrash.com/metatrash"
++)
++
++// oauthClient is a public client described by a Client ID Metadata Document.
++// The client_id is the HTTPS URL of that document.
++type oauthClient struct {
++	ID, Name, Host string
++	RedirectURIs   []string
++}
++
++const maxClientDocumentBytes = 16 * 1024
++const maxClientCacheEntries = 128
++const maxClientCacheTTL = 24 * time.Hour
++const defaultClientCacheTTL = time.Hour
++const clientFailureTTL = time.Minute
++
++var redirectSchemePattern = regexp.MustCompile(`^[a-z][a-z0-9+.-]{0,31}$`)
++
++// Schemes that must never receive authorization responses.
++var deniedRedirectSchemes = map[string]bool{"javascript": true, "data": true, "file": true, "vbscript": true, "about": true, "blob": true, "ftp": true, "ws": true, "wss": true, "mailto": true, "tel": true}
++
++type clientCacheEntry struct {
++	client  oauthClient
++	err     error
++	expires time.Time
++}
++
++// oauthClients fetches and caches client metadata from allow-listed hosts.
++type oauthClients struct {
++	hosts map[string]bool
++	mu    sync.Mutex
++	cache map[string]clientCacheEntry
++	slots chan struct{}
++	// fetch returns the document body and the cache lifetime its headers allow.
++	fetch func(ctx context.Context, clientID string) ([]byte, time.Duration, error)
++	now   func() time.Time
++}
++
++func newOAuthClients(hosts map[string]bool) *oauthClients {
++	c := &oauthClients{hosts: hosts, cache: map[string]clientCacheEntry{}, slots: make(chan struct{}, 4), now: time.Now}
++	httpClient := clientMetadataHTTPClient()
++	c.fetch = func(ctx context.Context, clientID string) ([]byte, time.Duration, error) {
++		return fetchClientDocument(ctx, httpClient, clientID)
++	}
++	return c
++}
++
++// clientIDHost validates the client_id URL shape and returns its allow-listed
++// host. The URL must already be in canonical form: https, no port, userinfo,
++// query, fragment, encoded or dot segments, and a path beyond "/".
++func (c *oauthClients) clientIDHost(clientID string) (string, error) {
++	bad := fmt.Errorf("unrecognized client")
++	if len(clientID) < 10 || len(clientID) > 255 {
++		return "", bad
++	}
++	for _, r := range clientID {
++		if r < 33 || r > 126 {
++			return "", bad
++		}
++	}
++	u, err := url.Parse(clientID)
++	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" || u.Opaque != "" {
++		return "", bad
++	}
++	host := u.Hostname()
++	if host != strings.ToLower(host) || !c.hosts[host] {
++		return "", bad
++	}
++	if len(u.Path) < 2 || !strings.HasPrefix(u.Path, "/") || strings.Contains(u.Path, "//") {
++		return "", bad
++	}
++	for _, segment := range strings.Split(u.Path[1:], "/") {
++		if segment == "." || segment == ".." {
++			return "", bad
++		}
++	}
++	if "https://"+host+u.Path != clientID {
++		return "", bad
++	}
++	return host, nil
++}
++
++// lookup returns validated client metadata, from cache when still fresh.
++func (c *oauthClients) lookup(ctx context.Context, clientID string) (oauthClient, error) {
++	host, err := c.clientIDHost(clientID)
++	if err != nil {
++		return oauthClient{}, err
++	}
++	now := c.now()
++	c.mu.Lock()
++	if entry, ok := c.cache[clientID]; ok && now.Before(entry.expires) {
++		c.mu.Unlock()
++		return entry.client, entry.err
++	}
++	c.mu.Unlock()
++	select {
++	case c.slots <- struct{}{}:
++		defer func() { <-c.slots }()
++	default:
++		return oauthClient{}, fmt.Errorf("client lookup busy")
++	}
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	body, ttl, err := c.fetch(ctx, clientID)
++	var client oauthClient
++	if err == nil {
++		client, err = parseClientDocument(body, clientID, host)
++	}
++	if err != nil {
++		// Briefly remember failures so a broken or hostile document is not refetched per request.
++		ttl = clientFailureTTL
++		client = oauthClient{}
++	}
++	if ttl > maxClientCacheTTL {
++		ttl = maxClientCacheTTL
++	}
++	if ttl > 0 {
++		c.mu.Lock()
++		if len(c.cache) >= maxClientCacheEntries {
++			for key, entry := range c.cache {
++				if !now.Before(entry.expires) {
++					delete(c.cache, key)
++				}
++			}
++			for key := range c.cache {
++				if len(c.cache) < maxClientCacheEntries {
++					break
++				}
++				delete(c.cache, key)
++			}
++		}
++		c.cache[clientID] = clientCacheEntry{client: client, err: err, expires: now.Add(ttl)}
++		c.mu.Unlock()
++	}
++	return client, err
++}
++
++func parseClientDocument(body []byte, clientID, host string) (oauthClient, error) {
++	var doc struct {
++		ClientID                string          `json:"client_id"`
++		ClientName              *string         `json:"client_name"`
++		RedirectURIs            []string        `json:"redirect_uris"`
++		TokenEndpointAuthMethod *string         `json:"token_endpoint_auth_method"`
++		GrantTypes              []string        `json:"grant_types"`
++		ResponseTypes           []string        `json:"response_types"`
++		ClientSecret            json.RawMessage `json:"client_secret"`
++	}
++	if !utf8.Valid(body) {
++		return oauthClient{}, fmt.Errorf("client metadata is not UTF-8")
++	}
++	if err := json.Unmarshal(body, &doc); err != nil {
++		return oauthClient{}, fmt.Errorf("client metadata is not a JSON object")
++	}
++	if doc.ClientID != clientID {
++		return oauthClient{}, fmt.Errorf("client metadata client_id mismatch")
++	}
++	if doc.ClientSecret != nil {
++		return oauthClient{}, fmt.Errorf("client metadata must not contain a secret")
++	}
++	if doc.TokenEndpointAuthMethod != nil && *doc.TokenEndpointAuthMethod != "none" {
++		return oauthClient{}, fmt.Errorf("client must be a public client")
++	}
++	if doc.GrantTypes != nil && !containsString(doc.GrantTypes, "authorization_code") {
++		return oauthClient{}, fmt.Errorf("client does not use the authorization code grant")
++	}
++	if doc.ResponseTypes != nil && !containsString(doc.ResponseTypes, "code") {
++		return oauthClient{}, fmt.Errorf("client does not use code responses")
++	}
++	if len(doc.RedirectURIs) == 0 || len(doc.RedirectURIs) > 20 {
++		return oauthClient{}, fmt.Errorf("client metadata needs 1-20 redirect URIs")
++	}
++	for _, uri := range doc.RedirectURIs {
++		if !validRedirectURI(uri) {
++			return oauthClient{}, fmt.Errorf("client metadata has an invalid redirect URI")
++		}
++	}
++	name := host
++	if doc.ClientName != nil {
++		candidate := strings.TrimSpace(*doc.ClientName)
++		ok := utf8.RuneCountInString(candidate) >= 1 && utf8.RuneCountInString(candidate) <= 100
++		for _, r := range candidate {
++			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
++				ok = false
++			}
++		}
++		if ok {
++			name = candidate
++		}
++	}
++	return oauthClient{ID: clientID, Name: name, Host: host, RedirectURIs: doc.RedirectURIs}, nil
++}
++
++func containsString(values []string, want string) bool {
++	for _, value := range values {
++		if value == want {
++			return true
++		}
++	}
++	return false
++}
++
++func loopbackHost(host string) bool {
++	return host == "localhost" || host == "127.0.0.1" || host == "::1"
++}
++
++// validRedirectURI accepts https URLs, http loopback URLs (RFC 8252) and
++// private-use schemes for native apps. Fragments and credentials are refused.
++func validRedirectURI(raw string) bool {
++	if len(raw) < 4 || len(raw) > 512 {
++		return false
++	}
++	for _, r := range raw {
++		if r < 33 || r > 126 {
++			return false
++		}
++	}
++	u, err := url.Parse(raw)
++	if err != nil || u.Fragment != "" || strings.Contains(raw, "#") || u.User != nil || !redirectSchemePattern.MatchString(u.Scheme) || deniedRedirectSchemes[u.Scheme] {
++		return false
++	}
++	switch u.Scheme {
++	case "https":
++		return u.Host != "" && u.Opaque == ""
++	case "http":
++		return u.Opaque == "" && loopbackHost(u.Hostname())
++	default:
++		return u.Opaque != "" || u.Host != "" || u.Path != ""
++	}
++}
++
++// matchRedirectURI requires an exact match with a registered URI, except that
++// loopback http redirects ignore the port (RFC 8252 section 7.3).
++func (c oauthClient) matchRedirectURI(requested string) bool {
++	if !validRedirectURI(requested) {
++		return false
++	}
++	for _, registered := range c.RedirectURIs {
++		if requested == registered {
++			return true
++		}
++		reg, err1 := url.Parse(registered)
++		req, err2 := url.Parse(requested)
++		if err1 != nil || err2 != nil || reg.Scheme != "http" || req.Scheme != "http" || !loopbackHost(reg.Hostname()) {
++			continue
++		}
++		if req.Hostname() == reg.Hostname() && req.EscapedPath() == reg.EscapedPath() && req.RawQuery == reg.RawQuery && !req.ForceQuery && !reg.ForceQuery {
++			if port := req.Port(); port != "" {
++				if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
++					continue
++				}
++			}
++			return true
++		}
++	}
++	return false
++}
++
++// redirectSource is the CSP form-action source that allows the consent form's
++// redirect to reach this client.
++func redirectSource(raw string) string {
++	u, err := url.Parse(raw)
++	if err != nil {
++		return ""
++	}
++	if u.Scheme == "https" || u.Scheme == "http" {
++		return u.Scheme + "://" + u.Host
++	}
++	return u.Scheme + ":"
++}
++
++// publicAddress reports whether an address may be contacted for metadata.
++// Loopback, private, link-local (including cloud metadata), shared, multicast
++// and unspecified addresses are refused at connection time.
++func publicAddress(addr netip.Addr) bool {
++	addr = addr.Unmap()
++	if !addr.IsValid() || addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsInterfaceLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
++		return false
++	}
++	for _, prefix := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "64:ff9b::/96", "64:ff9b:1::/48", "2001:db8::/32", "2002::/16"} {
++		if netip.MustParsePrefix(prefix).Contains(addr) {
++			return false
++		}
++	}
++	return true
++}
++
++func clientMetadataHTTPClient() *http.Client {
++	dialer := &net.Dialer{Timeout: 5 * time.Second, Control: func(network, address string, _ syscall.RawConn) error {
++		addrPort, err := netip.ParseAddrPort(address)
++		if err != nil || !publicAddress(addrPort.Addr()) || addrPort.Port() != 443 {
++			return fmt.Errorf("client metadata address refused")
++		}
++		return nil
++	}}
++	transport := &http.Transport{
++		// Never use an environment proxy: the address check must see the real peer.
++		Proxy:                  nil,
++		DialContext:            dialer.DialContext,
++		ForceAttemptHTTP2:      true,
++		TLSHandshakeTimeout:    5 * time.Second,
++		ResponseHeaderTimeout:  5 * time.Second,
++		MaxResponseHeaderBytes: 16 * 1024,
++		MaxIdleConns:           4,
++		IdleConnTimeout:        30 * time.Second,
++	}
++	return &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
++		return http.ErrUseLastResponse
++	}}
++}
++
++func fetchClientDocument(ctx context.Context, client *http.Client, clientID string) ([]byte, time.Duration, error) {
++	req, err := http.NewRequestWithContext(ctx, http.MethodGet, clientID, nil)
++	if err != nil {
++		return nil, 0, err
++	}
++	req.Header.Set("Accept", "application/json")
++	req.Header.Set("User-Agent", "metatrash/"+metatrash.Version)
++	resp, err := client.Do(req)
++	if err != nil {
++		return nil, 0, fmt.Errorf("client metadata unavailable")
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return nil, 0, fmt.Errorf("client metadata unavailable")
++	}
++	kind, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
++	if err != nil || kind != "application/json" {
++		return nil, 0, fmt.Errorf("client metadata must be JSON")
++	}
++	body, err := io.ReadAll(io.LimitReader(resp.Body, maxClientDocumentBytes+1))
++	if err != nil {
++		return nil, 0, fmt.Errorf("client metadata unavailable")
++	}
++	if len(body) > maxClientDocumentBytes {
++		return nil, 0, errors.New("client metadata too large")
++	}
++	return body, cacheLifetime(resp.Header), nil
++}
++
++// cacheLifetime honours Cache-Control no-store/no-cache/max-age; the caller caps it.
++func cacheLifetime(header http.Header) time.Duration {
++	ttl := defaultClientCacheTTL
++	for _, value := range header.Values("Cache-Control") {
++		for _, directive := range strings.Split(value, ",") {
++			directive = strings.ToLower(strings.TrimSpace(directive))
++			switch {
++			case directive == "no-store" || directive == "no-cache":
++				return 0
++			case strings.HasPrefix(directive, "max-age="):
++				seconds, err := strconv.Atoi(strings.TrimPrefix(directive, "max-age="))
++				if err != nil || seconds < 0 {
++					return 0
++				}
++				ttl = time.Duration(seconds) * time.Second
++			}
++		}
++	}
++	return ttl
++}
+diff --git a/internal/service/oauth_flow_test.go b/internal/service/oauth_flow_test.go
+new file mode 100644
+index 0000000..10fc77f
+--- /dev/null
++++ b/internal/service/oauth_flow_test.go
+@@ -0,0 +1,351 @@
++package service
++
++import (
++	"context"
++	"crypto/sha256"
++	"encoding/base64"
++	"encoding/hex"
++	"encoding/json"
++	"html"
++	"net/http"
++	"net/http/httptest"
++	"net/url"
++	"os"
++	"path/filepath"
++	"regexp"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	"metatrash.com/metatrash"
++)
++
++var integrationDataOnce sync.Once
++var integrationDataDir string
++
++// oauthWorld is a full service with a real account database (integration
++// test). It runs only when METATRASH_TEST_DB_CONFIG is set.
++type oauthWorld struct {
++	t       *testing.T
++	s       *Service
++	h       *httpAdapter
++	db      *accountDatabase
++	owner   userAccount
++	member  userAccount
++	ownedID string
++	joinID  string
++}
++
++func randomName(t *testing.T, prefix string) string {
++	t.Helper()
++	value, err := randomHex(5)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return prefix + value
++}
++
++func newOAuthWorld(t *testing.T) *oauthWorld {
++	t.Helper()
++	db := testDatabase(t)
++	ctx := context.Background()
++	dir := t.TempDir()
++	b, err := os.ReadFile("../../config/spaces.example.json")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var cfg Config
++	if err = json.Unmarshal(b, &cfg); err != nil {
++		t.Fatal(err)
++	}
++	cfg.Spaces["private"] = SpaceConfig{Visibility: "private", Overrides: json.RawMessage(`{}`)}
++	b, _ = json.Marshal(cfg)
++	configPath, keyPath := filepath.Join(dir, "spaces.json"), filepath.Join(dir, "keys.json")
++	_ = os.WriteFile(configPath, b, 0600)
++	sum := sha256.Sum256([]byte("writer"))
++	b, _ = json.Marshal(map[string]Keys{"private": {WriteHashes: []string{hex.EncodeToString(sum[:])}}})
++	_ = os.WriteFile(keyPath, b, 0600)
++	// Owned repositories must outlive each test's temporary directory, because
++	// every world loads all ready spaces from the shared database.
++	integrationDataOnce.Do(func() { integrationDataDir, _ = os.MkdirTemp("", "metatrash-oauth-test-") })
++	s, err := Open(ctx, configPath, keyPath, integrationDataDir, metatrash.SpaceREADME)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(s.Close)
++	settings, err := (&oauthConfig{Enabled: true}).settings()
++	if err != nil {
++		t.Fatal(err)
++	}
++	s.accounts = &accounts{config: accountConfig{Origin: "https://metatrash.com"}, store: db, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{},
++		secret: []byte("test-only-secret"), mailSlots: make(chan struct{}, 2), oauth: &settings}
++	if err := s.loadOwnedSpaces(ctx, db); err != nil {
++		t.Fatal(err)
++	}
++	handler, err := s.Handler(metatrash.ToolSchema, nil, "https://metatrash.com")
++	if err != nil {
++		t.Fatal(err)
++	}
++	w := &oauthWorld{t: t, s: s, h: handler.(*httpAdapter), db: db}
++	w.h.oauth.clients, _ = testOAuthClients(map[string]string{testClientID: testClientDocument()})
++	w.owner = w.user("owner")
++	w.member = w.user("member")
++	space, err := s.createOwnedSpace(ctx, w.owner.ID, "Owner notes", randomName(t, "notes-"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	w.ownedID = space.ID
++	shared, err := s.createOwnedSpace(ctx, w.member.ID, "Shared plans", randomName(t, "plans-"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	w.joinID = shared.ID
++	invitation, err := db.inviteHuman(ctx, w.member.ID, shared.ID, w.owner.Email)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := db.acceptHumanInvitation(ctx, w.owner.ID, shared.ID, invitation); err != nil {
++		t.Fatal(err)
++	}
++	return w
++}
++
++// user creates an account with a username; owner and member each own one space.
++func (w *oauthWorld) user(prefix string) userAccount {
++	w.t.Helper()
++	ctx := context.Background()
++	user, err := w.db.FindOrCreate(ctx, randomName(w.t, prefix)+"@example.com")
++	if err != nil {
++		w.t.Fatal(err)
++	}
++	if err := w.db.ChooseUsername(ctx, user.ID, randomName(w.t, prefix)); err != nil {
++		w.t.Fatal(err)
++	}
++	user, _, err = w.db.ByID(ctx, user.ID)
++	if err != nil {
++		w.t.Fatal(err)
++	}
++	return user
++}
++
++func (w *oauthWorld) session(user userAccount) *http.Cookie {
++	token, _ := randomHex(32)
++	w.s.accounts.mu.Lock()
++	w.s.accounts.sessions[secretDigest(token)] = accountSession{UserID: user.ID, Expires: time.Now().Add(time.Hour)}
++	w.s.accounts.mu.Unlock()
++	return &http.Cookie{Name: sessionCookie, Value: token}
++}
++
++var csrfPattern = regexp.MustCompile(`name="csrf" value="([0-9a-f]{64})"`)
++
++func pkcePair(t *testing.T) (string, string) {
++	verifier, err := newOAuthToken("")
++	if err != nil {
++		t.Fatal(err)
++	}
++	sum := sha256.Sum256([]byte(verifier))
++	return verifier, base64.RawURLEncoding.EncodeToString(sum[:])
++}
++
++// authorize runs authorize, consent and approval and returns the code.
++func (w *oauthWorld) authorize(user userAccount, challenge string, choices map[string]string, resource string) (string, *httptest.ResponseRecorder) {
++	w.t.Helper()
++	res := oauthCall(w.h, "GET", authorizeURL(map[string]string{"code_challenge": challenge, "resource": resource}), nil)
++	browser := responseCookie(res, oauthCookie)
++	if res.Code != 200 || browser == nil {
++		w.t.Fatalf("authorize: %d %s", res.Code, res.Body)
++	}
++	session := w.session(user)
++	page := oauthCall(w.h, "GET", "/oauth/consent", nil, browser, session)
++	match := csrfPattern.FindStringSubmatch(page.Body.String())
++	if page.Code != 200 || match == nil {
++		w.t.Fatalf("consent page: %d %s", page.Code, page.Body)
++	}
++	form := url.Values{"csrf": {match[1]}, "decision": {"approve"}}
++	for space, choice := range choices {
++		form.Set("s-"+space, choice)
++	}
++	res = oauthCall(w.h, "POST", "/oauth/consent", form, browser, session)
++	if res.Code != 303 {
++		return "", res
++	}
++	loc, _ := url.Parse(res.Header().Get("Location"))
++	if loc.Query().Get("state") != "st" || loc.Query().Get("iss") != "https://metatrash.com" || !strings.HasPrefix(loc.String(), testRedirect+"?") {
++		w.t.Fatalf("approval redirect %s", loc)
++	}
++	return loc.Query().Get("code"), res
++}
++
++func (w *oauthWorld) token(form url.Values) (int, map[string]any) {
++	w.t.Helper()
++	req := httptest.NewRequest("POST", "/oauth/token", strings.NewReader(form.Encode()))
++	req.Host = "metatrash.com"
++	req.RemoteAddr = "192.0.2.1:1000"
++	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
++	res := httptest.NewRecorder()
++	w.h.ServeHTTP(res, req)
++	var body map[string]any
++	_ = json.Unmarshal(res.Body.Bytes(), &body)
++	return res.Code, body
++}
++
++func (w *oauthWorld) exchange(code, verifier string) (int, map[string]any) {
++	return w.token(url.Values{"grant_type": {"authorization_code"}, "client_id": {testClientID}, "code": {code}, "redirect_uri": {testRedirect}, "code_verifier": {verifier}, "resource": {"https://metatrash.com/mcp/account"}})
++}
++
++func (w *oauthWorld) valid(access string) bool {
++	_, err := w.db.validateAccessToken(context.Background(), access, w.h.oauth.mcpResource, time.Now(), w.h.oauth.settings)
++	return err == nil
++}
++
++func TestOAuthFlowAgainstDatabase(t *testing.T) {
++	w := newOAuthWorld(t)
++	ctx := context.Background()
++
++	// Consent lists the owned space and the joined space.
++	verifier, challenge := pkcePair(t)
++	code, res := w.authorize(w.owner, challenge, map[string]string{w.ownedID: "read_write", w.joinID: "read_only"}, "")
++	if code == "" {
++		t.Fatalf("approval failed: %d %s", res.Code, res.Body)
++	}
++	if responseCookie(res, oauthCookie) == nil || responseCookie(res, oauthCookie).MaxAge >= 0 {
++		t.Fatal("pending cookie not cleared after approval")
++	}
++	consent, err := w.db.grantConsent(ctx, w.owner.ID, testClientID, w.h.oauth.mcpResource)
++	if err != nil || consent[w.ownedID] != "read_write" || consent[w.joinID] != "read_only" || len(consent) != 2 {
++		t.Fatalf("stored consent %v %v", consent, err)
++	}
++
++	// Wrong redirect URI, client or verifier fail; the code is single use.
++	if status, body := w.token(url.Values{"grant_type": {"authorization_code"}, "client_id": {testClientID}, "code": {code}, "redirect_uri": {"http://localhost/callback"}, "code_verifier": {verifier}}); status != 400 || body["error"] != "invalid_grant" {
++		t.Fatalf("wrong redirect accepted: %v", body)
++	}
++	// That failed attempt spent the code; a later correct exchange is refused.
++	if status, body := w.exchange(code, verifier); status != 400 || body["error"] != "invalid_grant" {
++		t.Fatalf("spent code accepted: %v", body)
++	}
++
++	verifier, challenge = pkcePair(t)
++	code, _ = w.authorize(w.owner, challenge, map[string]string{w.ownedID: "read_write", w.joinID: "read_only"}, "https://metatrash.com/mcp/account")
++	wrongVerifier, _ := pkcePair(t)
++	if status, body := w.exchange(code, wrongVerifier); status != 400 || body["error"] != "invalid_grant" {
++		t.Fatalf("wrong PKCE verifier accepted: %v", body)
++	}
++
++	verifier, challenge = pkcePair(t)
++	code, _ = w.authorize(w.owner, challenge, map[string]string{w.ownedID: "read_write", w.joinID: "read_only"}, "")
++	status, tokens := w.exchange(code, verifier)
++	if status != 200 || tokens["token_type"] != "Bearer" || tokens["scope"] != scopeReadWrite || tokens["expires_in"] != float64(3600) {
++		t.Fatalf("code exchange: %d %v", status, tokens)
++	}
++	access, refresh := tokens["access_token"].(string), tokens["refresh_token"].(string)
++	if !w.valid(access) {
++		t.Fatal("issued access token invalid")
++	}
++	if _, err := w.db.validateAccessToken(ctx, access, w.h.oauth.restResource, time.Now(), w.h.oauth.settings); err == nil {
++		t.Fatal("token accepted for another resource")
++	}
++	if _, err := w.db.validateAccessToken(ctx, refresh, w.h.oauth.mcpResource, time.Now(), w.h.oauth.settings); err == nil {
++		t.Fatal("refresh token accepted as access token")
++	}
++	// Reusing the code revokes the tokens issued with it.
++	if status, body := w.exchange(code, verifier); status != 400 || body["error"] != "invalid_grant" || w.valid(access) {
++		t.Fatalf("code reuse: %v", body)
++	}
++
++	// Fresh tokens, then refresh rotation and replay detection.
++	verifier, challenge = pkcePair(t)
++	code, _ = w.authorize(w.owner, challenge, map[string]string{w.ownedID: "read_write"}, "")
++	_, tokens = w.exchange(code, verifier)
++	refresh = tokens["refresh_token"].(string)
++	status, rotated := w.token(url.Values{"grant_type": {"refresh_token"}, "client_id": {testClientID}, "refresh_token": {refresh}})
++	if status != 200 || rotated["refresh_token"] == refresh || !w.valid(rotated["access_token"].(string)) {
++		t.Fatalf("refresh: %d %v", status, rotated)
++	}
++	if status, body := w.token(url.Values{"grant_type": {"refresh_token"}, "client_id": {"https://claude.ai/other"}, "refresh_token": {rotated["refresh_token"].(string)}}); status != 400 || body["error"] != "invalid_grant" {
++		t.Fatal("refresh by another client accepted")
++	}
++	if status, body := w.token(url.Values{"grant_type": {"refresh_token"}, "client_id": {testClientID}, "refresh_token": {rotated["refresh_token"].(string)}, "scope": {"spaces:read"}}); status != 200 || body["scope"] != scopeRead {
++		t.Fatalf("narrowed refresh: %v", body)
++	} else {
++		rotated = body
++	}
++	if status, body := w.token(url.Values{"grant_type": {"refresh_token"}, "client_id": {testClientID}, "refresh_token": {rotated["refresh_token"].(string)}, "scope": {"spaces:read spaces:write"}}); status != 400 || body["error"] != "invalid_scope" {
++		t.Fatalf("widened refresh: %v", body)
++	}
++	// Replaying the first (spent) refresh token revokes the whole connection.
++	if status, body := w.token(url.Values{"grant_type": {"refresh_token"}, "client_id": {testClientID}, "refresh_token": {refresh}}); status != 400 || body["error"] != "invalid_grant" {
++		t.Fatalf("replay accepted: %v", body)
++	}
++	if w.valid(rotated["access_token"].(string)) {
++		t.Fatal("tokens survived replay revocation")
++	}
++	if consent, _ := w.db.grantConsent(ctx, w.owner.ID, testClientID, w.h.oauth.mcpResource); len(consent) != 0 {
++		t.Fatal("connection survived replay revocation")
++	}
++
++	// RFC 7009 revocation by the client.
++	verifier, challenge = pkcePair(t)
++	code, _ = w.authorize(w.owner, challenge, map[string]string{w.joinID: "read_only"}, "")
++	_, tokens = w.exchange(code, verifier)
++	revoke := func(token, client string) int {
++		req := httptest.NewRequest("POST", "/oauth/revoke", strings.NewReader(url.Values{"token": {token}, "client_id": {client}}.Encode()))
++		req.Host = "metatrash.com"
++		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
++		res := httptest.NewRecorder()
++		w.h.ServeHTTP(res, req)
++		return res.Code
++	}
++	if revoke(tokens["refresh_token"].(string), "https://claude.ai/other") != 200 || !w.valid(tokens["access_token"].(string)) {
++		t.Fatal("another client revoked a token")
++	}
++	if revoke(tokens["refresh_token"].(string), testClientID) != 200 || w.valid(tokens["access_token"].(string)) {
++		t.Fatal("refresh revocation did not end the connection's tokens")
++	}
++
++	// Removing the member deletes the space from the member's grants.
++	if consent, _ := w.db.grantConsent(ctx, w.owner.ID, testClientID, w.h.oauth.mcpResource); consent[w.joinID] != "read_only" {
++		t.Fatal("joined space consent missing")
++	}
++	if err := w.db.manageHumanMember(ctx, w.member.ID, w.joinID, w.owner.ID, "remove"); err != nil {
++		t.Fatal(err)
++	}
++	if consent, _ := w.db.grantConsent(ctx, w.owner.ID, testClientID, w.h.oauth.mcpResource); len(consent) != 0 {
++		t.Fatalf("consent survived membership removal: %v", consent)
++	}
++	// A space the account cannot access cannot be consented to.
++	verifier, challenge = pkcePair(t)
++	if code, res := w.authorize(w.owner, challenge, map[string]string{w.joinID: "read_only"}, ""); code != "" || res.Code != 409 {
++		t.Fatalf("consent to a removed membership: %d", res.Code)
++	}
++	_ = verifier
++
++	// Deny returns access_denied.
++	res = oauthCall(w.h, "GET", authorizeURL(nil), nil)
++	browser := responseCookie(res, oauthCookie)
++	session := w.session(w.owner)
++	page := oauthCall(w.h, "GET", "/oauth/consent", nil, browser, session)
++	match := csrfPattern.FindStringSubmatch(page.Body.String())
++	res = oauthCall(w.h, "POST", "/oauth/consent", url.Values{"csrf": {match[1]}, "decision": {"deny"}}, browser, session)
++	if loc, _ := url.Parse(res.Header().Get("Location")); res.Code != 303 || loc.Query().Get("error") != "access_denied" {
++		t.Fatal("deny")
++	}
++	if res := oauthCall(w.h, "POST", "/oauth/consent", url.Values{"csrf": {match[1]}, "decision": {"approve"}}, browser, session); res.Code != 400 {
++		t.Fatal("consumed request approved")
++	}
++	// Login continuation: an unauthenticated browser signs in and returns to consent.
++	res = oauthCall(w.h, "GET", authorizeURL(nil), nil)
++	browser = responseCookie(res, oauthCookie)
++	if page := oauthCall(w.h, "GET", "/oauth/consent", nil, browser); !strings.Contains(html.UnescapeString(page.Body.String()), "Sign in to connect Claude") {
++		t.Fatal("sign-in prompt")
++	}
++	login := responseCookie(oauthCall(w.h, "GET", "/login", nil), loginCookie)
++	sent := ""
++	w.s.accounts.send = func(_ context.Context, _, code string) error { sent = code; return nil }
++	oauthCall(w.h, "POST", "/login/send", url.Values{"email": {w.owner.Email}, "csrf": {login.Value}}, login)
++	res = oauthCall(w.h, "POST", "/login/verify", url.Values{"code": {sent}, "csrf": {login.Value}}, login, browser)
++	if res.Code != 303 || res.Header().Get("Location") != "/oauth/consent" {
++		t.Fatalf("login did not continue to consent: %d %s", res.Code, res.Header().Get("Location"))
++	}
++}
+diff --git a/internal/service/oauth_server.go b/internal/service/oauth_server.go
+new file mode 100644
+index 0000000..efd184b
+--- /dev/null
++++ b/internal/service/oauth_server.go
+@@ -0,0 +1,775 @@
++package service
++
++import (
++	"bytes"
++	"crypto/sha256"
++	"crypto/subtle"
++	_ "embed"
++	"encoding/base64"
++	"errors"
++	"html/template"
++	"log"
++	"mime"
++	"net/http"
++	"net/url"
++	"regexp"
++	"strconv"
++	"strings"
++	"sync"
++	"time"
++)
++
++//go:embed web/oauth.html
++var oauthHTML string
++var oauthTemplate = template.Must(template.New("oauth").Parse(oauthHTML))
++
++const oauthCookie = "__Host-metatrash-oauth"
++const pendingLifetime = 10 * time.Minute
++const maxPendingAuthorizations = 2048
++const maxAuthorizationCodes = 2048
++
++var codeChallengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
++var codeVerifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
++var spaceFieldPattern = regexp.MustCompile(`^s-[0-9a-f]{32}$`)
++
++// oauthPending is a validated authorization request waiting for sign-in and
++// consent. It is bound to one browser by the oauth cookie and kept in memory.
++type oauthPending struct {
++	ID                                      string
++	Client                                  oauthClient
++	RedirectURI, State, Challenge, Resource string
++	WantWrite                               bool
++	Expires                                 time.Time
++}
++
++// oauthCode is a single-use authorization code, kept in memory until expiry so
++// that a second use can be detected and the connection's tokens revoked.
++type oauthCode struct {
++	GrantID, UserID, ClientID, RedirectURI, Resource, Challenge, Scope string
++	Expires                                                            time.Time
++	Used                                                               bool
++}
++
++// oauthServer is the authorization server. It exists only when accounts are
++// enabled with oauth.enabled; every route below is absent otherwise.
++type oauthServer struct {
++	settings     oauthSettings
++	issuer       string
++	mcpResource  string
++	restResource string
++	clients      *oauthClients
++	mu           sync.Mutex
++	pending      map[string]*oauthPending
++	codes        map[string]*oauthCode
++	lastPurge    time.Time
++	now          func() time.Time
++}
++
++func newOAuthServer(settings oauthSettings, publicURL string) *oauthServer {
++	issuer := strings.TrimSuffix(publicURL, "/")
++	return &oauthServer{settings: settings, issuer: issuer, mcpResource: issuer + "/mcp/account", restResource: issuer + "/api/v1/account",
++		clients: newOAuthClients(settings.clientHosts), pending: map[string]*oauthPending{}, codes: map[string]*oauthCode{}, now: time.Now}
++}
++
++// canonicalResource accepts the resource exactly, or with one trailing slash
++// or an upper-case scheme/host, and returns the configured identifier.
++func (o *oauthServer) canonicalResource(raw string) (string, bool) {
++	if raw == "" {
++		return o.mcpResource, true
++	}
++	u, err := url.Parse(raw)
++	if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
++		return "", false
++	}
++	candidate := strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host) + strings.TrimSuffix(u.EscapedPath(), "/")
++	for _, resource := range []string{o.mcpResource, o.restResource} {
++		if candidate == resource {
++			return resource, true
++		}
++	}
++	return "", false
++}
++
++// cleanup removes expired pending requests and codes. Callers hold mu.
++func (o *oauthServer) cleanup(now time.Time) {
++	for key, p := range o.pending {
++		if !now.Before(p.Expires) {
++			delete(o.pending, key)
++		}
++	}
++	for key, c := range o.codes {
++		if !now.Before(c.Expires) {
++			delete(o.codes, key)
++		}
++	}
++}
++
++func (o *oauthServer) pendingFor(browser string) *oauthPending {
++	if browser == "" {
++		return nil
++	}
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	o.cleanup(o.now())
++	p := o.pending[secretDigest(browser)]
++	if p == nil {
++		return nil
++	}
++	copy := *p
++	return &copy
++}
++
++func (h *httpAdapter) oauthCookieName() string {
++	if h.basePath == "" {
++		return oauthCookie
++	}
++	return oauthCookie + "-" + secretDigest(h.basePath)[:16]
++}
++
++type oauthConsentSpace struct {
++	accessibleSpace
++	Choice       string
++	WriteAllowed bool
++}
++
++type oauthPage struct {
++	BasePath, Mode, Title, Message string
++	ContinueURL                    string
++	ClientName, ClientHost, Email  string
++	CSRF, LogoutCSRF               string
++	WantWrite                      bool
++	Spaces                         []oauthConsentSpace
++}
++
++func (h *httpAdapter) renderOAuth(w http.ResponseWriter, status int, page oauthPage, formTarget string) {
++	page.BasePath = h.basePath
++	formAction := "'self'"
++	if formTarget != "" {
++		formAction += " " + formTarget
++	}
++	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
++	var b bytes.Buffer
++	if err := oauthTemplate.Execute(&b, page); err != nil {
++		sendError(w, err)
++		return
++	}
++	w.Header().Set("Content-Type", "text/html; charset=utf-8")
++	w.WriteHeader(status)
++	_, _ = w.Write(b.Bytes())
++}
++
++func (h *httpAdapter) oauthErrorPage(w http.ResponseWriter, status int, title, message string) {
++	h.renderOAuth(w, status, oauthPage{Mode: "error", Title: title, Message: message}, "")
++}
++
++// serveOAuth handles discovery, authorization, consent, token and revocation
++// routes. It returns false for other paths or when OAuth is disabled.
++func (h *httpAdapter) serveOAuth(w http.ResponseWriter, r *http.Request, client string) bool {
++	o := h.oauth
++	path := r.URL.Path
++	if o == nil || !(strings.HasPrefix(path, "/oauth/") || strings.HasPrefix(path, "/.well-known/")) {
++		return false
++	}
++	switch path {
++	case "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/mcp/account", "/.well-known/oauth-protected-resource/api/v1/account":
++	case "/oauth/authorize", "/oauth/consent", "/oauth/token", "/oauth/revoke":
++	default:
++		return false
++	}
++	w.Header().Set("Referrer-Policy", "same-origin")
++	w.Header().Set("X-Frame-Options", "DENY")
++	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
++	if !strings.EqualFold(r.Host, h.publicHost) {
++		sendError(w, problem(403, "forbidden", "Use the configured site address."))
++		return true
++	}
++	switch path {
++	case "/oauth/authorize":
++		h.oauthAuthorize(w, r, client)
++	case "/oauth/consent":
++		if r.Method == http.MethodPost {
++			h.oauthConsentSubmit(w, r)
++		} else {
++			h.oauthConsentPage(w, r)
++		}
++	case "/oauth/token":
++		h.oauthToken(w, r, client)
++	case "/oauth/revoke":
++		h.oauthRevoke(w, r, client)
++	default:
++		h.oauthMetadata(w, r)
++	}
++	return true
++}
++
++// Discovery documents are public; CORS lets browser-based MCP clients read them.
++func (h *httpAdapter) oauthMetadata(w http.ResponseWriter, r *http.Request) {
++	o := h.oauth
++	w.Header().Set("Access-Control-Allow-Origin", "*")
++	if r.Method == http.MethodOptions {
++		w.Header().Set("Access-Control-Allow-Methods", "GET")
++		w.Header().Set("Access-Control-Allow-Headers", "MCP-Protocol-Version")
++		w.WriteHeader(http.StatusNoContent)
++		return
++	}
++	if r.Method != http.MethodGet && r.Method != http.MethodHead {
++		w.Header().Set("Allow", "GET, HEAD")
++		sendError(w, problem(405, "invalid_request", "Use GET."))
++		return
++	}
++	w.Header().Set("Cache-Control", "public, max-age=3600")
++	scopes := []string{"spaces:read", "spaces:write"}
++	switch r.URL.Path {
++	case "/.well-known/oauth-authorization-server":
++		sendJSON(w, 200, map[string]any{
++			"issuer":                                         o.issuer,
++			"authorization_endpoint":                         o.issuer + "/oauth/authorize",
++			"token_endpoint":                                 o.issuer + "/oauth/token",
++			"revocation_endpoint":                            o.issuer + "/oauth/revoke",
++			"response_types_supported":                       []string{"code"},
++			"response_modes_supported":                       []string{"query"},
++			"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
++			"code_challenge_methods_supported":               []string{"S256"},
++			"token_endpoint_auth_methods_supported":          []string{"none"},
++			"revocation_endpoint_auth_methods_supported":     []string{"none"},
++			"scopes_supported":                               scopes,
++			"client_id_metadata_document_supported":          true,
++			"authorization_response_iss_parameter_supported": true,
++			"service_documentation":                          o.issuer + "/",
++		})
++	case "/.well-known/oauth-protected-resource/mcp/account":
++		sendJSON(w, 200, map[string]any{"resource": o.mcpResource, "authorization_servers": []string{o.issuer}, "scopes_supported": scopes, "bearer_methods_supported": []string{"header"}, "resource_name": "Metatrash spaces (MCP)"})
++	default:
++		sendJSON(w, 200, map[string]any{"resource": o.restResource, "authorization_servers": []string{o.issuer}, "scopes_supported": scopes, "bearer_methods_supported": []string{"header"}, "resource_name": "Metatrash spaces (REST)"})
++	}
++}
++
++// oauthRedirect sends an authorization response to the client's validated
++// redirect URI, preserving any registered query and adding iss (RFC 9207).
++func (h *httpAdapter) oauthRedirect(w http.ResponseWriter, r *http.Request, redirectURI string, params url.Values) {
++	u, err := url.Parse(redirectURI)
++	if err != nil {
++		h.oauthErrorPage(w, 400, "This request cannot continue", "The app's return address is invalid.")
++		return
++	}
++	query := u.Query()
++	for key, values := range params {
++		query[key] = values
++	}
++	query.Set("iss", h.oauth.issuer)
++	u.RawQuery = query.Encode()
++	w.Header().Set("Location", u.String())
++	w.WriteHeader(http.StatusSeeOther)
++}
++
++func (h *httpAdapter) oauthAuthorize(w http.ResponseWriter, r *http.Request, client string) {
++	o := h.oauth
++	if r.Method != http.MethodGet {
++		w.Header().Set("Allow", "GET")
++		sendError(w, problem(405, "invalid_request", "Use GET."))
++		return
++	}
++	if err := h.service.rates.take(allowance{"oauth:authorize:" + client, 60, 600}); err != nil {
++		h.oauthErrorPage(w, 429, "Too many requests", "Please wait a few minutes before connecting again.")
++		return
++	}
++	query, err := url.ParseQuery(r.URL.RawQuery)
++	if err != nil {
++		h.oauthErrorPage(w, 400, "This request cannot continue", "The app sent an invalid sign-in request.")
++		return
++	}
++	for key, values := range query {
++		if len(values) != 1 {
++			h.oauthErrorPage(w, 400, "This request cannot continue", "The app repeated the parameter "+strconv.Quote(key)+".")
++			return
++		}
++	}
++	// Client and redirect URI are verified before anything is sent to the redirect URI.
++	clientID, redirectURI := query.Get("client_id"), query.Get("redirect_uri")
++	app, err := o.clients.lookup(r.Context(), clientID)
++	if err != nil {
++		h.oauthErrorPage(w, 400, "This app is not recognized", "Metatrash only connects apps it can verify. The app's identity could not be confirmed.")
++		return
++	}
++	if !app.matchRedirectURI(redirectURI) {
++		h.oauthErrorPage(w, 400, "This request cannot continue", "The app's return address is not registered for "+app.Name+".")
++		return
++	}
++	fail := func(code, description string) {
++		params := url.Values{"error": {code}, "error_description": {description}}
++		if state, ok := query["state"]; ok {
++			params["state"] = state
++		}
++		h.oauthRedirect(w, r, redirectURI, params)
++	}
++	if query.Get("response_type") != "code" {
++		fail("unsupported_response_type", "Only the authorization code flow is supported.")
++		return
++	}
++	challenge := query.Get("code_challenge")
++	if query.Get("code_challenge_method") != "S256" || !codeChallengePattern.MatchString(challenge) {
++		fail("invalid_request", "PKCE with code_challenge_method S256 is required.")
++		return
++	}
++	resource, ok := o.canonicalResource(query.Get("resource"))
++	if !ok {
++		fail("invalid_target", "Unknown resource.")
++		return
++	}
++	scope, _ := parseScope(query.Get("scope"), true)
++	if len(query.Get("state")) > 2048 {
++		fail("invalid_request", "state is too long.")
++		return
++	}
++	if query.Get("prompt") == "none" {
++		fail("consent_required", "Metatrash always asks the user to choose spaces.")
++		return
++	}
++	for _, unsupported := range []string{"request", "request_uri"} {
++		if _, present := query[unsupported]; present {
++			fail(unsupported+"_not_supported", "Request objects are not supported.")
++			return
++		}
++	}
++	browser := cookieToken(r, h.oauthCookieName())
++	if browser == "" {
++		browser, err = randomHex(32)
++		if err != nil {
++			sendError(w, err)
++			return
++		}
++	}
++	id, err := randomHex(16)
++	if err != nil {
++		sendError(w, err)
++		return
++	}
++	pending := &oauthPending{ID: id, Client: app, RedirectURI: redirectURI, State: query.Get("state"), Challenge: challenge, Resource: resource, WantWrite: scope == scopeReadWrite, Expires: o.now().Add(pendingLifetime)}
++	o.mu.Lock()
++	o.cleanup(o.now())
++	if len(o.pending) >= maxPendingAuthorizations {
++		o.mu.Unlock()
++		h.oauthErrorPage(w, 503, "Metatrash is busy", "Please try connecting again in a few minutes.")
++		return
++	}
++	// One pending request per browser: a newer request replaces the older one.
++	o.pending[secretDigest(browser)] = pending
++	o.mu.Unlock()
++	// Lax so the cookie is set on this cross-site navigation and sent on the
++	// same-site continuation below; Strict session cookies are not sent on a
++	// cross-site navigation, so consent happens on the next, same-site page.
++	http.SetCookie(w, &http.Cookie{Name: h.oauthCookieName(), Value: browser, Path: "/", MaxAge: int(pendingLifetime / time.Second), Expires: o.now().Add(pendingLifetime), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
++	h.renderOAuth(w, 200, oauthPage{Mode: "continue", Title: "Continue", ClientName: app.Name, ClientHost: app.Host, ContinueURL: h.basePath + "/oauth/consent"}, "")
++}
++
++func (h *httpAdapter) consentCSRF(session string, pending *oauthPending) string {
++	return h.service.accounts.mac("oauth-consent:" + session + ":" + pending.ID)
++}
++
++func (h *httpAdapter) oauthConsentPage(w http.ResponseWriter, r *http.Request) {
++	if r.Method != http.MethodGet && r.Method != http.MethodHead {
++		w.Header().Set("Allow", "GET, HEAD, POST")
++		sendError(w, problem(405, "invalid_request", "Use GET or POST."))
++		return
++	}
++	if r.URL.RawQuery != "" {
++		sendError(w, invalid("This page does not accept query parameters."))
++		return
++	}
++	pending := h.oauth.pendingFor(cookieToken(r, h.oauthCookieName()))
++	if pending == nil {
++		h.oauthErrorPage(w, 400, "This connection request expired", "Connection requests last ten minutes and work only in the browser where they started.")
++		return
++	}
++	session := cookieToken(r, h.sessionCookieName())
++	user, signedIn, err := h.service.accounts.currentUser(r.Context(), session)
++	if err != nil {
++		h.oauthErrorPage(w, 503, "Sign-in is temporarily unavailable", "Please try again shortly.")
++		return
++	}
++	if !signedIn {
++		h.renderOAuth(w, 200, oauthPage{Mode: "signin", Title: "Sign in", ClientName: pending.Client.Name, ClientHost: pending.Client.Host}, "")
++		return
++	}
++	h.renderConsent(w, r, 200, user, session, pending, "")
++}
++
++func (h *httpAdapter) renderConsent(w http.ResponseWriter, r *http.Request, status int, user userAccount, session string, pending *oauthPending, message string) {
++	db := h.service.ownedDB
++	if db == nil {
++		h.oauthErrorPage(w, 503, "Spaces are temporarily unavailable", "Please try again shortly.")
++		return
++	}
++	spaces, err := db.accessibleSpaces(r.Context(), user)
++	if err != nil {
++		h.oauthErrorPage(w, 503, "Spaces are temporarily unavailable", "Please try again shortly.")
++		return
++	}
++	previous, err := db.grantConsent(r.Context(), user.ID, pending.Client.ID, pending.Resource)
++	if err != nil {
++		h.oauthErrorPage(w, 503, "Spaces are temporarily unavailable", "Please try again shortly.")
++		return
++	}
++	page := oauthPage{Mode: "consent", Title: "Connect " + pending.Client.Name, Message: message, ClientName: pending.Client.Name, ClientHost: pending.Client.Host, Email: user.Email,
++		CSRF: h.consentCSRF(session, pending), LogoutCSRF: h.service.accounts.mac("logout:" + session), WantWrite: pending.WantWrite}
++	for _, space := range spaces {
++		item := oauthConsentSpace{accessibleSpace: space, Choice: "none", WriteAllowed: space.CanWrite && pending.WantWrite}
++		if choice, ok := previous[space.ID]; ok {
++			item.Choice = choice
++			if choice == "read_write" && !item.WriteAllowed {
++				item.Choice = "read_only"
++			}
++		}
++		page.Spaces = append(page.Spaces, item)
++	}
++	h.renderOAuth(w, status, page, redirectSource(pending.RedirectURI))
++}
++
++func (h *httpAdapter) oauthConsentSubmit(w http.ResponseWriter, r *http.Request) {
++	o := h.oauth
++	a := h.service.accounts
++	if r.Header.Get("Origin") != h.publicOrigin {
++		sendError(w, problem(403, "forbidden", "Please submit the form from this site."))
++		return
++	}
++	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
++	if err != nil || kind != "application/x-www-form-urlencoded" || r.URL.RawQuery != "" {
++		sendError(w, problem(415, "invalid_request", "Use a form submission."))
++		return
++	}
++	r.Body = http.MaxBytesReader(w, r.Body, 16384)
++	if err := r.ParseForm(); err != nil {
++		sendError(w, invalid("Invalid or oversized form."))
++		return
++	}
++	for key, values := range r.PostForm {
++		if len(values) != 1 || !(key == "csrf" || key == "decision" || spaceFieldPattern.MatchString(key)) {
++			sendError(w, invalid("Unknown or duplicate form field."))
++			return
++		}
++	}
++	browser := cookieToken(r, h.oauthCookieName())
++	pending := o.pendingFor(browser)
++	if pending == nil {
++		h.oauthErrorPage(w, 400, "This connection request expired", "Connection requests last ten minutes and work only in the browser where they started.")
++		return
++	}
++	session := cookieToken(r, h.sessionCookieName())
++	if session == "" || subtle.ConstantTimeCompare([]byte(h.consentCSRF(session, pending)), []byte(r.PostForm.Get("csrf"))) != 1 {
++		sendError(w, problem(403, "forbidden", "This form expired. Return to your app and connect again."))
++		return
++	}
++	user, signedIn, err := a.currentUser(r.Context(), session)
++	if err != nil || !signedIn {
++		h.oauthErrorPage(w, 403, "Please sign in again", "Your session ended. Return to your app and connect again.")
++		return
++	}
++	if err := h.service.rates.take(allowance{"oauth:consent:user:" + user.ID, 30, 600}); err != nil {
++		h.oauthErrorPage(w, 429, "Too many requests", "Please wait a few minutes before connecting again.")
++		return
++	}
++	// The pending request is consumed by either decision; a resubmission cannot reuse it.
++	consume := func() bool {
++		o.mu.Lock()
++		defer o.mu.Unlock()
++		key := secretDigest(browser)
++		if current := o.pending[key]; current == nil || current.ID != pending.ID {
++			return false
++		}
++		delete(o.pending, key)
++		return true
++	}
++	clearCookie := func() {
++		http.SetCookie(w, &http.Cookie{Name: h.oauthCookieName(), Value: "", Path: "/", MaxAge: -1, Expires: time.Unix(1, 0), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
++	}
++	stateParams := url.Values{}
++	if pending.State != "" {
++		stateParams.Set("state", pending.State)
++	}
++	switch r.PostForm.Get("decision") {
++	case "deny":
++		if !consume() {
++			h.oauthErrorPage(w, 400, "This connection request expired", "Return to your app and connect again.")
++			return
++		}
++		clearCookie()
++		stateParams.Set("error", "access_denied")
++		stateParams.Set("error_description", "The user declined to connect.")
++		h.oauthRedirect(w, r, pending.RedirectURI, stateParams)
++		return
++	case "approve":
++	default:
++		sendError(w, invalid("Choose Connect or Cancel."))
++		return
++	}
++	choices := []oauthSpaceChoice{}
++	for key, values := range r.PostForm {
++		if !spaceFieldPattern.MatchString(key) {
++			continue
++		}
++		switch values[0] {
++		case "none":
++		case "read_only":
++			choices = append(choices, oauthSpaceChoice{SpaceID: key[2:], Permission: "read_only"})
++		case "read_write":
++			if !pending.WantWrite {
++				h.renderConsent(w, r, 400, user, session, pending, "This app asked for read-only access.")
++				return
++			}
++			choices = append(choices, oauthSpaceChoice{SpaceID: key[2:], Permission: "read_write"})
++		default:
++			sendError(w, invalid("Invalid access choice."))
++			return
++		}
++	}
++	db := h.service.ownedDB
++	if db == nil {
++		h.oauthErrorPage(w, 503, "Spaces are temporarily unavailable", "Please try again shortly.")
++		return
++	}
++	now := o.now()
++	grantID, scope, err := db.saveGrant(r.Context(), user.ID, pending.Client, pending.Resource, choices, now, o.settings.grantIdle)
++	if err != nil {
++		var p *Error
++		if errors.As(err, &p) {
++			h.renderConsent(w, r, p.Status, user, session, pending, p.Message)
++			return
++		}
++		log.Printf("oauth consent failed (%T)", err)
++		h.renderConsent(w, r, 503, user, session, pending, "The connection could not be saved. Please try again.")
++		return
++	}
++	code, err := newOAuthToken("mt_ac_")
++	if err != nil {
++		sendError(w, err)
++		return
++	}
++	o.mu.Lock()
++	o.cleanup(now)
++	if len(o.codes) >= maxAuthorizationCodes {
++		o.mu.Unlock()
++		h.oauthErrorPage(w, 503, "Metatrash is busy", "Your choices were saved. Please connect again in a few minutes.")
++		return
++	}
++	o.codes[secretDigest(code)] = &oauthCode{GrantID: grantID, UserID: user.ID, ClientID: pending.Client.ID, RedirectURI: pending.RedirectURI, Resource: pending.Resource, Challenge: pending.Challenge, Scope: scope, Expires: now.Add(o.settings.codeTTL)}
++	o.mu.Unlock()
++	if !consume() {
++		o.mu.Lock()
++		delete(o.codes, secretDigest(code))
++		o.mu.Unlock()
++		h.oauthErrorPage(w, 400, "This connection request expired", "Your choices were saved. Return to your app and connect again.")
++		return
++	}
++	clearCookie()
++	stateParams.Set("code", code)
++	h.oauthRedirect(w, r, pending.RedirectURI, stateParams)
++}
++
++// Token endpoint responses (RFC 6749 section 5) are never cached.
++func oauthJSON(w http.ResponseWriter, status int, value any) {
++	w.Header().Set("Cache-Control", "no-store")
++	w.Header().Set("Pragma", "no-cache")
++	sendJSON(w, status, value)
++}
++
++func oauthFailure(w http.ResponseWriter, err error) {
++	var p *Error
++	if !errors.As(err, &p) {
++		log.Printf("oauth token request failed (%T)", err)
++		oauthJSON(w, 503, map[string]string{"error": "temporarily_unavailable", "error_description": "Please try again shortly."})
++		return
++	}
++	if p.Code == "invalid_client" {
++		w.Header().Set("WWW-Authenticate", `Bearer realm="metatrash"`)
++	}
++	if p.RetryAfterSeconds > 0 {
++		w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
++	}
++	oauthJSON(w, p.Status, map[string]string{"error": p.Code, "error_description": p.Message})
++}
++
++func oauthRequestError(code, description string) *Error {
++	status := 400
++	if code == "invalid_client" {
++		status = 401
++	}
++	return &Error{Status: status, Code: code, Message: description}
++}
++
++// parseOAuthForm reads a bounded, single-valued form body for token and
++// revocation requests. Client secrets and client authentication are refused.
++func parseOAuthForm(w http.ResponseWriter, r *http.Request) (url.Values, error) {
++	if r.Method != http.MethodPost {
++		w.Header().Set("Allow", "POST")
++		return nil, &Error{Status: 405, Code: "invalid_request", Message: "Use POST."}
++	}
++	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
++	if err != nil || kind != "application/x-www-form-urlencoded" {
++		return nil, oauthRequestError("invalid_request", "Use application/x-www-form-urlencoded.")
++	}
++	if r.URL.RawQuery != "" {
++		return nil, oauthRequestError("invalid_request", "Parameters belong in the request body.")
++	}
++	if r.Header.Get("Authorization") != "" {
++		return nil, oauthRequestError("invalid_client", "This server supports public clients only (token_endpoint_auth_method none).")
++	}
++	r.Body = http.MaxBytesReader(w, r.Body, 8192)
++	if err := r.ParseForm(); err != nil {
++		return nil, oauthRequestError("invalid_request", "Invalid or oversized form.")
++	}
++	for _, values := range r.PostForm {
++		if len(values) != 1 {
++			return nil, oauthRequestError("invalid_request", "Parameters must not repeat.")
++		}
++	}
++	if _, present := r.PostForm["client_secret"]; present {
++		return nil, oauthRequestError("invalid_client", "This server supports public clients only (token_endpoint_auth_method none).")
++	}
++	return r.PostForm, nil
++}
++
++func tokenCORS(w http.ResponseWriter, r *http.Request) bool {
++	w.Header().Set("Access-Control-Allow-Origin", "*")
++	if r.Method == http.MethodOptions {
++		w.Header().Set("Access-Control-Allow-Methods", "POST")
++		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
++		w.WriteHeader(http.StatusNoContent)
++		return true
++	}
++	return false
++}
++
++func (h *httpAdapter) oauthToken(w http.ResponseWriter, r *http.Request, client string) {
++	o := h.oauth
++	if tokenCORS(w, r) {
++		return
++	}
++	if err := h.service.rates.take(allowance{"oauth:token:" + client, 60, 60}, allowance{"oauth:token", 1200, 60}); err != nil {
++		oauthFailure(w, err)
++		return
++	}
++	form, err := parseOAuthForm(w, r)
++	if err != nil {
++		oauthFailure(w, err)
++		return
++	}
++	db := h.service.ownedDB
++	now := o.now()
++	o.mu.Lock()
++	purge := db != nil && now.Sub(o.lastPurge) > 10*time.Minute
++	if purge {
++		o.lastPurge = now
++	}
++	o.mu.Unlock()
++	if purge {
++		if err := db.purgeExpired(r.Context(), now); err != nil {
++			log.Printf("oauth purge failed (%T)", err)
++		}
++	}
++	clientID := form.Get("client_id")
++	if clientID == "" {
++		oauthFailure(w, oauthRequestError("invalid_request", "client_id is required."))
++		return
++	}
++	resource := ""
++	if raw, present := form["resource"]; present {
++		var ok bool
++		if resource, ok = o.canonicalResource(raw[0]); !ok || raw[0] == "" {
++			oauthFailure(w, oauthRequestError("invalid_target", "Unknown resource."))
++			return
++		}
++	}
++	var pair oauthTokenPair
++	switch form.Get("grant_type") {
++	case "authorization_code":
++		verifier, redirectURI := form.Get("code_verifier"), form.Get("redirect_uri")
++		digest := secretDigest(form.Get("code"))
++		o.mu.Lock()
++		code := o.codes[digest]
++		var snapshot oauthCode
++		reused := false
++		if code != nil && now.Before(code.Expires) {
++			snapshot = *code
++			reused = code.Used
++			code.Used = true
++		}
++		o.mu.Unlock()
++		if snapshot.GrantID == "" {
++			oauthFailure(w, oauthGrantError("The authorization code is invalid or expired."))
++			return
++		}
++		if reused {
++			// RFC 6749 section 4.1.2: revoke tokens issued with a reused code.
++			if err := db.revokeGrantTokens(r.Context(), snapshot.GrantID); err != nil {
++				log.Printf("oauth code reuse revocation failed (%T)", err)
++			}
++			oauthFailure(w, oauthGrantError("The authorization code was already used."))
++			return
++		}
++		sum := sha256.Sum256([]byte(verifier))
++		computed := base64.RawURLEncoding.EncodeToString(sum[:])
++		if snapshot.ClientID != clientID || snapshot.RedirectURI != redirectURI || (resource != "" && resource != snapshot.Resource) ||
++			!codeVerifierPattern.MatchString(verifier) || subtle.ConstantTimeCompare([]byte(computed), []byte(snapshot.Challenge)) != 1 {
++			oauthFailure(w, oauthGrantError("The authorization code does not match this request."))
++			return
++		}
++		if db == nil {
++			oauthFailure(w, errors.New("account database unavailable"))
++			return
++		}
++		pair, err = db.issueForCode(r.Context(), snapshot, now, o.settings)
++	case "refresh_token":
++		refresh := form.Get("refresh_token")
++		if !strings.HasPrefix(refresh, "mt_rt_") || len(refresh) != 49 {
++			oauthFailure(w, oauthGrantError("Refresh token is invalid or expired."))
++			return
++		}
++		if db == nil {
++			oauthFailure(w, errors.New("account database unavailable"))
++			return
++		}
++		pair, err = db.refreshTokens(r.Context(), refresh, clientID, resource, form.Get("scope"), now, o.settings)
++	case "":
++		err = oauthRequestError("invalid_request", "grant_type is required.")
++	default:
++		err = oauthRequestError("unsupported_grant_type", "Use authorization_code or refresh_token.")
++	}
++	if err != nil {
++		oauthFailure(w, err)
++		return
++	}
++	oauthJSON(w, 200, map[string]any{"access_token": pair.Access, "token_type": "Bearer", "expires_in": int(pair.AccessTTL / time.Second), "refresh_token": pair.Refresh, "scope": pair.Scope})
++}
++
++func (h *httpAdapter) oauthRevoke(w http.ResponseWriter, r *http.Request, client string) {
++	if tokenCORS(w, r) {
++		return
++	}
++	if err := h.service.rates.take(allowance{"oauth:revoke:" + client, 60, 60}); err != nil {
++		oauthFailure(w, err)
++		return
++	}
++	form, err := parseOAuthForm(w, r)
++	if err != nil {
++		oauthFailure(w, err)
++		return
++	}
++	token, clientID := form.Get("token"), form.Get("client_id")
++	if token == "" || clientID == "" {
++		oauthFailure(w, oauthRequestError("invalid_request", "token and client_id are required."))
++		return
++	}
++	db := h.service.ownedDB
++	if db == nil {
++		oauthFailure(w, errors.New("account database unavailable"))
++		return
++	}
++	if len(token) == 49 && (strings.HasPrefix(token, "mt_at_") || strings.HasPrefix(token, "mt_rt_")) {
++		if err := db.revokeToken(r.Context(), token, clientID); err != nil {
++			oauthFailure(w, err)
++			return
++		}
++	}
++	w.Header().Set("Cache-Control", "no-store")
++	w.WriteHeader(http.StatusOK)
++}
+diff --git a/internal/service/oauth_store.go b/internal/service/oauth_store.go
+new file mode 100644
+index 0000000..a51c779
+--- /dev/null
++++ b/internal/service/oauth_store.go
+@@ -0,0 +1,439 @@
++package service
++
++import (
++	"context"
++	"crypto/rand"
++	"database/sql"
++	"encoding/base64"
++	"fmt"
++	"sort"
++	"strings"
++	"time"
++)
++
++const scopeRead = "spaces:read"
++const scopeReadWrite = "spaces:read spaces:write"
++
++// oauthSpaceChoice is one consented space from the consent form.
++type oauthSpaceChoice struct {
++	SpaceID    string
++	Permission string // read_only or read_write
++}
++
++// accessibleSpace is a space the account can currently consent to.
++type accessibleSpace struct {
++	ID, Name, Slug, Owner string
++	Owned                 bool
++	CanWrite              bool // owner, or member with read_write agent permission
++}
++
++// oauthTokenPair is returned to the client once; only digests are stored.
++type oauthTokenPair struct {
++	Access, Refresh string
++	Scope           string
++	AccessTTL       time.Duration
++}
++
++// oauthIdentity is the result of validating an access token for one request.
++type oauthIdentity struct {
++	GrantID, UserID, ClientID, Scope string
++}
++
++func (id oauthIdentity) canWrite() bool { return id.Scope == scopeReadWrite }
++
++// newOAuthToken returns a 256-bit random token with a recognisable prefix.
++func newOAuthToken(prefix string) (string, error) {
++	b := make([]byte, 32)
++	if _, err := rand.Read(b); err != nil {
++		return "", err
++	}
++	return prefix + base64.RawURLEncoding.EncodeToString(b), nil
++}
++
++// accessibleSpaces lists ready owned spaces and active memberships for the consent page.
++func (db *accountDatabase) accessibleSpaces(ctx context.Context, user userAccount) ([]accessibleSpace, error) {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	spaces := []accessibleSpace{}
++	rows, err := db.db.QueryContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? AND provisioning_state = 'ready' ORDER BY created_at, space_id LIMIT 200", user.ID)
++	if err != nil {
++		return nil, fmt.Errorf("cannot list spaces")
++	}
++	for rows.Next() {
++		space, err := scanOwnedSpace(rows)
++		if err != nil {
++			rows.Close()
++			return nil, err
++		}
++		spaces = append(spaces, accessibleSpace{ID: space.ID, Name: space.Name, Slug: space.Slug, Owner: user.Username, Owned: true, CanWrite: true})
++	}
++	err = rows.Err()
++	rows.Close()
++	if err != nil {
++		return nil, fmt.Errorf("cannot list spaces")
++	}
++	rows, err = db.db.QueryContext(ctx, `SELECT s.space_id, s.name, s.slug, COALESCE(u.username, ''), m.agent_permission FROM metatrash_memberships m JOIN metatrash_spaces s ON s.space_id = m.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE m.user_id = ? AND m.status = 'active' AND s.provisioning_state = 'ready' ORDER BY m.joined_at, s.space_id LIMIT 200`, user.ID)
++	if err != nil {
++		return nil, fmt.Errorf("cannot list joined spaces")
++	}
++	defer rows.Close()
++	for rows.Next() {
++		var item accessibleSpace
++		var permission string
++		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Owner, &permission); err != nil {
++			return nil, fmt.Errorf("cannot list joined spaces")
++		}
++		item.CanWrite = permission == "read_write"
++		spaces = append(spaces, item)
++	}
++	if rows.Err() != nil {
++		return nil, fmt.Errorf("cannot list joined spaces")
++	}
++	return spaces, nil
++}
++
++// grantConsent returns the current consent for an existing connection, keyed by space ID.
++func (db *accountDatabase) grantConsent(ctx context.Context, userID, clientID, resource string) (map[string]string, error) {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	rows, err := db.db.QueryContext(ctx, "SELECT gs.space_id, gs.permission FROM metatrash_oauth_grants g JOIN metatrash_oauth_grant_spaces gs ON gs.grant_id = g.grant_id WHERE g.user_id = ? AND g.client_id = ? AND g.resource = ?", userID, clientID, resource)
++	if err != nil {
++		return nil, fmt.Errorf("cannot read existing connection")
++	}
++	defer rows.Close()
++	consent := map[string]string{}
++	for rows.Next() {
++		var id, permission string
++		if err := rows.Scan(&id, &permission); err != nil {
++			return nil, fmt.Errorf("cannot read existing connection")
++		}
++		consent[id] = permission
++	}
++	return consent, rows.Err()
++}
++
++// saveGrant creates or replaces the connection for (user, client, resource).
++// Spaces are locked in ID order, as membership changes lock a space first, and
++// current ownership or active membership is re-checked inside the transaction.
++// Write access needs the owner or a read_write member permission.
++func (db *accountDatabase) saveGrant(ctx context.Context, userID string, client oauthClient, resource string, choices []oauthSpaceChoice, now time.Time, idle time.Duration) (string, string, error) {
++	if !idPattern.MatchString(userID) || len(choices) > 200 {
++		return "", "", invalid("Invalid connection request.")
++	}
++	selected := append([]oauthSpaceChoice(nil), choices...)
++	sort.Slice(selected, func(i, j int) bool { return selected[i].SpaceID < selected[j].SpaceID })
++	scope := scopeRead
++	for i, choice := range selected {
++		if !idPattern.MatchString(choice.SpaceID) || (choice.Permission != "read_only" && choice.Permission != "read_write") || (i > 0 && selected[i-1].SpaceID == choice.SpaceID) {
++			return "", "", invalid("Invalid space selection.")
++		}
++		if choice.Permission == "read_write" {
++			scope = scopeReadWrite
++		}
++	}
++	grantID, err := randomHex(16)
++	if err != nil {
++		return "", "", err
++	}
++	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
++	defer cancel()
++	tx, err := db.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
++	if err != nil {
++		return "", "", fmt.Errorf("connection storage unavailable")
++	}
++	defer tx.Rollback()
++	members := make([]sql.NullString, len(selected))
++	for i, choice := range selected {
++		space, err := scanOwnedSpace(tx.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE space_id = ? FOR UPDATE", choice.SpaceID))
++		if err == sql.ErrNoRows || (err == nil && space.State != "ready") {
++			return "", "", problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
++		}
++		if err != nil {
++			return "", "", fmt.Errorf("cannot check selected space")
++		}
++		if space.OwnerID == userID {
++			continue
++		}
++		var status, permission string
++		err = tx.QueryRowContext(ctx, "SELECT status, agent_permission FROM metatrash_memberships WHERE space_id = ? AND user_id = ?", choice.SpaceID, userID).Scan(&status, &permission)
++		if err == sql.ErrNoRows || (err == nil && status != "active") {
++			return "", "", problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
++		}
++		if err != nil {
++			return "", "", fmt.Errorf("cannot check selected space")
++		}
++		if choice.Permission == "read_write" && permission != "read_write" {
++			return "", "", problem(409, "conflict", "The space owner allows read-only app access to a selected space.")
++		}
++		members[i] = sql.NullString{String: userID, Valid: true}
++	}
++	var existing string
++	err = tx.QueryRowContext(ctx, "SELECT grant_id FROM metatrash_oauth_grants WHERE user_id = ? AND client_id = ? AND resource = ? FOR UPDATE", userID, client.ID, resource).Scan(&existing)
++	unix := now.Unix()
++	expires := now.Add(idle).Unix()
++	switch {
++	case err == nil:
++		grantID = existing
++		if _, err := tx.ExecContext(ctx, "UPDATE metatrash_oauth_grants SET client_name = ?, scope = ?, updated_at = ?, expires_at = ? WHERE grant_id = ?", client.Name, scope, unix, expires, grantID); err != nil {
++			return "", "", fmt.Errorf("cannot update connection")
++		}
++		if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_oauth_grant_spaces WHERE grant_id = ?", grantID); err != nil {
++			return "", "", fmt.Errorf("cannot update connection")
++		}
++	case err == sql.ErrNoRows:
++		if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_oauth_grants (grant_id, user_id, client_id, client_name, resource, scope, created_at, updated_at, last_used_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", grantID, userID, client.ID, client.Name, resource, scope, unix, unix, unix, expires); err != nil {
++			return "", "", fmt.Errorf("cannot save connection")
++		}
++	default:
++		return "", "", fmt.Errorf("cannot read connection")
++	}
++	for i, choice := range selected {
++		if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_oauth_grant_spaces (grant_id, space_id, member_user_id, permission) VALUES (?, ?, ?, ?)", grantID, choice.SpaceID, members[i], choice.Permission); err != nil {
++			return "", "", fmt.Errorf("cannot save connection spaces")
++		}
++	}
++	if err := tx.Commit(); err != nil {
++		return "", "", fmt.Errorf("cannot confirm connection; try again")
++	}
++	return grantID, scope, nil
++}
++
++func narrowerScope(a, b string) string {
++	if a == scopeReadWrite && b == scopeReadWrite {
++		return scopeReadWrite
++	}
++	return scopeRead
++}
++
++func insertTokenPair(ctx context.Context, tx *sql.Tx, grantID, scope string, now time.Time, accessTTL, refreshTTL time.Duration) (oauthTokenPair, error) {
++	access, err := newOAuthToken("mt_at_")
++	if err != nil {
++		return oauthTokenPair{}, err
++	}
++	refresh, err := newOAuthToken("mt_rt_")
++	if err != nil {
++		return oauthTokenPair{}, err
++	}
++	for _, token := range []struct {
++		value, kind string
++		ttl         time.Duration
++	}{{access, "access", accessTTL}, {refresh, "refresh", refreshTTL}} {
++		if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_oauth_tokens (token_digest, grant_id, kind, scope, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)", secretDigest(token.value), grantID, token.kind, scope, now.Unix(), now.Add(token.ttl).Unix()); err != nil {
++			return oauthTokenPair{}, fmt.Errorf("cannot save token")
++		}
++	}
++	return oauthTokenPair{Access: access, Refresh: refresh, Scope: scope, AccessTTL: accessTTL}, nil
++}
++
++func oauthGrantError(description string) *Error {
++	return &Error{Status: 400, Code: "invalid_grant", Message: description}
++}
++
++// issueForCode exchanges a verified authorization code for the first token pair.
++func (db *accountDatabase) issueForCode(ctx context.Context, code oauthCode, now time.Time, s oauthSettings) (oauthTokenPair, error) {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	tx, err := db.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
++	if err != nil {
++		return oauthTokenPair{}, fmt.Errorf("token storage unavailable")
++	}
++	defer tx.Rollback()
++	var userID, clientID, resource, scope string
++	var expires int64
++	err = tx.QueryRowContext(ctx, "SELECT user_id, client_id, resource, scope, expires_at FROM metatrash_oauth_grants WHERE grant_id = ? FOR UPDATE", code.GrantID).Scan(&userID, &clientID, &resource, &scope, &expires)
++	if err == sql.ErrNoRows {
++		return oauthTokenPair{}, oauthGrantError("The connection was revoked.")
++	}
++	if err != nil {
++		return oauthTokenPair{}, fmt.Errorf("cannot read connection")
++	}
++	if userID != code.UserID || clientID != code.ClientID || resource != code.Resource || expires <= now.Unix() {
++		return oauthTokenPair{}, oauthGrantError("The connection is no longer valid.")
++	}
++	pair, err := insertTokenPair(ctx, tx, code.GrantID, narrowerScope(scope, code.Scope), now, s.accessTTL, s.refreshTTL)
++	if err != nil {
++		return oauthTokenPair{}, err
++	}
++	if _, err := tx.ExecContext(ctx, "UPDATE metatrash_oauth_grants SET last_used_at = ?, expires_at = ? WHERE grant_id = ?", now.Unix(), now.Add(s.grantIdle).Unix(), code.GrantID); err != nil {
++		return oauthTokenPair{}, fmt.Errorf("cannot update connection")
++	}
++	if err := tx.Commit(); err != nil {
++		return oauthTokenPair{}, fmt.Errorf("cannot confirm token")
++	}
++	return pair, nil
++}
++
++// refreshTokens rotates a refresh token. A spent token presented again revokes
++// the whole connection (replay detection); the caller reports invalid_grant.
++func (db *accountDatabase) refreshTokens(ctx context.Context, refresh, clientID, resource, requestedScope string, now time.Time, s oauthSettings) (oauthTokenPair, error) {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	tx, err := db.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
++	if err != nil {
++		return oauthTokenPair{}, fmt.Errorf("token storage unavailable")
++	}
++	defer tx.Rollback()
++	digest := secretDigest(refresh)
++	var grantID, kind, tokenScope, grantClient, grantResource, grantScope string
++	var tokenExpires, grantExpires int64
++	var used sql.NullInt64
++	err = tx.QueryRowContext(ctx, "SELECT t.grant_id, t.kind, t.scope, t.expires_at, t.used_at, g.client_id, g.resource, g.scope, g.expires_at FROM metatrash_oauth_tokens t JOIN metatrash_oauth_grants g ON g.grant_id = t.grant_id WHERE t.token_digest = ? FOR UPDATE", digest).Scan(&grantID, &kind, &tokenScope, &tokenExpires, &used, &grantClient, &grantResource, &grantScope, &grantExpires)
++	if err == sql.ErrNoRows {
++		return oauthTokenPair{}, oauthGrantError("Refresh token is invalid or expired.")
++	}
++	if err != nil {
++		return oauthTokenPair{}, fmt.Errorf("cannot read token")
++	}
++	if kind != "refresh" || grantClient != clientID {
++		return oauthTokenPair{}, oauthGrantError("Refresh token is invalid or expired.")
++	}
++	if used.Valid {
++		if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_oauth_grants WHERE grant_id = ?", grantID); err != nil {
++			return oauthTokenPair{}, fmt.Errorf("cannot revoke replayed connection")
++		}
++		if err := tx.Commit(); err != nil {
++			return oauthTokenPair{}, fmt.Errorf("cannot revoke replayed connection")
++		}
++		return oauthTokenPair{}, oauthGrantError("Refresh token was already used; the connection has been revoked.")
++	}
++	if tokenExpires <= now.Unix() || grantExpires <= now.Unix() {
++		return oauthTokenPair{}, oauthGrantError("Refresh token is invalid or expired.")
++	}
++	if resource != "" && resource != grantResource {
++		return oauthTokenPair{}, &Error{Status: 400, Code: "invalid_target", Message: "The resource does not match this token."}
++	}
++	scope := narrowerScope(tokenScope, grantScope)
++	if requestedScope != "" {
++		requested, ok := parseScope(requestedScope, false)
++		if !ok || (requested == scopeReadWrite && scope != scopeReadWrite) {
++			return oauthTokenPair{}, &Error{Status: 400, Code: "invalid_scope", Message: "The requested scope exceeds the granted scope."}
++		}
++		scope = requested
++	}
++	result, err := tx.ExecContext(ctx, "UPDATE metatrash_oauth_tokens SET used_at = ? WHERE token_digest = ? AND used_at IS NULL", now.Unix(), digest)
++	if err != nil {
++		return oauthTokenPair{}, fmt.Errorf("cannot rotate token")
++	}
++	if n, err := result.RowsAffected(); err != nil || n != 1 {
++		return oauthTokenPair{}, oauthGrantError("Refresh token is invalid or expired.")
++	}
++	pair, err := insertTokenPair(ctx, tx, grantID, scope, now, s.accessTTL, s.refreshTTL)
++	if err != nil {
++		return oauthTokenPair{}, err
++	}
++	if _, err := tx.ExecContext(ctx, "UPDATE metatrash_oauth_grants SET last_used_at = ?, expires_at = ? WHERE grant_id = ?", now.Unix(), now.Add(s.grantIdle).Unix(), grantID); err != nil {
++		return oauthTokenPair{}, fmt.Errorf("cannot update connection")
++	}
++	if err := tx.Commit(); err != nil {
++		return oauthTokenPair{}, fmt.Errorf("cannot confirm token")
++	}
++	return pair, nil
++}
++
++// revokeToken implements RFC 7009 for a client: an access token is deleted; a
++// refresh token deletes every token of its connection (consent is kept).
++// Unknown tokens and other clients' tokens are ignored.
++func (db *accountDatabase) revokeToken(ctx context.Context, token, clientID string) error {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	var grantID, kind, grantClient string
++	err := db.db.QueryRowContext(ctx, "SELECT t.grant_id, t.kind, g.client_id FROM metatrash_oauth_tokens t JOIN metatrash_oauth_grants g ON g.grant_id = t.grant_id WHERE t.token_digest = ?", secretDigest(token)).Scan(&grantID, &kind, &grantClient)
++	if err == sql.ErrNoRows {
++		return nil
++	}
++	if err != nil {
++		return fmt.Errorf("cannot read token")
++	}
++	if grantClient != clientID {
++		return nil
++	}
++	if kind == "access" {
++		_, err = db.db.ExecContext(ctx, "DELETE FROM metatrash_oauth_tokens WHERE token_digest = ?", secretDigest(token))
++	} else {
++		_, err = db.db.ExecContext(ctx, "DELETE FROM metatrash_oauth_tokens WHERE grant_id = ?", grantID)
++	}
++	if err != nil {
++		return fmt.Errorf("cannot revoke token")
++	}
++	return nil
++}
++
++// revokeGrantTokens deletes all tokens of a connection, used when an
++// authorization code is presented twice.
++func (db *accountDatabase) revokeGrantTokens(ctx context.Context, grantID string) error {
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	_, err := db.db.ExecContext(ctx, "DELETE FROM metatrash_oauth_tokens WHERE grant_id = ?", grantID)
++	return err
++}
++
++// validateAccessToken checks an access token for a request to one protected
++// resource. The connection must still exist and be within its idle lifetime.
++// Last use is recorded at most once an hour per connection.
++func (db *accountDatabase) validateAccessToken(ctx context.Context, token, resource string, now time.Time, s oauthSettings) (oauthIdentity, error) {
++	invalidToken := &Error{Status: 401, Code: "invalid_token", Message: "The access token is invalid or expired."}
++	if !strings.HasPrefix(token, "mt_at_") || len(token) != 49 {
++		return oauthIdentity{}, invalidToken
++	}
++	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
++	defer cancel()
++	var id oauthIdentity
++	var grantResource string
++	var tokenExpires, grantExpires, lastUsed int64
++	err := db.db.QueryRowContext(ctx, "SELECT t.grant_id, t.scope, t.expires_at, g.user_id, g.client_id, g.resource, g.scope, g.expires_at, g.last_used_at FROM metatrash_oauth_tokens t JOIN metatrash_oauth_grants g ON g.grant_id = t.grant_id WHERE t.token_digest = ? AND t.kind = 'access'", secretDigest(token)).Scan(&id.GrantID, &id.Scope, &tokenExpires, &id.UserID, &id.ClientID, &grantResource, new(string), &grantExpires, &lastUsed)
++	if err == sql.ErrNoRows {
++		return oauthIdentity{}, invalidToken
++	}
++	if err != nil {
++		return oauthIdentity{}, fmt.Errorf("cannot check access token")
++	}
++	if grantResource != resource || tokenExpires <= now.Unix() || grantExpires <= now.Unix() {
++		return oauthIdentity{}, invalidToken
++	}
++	if now.Unix()-lastUsed >= 3600 {
++		if _, err := db.db.ExecContext(ctx, "UPDATE metatrash_oauth_grants SET last_used_at = ?, expires_at = ? WHERE grant_id = ? AND last_used_at = ?", now.Unix(), now.Add(s.grantIdle).Unix(), id.GrantID, lastUsed); err != nil {
++			return oauthIdentity{}, fmt.Errorf("cannot record connection use")
++		}
++	}
++	return id, nil
++}
++
++// purgeExpired removes expired tokens and idle-expired connections.
++func (db *accountDatabase) purgeExpired(ctx context.Context, now time.Time) error {
++	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
++	defer cancel()
++	if _, err := db.db.ExecContext(ctx, "DELETE FROM metatrash_oauth_tokens WHERE expires_at <= ? LIMIT 1000", now.Unix()); err != nil {
++		return err
++	}
++	_, err := db.db.ExecContext(ctx, "DELETE FROM metatrash_oauth_grants WHERE expires_at <= ? LIMIT 100", now.Unix())
++	return err
++}
++
++// parseScope maps a requested scope string onto the two supported values.
++// Unknown scope tokens are ignored when lenient; an empty or unknown-only
++// request means the default read/write request (consent still decides).
++func parseScope(raw string, lenient bool) (string, bool) {
++	read, write := false, false
++	for _, token := range strings.Fields(raw) {
++		switch token {
++		case "spaces:read":
++			read = true
++		case "spaces:write":
++			write = true
++		default:
++			if !lenient {
++				return "", false
++			}
++		}
++	}
++	if write {
++		return scopeReadWrite, true
++	}
++	if read {
++		return scopeRead, true
++	}
++	if lenient {
++		return scopeReadWrite, true
++	}
++	return "", false
++}
+diff --git a/internal/service/oauth_test.go b/internal/service/oauth_test.go
+new file mode 100644
+index 0000000..56308e1
+--- /dev/null
++++ b/internal/service/oauth_test.go
+@@ -0,0 +1,349 @@
++package service
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"net/http"
++	"net/http/httptest"
++	"net/netip"
++	"net/url"
++	"strings"
++	"testing"
++	"time"
++)
++
++func testOAuthClients(docs map[string]string) (*oauthClients, *int) {
++	fetches := new(int)
++	c := newOAuthClients(map[string]bool{"claude.ai": true, "chatgpt.com": true})
++	c.fetch = func(_ context.Context, clientID string) ([]byte, time.Duration, error) {
++		*fetches++
++		doc, ok := docs[clientID]
++		if !ok {
++			return nil, 0, fmt.Errorf("not found")
++		}
++		return []byte(doc), time.Hour, nil
++	}
++	return c, fetches
++}
++
++const testClientID = "https://claude.ai/oauth/test-client-metadata"
++const testRedirect = "https://claude.ai/api/mcp/auth_callback"
++
++func testClientDocument() string {
++	return `{"client_id":"` + testClientID + `","client_name":"Claude","redirect_uris":["` + testRedirect + `","http://localhost/callback","http://127.0.0.1/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"application_type":"native"}`
++}
++
++func TestOAuthClientIDShape(t *testing.T) {
++	c, _ := testOAuthClients(nil)
++	for _, bad := range []string{
++		"http://claude.ai/oauth/x", "https://evil.example/oauth/x", "https://claude.ai", "https://claude.ai/",
++		"https://claude.ai:8443/x", "https://user@claude.ai/x", "https://claude.ai/x?y=1", "https://claude.ai/x#f",
++		"https://CLAUDE.AI/x", "https://claude.ai/a/../b", "https://claude.ai//x", "https://claude.ai/%41", "https://sub.claude.ai/x",
++		"https://claude.ai/x y",
++	} {
++		if _, err := c.clientIDHost(bad); err == nil {
++			t.Errorf("accepted client_id %q", bad)
++		}
++	}
++	if host, err := c.clientIDHost(testClientID); err != nil || host != "claude.ai" {
++		t.Fatal("rejected valid client_id")
++	}
++}
++
++func TestOAuthClientDocument(t *testing.T) {
++	c, fetches := testOAuthClients(map[string]string{testClientID: testClientDocument()})
++	client, err := c.lookup(context.Background(), testClientID)
++	if err != nil || client.Name != "Claude" || client.Host != "claude.ai" {
++		t.Fatalf("lookup failed: %v", err)
++	}
++	if _, err := c.lookup(context.Background(), testClientID); err != nil || *fetches != 1 {
++		t.Fatal("cache not used")
++	}
++	base := map[string]any{"client_id": testClientID, "redirect_uris": []string{testRedirect}}
++	for name, change := range map[string]func(map[string]any){
++		"wrong id":         func(d map[string]any) { d["client_id"] = "https://claude.ai/other" },
++		"secret":           func(d map[string]any) { d["client_secret"] = "x" },
++		"confidential":     func(d map[string]any) { d["token_endpoint_auth_method"] = "client_secret_basic" },
++		"no code grant":    func(d map[string]any) { d["grant_types"] = []string{"client_credentials"} },
++		"no code response": func(d map[string]any) { d["response_types"] = []string{"token"} },
++		"no redirects":     func(d map[string]any) { d["redirect_uris"] = []string{} },
++		"bad redirect":     func(d map[string]any) { d["redirect_uris"] = []string{"javascript:alert(1)"} },
++		"remote http":      func(d map[string]any) { d["redirect_uris"] = []string{"http://claude.ai/cb"} },
++		"fragment":         func(d map[string]any) { d["redirect_uris"] = []string{"https://claude.ai/cb#x"} },
++	} {
++		doc := map[string]any{}
++		for k, v := range base {
++			doc[k] = v
++		}
++		change(doc)
++		b, _ := json.Marshal(doc)
++		if _, err := parseClientDocument(b, testClientID, "claude.ai"); err == nil {
++			t.Errorf("accepted document: %s", name)
++		}
++	}
++	b, _ := json.Marshal(map[string]any{"client_id": testClientID, "redirect_uris": []string{testRedirect}, "client_name": "‮evil"})
++	if client, err := parseClientDocument(b, testClientID, "claude.ai"); err != nil || client.Name != "claude.ai" {
++		t.Fatal("control-character name not replaced by host")
++	}
++	if _, err := c.lookup(context.Background(), "https://claude.ai/missing"); err == nil {
++		t.Fatal("missing document accepted")
++	}
++}
++
++func TestOAuthRedirectMatching(t *testing.T) {
++	client := oauthClient{RedirectURIs: []string{testRedirect, "http://localhost/callback", "http://127.0.0.1/cb?x=1", "cursor://anysphere/cb"}}
++	for _, ok := range []string{testRedirect, "http://localhost:3118/callback", "http://localhost/callback", "http://127.0.0.1:5000/cb?x=1", "cursor://anysphere/cb"} {
++		if !client.matchRedirectURI(ok) {
++			t.Errorf("rejected %q", ok)
++		}
++	}
++	for _, bad := range []string{testRedirect + "/", "https://claude.ai/api/mcp/auth_callback?x=1", "http://localhost:3118/callback2", "http://127.0.0.1:3118/callback", "http://localhost:99999/callback", "https://localhost/callback", "http://127.0.0.1:5000/cb", "cursor://anysphere/cb2", "HTTPS://claude.ai/api/mcp/auth_callback"} {
++		if client.matchRedirectURI(bad) {
++			t.Errorf("accepted %q", bad)
++		}
++	}
++	if redirectSource(testRedirect) != "https://claude.ai" || redirectSource("http://localhost:3118/cb") != "http://localhost:3118" || redirectSource("cursor://anysphere/cb") != "cursor:" {
++		t.Fatal("redirect CSP source")
++	}
++}
++
++func TestOAuthPublicAddress(t *testing.T) {
++	for _, bad := range []string{"127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "224.0.0.1", "64:ff9b::a00:1"} {
++		if publicAddress(netip.MustParseAddr(bad)) {
++			t.Errorf("allowed %s", bad)
++		}
++	}
++	for _, ok := range []string{"160.79.104.10", "2607:6bc0::10"} {
++		if !publicAddress(netip.MustParseAddr(ok)) {
++			t.Errorf("refused %s", ok)
++		}
++	}
++	dial := clientMetadataHTTPClient().Transport.(*http.Transport).DialContext
++	for _, address := range []string{"127.0.0.1:443", "169.254.169.254:443", "10.0.0.1:443", "160.79.104.10:80"} {
++		if _, err := dial(context.Background(), "tcp", address); err == nil || !strings.Contains(err.Error(), "client metadata address refused") {
++			t.Errorf("dial %s not refused by address check: %v", address, err)
++		}
++	}
++}
++
++func TestOAuthCacheLifetime(t *testing.T) {
++	cases := map[string]time.Duration{"": time.Hour, "max-age=60": time.Minute, "public, max-age=999999": 999999 * time.Second, "no-store": 0, "no-cache": 0, "max-age=x": 0}
++	for value, want := range cases {
++		h := http.Header{}
++		if value != "" {
++			h.Set("Cache-Control", value)
++		}
++		if got := cacheLifetime(h); got != want {
++			t.Errorf("%q: got %v want %v", value, got, want)
++		}
++	}
++}
++
++func TestOAuthScopeAndResource(t *testing.T) {
++	o := newOAuthServer(oauthSettings{clientHosts: map[string]bool{"claude.ai": true}}, "https://metatrash.com")
++	for raw, want := range map[string]string{"": o.mcpResource, "https://metatrash.com/mcp/account": o.mcpResource, "https://metatrash.com/mcp/account/": o.mcpResource, "HTTPS://Metatrash.com/mcp/account": o.mcpResource, "https://metatrash.com/api/v1/account": o.restResource} {
++		if got, ok := o.canonicalResource(raw); !ok || got != want {
++			t.Errorf("resource %q", raw)
++		}
++	}
++	for _, bad := range []string{"https://metatrash.com/mcp", "https://evil.example/mcp/account", "https://metatrash.com/mcp/account?x=1", "https://metatrash.com/mcp/account#x"} {
++		if _, ok := o.canonicalResource(bad); ok {
++			t.Errorf("accepted resource %q", bad)
++		}
++	}
++	for raw, want := range map[string]string{"": scopeReadWrite, "spaces:read": scopeRead, "spaces:write": scopeReadWrite, "openid spaces:read": scopeRead, "openid": scopeReadWrite} {
++		if got, _ := parseScope(raw, true); got != want {
++			t.Errorf("scope %q got %q", raw, got)
++		}
++	}
++	if _, ok := parseScope("openid", false); ok {
++		t.Fatal("strict scope accepted unknown")
++	}
++}
++
++// testOAuthHandler builds a handler with OAuth enabled and no database; enough
++// for discovery and request validation.
++func testOAuthHandler(t *testing.T) (*httpAdapter, *Service) {
++	t.Helper()
++	s, _, _ := testAccounts(t)
++	settings, err := (&oauthConfig{Enabled: true}).settings()
++	if err != nil {
++		t.Fatal(err)
++	}
++	s.accounts.oauth = &settings
++	handler, err := s.Handler([]byte(`{"tools":[]}`), nil, "https://metatrash.com")
++	if err != nil {
++		t.Fatal(err)
++	}
++	h := handler.(*httpAdapter)
++	h.oauth.clients, _ = testOAuthClients(map[string]string{testClientID: testClientDocument()})
++	return h, s
++}
++
++func oauthCall(h http.Handler, method, target string, body url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
++	var req *http.Request
++	if body != nil {
++		req = httptest.NewRequest(method, target, strings.NewReader(body.Encode()))
++		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
++		req.Header.Set("Origin", "https://metatrash.com")
++	} else {
++		req = httptest.NewRequest(method, target, nil)
++	}
++	req.Host = "metatrash.com"
++	for _, cookie := range cookies {
++		if cookie != nil {
++			req.AddCookie(cookie)
++		}
++	}
++	w := httptest.NewRecorder()
++	h.ServeHTTP(w, req)
++	return w
++}
++
++func responseCookie(w *httptest.ResponseRecorder, name string) *http.Cookie {
++	for _, cookie := range w.Result().Cookies() {
++		if cookie.Name == name {
++			return cookie
++		}
++	}
++	return nil
++}
++
++func authorizeURL(changes map[string]string) string {
++	q := url.Values{"response_type": {"code"}, "client_id": {testClientID}, "redirect_uri": {testRedirect}, "code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"}, "state": {"st"}, "resource": {"https://metatrash.com/mcp/account"}, "scope": {"spaces:read spaces:write"}}
++	for k, v := range changes {
++		if v == "" {
++			q.Del(k)
++		} else {
++			q.Set(k, v)
++		}
++	}
++	return "/oauth/authorize?" + q.Encode()
++}
++
++func TestOAuthDiscovery(t *testing.T) {
++	h, _ := testOAuthHandler(t)
++	w := oauthCall(h, "GET", "/.well-known/oauth-authorization-server", nil)
++	var meta map[string]any
++	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &meta) != nil || meta["issuer"] != "https://metatrash.com" || meta["client_id_metadata_document_supported"] != true || meta["token_endpoint"] != "https://metatrash.com/oauth/token" || fmt.Sprint(meta["code_challenge_methods_supported"]) != "[S256]" || fmt.Sprint(meta["token_endpoint_auth_methods_supported"]) != "[none]" || meta["authorization_response_iss_parameter_supported"] != true {
++		t.Fatalf("authorization server metadata: %d %s", w.Code, w.Body)
++	}
++	w = oauthCall(h, "GET", "/.well-known/oauth-protected-resource/mcp/account", nil)
++	if w.Code != 200 || !strings.Contains(w.Body.String(), `"resource":"https://metatrash.com/mcp/account"`) || w.Header().Get("Access-Control-Allow-Origin") != "*" {
++		t.Fatalf("protected resource metadata: %s", w.Body)
++	}
++	// Disabled OAuth exposes none of these routes.
++	s, _, _ := testAccounts(t)
++	plain, _ := s.Handler([]byte(`{"tools":[]}`), nil, "https://metatrash.com")
++	if w := oauthCall(plain, "GET", "/.well-known/oauth-authorization-server", nil); w.Code != 404 {
++		t.Fatal("metadata served while OAuth disabled")
++	}
++	// Folder hosting: issuer and endpoints include the prefix.
++	o := newOAuthServer(oauthSettings{}, "https://example.com/metatrash")
++	if o.issuer != "https://example.com/metatrash" || o.mcpResource != "https://example.com/metatrash/mcp/account" {
++		t.Fatal("prefixed issuer")
++	}
++}
++
++func TestOAuthAuthorizeValidation(t *testing.T) {
++	h, _ := testOAuthHandler(t)
++	// Unknown client or unregistered redirect: an error page, never a redirect.
++	for _, changes := range []map[string]string{
++		{"client_id": "https://evil.example/client"},
++		{"client_id": "https://claude.ai/unknown"},
++		{"redirect_uri": "https://evil.example/cb"},
++		{"redirect_uri": ""},
++	} {
++		w := oauthCall(h, "GET", authorizeURL(changes), nil)
++		if w.Code != 400 || w.Header().Get("Location") != "" {
++			t.Errorf("%v: status %d location %q", changes, w.Code, w.Header().Get("Location"))
++		}
++	}
++	if w := oauthCall(h, "GET", authorizeURL(nil)+"&state=dup", nil); w.Code != 400 || w.Header().Get("Location") != "" {
++		t.Fatal("duplicate parameter accepted")
++	}
++	// Other errors go back to the client with state and iss.
++	for changes, code := range map[string]string{
++		`{"response_type":"token"}`:               "unsupported_response_type",
++		`{"code_challenge":""}`:                   "invalid_request",
++		`{"code_challenge_method":"plain"}`:       "invalid_request",
++		`{"code_challenge":"short"}`:              "invalid_request",
++		`{"resource":"https://evil.example/mcp"}`: "invalid_target",
++		`{"prompt":"none"}`:                       "consent_required",
++	} {
++		var m map[string]string
++		_ = json.Unmarshal([]byte(changes), &m)
++		w := oauthCall(h, "GET", authorizeURL(m), nil)
++		loc, _ := url.Parse(w.Header().Get("Location"))
++		if w.Code != 303 || loc == nil || !strings.HasPrefix(loc.String(), testRedirect+"?") || loc.Query().Get("error") != code || loc.Query().Get("state") != "st" || loc.Query().Get("iss") != "https://metatrash.com" {
++			t.Errorf("%s: %d %s", changes, w.Code, w.Header().Get("Location"))
++		}
++	}
++	// A valid request stores a pending authorization bound to a Lax cookie and
++	// continues on a same-site page (no consent shown on the cross-site hop).
++	w := oauthCall(h, "GET", authorizeURL(nil), nil)
++	cookie := responseCookie(w, oauthCookie)
++	if w.Code != 200 || cookie == nil || cookie.SameSite != http.SameSiteLaxMode || !cookie.Secure || !cookie.HttpOnly || !strings.Contains(w.Body.String(), `http-equiv="refresh"`) || !strings.Contains(w.Body.String(), "/oauth/consent") {
++		t.Fatalf("authorize continuation: %d %s", w.Code, w.Body)
++	}
++	// Not signed in: sign-in prompt naming the client.
++	w = oauthCall(h, "GET", "/oauth/consent", nil, cookie)
++	if w.Code != 200 || !strings.Contains(w.Body.String(), "Sign in to connect Claude") {
++		t.Fatalf("sign-in page: %d %s", w.Code, w.Body)
++	}
++	// Without the browser binding cookie the request is unknown.
++	if w := oauthCall(h, "GET", "/oauth/consent", nil); w.Code != 400 {
++		t.Fatal("consent without browser binding")
++	}
++	// Consent POST requires the session-bound CSRF value.
++	if w := oauthCall(h, "POST", "/oauth/consent", url.Values{"csrf": {"x"}, "decision": {"approve"}}, cookie); w.Code != 403 {
++		t.Fatalf("consent POST without session: %d", w.Code)
++	}
++}
++
++func TestOAuthTokenRequestValidation(t *testing.T) {
++	h, _ := testOAuthHandler(t)
++	post := func(form url.Values, header map[string]string) *httptest.ResponseRecorder {
++		req := httptest.NewRequest("POST", "/oauth/token", strings.NewReader(form.Encode()))
++		req.Host = "metatrash.com"
++		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
++		for k, v := range header {
++			req.Header.Set(k, v)
++		}
++		w := httptest.NewRecorder()
++		h.ServeHTTP(w, req)
++		return w
++	}
++	errorCode := func(w *httptest.ResponseRecorder) string {
++		var body map[string]string
++		_ = json.Unmarshal(w.Body.Bytes(), &body)
++		return body["error"]
++	}
++	if w := post(url.Values{"grant_type": {"authorization_code"}, "client_id": {testClientID}}, map[string]string{"Authorization": "Basic eDp5"}); w.Code != 401 || errorCode(w) != "invalid_client" {
++		t.Fatal("client authentication accepted")
++	}
++	if w := post(url.Values{"grant_type": {"authorization_code"}, "client_id": {testClientID}, "client_secret": {"x"}}, nil); errorCode(w) != "invalid_client" {
++		t.Fatal("client secret accepted")
++	}
++	if w := post(url.Values{"grant_type": {"password"}, "client_id": {testClientID}}, nil); w.Code != 400 || errorCode(w) != "unsupported_grant_type" || w.Header().Get("Cache-Control") != "no-store" {
++		t.Fatal("password grant")
++	}
++	if w := post(url.Values{"grant_type": {"authorization_code"}, "client_id": {testClientID}, "code": {"mt_ac_nope"}, "redirect_uri": {testRedirect}, "code_verifier": {strings.Repeat("a", 43)}}, nil); errorCode(w) != "invalid_grant" {
++		t.Fatalf("unknown code: %s", w.Body)
++	}
++	if w := post(url.Values{"grant_type": {"refresh_token"}, "client_id": {testClientID}, "refresh_token": {"nope"}}, nil); errorCode(w) != "invalid_grant" {
++		t.Fatal("malformed refresh token")
++	}
++	if w := post(url.Values{"grant_type": {"refresh_token"}, "client_id": {testClientID}, "resource": {"https://evil.example/"}}, nil); errorCode(w) != "invalid_target" {
++		t.Fatal("foreign resource")
++	}
++	req := httptest.NewRequest("POST", "/oauth/token?code=x", strings.NewReader(""))
++	req.Host = "metatrash.com"
++	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
++	w := httptest.NewRecorder()
++	h.ServeHTTP(w, req)
++	if w.Code != 400 {
++		t.Fatal("query parameters accepted on token endpoint")
++	}
++}
+diff --git a/internal/service/web/oauth.html b/internal/service/web/oauth.html
+new file mode 100644
+index 0000000..57a3dbe
+--- /dev/null
++++ b/internal/service/web/oauth.html
+@@ -0,0 +1,39 @@
++<!doctype html>
++<html lang="en">
++<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">{{if .ContinueURL}}<meta http-equiv="refresh" content="0;url={{.ContinueURL}}">{{end}}<title>{{.Title}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css"></head>
++<body>
++<a class="skip" href="#main">Skip to content</a>
++<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/account">Your account</a></nav></header>
++<main id="main" class="account-panel">
++<p class="eyebrow">Connect an app</p>
++{{if eq .Mode "continue"}}
++<h1>Continue to Metatrash</h1>
++<p>{{.ClientName}} wants to connect to your Metatrash spaces.</p>
++<a class="button" href="{{.ContinueURL}}">Continue →</a>
++{{else if eq .Mode "signin"}}
++<h1>Sign in to connect {{.ClientName}}</h1>
++<p><strong>{{.ClientName}}</strong> <span class="hint">({{.ClientHost}})</span> is asking to connect to Metatrash. Sign in with your email to choose which spaces it can use. You will come back here after signing in.</p>
++<a class="button" href="{{.BasePath}}/login">Sign in with email →</a>
++{{else if eq .Mode "consent"}}
++<h1>Connect {{.ClientName}}?</h1>
++<p><strong>{{.ClientName}}</strong> <span class="hint">({{.ClientHost}})</span> is asking to use Metatrash as <strong class="account-email">{{.Email}}</strong>.</p>
++{{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
++<form method="post" action="{{.BasePath}}/oauth/consent">
++<input type="hidden" name="csrf" value="{{.CSRF}}">
++<section class="account-card"><h2>Choose spaces</h2>
++<p class="hint">The app can always use the public space, as anyone can. Choose which private spaces it may also use. Nothing is shared unless you choose it here.{{if not .WantWrite}} This app asked for read-only access.{{end}}</p>
++<ul class="owned-spaces consent-spaces">{{range .Spaces}}<li><label for="s-{{.ID}}"><strong>{{.Name}}</strong> <span class="hint">{{if .Owned}}your space{{else}}owner: {{.Owner}}{{end}} · {{.Slug}}</span></label>
++<select id="s-{{.ID}}" name="s-{{.ID}}"><option value="none"{{if eq .Choice "none"}} selected{{end}}>Not connected</option><option value="read_only"{{if eq .Choice "read_only"}} selected{{end}}>Read only</option>{{if .WriteAllowed}}<option value="read_write"{{if eq .Choice "read_write"}} selected{{end}}>Read and write</option>{{end}}</select>
++{{if not .WriteAllowed}}<p class="hint">{{if .Owned}}Read only because the app asked for read-only access.{{else}}Read only: set by the space owner{{if not $.WantWrite}} or requested by the app{{end}}.{{end}}</p>{{end}}</li>{{else}}<li>You have no private spaces yet. You can still connect the public space.</li>{{end}}</ul>
++<p class="hint">You can review or revoke this connection at any time on Your account. A space owner can reduce or remove access, which applies immediately.</p></section>
++<button class="button" type="submit" name="decision" value="approve">Connect</button>
++<button class="button button-quiet" type="submit" name="decision" value="deny">Cancel</button>
++</form>
++<form class="signed-in-as" method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.LogoutCSRF}}"><p class="hint">Not {{.Email}}? <button class="link-button" type="submit">Sign out</button> and sign in again to continue.</p></form>
++{{else}}
++<h1>{{.Title}}</h1>
++<p>{{.Message}}</p>
++<p class="hint">Return to the app you were connecting and try again.</p>
++{{end}}
++</main><footer><span>metatrash / a little room for agents</span><a href="{{.BasePath}}/">Back to home</a></footer>
++</body></html>
+diff --git a/internal/service/web/style.css b/internal/service/web/style.css
+index 28240c9..bf146c6 100644
+--- a/internal/service/web/style.css
++++ b/internal/service/web/style.css
+@@ -39,3 +39,4 @@
+ @media(max-width:800px){#document-viewer{height:70vh;min-height:360px}}
+ 
+ .owned-spaces{list-style:none;margin:20px 0;padding:0}.owned-spaces li{padding:18px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.owned-spaces .hint{margin:6px 0}.owned-spaces .button{margin-top:8px}.account-card h3{font-size:18px;font-weight:550;margin-top:26px}.space-bar>span{overflow-wrap:anywhere;min-width:0}
++.account-panel select{display:block;width:100%;margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);font:inherit;font-size:15px}.account-panel select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.consent-spaces label{margin:0;font-size:16px;line-height:1.5}.consent-spaces label .hint{display:block;margin:2px 0 0;font-size:13px}.account-panel .button-quiet{background:transparent;color:var(--text);border:1px solid var(--line);margin-left:10px}.account-panel .button-quiet:hover{background:var(--panel);color:var(--accent)}.link-button{background:none;padding:0;color:var(--accent);font-size:inherit;text-decoration:underline}.signed-in-as{margin-top:28px}

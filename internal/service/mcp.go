@@ -17,7 +17,11 @@ import (
 )
 
 type mcpIdentityKey struct{}
-type mcpIdentity struct{ key, client string }
+type mcpIdentity struct {
+	key, client string
+	// oauth is set only on the OAuth endpoint, after token validation.
+	oauth *oauthIdentity
+}
 
 // MCP arguments deliberately exclude credentials, which belong to each HTTP request.
 type mcpInput struct {
@@ -35,16 +39,55 @@ type mcpInput struct {
 	To         string  `json:"to"`
 }
 
-func (h *httpAdapter) mcpHandler(schema []byte) (http.Handler, error) {
+const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value as the space argument of read, list, history, write and move. Writes need ifInState from a read or list of the same space."
+
+// mcpHandler builds the anonymous /mcp server, or with account set the OAuth
+// /mcp/account server, which adds the spaces tool and checks every operation
+// with agentSpaceAccess instead of space keys.
+func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, error) {
 	var catalog struct {
-		Tools []*mcp.Tool `json:"tools"`
+		Tools        []*mcp.Tool `json:"tools"`
+		AccountTools []*mcp.Tool `json:"accountTools"`
 	}
 	if err := json.Unmarshal(schema, &catalog); err != nil {
 		return nil, err
 	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "metatrash", Version: metatrash.Version}, &mcp.ServerOptions{
-		SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"},
-	})
+	options := &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}}
+	if account {
+		options.Instructions = accountInstructions
+	}
+	server := mcp.NewServer(&mcp.Implementation{Name: "metatrash", Version: metatrash.Version}, options)
+	if account {
+		for _, tool := range catalog.AccountTools {
+			if tool.Name != "spaces" {
+				return nil, fmt.Errorf("unknown MCP account tool %q", tool.Name)
+			}
+			server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				identity, ok := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
+				if !ok || identity.oauth == nil {
+					return mcpFailure(problem(401, "unauthorized", "Missing transport credentials.")), nil
+				}
+				var args map[string]json.RawMessage
+				if raw := req.Params.Arguments; len(raw) > 0 && string(raw) != "null" {
+					if err := json.Unmarshal(raw, &args); err != nil || len(args) != 0 {
+						return mcpFailure(invalid("spaces takes no arguments.")), nil
+					}
+				}
+				if err := h.service.rates.reserve(allowance{"oauth:spaces:" + identity.oauth.GrantID, 120, 60}); err != nil {
+					return mcpFailure(err), nil
+				}
+				value, err := h.service.listConnectedSpaces(ctx, *identity.oauth)
+				if err != nil {
+					return mcpFailure(err), nil
+				}
+				b, err := json.Marshal(value)
+				if err != nil {
+					return mcpFailure(err), nil
+				}
+				return &mcp.CallToolResult{StructuredContent: value, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
+			})
+		}
+	}
 	for _, tool := range catalog.Tools {
 		op := tool.Name
 		switch op {
@@ -75,10 +118,21 @@ func (h *httpAdapter) mcpHandler(schema []byte) (http.Handler, error) {
 				return mcpFailure(err), nil
 			}
 			write := op == "write" || op == "move"
-			if err := h.service.Access(args.Space, identity.key, identity.client, write); err != nil {
+			var repo *repository
+			var err error
+			if account {
+				if identity.oauth == nil {
+					return mcpFailure(problem(401, "unauthorized", "Missing transport credentials.")), nil
+				}
+				repo, err = h.service.agentSpaceAccess(ctx, *identity.oauth, args.Space, identity.client, write)
+			} else {
+				err = h.service.Access(args.Space, identity.key, identity.client, write)
+				repo = h.service.repos[args.Space]
+			}
+			if err != nil {
 				return mcpFailure(err), nil
 			}
-			if int64(len(raw)) > h.service.config.Spaces[args.Space].Limits.Storage.MaxRequestBytes {
+			if int64(len(raw)) > repo.limits.MaxRequestBytes {
 				return mcpFailure(problem(413, "payload_too_large", "Arguments exceed the space request limit.")), nil
 			}
 			var instance any
@@ -90,7 +144,7 @@ func (h *httpAdapter) mcpHandler(schema []byte) (http.Handler, error) {
 			}
 			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
 				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, From: args.From, To: args.To}
-			value, err := h.service.Dispatch(ctx, args.Space, op, in)
+			value, err := h.service.dispatchRepository(ctx, repo, args.Space, op, in)
 			if err != nil {
 				return mcpFailure(err), nil
 			}
@@ -109,17 +163,26 @@ func (h *httpAdapter) mcpHandler(schema []byte) (http.Handler, error) {
 	}), nil
 }
 
-func (h *httpAdapter) serveMCP(w http.ResponseWriter, r *http.Request) {
+// mcpHostAndOrigin applies the explicit Host allowlist and browser Origin rule
+// shared by both MCP endpoints.
+func (h *httpAdapter) mcpHostAndOrigin(w http.ResponseWriter, r *http.Request) bool {
 	switch strings.TrimSuffix(strings.ToLower(r.Host), ":443") {
 	case strings.TrimSuffix(h.publicHost, ":443"):
 	case "127.0.0.1:8080", "localhost:8080", "[::1]:8080":
 	default:
 		sendError(w, problem(403, "forbidden", "Unrecognized MCP host."))
-		return
+		return false
 	}
 	// Native MCP clients omit Origin. Browser callers must use the public HTTPS origin.
 	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || origins[0] != h.publicOrigin) {
 		sendError(w, problem(403, "forbidden", "Unrecognized MCP origin."))
+		return false
+	}
+	return true
+}
+
+func (h *httpAdapter) serveMCP(w http.ResponseWriter, r *http.Request) {
+	if !h.mcpHostAndOrigin(w, r) {
 		return
 	}
 	key := ""

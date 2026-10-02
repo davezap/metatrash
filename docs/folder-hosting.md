@@ -20,6 +20,8 @@ Use matching trailing slashes. The redirect handles the bare folder address. Do 
 
 Apache removes /metatrash/ from incoming paths; Go still receives /, /login, /mcp, /api/v1/... and so on. Go adds the prefix to outward links and redirects. Do not configure the proxy to preserve the prefix too. Direct loopback page rendering will contain the configured external prefix; use the public URL for browser checks. Direct loopback health checks remain at /healthz.
 
+With OAuth agent access enabled, also add the two root discovery ProxyPass lines from [OAuth authorization](oauth-authorization.md#apache) so clients can find the issuer `https://mydomain.com/metatrash`.
+
 The external MCP endpoint is https://mydomain.com/metatrash/mcp and REST endpoints begin https://mydomain.com/metatrash/api/v1/. MCP permits the configured public host and origin, plus the existing local development hosts. Host preservation remains required. The public prefix does not change space paths or API arguments.
 
 If email accounts are enabled, set their origin to https://mydomain.com, WITHOUT /metatrash/. Browsers send an origin without a path. Startup rejects a mismatch with public-url. Existing Origin and CSRF validation stay enabled. Account forms and redirects use the prefix.

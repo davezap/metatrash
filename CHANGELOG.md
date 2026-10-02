@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### 0.15.0 - Connected apps and member app permissions (2026-10-02)
+
+- Added Connected apps on Your account: the connector address, each live connection's app name, client host, MCP/REST, connection and last-use times, and current access per space, with Revoke (deletes consent and tokens immediately; session CSRF, exact Origin, per-account limit, own connections only).
+- Added the owner's per-member app permission (read and write / read only) on Manage sharing, changed under the space lock and applied to the member's next app operation; the consent page follows it.
+- Replaced the README connection notes with OAuth instructions for private spaces in Claude and ChatGPT, and pointed the My Spaces note at Connected apps.
+- MariaDB integration test for listing, permission changes (owner only, CSRF bound) and revocation. Added the 0.10.0 to 0.15.0 deployment checklist. See docs/oauth-account-management.md. No new SQL. Saved before snapshot and incremental patch 0034.
+
+### 0.14.0 - OAuth-protected MCP and REST (2026-10-02)
+
+- Added the OAuth MCP endpoint `/mcp/account` (D1) and REST resource `/api/v1/account/` (D2), each a separate audience. Missing or invalid tokens get 401 with an RFC 9728 `resource_metadata` challenge, which starts OAuth in Claude and ChatGPT. `/mcp` stays anonymous and public-only.
+- Added one shared access check per operation, before quotas and Git: consent for the connection ∩ current ownership or active membership ∩ the owner's member app permission ∩ token scope. Unconnected and key-protected spaces (D3) are `not_found`, suspension is `forbidden`, read-only writes are `insufficient_scope`.
+- Added the `spaces` MCP tool and `GET /api/v1/account/spaces`, server instructions, and `accountTools` in the tool schema (0.3.0). Account REST mirrors the anonymous operation routes; the REST operation handler is shared and now rejects unsupported methods before charging quotas.
+- `key` and `access_token` query parameters are refused on every route. New owned-space READMEs describe OAuth access. Updated the API contract.
+- MariaDB integration test of MCP and REST through real tokens, covering every access rule above. See docs/oauth-protected-endpoints.md. Saved before snapshot and incremental patch 0033.
+
+### 0.13.0 - OAuth authorization server (2026-10-02)
+
+- Added RFC 8414 authorization server metadata and RFC 9728 protected resource metadata for `/mcp/account` and `/api/v1/account`, with CIMD, S256-only PKCE, public clients only and `iss` responses (RFC 9207). All OAuth routes exist only with `oauth.enabled`.
+- Added Client ID Metadata Document lookup from allow-listed hosts: canonical HTTPS client IDs, no proxy or redirects, public-address-only connections on port 443, 5-second timeout, 16 KiB JSON cap, strict document checks, header-driven cache capped at 24 hours.
+- Added `/oauth/authorize` with exact redirect matching (loopback ports ignored), a browser-bound pending request held server-side, a same-site continuation step so SameSite=Strict sign-in works, email-code sign-in continuation, and a consent page to choose read-only or read/write per owned or joined space. Approval re-checks ownership, membership and member permissions in one transaction.
+- Added `/oauth/token` (single-use 60-second codes bound to client, redirect, resource and PKCE; refresh rotation with replay revocation of the whole connection; scope narrowing only) and `/oauth/revoke` (RFC 7009). Tokens are opaque and stored as SHA-256 digests; nothing accepts them until 0.14.0. No new SQL.
+- Unit tests for every protocol rule plus a MariaDB integration test of the full flow; documented Apache folder-hosting discovery lines. See docs/oauth-authorization.md. Saved before snapshot and incremental patch 0032.
+
+### 0.12.0 - OAuth foundation: schema v5 and configuration (2026-10-02)
+
+- Settled the OAuth plan's owner decisions D1-D5 as recommended. Library check: `ory/fosite` (no release since December 2024, heavy dependencies, no `resource`/CIMD) and `zitadel/oidc` (Go 1.26 from v3.51.9, OIDC-first) did not fit; owner chose a focused in-house implementation with no new module dependencies.
+- Added account schema v5: member `agent_permission` (default `read_write`), OAuth grants, consented grant spaces (membership-bound rows cascade on member removal), and digested access/refresh tokens. Startup requires v5 and checks tables, keys, foreign keys and delete rules. The script is safe to repeat after an interruption.
+- Added the optional `oauth` account-configuration object (off by default): client host allow-list and token/code/grant lifetimes, validated at startup even when disabled. The issuer is the public URL.
+- Brought forward repository-bound dispatch and a shared owned-space operation quota helper (separate per-client write bucket). Agent access to owned spaces remains closed; no new endpoints.
+- Fixed two stale assertions in the account HTTP test harness, which has no owned-space database. Built, vetted and tested with Go 1.25.1; schema, readiness and grants exercised against a disposable MariaDB 10.11. See docs/oauth-foundation.md. Saved before snapshot and incremental patch 0031.
+
+### Documentation - OAuth agent access plan (2026-10-02)
+
+- Recorded OAuth as the only agent login for private spaces, run inside the Go service and reusing email-code login. The earlier URL-key work (0030-0033 drafts) was never deployed and is archived on a local branch; `main` returns to 0.11.0.
+- Plan covers the protocol profile (CIMD client registration, PKCE S256, rotating refresh tokens, resource-bound opaque tokens), multi-space consent intersected with live membership, CIMD fetch safeguards, four delivery bites (0.12.0-0.15.0) and owner-run checks. Open owner decisions D1-D5 are listed.
+- Saved before snapshot and incremental patch 0030. Application remains 0.11.0; no runtime/schema changes. Documentation and patch checks only; no builds or tests.
+
 ### 0.11.0 - Human sharing and member browsing (2026-10-01)
 
 - Added owner sharing controls for email invitations, cancellation, member identity/status, and suspension/restoration/removal, using the existing transactional backend. The owner remains separate and cannot be removed through member controls.

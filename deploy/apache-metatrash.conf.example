@@ -22,3 +22,7 @@ ProxyPassReverse / http://127.0.0.1:8080/
 # ProxyPass        /metatrash/ http://127.0.0.1:8080/
 # ProxyPassReverse /metatrash/ http://127.0.0.1:8080/
 # Both sides must end in /; Apache strips the external prefix before proxying.
+# With OAuth enabled under a folder, also pass root discovery (RFC 8414/9728):
+# ProxyPass        /.well-known/oauth-authorization-server/metatrash http://127.0.0.1:8080/.well-known/oauth-authorization-server
+# ProxyPass        /.well-known/oauth-protected-resource/metatrash/ http://127.0.0.1:8080/.well-known/oauth-protected-resource/
+# Never log request bodies or Authorization headers (OAuth codes and tokens).

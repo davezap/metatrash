@@ -22,13 +22,14 @@ const sessionLifetime = 24 * time.Hour
 const maxAccountRecords = 10000
 
 type accountConfig struct {
-	Origin             string `json:"origin"`
-	SMTPHost           string `json:"smtpHost"`
-	SMTPPort           int    `json:"smtpPort"`
-	SMTPUsername       string `json:"smtpUsername"`
-	SMTPFrom           string `json:"smtpFrom"`
-	SMTPPasswordFile   string `json:"smtpPasswordFile"`
-	DatabaseConfigFile string `json:"databaseConfigFile"`
+	Origin             string       `json:"origin"`
+	SMTPHost           string       `json:"smtpHost"`
+	SMTPPort           int          `json:"smtpPort"`
+	SMTPUsername       string       `json:"smtpUsername"`
+	SMTPFrom           string       `json:"smtpFrom"`
+	SMTPPasswordFile   string       `json:"smtpPasswordFile"`
+	DatabaseConfigFile string       `json:"databaseConfigFile"`
+	OAuth              *oauthConfig `json:"oauth"`
 }
 
 type userAccount struct {
@@ -66,6 +67,8 @@ type accounts struct {
 	secret     []byte
 	mailSlots  chan struct{}
 	send       func(context.Context, string, string) error
+	// oauth is nil unless the account configuration enables OAuth agent access.
+	oauth *oauthSettings
 }
 
 // Email identity is case-insensitive. Do not collapse dots or plus aliases.
@@ -132,6 +135,18 @@ func (s *Service) EnableAccounts(configPath string) error {
 		return fmt.Errorf("SMTP password file is empty")
 	}
 	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
+	if cfg.OAuth != nil && cfg.OAuth.Enabled {
+		settings, err := cfg.OAuth.settings()
+		if err != nil {
+			return err
+		}
+		a.oauth = &settings
+	} else if cfg.OAuth != nil {
+		// Validate disabled settings too, so enabling later cannot fail on startup.
+		if _, err := cfg.OAuth.settings(); err != nil {
+			return err
+		}
+	}
 	if _, err := rand.Read(a.secret); err != nil {
 		return err
 	}
