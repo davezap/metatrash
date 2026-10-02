@@ -18,6 +18,19 @@
 {{else if eq .Status "suspended"}}<form method="post" action="{{$.BasePath}}/account/membership/restore"><input type="hidden" name="csrf" value="{{index $.MembershipCSRF "restore"}}"><input type="hidden" name="space" value="{{$.Sharing.ID}}"><input type="hidden" name="member" value="{{.ID}}"><button class="button" type="submit">Restore access</button></form>{{end}}
 {{if $.OAuthEnabled}}<form method="post" action="{{$.BasePath}}/account/membership/agent"><input type="hidden" name="csrf" value="{{index $.MembershipCSRF "agent"}}"><input type="hidden" name="space" value="{{$.Sharing.ID}}"><input type="hidden" name="member" value="{{.ID}}"><label for="agent-{{.ID}}">Their connected apps may</label><select id="agent-{{.ID}}" name="permission"><option value="read_write"{{if eq .AgentPermission "read_write"}} selected{{end}}>Read and write</option><option value="read_only"{{if eq .AgentPermission "read_only"}} selected{{end}}>Read only</option></select><button class="button" type="submit">Save app access</button></form>{{end}}
 <details><summary>Remove member…</summary><p>Removal ends access to this space. Returning requires a new invitation and acceptance.</p><form method="post" action="{{$.BasePath}}/account/membership/remove"><input type="hidden" name="csrf" value="{{index $.MembershipCSRF "remove"}}"><input type="hidden" name="space" value="{{$.Sharing.ID}}"><input type="hidden" name="member" value="{{.ID}}"><button class="button" type="submit">Remove from this space</button></form></details></li>{{else}}<li>No invited members yet.</li>{{end}}</ul><p class="hint">Shows up to 200 members. Suspension, restoration and removal apply only to this space.{{if .OAuthEnabled}} App access limits what a member's connected AI apps can do here; lowering it or suspending the member applies to their next operation. You always have full access to your own space.{{end}}</p></section>
+{{else if .AppSpaces}}
+<p class="eyebrow">Connected app</p><h1>Change spaces for {{.AppSpaces.Name}}</h1><p><a href="{{.BasePath}}/account#connected-apps">← Your account</a></p>
+<p class="hint">{{.AppSpaces.Host}} · {{.AppSpaces.Kind}} · connected {{.AppSpaces.Created}}</p>
+{{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
+<form method="post" action="{{.BasePath}}/account/apps/spaces"><input type="hidden" name="csrf" value="{{.AppSpacesCSRF}}"><input type="hidden" name="grant" value="{{.AppSpaces.ID}}">
+<section class="account-card"><h2>Choose spaces</h2>
+<p class="hint">The app can always use the public space. Changes apply to the app's next operation; it does not need to reconnect.{{if not .AppSpaces.CanWrite}} This connection is read-only. To let the app write, connect it again from the app.{{end}}</p>
+<ul class="owned-spaces consent-spaces">{{range .AppSpaces.Spaces}}<li><label for="s-{{.ID}}"><strong>{{.Name}}</strong> <span class="hint">{{.Owner}}/{{.Slug}}{{if .Owned}} · your space{{end}}</span></label>
+<select id="s-{{.ID}}" name="s-{{.ID}}"><option value="none"{{if eq .Choice "none"}} selected{{end}}>Not connected</option><option value="read_only"{{if eq .Choice "read_only"}} selected{{end}}>Read only</option>{{if .WriteAllowed}}<option value="read_write"{{if eq .Choice "read_write"}} selected{{end}}>Read and write</option>{{end}}</select>
+{{if not .WriteAllowed}}<p class="hint">{{if not $.AppSpaces.CanWrite}}Read only: this connection is read-only.{{else}}Read only: set by the space owner.{{end}}</p>{{end}}</li>{{else}}<li>You have no private spaces yet.</li>{{end}}</ul>
+{{if .AppSpaces.Kept}}<p class="hint">{{.AppSpaces.Kept}} other connected {{if eq .AppSpaces.Kept 1}}space is{{else}}spaces are{{end}} suspended by {{if eq .AppSpaces.Kept 1}}its owner{{else}}their owners{{end}} and will stay connected for when access is restored.</p>{{end}}
+</section>
+<button class="button" type="submit">Save spaces</button></form>
 {{else if .SignedIn}}
 <p class="eyebrow">Your account</p><h1>You’re signed in.</h1><p class="account-email">{{.User.Email}}</p>
 {{if .Message}}<p class="form-error" role="alert">{{.Message}}</p>{{end}}
@@ -42,8 +55,9 @@
 <p class="hint">The app sends you here to sign in and choose which spaces it may use, read-only or read and write. No keys to copy. The public space is always included.</p>
 {{if .AppsUnavailable}}<p role="alert">Connected apps are temporarily unavailable. Reload shortly.</p>{{else}}<ul class="owned-spaces">{{range .Apps}}<li><strong>{{.Name}}</strong> <span class="hint">{{.Host}} · {{.Kind}}</span><p class="hint">Connected {{.Created}} · last used {{.LastUsed}}</p>
 <ul class="app-spaces">{{range .Spaces}}<li>{{.Name}} — {{.Access}}</li>{{else}}<li>Public space only</li>{{end}}</ul>
+<p><a href="{{$.BasePath}}/account/apps/{{.ID}}">Change spaces</a></p>
 <form method="post" action="{{$.BasePath}}/account/apps/revoke"><input type="hidden" name="csrf" value="{{$.AppsCSRF}}"><input type="hidden" name="grant" value="{{.ID}}"><button class="button" type="submit">Revoke access</button></form></li>{{else}}<li>No apps are connected.</li>{{end}}</ul>
-<p class="hint">Revoking signs the app out immediately and forgets its choices; connecting again asks you to choose spaces again. Unused connections expire after a period of inactivity.</p>{{end}}</section>{{end}}
+<p class="hint">To add or remove spaces, use Change spaces; the app keeps working without reconnecting. Revoking signs the app out immediately and forgets its choices; connecting again asks you to choose spaces again. Unused connections expire after a period of inactivity.</p>{{end}}</section>{{end}}
 <form method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
 {{else}}
 <p class="eyebrow">A space of your own</p><h1>{{if .Verify}}Check your email.{{else}}Sign in or register.{{end}}</h1>

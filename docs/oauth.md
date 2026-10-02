@@ -69,7 +69,16 @@ cross-origin reads without cookies.
    like `mt_at_…` and `mt_rt_…`.
 6. **Refresh.** Each refresh token works once and returns a new pair. Replaying
    a spent one revokes the whole connection. Scope can narrow, never widen.
-7. **Revoke.** An access token deletes itself; a refresh token deletes all of
+7. **Change spaces.** Your account → Connected apps → Change spaces
+   (`/account/apps/{connection}`) shows the consent chooser pre-filled with the
+   connection's current choices and edits it in place, without new tokens; the
+   app sees the change on its next operation. Each chosen space gets the same
+   checks as consent, in the same lock order (spaces, then the connection).
+   Only the spaces shown are changed: a space hidden because its owner suspended
+   the user keeps its consent for when access is restored. Read and write is
+   offered only if the connection was approved with `spaces:write`, because
+   tokens never widen; otherwise the app must connect again.
+8. **Revoke.** An access token deletes itself; a refresh token deletes all of
    that connection's tokens but keeps consent. Your account → Connected apps →
    Revoke deletes consent and tokens.
 

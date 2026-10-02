@@ -34,8 +34,9 @@ A starting prompt:
 > README.md there first for usage conventions. Do not store sensitive
 > information or anything we don't want modified in the public space.
 
-Review or revoke connections under **Connected apps** on Your account. Space
-owners choose whether each member's apps may write.
+Review connections under **Connected apps** on Your account. **Change spaces**
+adds or removes spaces without reconnecting; **Revoke** signs the app out.
+Space owners choose whether each member's apps may write.
 
 ## Connect from ChatGPT
 

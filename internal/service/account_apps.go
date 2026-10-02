@@ -92,6 +92,83 @@ func (h *httpAdapter) connectedApps(ctx context.Context, user userAccount) ([]co
 	return apps, rows.Err()
 }
 
+// appSpacesPage is the Change spaces page for one connection: the consent
+// page's chooser, pre-filled with the connection's current choices.
+type appSpacesPage struct {
+	ID, Name, Host, Kind, Created string
+	CanWrite                      bool // the connection's tokens may write
+	Spaces                        []oauthConsentSpace
+	Kept                          int // connected spaces not shown (suspended), left unchanged
+}
+
+// appSpaces builds the Change spaces page for one of the account's live
+// connections. Another account's or an expired connection is not_found.
+func (h *httpAdapter) appSpaces(ctx context.Context, user userAccount, grantID string) (*appSpacesPage, error) {
+	db := h.service.ownedDB
+	if db == nil || h.oauth == nil {
+		return nil, missing()
+	}
+	if !idPattern.MatchString(grantID) {
+		return nil, missing()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	page := &appSpacesPage{ID: grantID}
+	var clientID, resource, scope string
+	var created int64
+	err := db.db.QueryRowContext(ctx, "SELECT client_id, client_name, resource, scope, created_at FROM metatrash_oauth_grants WHERE grant_id = ? AND user_id = ? AND expires_at > ?", grantID, user.ID, time.Now().Unix()).Scan(&clientID, &page.Name, &resource, &scope, &created)
+	if err == sql.ErrNoRows {
+		return nil, missing()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot read connection")
+	}
+	if u, err := url.Parse(clientID); err == nil {
+		page.Host = u.Hostname()
+	}
+	page.Kind = "MCP"
+	if strings.HasSuffix(resource, "/api/v1/account") {
+		page.Kind = "REST"
+	}
+	page.Created = formatUnix(created)
+	page.CanWrite = scope == scopeReadWrite
+	current := map[string]string{}
+	rows, err := db.db.QueryContext(ctx, "SELECT space_id, permission FROM metatrash_oauth_grant_spaces WHERE grant_id = ?", grantID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read connection spaces")
+	}
+	for rows.Next() {
+		var id, permission string
+		if err := rows.Scan(&id, &permission); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("cannot read connection spaces")
+		}
+		current[id] = permission
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("cannot read connection spaces")
+	}
+	spaces, err := db.accessibleSpaces(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	for _, space := range spaces {
+		item := oauthConsentSpace{accessibleSpace: space, Choice: "none", WriteAllowed: space.CanWrite && page.CanWrite}
+		if choice, ok := current[space.ID]; ok {
+			item.Choice = choice
+			if choice == "read_write" && !item.WriteAllowed {
+				item.Choice = "read_only"
+			}
+			delete(current, space.ID)
+		}
+		page.Spaces = append(page.Spaces, item)
+	}
+	page.Kept = len(current)
+	return page, nil
+}
+
 // revokeConnection deletes one of the account's connections with its consent
 // and tokens (cascade). Called only after the account form checks.
 func (db *accountDatabase) revokeConnection(ctx context.Context, userID, grantID string) error {

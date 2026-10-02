@@ -24,7 +24,9 @@ var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 type accountPage struct {
 	OAuthEnabled                    bool
 	AppConnectURL, AppsCSRF         string
+	AppSpacesCSRF                   string
 	Apps                            []connectedApp
+	AppSpaces                       *appSpacesPage
 	AppsUnavailable                 bool
 	Sharing                         *humanSharingPage
 	Invitations                     []humanInvitation
@@ -67,7 +69,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove", "agent"} {
 			page.MembershipCSRF[action] = h.service.accounts.mac("membership:" + action + ":" + cookieToken(r, h.sessionCookieName()))
 		}
-		if page.Sharing == nil {
+		if page.Sharing == nil && page.AppSpaces == nil {
 			var membershipErr error
 			page.Invitations, page.Joined, membershipErr = h.accountMemberships(r.Context(), page.User)
 			if membershipErr != nil {
@@ -79,7 +81,8 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 			page.OAuthEnabled = true
 			page.AppConnectURL = h.oauth.mcpResource
 			page.AppsCSRF = h.service.accounts.mac("apps-revoke:" + cookieToken(r, h.sessionCookieName()))
-			if page.Sharing == nil {
+			page.AppSpacesCSRF = h.service.accounts.mac("apps-spaces:" + cookieToken(r, h.sessionCookieName()))
+			if page.Sharing == nil && page.AppSpaces == nil {
 				var appsErr error
 				if page.Apps, appsErr = h.connectedApps(r.Context(), page.User); appsErr != nil {
 					page.AppsUnavailable = true
@@ -127,13 +130,15 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	sharingRoute := strings.HasPrefix(path, "/account/sharing/") && idPattern.MatchString(sharingID)
 	membershipAction := strings.TrimPrefix(path, "/account/membership/")
 	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove" || membershipAction == "agent")
+	appID := strings.TrimPrefix(path, "/account/apps/")
+	appRoute := strings.HasPrefix(path, "/account/apps/") && idPattern.MatchString(appID)
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
 		suffix := "-" + secretDigest(h.basePath)[:16]
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/apps/revoke" {
+	if !sharingRoute && !membershipRoute && !appRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -154,7 +159,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, invalid("Account routes do not accept query parameters."))
 		return true
 	}
-	if path == "/login" || path == "/account" || sharingRoute {
+	if path == "/login" || path == "/account" || sharingRoute || appRoute {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
@@ -166,7 +171,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
 			return true
 		}
-		if path == "/account" || sharingRoute {
+		if path == "/account" || sharingRoute || appRoute {
 			if !signedIn {
 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 				return true
@@ -174,6 +179,13 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)}
 			if sharingRoute {
 				page.Sharing, err = h.humanSharing(r.Context(), user, sharingID)
+				if err != nil {
+					sendError(w, err)
+					return true
+				}
+			}
+			if appRoute {
+				page.AppSpaces, err = h.appSpaces(r.Context(), user, appID)
 				if err != nil {
 					sendError(w, err)
 					return true
@@ -214,7 +226,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, problem(415, "invalid_request", "Use a form submission."))
 		return true
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 2048)
+	formLimit := int64(2048)
+	if path == "/account/apps/spaces" {
+		formLimit = 16384 // one field per space
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
 	if err := r.ParseForm(); err != nil {
 		sendError(w, invalid("Invalid or oversized form."))
 		return true
@@ -239,7 +255,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	if path == "/account/username" {
 		allowed["username"] = true
 	}
-	if path == "/account/apps/revoke" {
+	if path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		allowed["grant"] = true
 	}
 	if path == "/login/send" {
@@ -249,7 +265,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		allowed["code"] = true
 	}
 	for key, values := range r.PostForm {
-		if !allowed[key] || len(values) != 1 {
+		if !(allowed[key] || (path == "/account/apps/spaces" && spaceFieldPattern.MatchString(key))) || len(values) != 1 {
 			sendError(w, invalid("Unknown or duplicate form field."))
 			return true
 		}
@@ -257,7 +273,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	browser := cookieToken(r, loginCookie)
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/apps/revoke" {
+	if membershipRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -275,6 +291,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if path == "/account/apps/revoke" {
 			csrf = a.mac("apps-revoke:" + session)
 		}
+		if path == "/account/apps/spaces" {
+			csrf = a.mac("apps-spaces:" + session)
+		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
@@ -282,6 +301,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if membershipRoute {
 		h.submitHumanMembership(w, r, session, membershipAction)
+		return true
+	}
+	if path == "/account/apps/spaces" {
+		h.submitAppSpaces(w, r, session)
 		return true
 	}
 	if path == "/account/apps/revoke" {
@@ -452,4 +475,60 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 	return true
+}
+
+// submitAppSpaces saves Change spaces for one connection after the form,
+// Origin and CSRF checks. Each s-{space} field is none, read_only or
+// read_write; errors re-render the page with the user's current state.
+func (h *httpAdapter) submitAppSpaces(w http.ResponseWriter, r *http.Request, session string) {
+	a := h.service.accounts
+	user, signedIn, err := a.currentUser(r.Context(), session)
+	if err != nil {
+		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
+		return
+	}
+	if !signedIn {
+		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+		return
+	}
+	if h.oauth == nil || h.service.ownedDB == nil {
+		sendError(w, missing())
+		return
+	}
+	grantID := r.PostForm.Get("grant")
+	choices := []oauthSpaceChoice{}
+	for key, values := range r.PostForm {
+		if !spaceFieldPattern.MatchString(key) {
+			continue
+		}
+		switch values[0] {
+		case "none", "read_only", "read_write":
+			choices = append(choices, oauthSpaceChoice{SpaceID: key[2:], Permission: values[0]})
+		default:
+			sendError(w, invalid("Invalid access choice."))
+			return
+		}
+	}
+	err = h.service.rates.take(allowance{"apps:user:" + user.ID, 30, 600})
+	if err == nil {
+		err = h.service.ownedDB.changeGrantSpaces(r.Context(), user.ID, grantID, choices, time.Now())
+	}
+	if err == nil {
+		http.Redirect(w, r, h.basePath+"/account#connected-apps", http.StatusSeeOther)
+		return
+	}
+	status, message := http.StatusServiceUnavailable, "Your changes could not be saved. Reload before retrying."
+	var p *Error
+	if errors.As(err, &p) {
+		status, message = p.Status, p.Message
+		if p.RetryAfterSeconds > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+		}
+	}
+	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: message}
+	if page.AppSpaces, err = h.appSpaces(r.Context(), user, grantID); err != nil {
+		// The connection itself is gone: show Your account with the message.
+		page.AppSpaces = nil
+	}
+	h.renderAccount(w, r, status, page)
 }

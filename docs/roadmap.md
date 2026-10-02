@@ -2,7 +2,7 @@
 
 Open work after 0.15.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
-## Next: 0.15.1 Change spaces (proposed, not started)
+## Next: 0.15.1 Change spaces (implemented, unreleased)
 
 Found in live use:
 
@@ -17,6 +17,10 @@ Proposal: a **Change spaces** action on each Connected apps entry, reusing the
 consent page's space chooser pre-filled with the current choices, editing the
 live connection in place with the same checks as consent and applying to the
 app's next operation. Add a hint that new spaces are added there.
+
+Done (see CHANGELOG). Consent still replaces the list it shows, which is
+correct for a pre-filled form; the bartco loss came from Revoke clearing the
+previous choices, and Change spaces removes the need to revoke.
 
 Also agreed for 0.15.1:
 

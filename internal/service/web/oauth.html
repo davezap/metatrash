@@ -25,7 +25,7 @@
 <ul class="owned-spaces consent-spaces">{{range .Spaces}}<li><label for="s-{{.ID}}"><strong>{{.Name}}</strong> <span class="hint">{{if .Owned}}your space{{else}}owner: {{.Owner}}{{end}} · {{.Slug}}</span></label>
 <select id="s-{{.ID}}" name="s-{{.ID}}"><option value="none"{{if eq .Choice "none"}} selected{{end}}>Not connected</option><option value="read_only"{{if eq .Choice "read_only"}} selected{{end}}>Read only</option>{{if .WriteAllowed}}<option value="read_write"{{if eq .Choice "read_write"}} selected{{end}}>Read and write</option>{{end}}</select>
 {{if not .WriteAllowed}}<p class="hint">{{if .Owned}}Read only because the app asked for read-only access.{{else}}Read only: set by the space owner{{if not $.WantWrite}} or requested by the app{{end}}.{{end}}</p>{{end}}</li>{{else}}<li>You have no private spaces yet. You can still connect the public space.</li>{{end}}</ul>
-<p class="hint">You can review or revoke this connection at any time on Your account. A space owner can reduce or remove access, which applies immediately.</p></section>
+<p class="hint">You can add or remove spaces later with Change spaces on Your account, without reconnecting, or revoke this connection there. A space owner can reduce or remove access, which applies immediately.</p></section>
 <button class="button" type="submit" name="decision" value="approve">Connect</button>
 <button class="button button-quiet" type="submit" name="decision" value="deny">Cancel</button>
 </form>

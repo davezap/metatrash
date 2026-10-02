@@ -144,28 +144,9 @@ func (db *accountDatabase) saveGrant(ctx context.Context, userID string, client 
 	defer tx.Rollback()
 	members := make([]sql.NullString, len(selected))
 	for i, choice := range selected {
-		space, err := scanOwnedSpace(tx.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE space_id = ? FOR UPDATE", choice.SpaceID))
-		if err == sql.ErrNoRows || (err == nil && space.State != "ready") {
-			return "", "", problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
+		if members[i], err = checkGrantChoice(ctx, tx, userID, choice); err != nil {
+			return "", "", err
 		}
-		if err != nil {
-			return "", "", fmt.Errorf("cannot check selected space")
-		}
-		if space.OwnerID == userID {
-			continue
-		}
-		var status, permission string
-		err = tx.QueryRowContext(ctx, "SELECT status, agent_permission FROM metatrash_memberships WHERE space_id = ? AND user_id = ?", choice.SpaceID, userID).Scan(&status, &permission)
-		if err == sql.ErrNoRows || (err == nil && status != "active") {
-			return "", "", problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
-		}
-		if err != nil {
-			return "", "", fmt.Errorf("cannot check selected space")
-		}
-		if choice.Permission == "read_write" && permission != "read_write" {
-			return "", "", problem(409, "conflict", "The space owner allows read-only app access to a selected space.")
-		}
-		members[i] = sql.NullString{String: userID, Valid: true}
 	}
 	var existing string
 	err = tx.QueryRowContext(ctx, "SELECT grant_id FROM metatrash_oauth_grants WHERE user_id = ? AND client_id = ? AND resource = ? FOR UPDATE", userID, client.ID, resource).Scan(&existing)
@@ -196,6 +177,112 @@ func (db *accountDatabase) saveGrant(ctx context.Context, userID string, client 
 		return "", "", fmt.Errorf("cannot confirm connection; try again")
 	}
 	return grantID, scope, nil
+}
+
+// checkGrantChoice locks one chosen space and re-checks, inside the caller's
+// transaction, that the user owns it or is an active member, and that write
+// access is allowed. It returns the member_user_id value for the consent row
+// (NULL for the owner, so owner rows survive membership changes).
+func checkGrantChoice(ctx context.Context, tx *sql.Tx, userID string, choice oauthSpaceChoice) (sql.NullString, error) {
+	space, err := scanOwnedSpace(tx.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE space_id = ? FOR UPDATE", choice.SpaceID))
+	if err == sql.ErrNoRows || (err == nil && space.State != "ready") {
+		return sql.NullString{}, problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
+	}
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("cannot check selected space")
+	}
+	if space.OwnerID == userID {
+		return sql.NullString{}, nil
+	}
+	var status, permission string
+	err = tx.QueryRowContext(ctx, "SELECT status, agent_permission FROM metatrash_memberships WHERE space_id = ? AND user_id = ?", choice.SpaceID, userID).Scan(&status, &permission)
+	if err == sql.ErrNoRows || (err == nil && status != "active") {
+		return sql.NullString{}, problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
+	}
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("cannot check selected space")
+	}
+	if choice.Permission == "read_write" && permission != "read_write" {
+		return sql.NullString{}, problem(409, "conflict", "The space owner allows read-only app access to a selected space.")
+	}
+	return sql.NullString{String: userID, Valid: true}, nil
+}
+
+// changeGrantSpaces edits a live connection in place (Change spaces on Your
+// account). Each choice sets one space to none, read_only or read_write; spaces
+// not in choices keep their consent, so a space hidden while its owner has
+// suspended the user is not dropped. Chosen spaces get the same checks as
+// consent, locked in the same order (spaces, then the connection). Tokens are
+// untouched, so the app sees the change on its next operation. Write access
+// needs a connection approved with write scope, because tokens never widen.
+func (db *accountDatabase) changeGrantSpaces(ctx context.Context, userID, grantID string, choices []oauthSpaceChoice, now time.Time) error {
+	if !idPattern.MatchString(userID) || !idPattern.MatchString(grantID) {
+		return missing()
+	}
+	if len(choices) > 400 {
+		return invalid("Invalid space selection.")
+	}
+	selected := append([]oauthSpaceChoice(nil), choices...)
+	sort.Slice(selected, func(i, j int) bool { return selected[i].SpaceID < selected[j].SpaceID })
+	wantWrite := false
+	for i, choice := range selected {
+		if !idPattern.MatchString(choice.SpaceID) || (choice.Permission != "none" && choice.Permission != "read_only" && choice.Permission != "read_write") || (i > 0 && selected[i-1].SpaceID == choice.SpaceID) {
+			return invalid("Invalid space selection.")
+		}
+		wantWrite = wantWrite || choice.Permission == "read_write"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	tx, err := db.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return fmt.Errorf("connection storage unavailable")
+	}
+	defer tx.Rollback()
+	members := make([]sql.NullString, len(selected))
+	for i, choice := range selected {
+		if choice.Permission == "none" {
+			continue
+		}
+		if members[i], err = checkGrantChoice(ctx, tx, userID, choice); err != nil {
+			return err
+		}
+	}
+	var scope string
+	err = tx.QueryRowContext(ctx, "SELECT scope FROM metatrash_oauth_grants WHERE grant_id = ? AND user_id = ? AND expires_at > ? FOR UPDATE", grantID, userID, now.Unix()).Scan(&scope)
+	if err == sql.ErrNoRows {
+		return problem(404, "not_found", "This connection no longer exists. It may have been revoked or expired.")
+	}
+	if err != nil {
+		return fmt.Errorf("cannot read connection")
+	}
+	if wantWrite && scope != scopeReadWrite {
+		return problem(409, "conflict", "This app was connected read-only. To let it write, connect it again from the app.")
+	}
+	for i, choice := range selected {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_oauth_grant_spaces WHERE grant_id = ? AND space_id = ?", grantID, choice.SpaceID); err != nil {
+			return fmt.Errorf("cannot update connection spaces")
+		}
+		if choice.Permission == "none" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_oauth_grant_spaces (grant_id, space_id, member_user_id, permission) VALUES (?, ?, ?, ?)", grantID, choice.SpaceID, members[i], choice.Permission); err != nil {
+			return fmt.Errorf("cannot update connection spaces")
+		}
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_oauth_grant_spaces WHERE grant_id = ?", grantID).Scan(&count); err != nil {
+		return fmt.Errorf("cannot update connection spaces")
+	}
+	if count > 200 {
+		return invalid("A connection can use at most 200 private spaces.")
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE metatrash_oauth_grants SET updated_at = ? WHERE grant_id = ?", now.Unix(), grantID); err != nil {
+		return fmt.Errorf("cannot update connection")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("cannot confirm the change; try again")
+	}
+	return nil
 }
 
 func narrowerScope(a, b string) string {

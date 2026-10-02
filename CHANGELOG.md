@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 0.15.1 (in progress) - Change spaces (2026-10-03)
+
+- Added **Change spaces** to each Connected apps entry on Your account (`/account/apps/{connection}`): the consent chooser, pre-filled with the connection's current choices, edits the live connection in place. No new tokens; the app sees the change on its next operation, so adding a space no longer needs Revoke and reconnect.
+- Chosen spaces get the same checks as consent (ownership or active membership, the owner's app permission), shared through `checkGrantChoice` in the same transaction and lock order. Only the spaces shown change, so a space hidden while its owner suspends the user keeps its consent. Read and write is offered only to connections approved with write scope, since tokens never widen.
+- Session-bound CSRF, exact Origin, own connections only (others are `not_found`), the Connected apps rate limit, and a 16 KiB form limit for this route. The consent page and Connected apps now point to Change spaces.
+- MariaDB integration test: add, raise, remove, cross-account and CSRF refusals, an unavailable space, suspension keeping consent, and a read-only connection refusing write. No new SQL: the runtime grants already cover it.
+
 ### 0.15.1 (in progress) - Space names for agents (2026-10-03)
 
 - On `/mcp/account` and `/api/v1/account/`, the `space` argument accepts `owner/slug` (e.g. `dave-zap/bartco`, matching `/spaces/{owner}/{slug}/`), the 32-hex ID, or `public`. A bare slug returns `not_found` with a hint to use `owner/slug`; bare slugs are not accepted because their meaning would change as spaces are connected. Only the connection's consented spaces are matched, so unconnected spaces still look missing.
