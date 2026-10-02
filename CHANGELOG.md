@@ -7,6 +7,7 @@
 - The `slug` column stays separate, so stored addresses never change if the rule does. Retry preparation still sends the stored slug, so an interrupted space finishes at the address it reserved.
 - Unit test of the slug rule and a MariaDB test of the form (derived address, name-field errors, duplicate names, idempotent retry). No new SQL.
 - Home page: the Claude and ChatGPT instructions now use the sign-in address `/mcp/account` (sign in, choose spaces, public space included), with `/mcp` noted as the no-sign-in public-only option and Change spaces mentioned. The prompt note explains `spaces` and `owner/slug` names, and the "Your own space" panel no longer says agent access is coming. Falls back to the old `/mcp` instructions when OAuth is off.
+- Home page: clicking a connector address (or Enter/Space on it) copies it and shows "Copied to clipboard" under it, announced to screen readers; the box label turns to "Copied ✓". If the browser refuses the clipboard, the address is selected and the message says to press Ctrl+C. New `/assets/copy.js` (same-origin script, allowed by the existing policy); without JavaScript the addresses stay selectable text.
 
 ## 0.15.1 - Change spaces and owner/slug space names (2026-10-03)
 
