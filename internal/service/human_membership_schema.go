@@ -7,7 +7,7 @@ import (
 )
 
 func (db *accountDatabase) checkHumanMembershipSchema(ctx context.Context) error {
-	badSchema := fmt.Errorf("human membership schema v4 required; follow docs/human-membership-storage.md")
+	badSchema := fmt.Errorf("human membership schema v4 required; follow docs/deployment.md")
 	var count int
 	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('metatrash_memberships', 'metatrash_invitations') AND engine = 'InnoDB'").Scan(&count); err != nil || count != 2 {
 		return badSchema

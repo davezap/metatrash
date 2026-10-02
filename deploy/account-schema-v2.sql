@@ -1,6 +1,6 @@
 -- Stage 2 upgrade: stop the service and back up the database first.
 -- Apply ONCE after schema v1 and the completed legacy import/empty initialization.
--- DDL implicitly commits; see docs/public-usernames.md for interrupted upgrades.
+-- DDL implicitly commits; see docs/deployment.md for interrupted upgrades.
 ALTER TABLE metatrash_users
     ADD COLUMN username VARCHAR(32) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
     ADD UNIQUE KEY metatrash_users_username (username);

@@ -11,7 +11,7 @@ import (
 )
 
 // Owner-run focused checks use fake mail and storage; SQL cutover checks are
-// documented separately in docs/account-database.md.
+// documented separately in docs/deployment.md.
 type memoryAccountStore struct {
 	users   map[string]userAccount
 	failure error

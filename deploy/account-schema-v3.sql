@@ -1,5 +1,5 @@
 -- Stage 3 storage foundation. Stop service and back up database/data first.
--- Apply ONCE after schema v2; DDL implicitly commits. See docs/owned-space-storage.md.
+-- Apply ONCE after schema v2; DDL implicitly commits. See docs/deployment.md.
 CREATE TABLE metatrash_spaces (
     space_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
     owner_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

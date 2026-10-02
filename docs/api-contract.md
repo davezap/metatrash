@@ -1,8 +1,8 @@
-# File service contract - 0.2.0
+# File service contract
 
 Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
 
-This contract replaces the earlier per-file version draft. The owner deployed and smoke-tested the 0.1.0 REST service. The 0.2.0 MCP adapter calls the same service and awaits owner build and deployment. See [MCP bring-up](mcp-bring-up.md) for transport and verification details.
+MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.15.0.
 
 ## Five operations
 
@@ -14,19 +14,19 @@ This contract replaces the earlier per-file version draft. The owner deployed an
 | `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState` |
 | `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` |
 
-[tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json`. `/mcp` exposes these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
+[tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json`. The MCP endpoints expose these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
 
 ## Spaces and access
 
-One global `public` space is fully open for reads and permitted mutations, within limits and protected-path rules. Each private space has its own repository and read/write keys. Space IDs contain lowercase letters, digits, and hyphens, start with a letter or digit, and are at most 48 characters.
+One global `public` space is fully open for reads and permitted mutations, within limits and protected-path rules. Every space has its own repository. Private spaces are either administrator-configured key spaces (below) or account-owned spaces reached through OAuth (next section). Space IDs contain lowercase letters, digits, and hyphens, start with a letter or digit, and are at most 48 characters.
 
-REST and remote MCP carry space-scoped bearer credentials through the transport, never tool arguments or URLs. A write key also permits reads. A read key cannot write or move. Private unknown spaces and invalid/missing keys return the same unauthorized response. Check access before disclosing files, revisions, IDs, or conflicts. Private HTTP responses use `Cache-Control: no-store`. Keys do not change backend configuration.
+For key spaces, REST and `/mcp` carry space-scoped bearer credentials through the transport, never tool arguments or URLs. A write key also permits reads. A read key cannot write or move. Private unknown spaces and invalid/missing keys return the same unauthorized response. Check access before disclosing files, revisions, IDs, or conflicts. Private HTTP responses use `Cache-Control: no-store`. Keys do not change backend configuration.
 
-### OAuth agent access (0.14.0)
+### OAuth agent access
 
 Account-owned private spaces are reached only through OAuth, at the MCP endpoint `/mcp/account` and the REST routes under `/api/v1/account/` (each is its own protected resource; a token works only where it was issued). Requests carry `Authorization: Bearer <access token>`; without a valid token the response is 401 with `WWW-Authenticate: Bearer resource_metadata="…", scope="spaces:read spaces:write"` (plus `error="invalid_token"` for a bad or expired token). The MCP endpoint adds a `spaces` tool and REST adds `GET /api/v1/account/spaces`; both list the public space and the connected private spaces with `read_only` or `read_write` access. Other operations take the same arguments as the anonymous routes, with `space` set to `public` or a listed space ID.
 
-Effective access is the user's consent for that app intersected with current ownership or active membership, the owner's per-member app permission and the token scope, checked once per operation before quotas and Git. Unconnected, unknown and key-protected spaces return `not_found`; suspended membership returns `forbidden`; a write without read/write access returns 403 `insufficient_scope` (REST adds an RFC 6750 challenge). The public space keeps its anonymous rules. Space keys are never accepted on OAuth routes, and `key` or `access_token` query parameters are refused on every route. See [OAuth protected endpoints](oauth-protected-endpoints.md).
+Effective access is the user's consent for that app intersected with current ownership or active membership, the owner's per-member app permission and the token scope, checked once per operation before quotas and Git. Unconnected, unknown and key-protected spaces return `not_found`; suspended membership returns `forbidden`; a write without read/write access returns 403 `insufficient_scope` (REST adds an RFC 6750 challenge). The public space keeps its anonymous rules. Space keys are never accepted on OAuth routes, and `key` or `access_token` query parameters are refused on every route. See [oauth.md](oauth.md).
 
 ## Files, identity, and paths
 
@@ -146,7 +146,3 @@ Keep transport out of storage logic. Model a space as an account-like scope, a f
 A later JMAP adapter can translate space to accountId and these objects to a custom File data type, with get/set/query/changes methods. Git snapshots and the identity index allow change calculation. Removed history would need a cannotCalculateChanges response. That adapter still needs capability discovery, method envelopes, batching, and other protocol behavior; this draft is not JMAP or JMAP Mail compatibility.
 
 MCP discovery and tool results follow the [official MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools). Pin the supported SDK/protocol version at implementation time. Do not build a second mutation engine for REST or future JMAP.
-
-## Bring-up assumptions
-
-One Go service process on Amazon Linux 2023, Git installed, persistent local disk, and HTTPS through Apache. See [server bring-up](server-bring-up.md). Implement adapters in small bites, using light checks only. No broker, database, JMAP endpoint, build-for-validation, or exhaustive suite.

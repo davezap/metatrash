@@ -1,5 +1,5 @@
 -- Stage 4 first bite. Apply ONCE after v3 with the service stopped.
--- DDL implicitly commits; see docs/human-membership-storage.md for recovery.
+-- DDL implicitly commits; see docs/deployment.md for recovery.
 CREATE TABLE metatrash_memberships (
     space_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

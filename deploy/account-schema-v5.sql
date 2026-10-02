@@ -1,7 +1,7 @@
 -- OAuth agent access foundation (0.12.0). Stop the service and back up the
 -- database and data directory first. Apply after schema v4 as the schema
 -- administrator. DDL implicitly commits; MariaDB IF NOT EXISTS clauses make an
--- interrupted run safe to repeat. See docs/oauth-foundation.md.
+-- interrupted run safe to repeat. See docs/deployment.md.
 
 -- Owner-set permission for a member's connected apps. Owners always have
 -- read/write on their own spaces and have no membership row.

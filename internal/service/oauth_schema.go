@@ -9,7 +9,7 @@ import (
 // Schema v5 readiness: member agent permissions and OAuth grant storage. Checked
 // at startup with the other account schema checks; missing pieces fail closed.
 func (db *accountDatabase) checkOAuthSchema(ctx context.Context) error {
-	bad := fmt.Errorf("account schema v5 required; follow docs/oauth-foundation.md")
+	bad := fmt.Errorf("account schema v5 required; follow docs/deployment.md")
 	var count int
 	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('metatrash_oauth_grants', 'metatrash_oauth_grant_spaces', 'metatrash_oauth_tokens') AND engine = 'InnoDB'").Scan(&count); err != nil || count != 3 {
 		return bad

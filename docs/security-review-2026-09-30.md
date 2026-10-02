@@ -1,12 +1,11 @@
 # Focused security review — 2026-09-30
 
-**Follow-up in 0.6.0:** F1 is addressed locally through separate mail-attempt
-limits and atomic delivery reservations; owner validation/deployment remains
-pending. Admitted failures retain reservations. F2 is addressed locally in 0.7.1 through authorization before atomic operation reservations and atomic ingress reservations; owner checks/deployment remain pending. See [quota fix](private-space-quota.md). F3 remains open. See
-[account database delivery and focused checks](account-database.md). The review
-and source locations below describe the original 0.5.3 snapshot.
+**Status (0.15.0):** F1 fixed in 0.6.0 and F2 in 0.7.1 (both deployed). F3 and
+the hardening observations are open; see the [roadmap](roadmap.md). The review
+predates accounts in MariaDB, owned spaces and OAuth, which have not had a
+separate review. Source locations below refer to the 0.5.3 snapshot.
 
-Reviewed local version 0.5.3, base commit `9795ed0232eab6d4a5ca3ba56d85d2b7ee36ddb3`. This is a source review of the Go service, REST/MCP adapters, account flow, embedded viewer, and deployment examples. Existing snapshots and patches are historical material, not active application code. No builds, test suites, live attacks, email sends, or deployment changes were performed. Findings below are based on code tracing, not runtime reproduction. Application version remains 0.5.3.
+Reviewed local version 0.5.3, base commit `9795ed0232eab6d4a5ca3ba56d85d2b7ee36ddb3`. This is a source review of the Go service, REST/MCP adapters, account flow, embedded viewer, and deployment examples. No builds, test suites, live attacks, email sends, or deployment changes were performed. Findings below are based on code tracing, not runtime reproduction. Application version remains 0.5.3.
 
 ## System escape assessment
 

@@ -26,7 +26,7 @@ const ownedSpaceREADME = "# Private space\n\nThis space belongs to its human own
 func (db *accountDatabase) checkOwnedSpaceSchema(ctx context.Context) error {
 	var count int
 	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'metatrash_spaces' AND engine = 'InnoDB'").Scan(&count); err != nil || count != 1 {
-		return fmt.Errorf("owned-space InnoDB table required; follow docs/owned-space-storage.md")
+		return fmt.Errorf("owned-space InnoDB table required; follow docs/deployment.md")
 	}
 	for _, index := range []struct{ name, columns string }{
 		{"PRIMARY", "space_id"},

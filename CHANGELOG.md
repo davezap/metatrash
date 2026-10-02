@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Documentation - Workspace cleanup (2026-10-02)
+
+- Replaced 23 per-release documents with current-state docs: `architecture.md`, `deployment.md`, `oauth.md` and `roadmap.md`. The API contract and security review were refreshed; the old files remain in git history.
+- Added `deploy/account-grants.sql` with every runtime database grant for schemas v1-v5 in one place, and pointed startup error messages and SQL comments at `docs/deployment.md`.
+- Rewrote the README around connecting, documentation and workflow.
+- Removed `patch/` and the git-ignored `snapshots/` folder; git (including the local `archive/url-key-0030-0034` branch) holds every state they recorded. Patches and before snapshots are no longer produced.
+
+## 0.15.0 and earlier
+
 ### 0.15.0 - Connected apps and member app permissions (2026-10-02)
 
 - Added Connected apps on Your account: the connector address, each live connection's app name, client host, MCP/REST, connection and last-use times, and current access per space, with Revoke (deletes consent and tokens immediately; session CSRF, exact Origin, per-account limit, own connections only).
@@ -229,5 +238,3 @@
 
 - Rate controls apply to all users and spaces, including private key holders, with site-admin configuration per space.
 - Bring-up remains intentionally small: the owner performed the server build and local health check; no exhaustive validation.
-
-The owner confirmed the 0.3.0 public routing fix. Version 0.4.0 email accounts await owner build/deployment; private-space management remains planned.
