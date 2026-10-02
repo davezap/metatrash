@@ -9,7 +9,10 @@ Found in live use:
 - The only way to add a space to an existing connection is Revoke (Your
   account → Connected apps) and reconnect. Deleting and re-adding the connector
   in Claude does not restart OAuth: Claude reuses its cached tokens and
-  Metatrash is never told the connector was removed.
+  Metatrash is never told the connector was removed. (Checked 2026-10-03:
+  **Disconnect** then Connect on the connector in Claude does restart OAuth,
+  shows the consent page with the previous choices, and refreshes Claude's
+  copy of the tool schema.)
 - Approving consent replaces the connection's space list instead of adding to
   it (after a reconnect, bartco dropped off because only metatrash was ticked).
 
@@ -21,6 +24,12 @@ app's next operation. Add a hint that new spaces are added there.
 Done (see CHANGELOG). Consent still replaces the list it shows, which is
 correct for a pre-filled form; the bartco loss came from Revoke clearing the
 previous choices, and Change spaces removes the need to revoke.
+
+Checked live 2026-10-03 with Claude: removing metatrash and adding bartco
+read-only through Change spaces applied to Claude's next calls without a
+reconnect (`spaces` updated, metatrash `not_found`, bartco listed), and a write
+to bartco was refused with `insufficient_scope`. Adding metatrash back worked
+the same way.
 
 Also in 0.15.1:
 
@@ -36,7 +45,6 @@ Also in 0.15.1:
 
 ## Owner checks still to run
 
-- A read-only space refuses writes from a connected app.
 - Restart the service; Claude and ChatGPT reconnect by refreshing silently.
 - With two accounts: set a member's app permission to read only; suspend,
   restore and remove a member who has a connected app; re-inviting does not

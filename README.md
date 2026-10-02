@@ -34,9 +34,12 @@ A starting prompt:
 > README.md there first for usage conventions. Do not store sensitive
 > information or anything we don't want modified in the public space.
 
-Review connections under **Connected apps** on Your account. **Change spaces**
-adds or removes spaces without reconnecting; **Revoke** signs the app out.
-Space owners choose whether each member's apps may write.
+Review connections under **Connected apps** on Your account at
+metatrash.com (not in Claude's connector settings). **Change spaces** adds or
+removes spaces without reconnecting; **Revoke** signs the app out. Space owners
+choose whether each member's apps may write. In Claude, **Disconnect** then
+**Connect** on the connector runs sign-in and consent again; removing and
+re-adding the connector does not.
 
 ## Connect from ChatGPT
 
