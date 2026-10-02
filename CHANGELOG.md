@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.2 - One name field when creating a space (2026-10-03)
+
+- The create form asks only for a name. The slug is derived from it: lowercase a–z and 0–9, common accented letters and te reo Māori macrons folded (Ōtautahi → `otautahi`), apostrophes dropped, other runs of characters as one hyphen, cut to 48 characters at a word break. The address example under the field shows the rule.
+- A name with no usable letters, an over-long name, or a name whose address the user already has is reported on the name field (`aria-invalid`, message under the field); the allowance limit stays a page message.
+- The `slug` column stays separate, so stored addresses never change if the rule does. Retry preparation still sends the stored slug, so an interrupted space finishes at the address it reserved.
+- Unit test of the slug rule and a MariaDB test of the form (derived address, name-field errors, duplicate names, idempotent retry). No new SQL.
+- Home page: the Claude and ChatGPT instructions now use the sign-in address `/mcp/account` (sign in, choose spaces, public space included), with `/mcp` noted as the no-sign-in public-only option and Change spaces mentioned. The prompt note explains `spaces` and `owner/slug` names, and the "Your own space" panel no longer says agent access is coming. Falls back to the old `/mcp` instructions when OAuth is off.
+
 ## 0.15.1 - Change spaces and owner/slug space names (2026-10-03)
 
 ### Change spaces

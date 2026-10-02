@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	_ "embed"
 	"errors"
@@ -22,26 +23,27 @@ var accountHTML string
 var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 
 type accountPage struct {
-	OAuthEnabled                    bool
-	AppConnectURL, AppsCSRF         string
-	AppSpacesCSRF                   string
-	Apps                            []connectedApp
-	AppSpaces                       *appSpacesPage
-	AppsUnavailable                 bool
-	Sharing                         *humanSharingPage
-	Invitations                     []humanInvitation
-	Joined                          []joinedHumanSpace
-	MembershipUnavailable           bool
-	MembershipCSRF                  map[string]string
-	SpaceCSRF, SpaceName, SpaceSlug string
-	Spaces                          []accountSpace
-	SpacesUnavailable               bool
-	CanCreate                       bool
-	BasePath                        string
-	Disabled, Verify, SignedIn      bool
-	CSRF, Email, Message            string
-	UsernameCSRF, Username          string
-	User                            userAccount
+	OAuthEnabled               bool
+	AppConnectURL, AppsCSRF    string
+	AppSpacesCSRF              string
+	Apps                       []connectedApp
+	AppSpaces                  *appSpacesPage
+	AppsUnavailable            bool
+	Sharing                    *humanSharingPage
+	Invitations                []humanInvitation
+	Joined                     []joinedHumanSpace
+	MembershipUnavailable      bool
+	MembershipCSRF             map[string]string
+	SpaceCSRF, SpaceName       string
+	SpaceNameError             string
+	Spaces                     []accountSpace
+	SpacesUnavailable          bool
+	CanCreate                  bool
+	BasePath                   string
+	Disabled, Verify, SignedIn bool
+	CSRF, Email, Message       string
+	UsernameCSRF, Username     string
+	User                       userAccount
 }
 
 func accountCookie(w http.ResponseWriter, name, value string, age int) {
@@ -351,21 +353,36 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 			return true
 		}
-		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), SpaceName: r.PostForm.Get("name"), SpaceSlug: r.PostForm.Get("slug")}
+		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), SpaceName: r.PostForm.Get("name")}
+		// The create form sends only a name and the slug is derived from it.
+		// Retry preparation sends the stored slug so an interrupted space
+		// always finishes at the address it reserved.
+		slug, derived := r.PostForm.Get("slug"), !r.PostForm.Has("slug")
 		err = h.service.rates.take(allowance{"space-create:user:" + user.ID, 10, 600})
+		if err == nil && derived {
+			slug, err = h.deriveNewSpaceSlug(r.Context(), user, page.SpaceName)
+		}
 		var space ownedSpace
 		if err == nil {
-			space, err = h.service.createOwnedSpace(r.Context(), user.ID, page.SpaceName, page.SpaceSlug)
+			space, err = h.service.createOwnedSpace(r.Context(), user.ID, page.SpaceName, slug)
 		}
 		if err != nil {
 			status := http.StatusServiceUnavailable
-			page.Message = "Your space is not ready yet. Reload your account page and retry the same name and URL slug."
+			message := "Your space is not ready yet. Reload your account page and retry."
 			var p *Error
 			if errors.As(err, &p) {
-				status, page.Message = p.Status, p.Message
+				status, message = p.Status, p.Message
 				if p.RetryAfterSeconds > 0 {
 					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
 				}
+			}
+			if derived && p != nil && p.Code == "conflict" {
+				message = "You already have a space at " + h.basePath + "/spaces/" + user.Username + "/" + slug + ". Choose a different name."
+			}
+			if derived && p != nil && (p.Code == "invalid_request" || p.Code == "conflict") {
+				page.SpaceNameError = message
+			} else {
+				page.Message = message
 			}
 			h.renderAccount(w, r, status, page)
 			return true
@@ -531,4 +548,24 @@ func (h *httpAdapter) submitAppSpaces(w http.ResponseWriter, r *http.Request, se
 		page.AppSpaces = nil
 	}
 	h.renderAccount(w, r, status, page)
+}
+
+// deriveNewSpaceSlug derives the slug for the create form and refuses a name
+// whose address the user already has. Retrying an interrupted space goes
+// through the stored slug instead, so a ready space here is always a clash.
+func (h *httpAdapter) deriveNewSpaceSlug(ctx context.Context, user userAccount, name string) (string, error) {
+	slug, err := deriveSpaceSlug(name)
+	if err != nil {
+		return "", err
+	}
+	spaces, err := h.accountSpaces(ctx, user)
+	if err != nil {
+		return "", err
+	}
+	for _, space := range spaces {
+		if space.Slug == slug && space.Ready {
+			return slug, problem(409, "conflict", "That address is already in use.")
+		}
+	}
+	return slug, nil
 }

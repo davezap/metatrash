@@ -119,6 +119,7 @@ type browserPage struct {
 	Private           bool
 	SpaceName         string
 	BasePath, MCPURL  string
+	AccountMCPURL     string // sign-in endpoint; empty when OAuth is off
 	AccountsEnabled   bool
 	Home              bool
 	Markdown          bool
@@ -257,6 +258,9 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		}
 	}
 	page := browserPage{BasePath: h.basePath, MCPURL: h.publicOrigin + h.basePath + "/mcp", Home: path == "/", AccountsEnabled: h.service.accounts != nil}
+	if h.oauth != nil {
+		page.AccountMCPURL = h.oauth.mcpResource
+	}
 	if !page.Home {
 		page.Path = strings.TrimPrefix(path, "/spaces/public/")
 		if page.Path == "" {

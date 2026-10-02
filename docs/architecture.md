@@ -63,7 +63,12 @@ CSRF value, bounded form fields and a per-user attempt limit.
 ## Owned spaces
 
 - A name (1–120 characters) and a fixed slug (1–48, unique per owner). URL:
-  `/spaces/{username}/{slug}/`, with document paths appended.
+  `/spaces/{username}/{slug}/`, with document paths appended. The create form
+  takes only the name; the slug is derived from it (lowercase a–z and 0–9,
+  common accents and macrons folded, apostrophes dropped, other runs become one
+  hyphen, cut to 48 at a word break) and stored in its own column, so it never
+  changes later. Problems with the derived address are reported on the name
+  field.
 - Creation reserves allowance under a lock on the owner's row (unfinished
   creations count), then provisions the repository through the write queue and
   marks it ready. Startup retries unfinished creations under their original ID

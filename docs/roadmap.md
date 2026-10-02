@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.15.1. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.15.2. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Done in 0.15.1: Change spaces
 
@@ -36,12 +36,6 @@ Also in 0.15.1:
 - **Agents don't need the 32-hex ID.** `owner/slug` names, IDs still
   accepted. Bare slugs were dropped on purpose: their meaning changes as
   spaces are connected.
-
-## Next: 0.15.2
-
-- **One field when creating a space.** The user enters only a name and the slug
-  is derived from it. Both columns stay, so separate slugs can return later. A
-  name that gives an invalid or already used slug is reported on the name field.
 
 ## Owner checks still to run
 

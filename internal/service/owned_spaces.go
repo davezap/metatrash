@@ -44,6 +44,62 @@ func (db *accountDatabase) checkOwnedSpaceSchema(ctx context.Context) error {
 	return nil
 }
 
+// slugFold maps common accented Latin letters, including te reo Māori
+// macrons, to ASCII when a slug is derived from a space name.
+var slugFold = map[rune]string{
+	'à': "a", 'á': "a", 'â': "a", 'ã': "a", 'ä': "a", 'å': "a", 'ā': "a", 'æ': "ae",
+	'ç': "c", 'ð': "d", 'đ': "d",
+	'è': "e", 'é': "e", 'ê': "e", 'ë': "e", 'ē': "e",
+	'ì': "i", 'í': "i", 'î': "i", 'ï': "i", 'ī': "i",
+	'ł': "l", 'ñ': "n",
+	'ò': "o", 'ó': "o", 'ô': "o", 'õ': "o", 'ö': "o", 'ø': "o", 'ō': "o", 'œ': "oe",
+	'ß': "ss", 'þ': "th",
+	'ù': "u", 'ú': "u", 'û': "u", 'ü': "u", 'ū': "u",
+	'ý': "y", 'ÿ': "y",
+}
+
+// deriveSpaceSlug makes a space's URL slug from its name: lowercase ASCII
+// letters and digits, folded accents, apostrophes dropped, and every other run
+// of characters as one hyphen. Long results are cut to 48 characters at a word
+// break where possible. The slug column stays separate from the name, so the
+// stored slug never changes if this rule does.
+func deriveSpaceSlug(name string) (string, error) {
+	var b strings.Builder
+	gap := false
+	for _, c := range strings.ToLower(strings.TrimSpace(name)) {
+		part := ""
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+			part = string(c)
+		case c == '\'' || c == '’':
+			continue
+		default:
+			part = slugFold[c]
+		}
+		if part == "" {
+			gap = b.Len() > 0
+			continue
+		}
+		if gap {
+			b.WriteByte('-')
+			gap = false
+		}
+		b.WriteString(part)
+	}
+	slug := b.String()
+	if len(slug) > 48 {
+		slug = slug[:48]
+		if i := strings.LastIndexByte(slug, '-'); i >= 24 {
+			slug = slug[:i]
+		}
+		slug = strings.TrimRight(slug, "-")
+	}
+	if slug == "" {
+		return "", invalid("Use at least one letter or number in the name. It becomes the space's address.")
+	}
+	return slug, nil
+}
+
 func normalizeSpaceName(name, slug string) (string, string, error) {
 	name = strings.TrimSpace(name)
 	slug = strings.ToLower(strings.TrimSpace(slug))
