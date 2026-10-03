@@ -8,8 +8,9 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
 `notes/design-session-2026-10-03.md`). The folder is the unit; a folder's
 `.metatrash.json` lists its services and actions.
 
-1. **Repo folder, boundary only.** Done in 0.16.0: `.metatrash.json`, GitHub
-   designation, nesting rules, root file in every space, `delete`.
+1. **Repo folder, boundary only.** Done in 0.16.0 and 0.16.1: `.metatrash.json`,
+   GitHub designation, nesting rules, root file in every space, `delete`,
+   `deletable`, history of deleted files. Checked live by Dave 2026-10-03.
 2. **One-way sync, space → GitHub.** A write under a GitHub folder commits and
    pushes, respecting `push` (`auto` or `review`). Needs: how the space gets
    GitHub credentials, what "review" looks like, and dotfiles such as
