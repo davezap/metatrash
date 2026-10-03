@@ -66,22 +66,6 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
 		return true
 	}
-	if path == "/about" {
-		if r.URL.RawQuery != "" {
-			sendError(w, invalid("Unknown or duplicate query parameter."))
-			return true
-		}
-		var body bytes.Buffer
-		if err := browserTemplate.Execute(&body, browserPage{BasePath: h.basePath, About: true, AccountsEnabled: h.service.accounts != nil}); err != nil {
-			sendError(w, err)
-			return true
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.Method != http.MethodHead {
-			_, _ = w.Write(body.Bytes())
-		}
-		return true
-	}
 	w.Header().Set("Content-Type", kind)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(data)
@@ -256,6 +240,22 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
+		return true
+	}
+	if path == "/about" {
+		if r.URL.RawQuery != "" {
+			sendError(w, invalid("Unknown or duplicate query parameter."))
+			return true
+		}
+		var body bytes.Buffer
+		if err := browserTemplate.Execute(&body, browserPage{BasePath: h.basePath, About: true, AccountsEnabled: h.service.accounts != nil}); err != nil {
+			sendError(w, err)
+			return true
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(body.Bytes())
+		}
 		return true
 	}
 	if path == "/spaces/public" {
