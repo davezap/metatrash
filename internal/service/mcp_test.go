@@ -83,7 +83,7 @@ func TestMCPSmoke(t *testing.T) {
 	}
 	rpc("notifications/initialized", "", map[string]any{}, 202)
 	list := rpc("tools/list", "", map[string]any{}, 200)
-	if len(list["tools"].([]any)) != 5 {
+	if len(list["tools"].([]any)) != 6 {
 		t.Fatal(list)
 	}
 	call := func(name, key string, args map[string]any, code string) map[string]any {

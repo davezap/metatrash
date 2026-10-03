@@ -225,11 +225,13 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 	op, allow := "", "GET"
 	switch resource {
 	case "file":
-		allow = "GET, PUT"
+		allow = "GET, PUT, DELETE"
 		if r.Method == "GET" {
 			op = "read"
 		} else if r.Method == "PUT" {
 			op = "write"
+		} else if r.Method == "DELETE" {
+			op = "delete"
 		}
 	case "files":
 		if r.Method == "GET" {
@@ -253,7 +255,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "move"
+	write := op == "write" || op == "move" || op == "delete"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -329,7 +331,7 @@ func parseQuery(raw, op string) (Input, error) {
 	switch op {
 	case "read":
 		allowed["path"], allowed["revision"] = true, true
-	case "write":
+	case "write", "delete":
 		allowed["path"] = true
 	case "list":
 		allowed["prefix"], allowed["limit"], allowed["cursor"] = true, true, true
@@ -361,7 +363,7 @@ func parseBody(b []byte, op string, in *Input) error {
 	allowed := map[string]bool{"ifInState": true}
 	if op == "write" {
 		allowed["text"], allowed["createOnly"] = true, true
-	} else {
+	} else if op == "move" {
 		allowed["from"], allowed["to"] = true, true
 	}
 	d := json.NewDecoder(bytes.NewReader(b))

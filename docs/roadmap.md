@@ -1,6 +1,23 @@
 # Roadmap
 
-Open work after 0.15.3. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.16.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+
+## Folders: first version
+
+From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
+`notes/design-session-2026-10-03.md`). The folder is the unit; a folder's
+`.metatrash.json` lists its services and actions.
+
+1. **Repo folder, boundary only.** Done in 0.16.0: `.metatrash.json`, GitHub
+   designation, nesting rules, root file in every space, `delete`.
+2. **One-way sync, space → GitHub.** A write under a GitHub folder commits and
+   pushes, respecting `push` (`auto` or `review`). Needs: how the space gets
+   GitHub credentials, what "review" looks like, and dotfiles such as
+   `.gitignore` and `.github/` (the path rule still refuses them).
+3. **One-way sync, GitHub → space.** Repo changes appear in the folder (`pull`
+   auto).
+4. **One folder action.** A write into an action folder triggers one process;
+   the result lands as a file. Enables the reserved `actions` key.
 
 ## Done in 0.15.1: Change spaces
 

@@ -147,8 +147,14 @@ func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, 
 		sendError(w, err)
 		return true
 	}
+	configs, err := repo.folderConfigs(ctx, files)
+	if err != nil {
+		sendError(w, err)
+		return true
+	}
 	lowerPath := strings.ToLower(path)
 	page := browserPage{BasePath: h.basePath, AccountsEnabled: true, Private: true, SpaceName: space.Name, Path: path, State: state, Text: string(content), Markdown: strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown"), Tree: fileTree(files, path, root)}
+	markServiceFolders(page.Tree, "", configs)
 	var body bytes.Buffer
 	if err := browserTemplate.Execute(&body, page); err != nil {
 		sendError(w, err)

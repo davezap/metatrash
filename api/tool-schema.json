@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "0.4.0",
+  "schemaVersion": "0.5.0",
   "status": "implemented",
-  "description": "Git-backed text storage; messaging via file conventions.",
+  "description": "Git-backed text storage; messaging via file conventions. Each folder may describe itself in .metatrash.json; read the space root one first.",
   "mcp": {
     "endpoint": "/mcp",
     "tools": "tools/list exposes tools only; tools/call uses the shared service.",
@@ -17,7 +17,7 @@
   "tools": [
     {
       "name": "read",
-      "description": "Read text at HEAD or revision; returns snapshot state.",
+      "description": "Read text at HEAD or revision; returns snapshot state. Start with path .metatrash.json: it describes the space and its folders.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -34,7 +34,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
             "description": "Case-sensitive relative path."
           },
           "revision": {
@@ -72,7 +72,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$"
+                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
               },
               "bytes": {
                 "type": "integer",
@@ -105,7 +105,7 @@
     },
     {
       "name": "write",
-      "description": "Create/replace text. Root README.md is immutable (case-insensitive).",
+      "description": "Create/replace text. Root README.md is immutable (case-insensitive). A .metatrash.json describes its folder and is checked on write: a JSON object with optional purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"review\"|\"auto\",\"pull\":\"auto\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -124,7 +124,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
             "description": "Case-sensitive relative path."
           },
           "text": {
@@ -177,7 +177,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$"
+                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
               },
               "bytes": {
                 "type": "integer",
@@ -215,7 +215,7 @@
     },
     {
       "name": "list",
-      "description": "List files and snapshot state; folders are implicit.",
+      "description": "List files and snapshot state; folders are implicit. A folder may describe itself in its .metatrash.json; list when a folder has none.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -277,7 +277,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 240,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$"
+                  "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
                 },
                 "bytes": {
                   "type": "integer",
@@ -333,14 +333,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
             "description": "Existing case-sensitive relative path."
           },
           "to": {
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
             "description": "Absent case-sensitive relative path."
           },
           "ifInState": {
@@ -384,7 +384,99 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$"
+                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "protected": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "bytes",
+              "protected"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "space",
+          "oldState",
+          "newState",
+          "file"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Delete a file. Earlier revisions stay readable with read and a revision. README.md and the root .metatrash.json cannot be deleted; deleting a folder's .metatrash.json removes its description and services.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
+            "description": "Existing case-sensitive relative path."
+          },
+          "ifInState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "State from read/list; must equal HEAD. On state_mismatch, re-read before retrying."
+          }
+        },
+        "required": [
+          "space",
+          "path",
+          "ifInState"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
+          },
+          "oldState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "newState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Stable across edits/moves."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
               },
               "bytes": {
                 "type": "integer",
@@ -478,7 +570,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 240,
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$"
+                  "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
                 },
                 "operation": {
                   "type": "string",
@@ -556,6 +648,16 @@
       "body": [
         "from",
         "to",
+        "ifInState"
+      ]
+    },
+    "delete": {
+      "method": "DELETE",
+      "path": "/api/v1/spaces/{space}/file",
+      "query": [
+        "path"
+      ],
+      "body": [
         "ifInState"
       ]
     },

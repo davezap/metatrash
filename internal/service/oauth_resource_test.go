@@ -129,7 +129,7 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	if init.status != 200 || !strings.Contains(init.result["instructions"].(string), "Call spaces first") {
 		t.Fatalf("initialize: %d %v", init.status, init.result)
 	}
-	if list := w.mcp(token, "tools/list", map[string]any{}, ""); len(list.result["tools"].([]any)) != 6 {
+	if list := w.mcp(token, "tools/list", map[string]any{}, ""); len(list.result["tools"].([]any)) != 7 {
 		t.Fatalf("tools: %v", list.result)
 	}
 	spaces := w.tool(token, "spaces", map[string]any{}, "")["spaces"].([]any)
@@ -154,6 +154,14 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 		t.Fatal("owned list")
 	}
 	w.tool(token, "history", map[string]any{"space": w.ownedID, "id": written["file"].(map[string]any)["id"]}, "")
+	// The root .metatrash.json exists; a GitHub folder can be designated and a file deleted.
+	root := w.tool(token, "read", map[string]any{"space": w.ownedName, "path": ".metatrash.json"}, "")
+	if !strings.Contains(root["file"].(map[string]any)["text"].(string), "purpose") {
+		t.Fatalf("root config: %v", root)
+	}
+	designated := w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "site/.metatrash.json", "text": `{"purpose":"site","services":[{"type":"github","repo":"dave-zap/site"}]}`, "ifInState": root["state"]}, "")
+	removed := w.tool(token, "delete", map[string]any{"space": w.ownedName, "path": "notes/b.md", "ifInState": designated["newState"]}, "")
+	w.tool(token, "delete", map[string]any{"space": w.ownedName, "path": ".metatrash.json", "ifInState": removed["newState"]}, "protected_file")
 	// Public space follows its anonymous rules; key-protected and unconnected spaces are invisible.
 	w.tool(token, "list", map[string]any{"space": "public"}, "")
 	w.tool(token, "list", map[string]any{"space": "private"}, "not_found")
@@ -218,6 +226,7 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	readOnly := w.connect(w.member, map[string]string{w.joinID: "read_only"}, "")
 	memberState := w.tool(readOnly, "list", map[string]any{"space": w.joinID}, "")["state"]
 	w.tool(readOnly, "write", map[string]any{"space": w.joinID, "path": "x.md", "text": "x", "ifInState": memberState}, "insufficient_scope")
+	w.tool(readOnly, "delete", map[string]any{"space": w.joinID, "path": "README.md", "ifInState": memberState}, "insufficient_scope")
 	w.tool(readOnly, "list", map[string]any{"space": w.ownedID}, "not_found")
 
 	// REST resource: separate audience, same checks.

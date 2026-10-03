@@ -39,7 +39,7 @@ type mcpInput struct {
 	To         string  `json:"to"`
 }
 
-const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value (owner/slug, or public) as the space argument of read, list, history, write and move. Writes need ifInState from a read or list of the same space."
+const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value (owner/slug, or public) as the space argument of read, list, history, write, move and delete. Start in a space by reading its root .metatrash.json, which describes the space and its folders; a folder may have its own .metatrash.json, and when it has none, list it. Writes need ifInState from a read or list of the same space."
 
 // mcpHandler builds the anonymous /mcp server, or with account set the OAuth
 // /mcp/account server, which adds the spaces tool and checks every operation
@@ -91,7 +91,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 	for _, tool := range catalog.Tools {
 		op := tool.Name
 		switch op {
-		case "read", "write", "list", "move", "history":
+		case "read", "write", "list", "move", "delete", "history":
 		default:
 			return nil, fmt.Errorf("unknown MCP tool %q", op)
 		}
@@ -117,7 +117,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			if err := decodeMCPInput(raw, &args); err != nil {
 				return mcpFailure(err), nil
 			}
-			write := op == "write" || op == "move"
+			write := op == "write" || op == "move" || op == "delete"
 			var repo *repository
 			var err error
 			space := args.Space

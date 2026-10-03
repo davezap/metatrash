@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.0 - Folder configuration, GitHub folders (boundary only), delete (2026-10-03)
+
+First step of the folders roadmap (design session 2026-10-03): a folder can be designated GitHub-backed. Nothing is synced yet.
+
+- **`.metatrash.json`** describes its folder: optional `purpose`, `children` (file or `folder/` names with a description) and `services`. It is an ordinary file agents read and write; the path rule now allows this one dotfile name as the last segment (other dotfiles are still refused). Every write is validated: a JSON object, known keys only, no duplicate keys, bounded text. `actions` is reserved and refused for now.
+- **GitHub folders.** A `services` entry `{"type":"github","repo":"owner/name"}` (optional `branch` default `main`, `push` `review` default or `auto`, `pull` `auto`) designates the folder as a repository. Files under it belong to the repo; files outside it are space-only. Only in account-owned spaces, never on the space root, and never inside or around another GitHub folder. No GitHub contact, tokens or syncing yet.
+- **Root `.metatrash.json` in every space.** New spaces start with one whose purpose names the space. At startup the service adds one to every existing space that lacks it (one commit each; a space at its storage limit is skipped with a log line). Agents can rewrite it but not delete or move it.
+- **`delete` operation**: MCP tool `delete` (`space`, `path`, `ifInState`) and REST `DELETE /api/v1/spaces/{space}/file?path=…` with JSON `{"ifInState": …}` (also under `/api/v1/account/`). Returns the removed file with old/new states; the commit records a `delete`. Earlier revisions stay readable with a revision. `README.md` and the root `.metatrash.json` are refused (`protected_file`). Counts as a write for quotas and OAuth scope.
+- `.metatrash.json` files cannot be moved (either end of a move); write the new one and delete the old one.
+- Tool schema 0.5.0: `delete` tool and REST mapping, path pattern, and descriptions telling agents to read the root `.metatrash.json` first. `/mcp/account` server instructions say the same. New spaces' README (public template and owned spaces) mentions it; existing READMEs are unchanged.
+- Explorer: folders with a GitHub service show a "GitHub owner/repo" label on private space pages.
+- Tests: config parsing and path rules, folder rules on an owned and the public space (root starter, services, nesting both ways, moves, deletes, stale delete, explorer labels), REST delete in the smoke test, MCP delete and designation through OAuth.
+
 ## 0.15.6 - About page, new footer (2026-10-03)
 
 - New `/about` page: a short description of the project, the source code link and a contact address (info@metatrash.com). Linked from the header as About.

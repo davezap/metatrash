@@ -80,7 +80,7 @@ func Open(ctx context.Context, configPath, keysPath, dataDir string, readme []by
 		return nil, err
 	}
 	for name, sc := range c.Spaces {
-		r, err := provision(ctx, filepath.Join(reposPath, name+".git"), sc.Limits.Storage, readme)
+		r, err := provision(ctx, filepath.Join(reposPath, name+".git"), sc.Limits.Storage, readme, name, false)
 		if err != nil {
 			return nil, fmt.Errorf("provision %s: %w", name, err)
 		}
@@ -211,7 +211,7 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		return result, nil
 	case "list", "history":
 		return s.page(ctx, r, space, op, in)
-	case "write", "move":
+	case "write", "move", "delete":
 		if !hashPattern.MatchString(in.IfInState) {
 			return nil, invalid("ifInState must be a commit hash from read/list.")
 		}
@@ -228,12 +228,25 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 			if strings.EqualFold(in.Path, "README.md") {
 				return nil, problem(403, "protected_file", "README.md is immutable.")
 			}
+		} else if op == "delete" {
+			if !validPath(in.Path) {
+				return nil, invalid("Valid path is required.")
+			}
+			if strings.EqualFold(in.Path, "README.md") {
+				return nil, problem(403, "protected_file", "README.md is immutable.")
+			}
+			if in.Path == folderConfigName {
+				return nil, problem(403, "protected_file", "The space root "+folderConfigName+" cannot be deleted; rewrite it instead.")
+			}
 		} else {
 			if !validPath(in.From) || !validPath(in.To) || in.From == in.To {
 				return nil, invalid("Distinct valid source and destination paths are required.")
 			}
 			if strings.EqualFold(in.From, "README.md") || strings.EqualFold(in.To, "README.md") {
 				return nil, problem(403, "protected_file", "README.md is immutable.")
+			}
+			if isFolderConfig(in.From) || isFolderConfig(in.To) {
+				return nil, problem(403, "protected_file", folderConfigName+" files cannot be moved; write the new one and delete the old one.")
 			}
 		}
 		return s.queued(ctx, func() (any, error) { return s.mutate(ctx, r, space, op, in) })
@@ -249,6 +262,23 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	}
 	if head != in.IfInState {
 		return nil, &Error{Status: 409, Code: "state_mismatch", Message: "Space changed; re-read before retrying.", CurrentState: head}
+	}
+	if op == "delete" {
+		f, ok := files[in.Path]
+		if !ok {
+			return nil, missing()
+		}
+		delete(files, in.Path)
+		state, err := r.commit(ctx, head, files, in.Path, f.ID, nil, "delete")
+		if err != nil {
+			return nil, err
+		}
+		return Mutation{Space: space, OldState: head, NewState: state, File: f.File}, nil
+	}
+	if op == "write" && isFolderConfig(in.Path) {
+		if err := r.checkFolderConfig(ctx, files, in.Path, *in.Text); err != nil {
+			return nil, err
+		}
 	}
 	dest := in.Path
 	var f record
@@ -303,7 +333,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	if op == "write" {
 		text = in.Text
 	}
-	state, err := r.commit(ctx, head, files, dest, text, operation)
+	state, err := r.commit(ctx, head, files, dest, f.ID, text, operation)
 	if err != nil {
 		return nil, err
 	}

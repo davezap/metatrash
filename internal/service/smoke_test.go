@@ -96,6 +96,16 @@ func TestSmoke(t *testing.T) {
 	if len(history.Entries) != 2 || history.Entries[0].Operation != "move" {
 		t.Fatal("history did not follow the move")
 	}
+	call("DELETE", "/api/v1/spaces/public/file?path=README.md", "", map[string]any{"ifInState": moved.NewState}, 403)
+	call("DELETE", "/api/v1/spaces/public/file?path=.metatrash.json", "", map[string]any{"ifInState": moved.NewState}, 403)
+	call("DELETE", "/api/v1/spaces/public/file?path=archive/a.txt", "", map[string]any{"ifInState": moved.NewState, "text": "x"}, 400)
+	var deleted Mutation
+	decode(call("DELETE", "/api/v1/spaces/public/file?path=archive/a.txt", "", map[string]any{"ifInState": moved.NewState}, 200), &deleted)
+	if deleted.File.ID != write.File.ID || deleted.OldState != moved.NewState {
+		t.Fatal("delete returned the wrong file or state")
+	}
+	call("GET", "/api/v1/spaces/public/file?path=archive/a.txt", "", nil, 404)
+	call("GET", "/api/v1/spaces/public/file?path=.metatrash.json", "", nil, 200)
 	call("GET", "/api/v1/spaces/private/files", "", nil, 401)
 	call("GET", "/api/v1/spaces/private/files", "wrong", nil, 401)
 	decode(call("GET", "/api/v1/spaces/private/files", "read-secret", nil, 200), &list)

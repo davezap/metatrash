@@ -2,7 +2,7 @@
 
 Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
 
-MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.15.0.
+MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.16.0.
 
 ## Five operations
 
@@ -12,6 +12,7 @@ MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Cur
 | `write` | `PUT /api/v1/spaces/{space}/file` | query: `path`; JSON: `text`, `ifInState`, optional `createOnly` |
 | `list` | `GET /api/v1/spaces/{space}/files` | query: optional `prefix`, `limit`, `cursor` |
 | `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState` |
+| `delete` | `DELETE /api/v1/spaces/{space}/file` | query: `path`; JSON: `ifInState` |
 | `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` |
 
 [tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json`. The MCP endpoints expose these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
@@ -32,9 +33,35 @@ Effective access is the user's consent for that app intersected with current own
 
 A file has `id`, `path`, UTF-8 `bytes`, and `protected`; read also returns `text`. Assign a random 32-character lowercase hexadecimal ID on creation. It survives edits and moves; a new file at a previously vacated path gets a new ID. IDs are unique within a space and never grant access.
 
-Paths are case-sensitive, canonical relative ASCII paths, at most 240 characters and eight segments. Each segment starts with a letter or digit and contains letters, digits, dots, underscores, or hyphens. Reject empty/dot segments, backslashes, leading/trailing slashes, hidden paths, symlinks, and file/directory collisions. Decode HTTP query encoding exactly once. Folders are implicit; no mkdir operation.
+Paths are case-sensitive, canonical relative ASCII paths, at most 240 characters and eight segments. Each segment starts with a letter or digit and contains letters, digits, dots, underscores, or hyphens; the one exception is a last segment of exactly `.metatrash.json` (folder configuration, below). Reject empty/dot segments, backslashes, leading/trailing slashes, other hidden paths, symlinks, and file/directory collisions. Decode HTTP query encoding exactly once. Folders are implicit; no mkdir operation.
 
-Root `README.md` is operator-managed, readable and versioned. Reject writes or moves with either source or destination equal to that name, case-insensitively. Hidden service metadata and Git internals are never exposed as files. Accept empty text; reject NUL and invalid Unicode; preserve text and line endings exactly.
+Root `README.md` is operator-managed, readable and versioned. Reject writes, moves and deletes with either source or destination equal to that name, case-insensitively. Hidden service metadata and Git internals are never exposed as files. Accept empty text; reject NUL and invalid Unicode; preserve text and line endings exactly.
+
+## Delete
+
+`delete` removes one file at `path`, with `ifInState` checked like write and move, and returns the removed file with old/new states. The commit records a `delete` operation for the file's ID. Earlier revisions stay readable with `read` and a `revision`; `history` of a deleted ID returns 404. `README.md` and the root `.metatrash.json` cannot be deleted (`protected_file`). There are no directory deletes.
+
+## Folder configuration (`.metatrash.json`)
+
+A folder may describe itself in a `.metatrash.json` inside it; the space root always has one. Agents should read the root one first, then a folder's own one, and list a folder that has none. It is an ordinary file (not `protected`) that agents read and write, validated on every write:
+
+```json
+{
+  "purpose": "Shared code for the bartco site",
+  "children": { "notes/": "Working notes", "site/": "The website repo" },
+  "services": [
+    { "type": "github", "repo": "dave-zap/bartco-site", "branch": "main", "push": "review", "pull": "auto" }
+  ]
+}
+```
+
+- A JSON object; every key optional; unknown keys and duplicate keys refused. `purpose` up to 2,000 characters; `children` up to 200 entries, each key one file name or folder name ending in `/`, each text up to 1,000 characters.
+- `services` up to 8, at most one per type. Only `github` exists: `repo` is `owner/name`; `branch` defaults to `main`; `push` is `review` (default) or `auto`; `pull` is `auto` (default). Nothing is synced yet (0.16.0 records the designation and the boundary only).
+- Services are allowed only in account-owned spaces, never on the space root, and a folder may not have a service of a type that a folder above or below it already has (no GitHub folder inside or around another). Different types may nest.
+- Files under a GitHub folder belong to that repository; files outside it are space-only and never synced.
+- `actions` is reserved and refused until folder actions exist.
+- `.metatrash.json` files cannot be moved (move source or destination); write the new one and delete the old one. A folder's file can be deleted, which removes its description and services; the root one cannot.
+- New spaces start with a root `.metatrash.json` whose `purpose` names the space. At startup the service adds one, as its own commit, to any space without it; a space at its storage limit is skipped with a log line.
 
 Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in each repository. Commit metadata and file changes together. This small index preserves identity and history through moves without depending on Git rename guesses or a separate database. Exclude it from user listings, but include it in repository storage accounting.
 

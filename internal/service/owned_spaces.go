@@ -21,7 +21,7 @@ type ownedSpace struct {
 }
 
 const ownedSpaceColumns = "space_id, owner_user_id, name, slug, provisioning_state, created_at, visibility"
-const ownedSpaceREADME = "# Private space\n\nThis space belongs to its human owner. Human browsing is read-only.\nThe owner can invite people through Your account. Agents reach this space only\nthrough apps that the owner or a member connected with OAuth and chose this\nspace for; the owner decides whether members' apps may write.\n"
+const ownedSpaceREADME = "# Private space\n\nThis space belongs to its human owner. Human browsing is read-only.\nThe owner can invite people through Your account. Agents reach this space only\nthrough apps that the owner or a member connected with OAuth and chose this\nspace for; the owner decides whether members' apps may write.\n\nAgents: start by reading .metatrash.json in the space root. It describes\nthe space and its folders; a folder may have its own .metatrash.json.\n"
 
 func (db *accountDatabase) checkOwnedSpaceSchema(ctx context.Context) error {
 	var count int
@@ -236,7 +236,7 @@ func (s *Service) prepareOwnedSpace(ctx context.Context, space ownedSpace) error
 				return nil, fmt.Errorf("ready owned repository missing")
 			}
 		}
-		repo, err := provision(ctx, path, s.config.Defaults.Storage, []byte(ownedSpaceREADME))
+		repo, err := provision(ctx, path, s.config.Defaults.Storage, []byte(ownedSpaceREADME), space.Name, true)
 		if err != nil {
 			return nil, err
 		}

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +22,8 @@ const indexPath = ".metatrash/files.json"
 type repository struct {
 	path   string
 	limits Storage
+	// owned marks account-owned spaces, the only ones that may attach services.
+	owned bool
 }
 
 // Git receives arguments directly, never through a shell. Ignore inherited Git overrides.
@@ -118,7 +122,9 @@ func dirBytes(path string) (int64, error) {
 }
 
 // Stage objects outside the repository. Over-budget writes leave no unreachable objects behind.
-func (r *repository) commit(ctx context.Context, old string, files map[string]record, changedPath string, text *string, operation string) (string, error) {
+// id names the changed file in the commit message; it is passed separately
+// because a deleted file is no longer in files.
+func (r *repository) commit(ctx context.Context, old string, files map[string]record, changedPath, id string, text *string, operation string) (string, error) {
 	if len(files) > r.limits.MaxFiles {
 		return "", storageLimit()
 	}
@@ -175,7 +181,7 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 	if old != "" {
 		args = append(args, "-p", old)
 	}
-	message := files[changedPath].ID + " " + operation + " " + changedPath + "\n"
+	message := id + " " + operation + " " + changedPath + "\n"
 	b, err = git(ctx, r.path, stage, []byte(message), args...)
 	if err != nil {
 		return "", err
@@ -227,14 +233,25 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 	return commit, nil
 }
 
-func provision(ctx context.Context, path string, limits Storage, readme []byte) (*repository, error) {
-	r := &repository{path: path, limits: limits}
+// provision opens a space repository, creating it with the protected README
+// and a starter root .metatrash.json if it is missing. An existing repository
+// without a root .metatrash.json gets the starter added as its own commit.
+// Callers serialize it with other writes (startup, or the write queue).
+func provision(ctx context.Context, path string, limits Storage, readme []byte, name string, owned bool) (*repository, error) {
+	r := &repository{path: path, limits: limits, owned: owned}
 	if info, err := os.Lstat(path); err == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("invalid repository directory")
 		}
-		_, _, err = r.snapshot(ctx, "")
-		return r, err
+		if err := r.addRootFolderConfig(ctx, name); err != nil {
+			var p *Error
+			if !errors.As(err, &p) {
+				return nil, err
+			}
+			// A full space keeps working without the starter file.
+			log.Printf("space %s: root %s not added: %s", filepath.Base(path), folderConfigName, p.Message)
+		}
+		return r, nil
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -255,12 +272,40 @@ func provision(ctx context.Context, path string, limits Storage, readme []byte) 
 		return nil, fmt.Errorf("README exceeds file limit")
 	}
 	files := map[string]record{"README.md": {File: File{ID: id, Path: "README.md", Bytes: int64(len(readme)), Protected: true}}}
-	staged := &repository{path: temp, limits: limits}
-	if _, err = staged.commit(ctx, "", files, "README.md", &text, "create"); err != nil {
+	staged := &repository{path: temp, limits: limits, owned: owned}
+	if _, err = staged.commit(ctx, "", files, "README.md", id, &text, "create"); err != nil {
+		return nil, err
+	}
+	if err = staged.addRootFolderConfig(ctx, name); err != nil {
 		return nil, err
 	}
 	if err = os.Rename(temp, path); err != nil {
 		return nil, err
 	}
 	return r, nil
+}
+
+// addRootFolderConfig commits the starter root .metatrash.json when the space
+// has none. It leaves an existing one alone.
+func (r *repository) addRootFolderConfig(ctx context.Context, name string) error {
+	head, files, err := r.snapshot(ctx, "")
+	if err != nil {
+		return err
+	}
+	if _, exists := files[folderConfigName]; exists {
+		return nil
+	}
+	for p := range files {
+		if strings.HasPrefix(p, folderConfigName+"/") {
+			return fmt.Errorf("cannot add %s: a folder of that name exists", folderConfigName)
+		}
+	}
+	id, err := randomHex(16)
+	if err != nil {
+		return err
+	}
+	text := folderConfigStarter(name)
+	files[folderConfigName] = record{File: File{ID: id, Path: folderConfigName, Bytes: int64(len(text))}}
+	_, err = r.commit(ctx, head, files, folderConfigName, id, &text, "create")
+	return err
 }

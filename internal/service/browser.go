@@ -77,6 +77,7 @@ var browserTemplate = template.Must(template.New("page").Funcs(template.FuncMap{
 
 type browserNode struct {
 	Name, URL string
+	Service   string // set on folders with a service attached, e.g. "GitHub owner/repo"
 	Count     int
 	Selected  bool
 	Children  []*browserNode

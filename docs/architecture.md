@@ -1,6 +1,6 @@
 # Architecture
 
-How Metatrash 0.15.0 works. The wire contract is in [api-contract.md](api-contract.md),
+How Metatrash 0.16.0 works. The wire contract is in [api-contract.md](api-contract.md),
 agent sign-in in [oauth.md](oauth.md), installation in [deployment.md](deployment.md).
 
 ## Shape
@@ -36,7 +36,17 @@ Files have a stable 32-hex ID that survives edits and moves, kept in a
 service-owned `.metatrash/files.json` index committed with the content. Every
 read returns the space `state` (HEAD hash) and every write or move must pass it
 back as `ifInState`. Messaging is a folder convention (inbox, processing,
-archive), not a broker.
+archive), not a broker. Files can be deleted (except `README.md` and the root
+`.metatrash.json`).
+
+Each space has a root `.metatrash.json`, and any folder may have one: it
+describes the folder (purpose, children) and the services attached to it,
+validated on write. The only service so far is `github`, which designates a
+folder as a repository: files under it belong to the repo, files outside it
+are space-only. Services are allowed only in owned spaces, never on the root,
+and never nested inside or around a folder with the same service type. No
+syncing yet. The explorer labels GitHub folders. Format in
+[api-contract.md](api-contract.md).
 
 ## Accounts
 

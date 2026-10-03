@@ -65,7 +65,10 @@ var spacePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
 var hashPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 var idPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-var pathPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$`)
+
+// Path segments start with a letter or digit. The one exception is the folder
+// configuration file name, .metatrash.json, as the last segment.
+var pathPattern = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\.metatrash\.json)$`)
 
 func strictJSON(b []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(b))
