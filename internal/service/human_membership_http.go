@@ -205,7 +205,11 @@ var accountNotices = map[string]string{
 	"invite-sent":    "Invitation emailed. They sign in with that address and accept from Your account.",
 	"invite-limited": "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
 	"invite-failed":  "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
+	"invite-daily":   "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
 }
+
+// inviteMailsPerOwnerDay caps invitation emails per owner across all their spaces.
+const inviteMailsPerOwnerDay = 5
 
 func (h *httpAdapter) noticeCookieName() string {
 	if h.basePath == "" {
@@ -227,7 +231,7 @@ func (h *httpAdapter) takeNotice(w http.ResponseWriter, r *http.Request) string 
 // emailInvitation runs after the invitation is committed and returns a notice
 // key. The invitation stands whatever happens to the email. Limits: one email
 // per space and address an hour, a few per address a day across all spaces, and
-// a daily cap per owner, so the form cannot be used to flood an inbox. SMTP
+// five a day per owner, so the form cannot be used to flood an inbox. SMTP
 // errors may contain addresses or credentials; never log them.
 func (h *httpAdapter) emailInvitation(ctx context.Context, owner userAccount, spaceID, invitationID string) string {
 	a := h.service.accounts
@@ -243,11 +247,15 @@ func (h *httpAdapter) emailInvitation(ctx context.Context, owner userAccount, sp
 	if err != nil {
 		return "invite-failed"
 	}
+	ownerDaily := allowance{"invite-mail:owner:" + owner.ID, inviteMailsPerOwnerDay, 86400}
 	if err := h.service.rates.reserve(
 		allowance{"invite-mail:" + spaceID + ":" + email, 1, 3600},
 		allowance{"invite-mail:to:" + email, 5, 86400},
-		allowance{"invite-mail:owner:" + owner.ID, 50, 86400},
+		ownerDaily,
 	); err != nil {
+		if h.service.rates.full(ownerDaily) {
+			return "invite-daily"
+		}
 		return "invite-limited"
 	}
 	select {

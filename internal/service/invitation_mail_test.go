@@ -113,6 +113,18 @@ func TestInvitationEmailAgainstDatabase(t *testing.T) {
 	if strings.Contains(page.Body.String(), "secret detail") || !strings.Contains(page.Body.String(), other.Email) || strings.Contains(page.Body.String(), `class="notice"`) {
 		t.Fatalf("sharing page after failure: %s", page.Body)
 	}
+	// Five emails per owner per day (one failed send above counts). Three more
+	// addresses fill the allowance; the next invitation is saved but not emailed.
+	fail = nil
+	for i := 0; i < 3; i++ {
+		if got := invite(w.user("extra").Email); got != "invite-sent" {
+			t.Fatalf("extra invite %d: %s", i, got)
+		}
+	}
+	last := w.user("last")
+	if got := invite(last.Email); got != "invite-daily" || len(sends) != 4 {
+		t.Fatalf("daily cap: %s %d", got, len(sends))
+	}
 	// An unknown notice value shows nothing.
 	page = oauthCall(w.h, "GET", "/account/sharing/"+w.joinID, nil, session, &http.Cookie{Name: w.h.noticeCookieName(), Value: "<script>"})
 	if page.Code != 200 || strings.Contains(page.Body.String(), `class="notice"`) {

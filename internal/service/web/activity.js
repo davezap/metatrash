@@ -68,8 +68,6 @@
         fragment.append(empty);
       }
       list.replaceChildren(fragment);
-      const revision = document.querySelector(".revision");
-      if (revision) revision.textContent = "Snapshot " + data.state;
       status.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       delay = 60000;
     } catch {

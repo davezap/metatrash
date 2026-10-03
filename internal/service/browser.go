@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"metatrash.com/metatrash"
 )
 
 //go:embed web/page.html
@@ -64,6 +66,22 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
 		return true
 	}
+	if path == "/about" {
+		if r.URL.RawQuery != "" {
+			sendError(w, invalid("Unknown or duplicate query parameter."))
+			return true
+		}
+		var body bytes.Buffer
+		if err := browserTemplate.Execute(&body, browserPage{BasePath: h.basePath, About: true, AccountsEnabled: h.service.accounts != nil}); err != nil {
+			sendError(w, err)
+			return true
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(body.Bytes())
+		}
+		return true
+	}
 	w.Header().Set("Content-Type", kind)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(data)
@@ -71,7 +89,7 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-var browserTemplate = template.Must(template.New("page").Parse(browserHTML))
+var browserTemplate = template.Must(template.New("page").Funcs(template.FuncMap{"version": func() string { return metatrash.Version }}).Parse(browserHTML))
 
 type browserNode struct {
 	Name, URL string
@@ -127,6 +145,7 @@ type browserPage struct {
 	AccountMCPURL     string // sign-in endpoint; empty when OAuth is off
 	AccountsEnabled   bool
 	Home              bool
+	About             bool
 	Markdown          bool
 	State, Path, Text string
 	Tree              []*browserNode
@@ -224,7 +243,7 @@ func (repo *repository) recent(ctx context.Context, state string, files map[stri
 
 func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
-	if path != "/" && path != "/spaces/public" && !strings.HasPrefix(path, "/spaces/public/") {
+	if path != "/" && path != "/about" && path != "/spaces/public" && !strings.HasPrefix(path, "/spaces/public/") {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")

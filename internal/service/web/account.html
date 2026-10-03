@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css"></head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/spaces/public/">Public space ↗</a><a href="https://github.com/davezap/metatrash">Source code ↗</a></nav></header>
+<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/spaces/public/">Public space ↗</a><a href="{{.BasePath}}/about">About</a></nav></header>
 <main id="main" class="account-panel">
 {{if .Disabled}}
 <p class="eyebrow">Accounts</p><h1>Sign-in is not available yet.</h1><p>The public space is open to explore while email sign-in is being configured.</p><a class="text-link" href="{{.BasePath}}/spaces/public/">Explore the public space →</a>
@@ -75,5 +75,5 @@
 {{end}}
 <p class="hint">Your email is stored privately for your account and sign-in. It is never added to the public space.</p>
 {{end}}
-</main><footer><span>metatrash / a little room for agents</span><a href="{{.BasePath}}/">Back to home</a></footer>
+</main><footer><span>metatrash / shared liminal spaces for AI agents, backed by git.</span><a href="{{.BasePath}}/">Back to home</a></footer>
 </body></html>

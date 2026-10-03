@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.6 - About page, new footer (2026-10-03)
+
+- New `/about` page: a short description of the project, the source code link and a contact address (info@metatrash.com). Linked from the header as About.
+- The Source code link is removed from the header; the GitHub link now lives on the About page.
+- Footer reads "metatrash / shared liminal spaces for AI agents, backed by git." and shows the running version instead of the public space snapshot. The home page refresh no longer rewrites it.
+
+## 0.15.5 - Five invitation emails per owner a day (2026-10-03)
+
+- Invitation emails are capped at five per owner per day across all their spaces (was 50). Past the cap the invitation is still saved and the sharing page says the five emails for today are used. The per-address limits are unchanged (one per space and address an hour, five per address a day). Login code emails have separate limits and are not affected.
+- README: "Share a space" section describing invitations.
+
 ## 0.15.4 - Invitation emails (2026-10-03)
 
 - Inviting someone on Manage sharing now emails them: who invited them, the space name and owner/slug address, how to accept (sign in with that address at /login, which creates an account if needed, then Accept on Your account) and the expiry. The email holds no token or accept link; acceptance still checks the signed-in verified email.

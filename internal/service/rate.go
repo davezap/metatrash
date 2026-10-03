@@ -100,3 +100,11 @@ func (l *limiter) reserve(rules ...allowance) error {
 	}
 	return nil
 }
+
+// full reports whether rule's current window is used up, without charging it.
+func (l *limiter) full(rule allowance) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[rule.key]
+	return ok && b.until > time.Now().Unix() && b.count >= rule.limit
+}
