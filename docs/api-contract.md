@@ -2,7 +2,7 @@
 
 Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
 
-MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.16.0.
+MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.16.1.
 
 ## Five operations
 
@@ -31,7 +31,7 @@ Effective access is the user's consent for that app intersected with current own
 
 ## Files, identity, and paths
 
-A file has `id`, `path`, UTF-8 `bytes`, and `protected`; read also returns `text`. Assign a random 32-character lowercase hexadecimal ID on creation. It survives edits and moves; a new file at a previously vacated path gets a new ID. IDs are unique within a space and never grant access.
+A file has `id`, `path`, UTF-8 `bytes`, `protected` (immutable: `README.md`) and `deletable` (false for `README.md` and the root `.metatrash.json`); read also returns `text`. `deletable` is derived from the path, not stored in the index. Assign a random 32-character lowercase hexadecimal ID on creation. It survives edits and moves; a new file at a previously vacated path gets a new ID. IDs are unique within a space and never grant access.
 
 Paths are case-sensitive, canonical relative ASCII paths, at most 240 characters and eight segments. Each segment starts with a letter or digit and contains letters, digits, dots, underscores, or hyphens; the one exception is a last segment of exactly `.metatrash.json` (folder configuration, below). Reject empty/dot segments, backslashes, leading/trailing slashes, other hidden paths, symlinks, and file/directory collisions. Decode HTTP query encoding exactly once. Folders are implicit; no mkdir operation.
 
@@ -39,7 +39,7 @@ Root `README.md` is operator-managed, readable and versioned. Reject writes, mov
 
 ## Delete
 
-`delete` removes one file at `path`, with `ifInState` checked like write and move, and returns the removed file with old/new states. The commit records a `delete` operation for the file's ID. Earlier revisions stay readable with `read` and a `revision`; `history` of a deleted ID returns 404. `README.md` and the root `.metatrash.json` cannot be deleted (`protected_file`). There are no directory deletes.
+`delete` removes one file at `path`, with `ifInState` checked like write and move, and returns the removed file with old/new states. The commit records a `delete` operation for the file's ID. Earlier revisions stay readable with `read` and a `revision`, and `history` of the deleted ID still works and ends with the `delete` entry. `README.md` and the root `.metatrash.json` cannot be deleted (`protected_file`). There are no directory deletes.
 
 ## Folder configuration (`.metatrash.json`)
 
@@ -109,7 +109,7 @@ Files sort by ASCII path. `prefix` is empty or a canonical folder prefix ending 
 
 First-page requests capture a revision. Opaque validated continuation tokens bind space, operation, filters/ID, limit, revision, and offset; following pages use that snapshot. Tokens grant no access. Mismatched/malformed tokens return 400. Tokens are signed with a process-local secret and expire on service restart; restart listing if rejected. A reset that removes their snapshot returns 404 if the token is otherwise still valid.
 
-History accepts the stable file ID from read/list and follows its identity through moves using the versioned index. Entries are newest first with `revision`, `path` at that revision, `operation` (create/write/move), and a server UTC `timestamp`. Read old text using that entry's path and revision. Unknown IDs and unavailable historical files/revisions return 404. A file's old path can later belong to a different ID.
+History accepts the stable file ID from read/list and follows its identity through moves using the versioned index. Entries are newest first with `revision`, `path` at that revision, `operation` (create/write/move/delete), and a server UTC `timestamp`. Read old text using that entry's path and revision; a `delete` entry's revision no longer has the file, so read the next older entry. Deleted files keep their history, ending with the `delete` entry. IDs that never appear and unavailable historical files/revisions return 404. A file's old path can later belong to a different ID.
 
 ## Rate controls for everyone
 

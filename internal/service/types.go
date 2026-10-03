@@ -1,5 +1,7 @@
 package service
 
+import "strings"
+
 type Error struct {
 	Code              string `json:"code"`
 	Message           string `json:"message"`
@@ -20,6 +22,9 @@ type File struct {
 	Path      string `json:"path"`
 	Bytes     int64  `json:"bytes"`
 	Protected bool   `json:"protected"`
+	// Deletable is derived from the path on every snapshot and never stored:
+	// false for README.md and the root .metatrash.json.
+	Deletable bool `json:"deletable"`
 }
 
 type record struct {
@@ -83,6 +88,20 @@ type Input struct {
 	CreateOnly bool    `json:"createOnly,omitempty"`
 	From       string  `json:"from,omitempty"`
 	To         string  `json:"to,omitempty"`
+}
+
+// storedRecord is the index entry format in .metatrash/files.json.
+type storedRecord struct {
+	ID        string `json:"id"`
+	Path      string `json:"path"`
+	Bytes     int64  `json:"bytes"`
+	Protected bool   `json:"protected"`
+	Blob      string `json:"blob"`
+}
+
+// deletable reports whether delete accepts a file at path.
+func deletable(path string, protected bool) bool {
+	return !protected && !strings.EqualFold(path, "README.md") && path != folderConfigName
 }
 
 func validPath(path string) bool { return len(path) <= 240 && pathPattern.MatchString(path) }

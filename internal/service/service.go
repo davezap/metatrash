@@ -324,6 +324,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 			return nil, invalid("File/directory path collision.")
 		}
 	}
+	f.Deletable = deletable(dest, f.Protected)
 	files[dest] = f
 	operation := op
 	if created {
@@ -431,16 +432,6 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		}
 		return result, nil
 	}
-	found := false
-	for _, f := range files {
-		if f.ID == in.ID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, missing()
-	}
 	b, err := git(ctx, r.path, "", nil, "log", "--first-parent", "--fixed-strings", "--grep="+in.ID+" ", "--format=%H%x09%cI%x09%s", "--max-count="+strconv.Itoa(c.Limit+1), "--skip="+strconv.Itoa(c.Offset), state, "--")
 	if err != nil {
 		return nil, err
@@ -463,6 +454,11 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 			return nil, err
 		}
 		entries = append(entries, HistoryEntry{Revision: parts[0], Path: message[2], Operation: message[1], Timestamp: stamp.UTC().Format(time.RFC3339)})
+	}
+	// Deleted files keep their history, ending with the delete entry; an ID
+	// that never appears in this snapshot's log is unknown.
+	if len(entries) == 0 && c.Offset == 0 {
+		return nil, missing()
 	}
 	result := HistoryResult{Space: space, State: state, ID: in.ID, Entries: entries}
 	if len(entries) > c.Limit {

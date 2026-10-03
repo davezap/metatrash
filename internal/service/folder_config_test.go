@@ -120,7 +120,7 @@ func TestFolderConfigRules(t *testing.T) {
 
 	// New spaces start with a valid root config naming the space.
 	read := do(owned, "read", Input{Path: ".metatrash.json"}, "").(ReadResult)
-	if !strings.Contains(read.File.Text, "Bart & Co") || read.File.Protected {
+	if !strings.Contains(read.File.Text, "Bart & Co") || read.File.Protected || read.File.Deletable {
 		t.Fatalf("root starter: %+v", read.File)
 	}
 	if _, err := parseFolderConfig(read.File.Text); err != nil {
@@ -153,7 +153,22 @@ func TestFolderConfigRules(t *testing.T) {
 	do(owned, "move", Input{From: "notes/a.md", To: "site/a.md"}, "")
 
 	// Delete: ordinary files, folder configs, not README or the root config.
+	listed := do(owned, "list", Input{}, "").(ListResult)
+	for _, f := range listed.Files {
+		if f.Deletable != (f.Path != "README.md" && f.Path != ".metatrash.json") {
+			t.Fatalf("deletable wrong for %s", f.Path)
+		}
+	}
 	deleted := do(owned, "delete", Input{Path: "site/a.md"}, "").(Mutation)
+	if !deleted.File.Deletable {
+		t.Fatal("deleted file reported undeletable")
+	}
+	hist := do(owned, "history", Input{ID: deleted.File.ID}, "").(HistoryResult)
+	if len(hist.Entries) != 3 || hist.Entries[0].Operation != "delete" || hist.Entries[1].Operation != "move" || hist.Entries[0].Path != "site/a.md" {
+		t.Fatalf("history of deleted file: %+v", hist.Entries)
+	}
+	do(owned, "read", Input{Path: hist.Entries[1].Path, Revision: hist.Entries[1].Revision}, "")
+	do(owned, "history", Input{ID: strings.Repeat("0", 32)}, "not_found")
 	do(owned, "read", Input{Path: "site/a.md"}, "not_found")
 	do(owned, "read", Input{Path: "site/a.md", Revision: deleted.OldState}, "")
 	do(owned, "delete", Input{Path: "site/a.md"}, "not_found")

@@ -90,6 +90,10 @@ func (r *repository) snapshot(ctx context.Context, revision string) (string, map
 	if err = json.Unmarshal(b, &files); err != nil {
 		return "", nil, err
 	}
+	for p, f := range files {
+		f.Deletable = deletable(p, f.Protected)
+		files[p] = f
+	}
 	return revision, files, nil
 }
 
@@ -153,7 +157,11 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 		f.Blob = strings.TrimSpace(string(b))
 		files[changedPath] = f
 	}
-	metadata, err := json.Marshal(files)
+	index := make(map[string]storedRecord, len(files))
+	for p, f := range files {
+		index[p] = storedRecord{ID: f.ID, Path: f.Path, Bytes: f.Bytes, Protected: f.Protected, Blob: f.Blob}
+	}
+	metadata, err := json.Marshal(index)
 	if err != nil {
 		return "", err
 	}

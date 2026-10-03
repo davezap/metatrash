@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1 - deletable flag, history of deleted files (2026-10-03)
+
+From live testing of 0.16.0:
+
+- File objects (read, list, write, move, delete results) gain `deletable`: false for `README.md` and the space root `.metatrash.json`, true otherwise. Agents can see the root file is undeletable without trying. It is derived from the path on every snapshot and not stored in the index. `protected` keeps its meaning (immutable; README only).
+- `history` keeps resolving a deleted file's ID. Its entries end with a `delete` entry (new value in the operation enum), so old text can be found and read by revision (use the entry before the delete). An ID that never appears in the log is still `not_found`.
+- Tool schema 0.5.1. Disconnect → Connect in Claude to refresh it.
+
 ## 0.16.0 - Folder configuration, GitHub folders (boundary only), delete (2026-10-03)
 
 First step of the folders roadmap (design session 2026-10-03): a folder can be designated GitHub-backed. Nothing is synced yet.

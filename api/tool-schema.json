@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.5.0",
+  "schemaVersion": "0.5.1",
   "status": "implemented",
   "description": "Git-backed text storage; messaging via file conventions. Each folder may describe itself in .metatrash.json; read the space root one first.",
   "mcp": {
@@ -81,6 +81,10 @@
               "protected": {
                 "type": "boolean"
               },
+              "deletable": {
+                "type": "boolean",
+                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+              },
               "text": {
                 "type": "string"
               }
@@ -90,6 +94,7 @@
               "path",
               "bytes",
               "protected",
+              "deletable",
               "text"
             ],
             "additionalProperties": false
@@ -185,13 +190,18 @@
               },
               "protected": {
                 "type": "boolean"
+              },
+              "deletable": {
+                "type": "boolean",
+                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
               }
             },
             "required": [
               "id",
               "path",
               "bytes",
-              "protected"
+              "protected",
+              "deletable"
             ],
             "additionalProperties": false
           },
@@ -285,13 +295,18 @@
                 },
                 "protected": {
                   "type": "boolean"
+                },
+                "deletable": {
+                  "type": "boolean",
+                  "description": "False for README.md and the space root .metatrash.json; delete refuses them."
                 }
               },
               "required": [
                 "id",
                 "path",
                 "bytes",
-                "protected"
+                "protected",
+                "deletable"
               ],
               "additionalProperties": false
             }
@@ -392,13 +407,18 @@
               },
               "protected": {
                 "type": "boolean"
+              },
+              "deletable": {
+                "type": "boolean",
+                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
               }
             },
             "required": [
               "id",
               "path",
               "bytes",
-              "protected"
+              "protected",
+              "deletable"
             ],
             "additionalProperties": false
           }
@@ -484,13 +504,18 @@
               },
               "protected": {
                 "type": "boolean"
+              },
+              "deletable": {
+                "type": "boolean",
+                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
               }
             },
             "required": [
               "id",
               "path",
               "bytes",
-              "protected"
+              "protected",
+              "deletable"
             ],
             "additionalProperties": false
           }
@@ -506,7 +531,7 @@
     },
     {
       "name": "history",
-      "description": "File history across moves, newest first. Read old content using entry path+revision.",
+      "description": "File history across moves and deletes, newest first. Read old content using entry path+revision; for a delete entry, use the next older entry. Deleted files keep their history.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -577,7 +602,8 @@
                   "enum": [
                     "create",
                     "write",
-                    "move"
+                    "move",
+                    "delete"
                   ]
                 },
                 "timestamp": {
