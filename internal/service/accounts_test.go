@@ -95,11 +95,11 @@ func TestAccountsCodes(t *testing.T) {
 	}
 	original := *code
 	for i := 0; i < 5; i++ {
-		if _, err := a.verify(context.Background(), browser, "wrong"); err == nil {
+		if _, _, err := a.verify(context.Background(), browser, "wrong"); err == nil {
 			t.Fatal("bad code accepted")
 		}
 	}
-	if _, err := a.verify(context.Background(), browser, original); err == nil {
+	if _, _, err := a.verify(context.Background(), browser, original); err == nil {
 		t.Fatal("code accepted after attempt limit")
 	}
 	if err := a.issue(context.Background(), browser, email); err != nil {
@@ -108,21 +108,21 @@ func TestAccountsCodes(t *testing.T) {
 	c := a.challenges[secretDigest(browser)]
 	c.Expires = time.Now().Add(-time.Second)
 	a.challenges[secretDigest(browser)] = c
-	if _, err := a.verify(context.Background(), browser, *code); err == nil {
+	if _, _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("expired code accepted")
 	}
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	token, err := a.verify(context.Background(), browser, *code)
-	if err != nil {
-		t.Fatal(err)
+	token, verified, err := a.verify(context.Background(), browser, *code)
+	if err != nil || verified != email {
+		t.Fatal(err, verified)
 	}
 	user, ok, err := a.currentUser(context.Background(), token)
 	if err != nil || !ok || user.Email != email || user.MaxPrivateSpaces != 1 {
 		t.Fatal("missing verified account or incorrect allowance")
 	}
-	if _, err := a.verify(context.Background(), browser, *code); err == nil {
+	if _, _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("code replay accepted")
 	}
 	restarted, _, _ := testAccounts(t)
@@ -137,7 +137,7 @@ func TestAccountsCodes(t *testing.T) {
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.verify(context.Background(), browser, *code); err != nil {
+	if _, _, err := a.verify(context.Background(), browser, *code); err != nil {
 		t.Fatal(err)
 	}
 	if store.users[email].ID != user.ID || store.users[email].MaxPrivateSpaces != 3 {
@@ -157,7 +157,7 @@ func TestAccountsCodes(t *testing.T) {
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.verify(context.Background(), browser, *code); err == nil {
+	if _, _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("database failure issued a session")
 	}
 	if _, exists := a.challenges[secretDigest(browser)]; exists {
@@ -207,7 +207,7 @@ func TestAccountsHTTP(t *testing.T) {
 	if !browser.Secure || !browser.HttpOnly || browser.SameSite != http.SameSiteStrictMode || browser.Path != "/" || browser.Domain != "" {
 		t.Fatal("unsafe cookie")
 	}
-	form := url.Values{"email": {"person@example.com"}, "csrf": {browser.Value}}
+	form := loginSendForm(t, w.Body.String(), "person@example.com")
 	if w := call("POST", "/login/send", "https://other.example", form, browser); w.Code != 403 || *code != "" {
 		t.Fatal("cross-origin send accepted")
 	}
@@ -221,9 +221,12 @@ func TestAccountsHTTP(t *testing.T) {
 		t.Fatal("invalid CSRF accepted")
 	}
 	form.Set("csrf", browser.Value)
+	// The rejected requests above spent the page's proof-of-work challenge.
+	form = loginSendForm(t, call("GET", "/login", "", nil, browser).Body.String(), "person@example.com")
 	if w := call("POST", "/login/send", "https://metatrash.com", form, browser); w.Code != 303 || *code == "" {
 		t.Fatal("code not sent")
 	}
+	form = loginSendForm(t, call("GET", "/login", "", nil, browser).Body.String(), "person@example.com")
 	if w := call("POST", "/login/send", "https://metatrash.com", form, browser); w.Code != 429 {
 		t.Fatal("resend not throttled")
 	}

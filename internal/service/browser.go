@@ -28,6 +28,9 @@ var activityJS []byte
 //go:embed web/copy.js
 var copyJS []byte
 
+//go:embed web/login.js
+var loginJS []byte
+
 //go:embed web/slate.js
 var slateJS []byte
 
@@ -57,6 +60,8 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		data, kind = activityJS, "text/javascript; charset=utf-8"
 	case "/assets/copy.js":
 		data, kind = copyJS, "text/javascript; charset=utf-8"
+	case "/assets/login.js":
+		data, kind = loginJS, "text/javascript; charset=utf-8"
 	default:
 		sendError(w, missing())
 		return true

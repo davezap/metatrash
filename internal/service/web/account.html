@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css">{{if .Pow}}<script src="{{.BasePath}}/assets/login.js" defer></script>{{end}}</head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/spaces/public/">Public space ↗</a></nav></header>
@@ -59,6 +59,13 @@
 <p><a href="{{$.BasePath}}/account/apps/{{.ID}}">Change spaces</a></p>
 <form method="post" action="{{$.BasePath}}/account/apps/revoke"><input type="hidden" name="csrf" value="{{$.AppsCSRF}}"><input type="hidden" name="grant" value="{{.ID}}"><button class="button" type="submit">Revoke access</button></form></li>{{else}}<li>No apps are connected.</li>{{end}}</ul>
 <p class="hint">To add or remove spaces, use Change spaces; the app keeps working without reconnecting. Revoking signs the app out immediately and forgets its choices; connecting again asks you to choose spaces again. Unused connections expire after a period of inactivity.</p>{{end}}</section>{{end}}
+{{if .GitHubEnabled}}<section class="account-card" id="github"><h2>GitHub</h2>
+<p>Connect GitHub so folders in your spaces can be mirrored to GitHub repositories. You install the Metatrash app on GitHub and choose which repositories it may use.</p>
+{{if .GitHubUnavailable}}<p role="alert">GitHub connections are temporarily unavailable. Reload shortly.</p>{{else}}<ul class="owned-spaces">{{range .GitHub}}<li><strong>{{.AccountLogin}}</strong> <span class="hint">{{.AccountType}}{{if eq .Status "suspended"}} · suspended on GitHub{{end}}</span><p class="hint">Connected {{.Connected}} by GitHub user {{.GitHubLogin}}</p>
+<p><a href="{{.SettingsURL}}" rel="noopener noreferrer">Choose repositories or uninstall on GitHub</a></p>
+<form method="post" action="{{$.BasePath}}/account/github/disconnect"><input type="hidden" name="csrf" value="{{$.GitHubDisconnectCSRF}}"><input type="hidden" name="installation" value="{{.ID}}"><button class="button" type="submit">Disconnect</button></form></li>{{else}}<li>GitHub is not connected.</li>{{end}}</ul>{{end}}
+<form method="post" action="{{.BasePath}}/account/github/connect"><input type="hidden" name="csrf" value="{{.GitHubConnectCSRF}}"><button class="button" type="submit">{{if .GitHub}}Connect another GitHub account{{else}}Connect GitHub{{end}} →</button></form>
+<p class="hint">GitHub asks you to install the app and sign in, then sends you back here. Disconnecting stops Metatrash using that installation but leaves the app installed on GitHub; uninstall it there to remove it completely.</p></section>{{end}}
 <form method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
 {{else}}
 <p class="eyebrow">A space of your own</p><h1>{{if .Verify}}Check your email.{{else}}Sign in or register.{{end}}</h1>
@@ -67,10 +74,10 @@
 <p>We’ve sent a six-digit code to <strong class="account-email">{{.Email}}</strong>. Enter it here within ten minutes. Check your spam folder if it hasn’t arrived.</p>
 <form method="post" action="{{.BasePath}}/login/verify"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="code">Login code</label><input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" required autofocus><button class="button" type="submit">Verify and sign in →</button></form>
 <details class="resend"><summary>Send a new code or use another email</summary><p>Allow a minute between requests. A new code replaces the previous code in this browser.</p>
-<form method="post" action="{{.BasePath}}/login/send"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" value="{{.Email}}" required><button class="button" type="submit">Send a new code</button></form></details>
+<form method="post" action="{{.BasePath}}/login/send" data-pow="{{.PowBits}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="pow" value="{{.Pow}}"><input type="hidden" name="nonce" value=""><div class="hp" aria-hidden="true"><label for="website-resend">Leave this field empty</label><input id="website-resend" name="website" type="text" value="" tabindex="-1" autocomplete="off"></div><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" value="{{.Email}}" required><button class="button" type="submit">Send a new code</button><p class="hint pow-status" data-pow-status role="status" aria-live="polite"></p><noscript><p class="hint">Sending a code needs JavaScript: your browser does a second of arithmetic to show it isn’t a bot.</p></noscript></form></details>
 {{else}}
 <p>Enter your email and we’ll send you a login code. No password needed. If you’re new, verifying your email creates your account.</p>
-<form method="post" action="{{.BasePath}}/login/send"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required><button class="button" type="submit">Email me a code →</button></form>
+<form method="post" action="{{.BasePath}}/login/send" data-pow="{{.PowBits}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="pow" value="{{.Pow}}"><input type="hidden" name="nonce" value=""><div class="hp" aria-hidden="true"><label for="website">Leave this field empty</label><input id="website" name="website" type="text" value="" tabindex="-1" autocomplete="off"></div><label for="email">Email address</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required><button class="button" type="submit">Email me a code →</button><p class="hint pow-status" data-pow-status role="status" aria-live="polite"></p><noscript><p class="hint">Sending a code needs JavaScript: your browser does a second of arithmetic to show it isn’t a bot.</p></noscript></form>
 <p class="hint">After signing in, choose a public username and create your own private space.</p>
 {{end}}
 <p class="hint">Your email is stored privately for your account and sign-in. It is never added to the public space.</p>

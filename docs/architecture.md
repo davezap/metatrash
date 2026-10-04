@@ -1,7 +1,8 @@
 # Architecture
 
 How Metatrash 0.16.0 works. The wire contract is in [api-contract.md](api-contract.md),
-agent sign-in in [oauth.md](oauth.md), installation in [deployment.md](deployment.md).
+agent sign-in in [oauth.md](oauth.md), the GitHub App in [github.md](github.md)
+(0.17.0), installation in [deployment.md](deployment.md).
 
 ## Shape
 
@@ -59,6 +60,18 @@ syncing yet. The explorer labels GitHub folders. Format in
   total, plus a separate 30-attempts-per-IP-per-10-minutes limit. All delivery
   limits are reserved together, so a rejected request does not consume the
   shared budget.
+- **Bot checks** (`login_guard.go`, `web/login.js`): before a code is sent the
+  form must leave a hidden honeypot field (`website`) empty and carry a proof
+  of work: a nonce so that SHA-256(challenge ":" nonce) starts with 18 zero
+  bits (a fraction of a second to a couple of seconds in a browser). The
+  challenge is signed, bound to the browser's login cookie, valid for 20
+  minutes and accepted once. Blocked requests count towards the attempt limit
+  but not the mail budgets, and the message does not say which check failed.
+  Without JavaScript no code can be sent.
+- **Login log**: every `/login/send` and `/login/verify` request writes one
+  journal line with IP, masked email (`e***@gmail.com`), an email ID (keyed
+  hash, changes on restart), both check results, the challenge age, the
+  result and the user agent. No codes, cookies or full addresses.
 - **Users** are keyed by an immutable `user_id`. Email is lowercased. Each user
   may own `max_private_spaces` spaces (default one, set by the administrator
   in the database).

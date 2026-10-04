@@ -2,7 +2,7 @@
 
 Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
 
-MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.16.1.
+MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.17.0.
 
 ## Five operations
 
@@ -57,7 +57,7 @@ A folder may describe itself in a `.metatrash.json` inside it; the space root al
 
 - A JSON object; every key optional; unknown keys and duplicate keys refused. `purpose` up to 2,000 characters; `children` up to 200 entries, each key one file name or folder name ending in `/`, each text up to 1,000 characters.
 - `services` up to 8, at most one per type. Only `github` exists: `repo` is `owner/name`; `branch` defaults to `main`; `push` is `review` (default) or `auto`; `pull` is `auto` (default). Nothing is synced yet (0.16.0 records the designation and the boundary only).
-- Services are allowed only in account-owned spaces, never on the space root, and a folder may not have a service of a type that a folder above or below it already has (no GitHub folder inside or around another). Different types may nest.
+- Services are allowed only in account-owned spaces, never on the space root, and a folder may not have a service of a type that a folder above or below it already has (no GitHub folder inside or around another). Different types may nest. The refusal names the clashing folder and suggests putting the repo beside it (for example under `dependencies/`).
 - Files under a GitHub folder belong to that repository; files outside it are space-only and never synced.
 - `actions` is reserved and refused until folder actions exist.
 - `.metatrash.json` files cannot be moved (move source or destination); write the new one and delete the old one. A folder's file can be deleted, which removes its description and services; the root one cannot.

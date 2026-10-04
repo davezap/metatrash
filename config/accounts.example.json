@@ -13,5 +13,14 @@
     "refreshTokenDays": 30,
     "codeSeconds": 60,
     "grantIdleDays": 90
+  },
+  "github": {
+    "enabled": false,
+    "appId": 0,
+    "appSlug": "metatrash",
+    "clientId": "",
+    "clientSecretFile": "/etc/metatrash/github-client-secret",
+    "webhookSecretFile": "/etc/metatrash/github-webhook-secret",
+    "privateKeyFile": "/etc/metatrash/github-app.pem"
   }
 }

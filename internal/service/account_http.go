@@ -30,6 +30,11 @@ type accountPage struct {
 	Apps                       []connectedApp
 	AppSpaces                  *appSpacesPage
 	AppsUnavailable            bool
+	GitHubEnabled              bool
+	GitHubConnectCSRF          string
+	GitHubDisconnectCSRF       string
+	GitHub                     []githubInstallationView
+	GitHubUnavailable          bool
 	Sharing                    *humanSharingPage
 	Invitations                []humanInvitation
 	Joined                     []joinedHumanSpace
@@ -43,6 +48,8 @@ type accountPage struct {
 	BasePath                   string
 	Disabled, Verify, SignedIn bool
 	CSRF, Email, Message       string
+	Pow                        string // login proof-of-work challenge
+	PowBits                    int
 	Notice                     string
 	UsernameCSRF, Username     string
 	User                       userAccount
@@ -94,6 +101,18 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 				}
 			}
 		}
+		if h.github != nil {
+			page.GitHubEnabled = true
+			page.GitHubConnectCSRF = h.service.accounts.mac("github-connect:" + cookieToken(r, h.sessionCookieName()))
+			page.GitHubDisconnectCSRF = h.service.accounts.mac("github-disconnect:" + cookieToken(r, h.sessionCookieName()))
+			if page.Sharing == nil && page.AppSpaces == nil {
+				var githubErr error
+				if page.GitHub, githubErr = h.githubConnections(r, page.User); githubErr != nil {
+					page.GitHubUnavailable = true
+					status = http.StatusServiceUnavailable
+				}
+			}
+		}
 		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
 		var err error
 		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
@@ -117,7 +136,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 }
 
 func (a *accounts) loginPage(browser string) accountPage {
-	page := accountPage{CSRF: browser}
+	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cleanup(time.Now())
@@ -136,16 +155,24 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove" || membershipAction == "agent")
 	appID := strings.TrimPrefix(path, "/account/apps/")
 	appRoute := strings.HasPrefix(path, "/account/apps/") && idPattern.MatchString(appID)
+	githubRoute := path == "/account/github/connect" || path == "/account/github/disconnect"
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
 		suffix := "-" + secretDigest(h.basePath)[:16]
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	formAction := "'self'"
+	if h.github != nil {
+		// Connect GitHub posts here and is redirected to GitHub; browsers check
+		// form-action against the redirect target too.
+		formAction += " " + h.github.settings.webBase
+	}
+	// script-src 'self' is for login.js (the login form's proof of work).
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
 	// no-referrer makes browsers send Origin: null on HTML form POSTs.
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
@@ -221,11 +248,21 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, problem(405, "invalid_request", "Use POST."))
 		return true
 	}
+	// Every login request writes one journal line (login_guard.go). result is
+	// set to the failure each check would cause before that check runs.
+	var entry *loginLog
+	note := func(string) {}
+	if path == "/login/send" || path == "/login/verify" {
+		entry = &loginLog{kind: strings.TrimPrefix(path, "/login/"), ip: client, ua: r.UserAgent(), result: "bad_origin"}
+		defer entry.write()
+		note = func(result string) { entry.result = result }
+	}
 	// Exact Origin and __Host- cookies prevent cross-site login/logout and cookie injection.
 	if r.Header.Get("Origin") != a.config.Origin {
 		sendError(w, problem(403, "forbidden", "Please submit the form from this site."))
 		return true
 	}
+	note("bad_form")
 	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || kind != "application/x-www-form-urlencoded" {
 		sendError(w, problem(415, "invalid_request", "Use a form submission."))
@@ -263,8 +300,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	if path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		allowed["grant"] = true
 	}
+	if path == "/account/github/disconnect" {
+		allowed["installation"] = true
+	}
 	if path == "/login/send" {
-		allowed["email"] = true
+		allowed["email"], allowed["pow"], allowed["nonce"], allowed[loginHoneypotField] = true, true, true, true
 	}
 	if path == "/login/verify" {
 		allowed["code"] = true
@@ -276,9 +316,17 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		}
 	}
 	browser := cookieToken(r, loginCookie)
+	if path == "/login/send" {
+		// Run both bot checks before anything else can stop the request, so
+		// the log line always says which of them it passed.
+		a.logEmail(entry, r.PostForm.Get("email"))
+		entry.honeypot = honeypotStatus(r)
+		entry.pow, entry.age = a.checkPow(browser, r.PostForm.Get("pow"), r.PostForm.Get("nonce"), time.Now())
+	}
+	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if membershipRoute || githubRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -299,6 +347,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if path == "/account/apps/spaces" {
 			csrf = a.mac("apps-spaces:" + session)
 		}
+		if githubRoute {
+			csrf = a.mac("github-" + strings.TrimPrefix(path, "/account/github/") + ":" + session)
+		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
@@ -310,6 +361,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if path == "/account/apps/spaces" {
 		h.submitAppSpaces(w, r, session)
+		return true
+	}
+	if githubRoute {
+		h.submitGitHub(w, r, session, path)
 		return true
 	}
 	if path == "/account/apps/revoke" {
@@ -438,12 +493,14 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		page := a.loginPage(browser)
 		var p *Error
 		if errors.As(err, &p) {
+			note(p.Code)
 			page.Message = p.Message
 			if p.RetryAfterSeconds > 0 {
 				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
 			}
 			h.renderAccount(w, r, p.Status, page)
 		} else {
+			note("error")
 			page.Message = "Sign-in is temporarily unavailable. Please try again later."
 			h.renderAccount(w, r, 503, page)
 		}
@@ -452,12 +509,23 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		email, err := normalizeEmail(r.PostForm.Get("email"))
 		if err != nil {
 			fail(invalid("Enter a valid email address."))
+			note("invalid_email")
 			return true
 		}
 		emailKey := a.mac("email:" + email)
 		// Attempt limits remain independent; rejected delivery admission consumes no send budget.
 		if err := h.service.rates.take(allowance{"mail:attempt:" + client, 30, 600}); err != nil {
 			fail(err)
+			return true
+		}
+		// Bot checks come before the mail budgets, so a blocked request costs
+		// real users nothing. The message does not say which check failed.
+		if entry.honeypot != "pass" || entry.pow != "pass" {
+			message := "We could not send a code. Reload this page and try again."
+			if entry.pow == "missing" && entry.honeypot == "pass" {
+				message = "Sending a code needs JavaScript. Turn it on for this site, reload and try again."
+			}
+			fail(problem(400, "blocked", message))
 			return true
 		}
 		if err := h.service.rates.reserve(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
@@ -468,6 +536,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			fail(err)
 			return true
 		}
+		note("sent")
 		accountCookie(w, loginCookie, browser, 1200)
 		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return true
@@ -476,11 +545,13 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		fail(err)
 		return true
 	}
-	token, err := a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
+	token, email, err := a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
+	a.logEmail(entry, email)
 	if err != nil {
 		fail(err)
 		return true
 	}
+	note("ok")
 	// Revoke this browser's previous session when replacing it.
 	a.mu.Lock()
 	delete(a.sessions, secretDigest(session))

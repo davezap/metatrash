@@ -11,10 +11,34 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
 1. **Repo folder, boundary only.** Done in 0.16.0 and 0.16.1: `.metatrash.json`,
    GitHub designation, nesting rules, root file in every space, `delete`,
    `deletable`, history of deleted files. Checked live by Dave 2026-10-03.
-2. **One-way sync, space → GitHub.** A write under a GitHub folder commits and
-   pushes, respecting `push` (`auto` or `review`). Needs: how the space gets
-   GitHub credentials, what "review" looks like, and dotfiles such as
-   `.gitignore` and `.github/` (the path rule still refuses them).
+2. **One-way sync, space → GitHub.** Agreed 2026-10-03:
+   - Credentials through a **Metatrash GitHub App** (installed on the repo,
+     short-lived tokens, webhooks reused by step 3). Owned by Dave's account
+     for now, possibly a dedicated Metatrash GitHub account later (apps can be
+     transferred).
+   - Agent commands: `pending` (files changed in a GitHub folder since the
+     last push, with the last-pushed and current revisions) and `push`
+     (space, folder, message; all or nothing, never a partial push). An agent
+     that objects to a change restores the file from history, moves it out of
+     the folder, deletes it or adds it to `.gitignore`.
+   - Push modes in `.metatrash.json`: `agent` (default; only `push` sends),
+     `auto` (quiet-period batch; `push` still works) and `review` (parked; no
+     push until the review UI exists).
+   - Dotfiles allowed only inside GitHub folders (`.git` never); push follows
+     the folder's `.gitignore` (common patterns).
+   - Never force-push: if GitHub moved ahead, `push` stops and says so.
+   - Chunks: 2a connect GitHub (app settings, install link, link check,
+     webhook signature) — built in 0.17.0, see [github.md](github.md); live
+     check waits on registering the app. 2b dotfiles and `.gitignore`; 2c
+     `pending` and `push`; 2d `auto` mode.
+   - Repos never nest (decided 2026-10-03, kept for simplicity and so agents
+     have one rule to learn): no GitHub folder inside or around another.
+     Related repos sit side by side, e.g. under `dependencies/`. The refusal
+     names the clashing folder and suggests that.
+   - Later: a member permission "write but not push", so working agents edit
+     and a supervising agent reviews `pending` and pushes. Possibly a GitHub
+     service on the space root (the whole space as one repo, so no other
+     GitHub folders in it).
 3. **One-way sync, GitHub → space.** Repo changes appear in the folder (`pull`
    auto).
 4. **One folder action.** A write into an action folder triggers one process;

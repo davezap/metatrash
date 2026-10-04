@@ -192,11 +192,11 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 		}
 		for _, svc := range c.Services {
 			if existing.has(svc.Type) {
-				where := "inside"
+				// Repos never nest. Say where the clash is and what to do instead.
 				if strings.HasPrefix(otherFolder, folder) {
-					where = "around"
+					return folderConfigError(fmt.Sprintf("%s already has a %s service and %s folders cannot nest; choose a folder that does not contain it.", otherFolder, svc.Type, svc.Type))
 				}
-				return folderConfigError(fmt.Sprintf("a %s folder cannot be %s another %s folder (%s).", svc.Type, where, svc.Type, otherFolder))
+				return folderConfigError(fmt.Sprintf("%s is inside %s, which already has a %s service, and %s folders cannot nest; put this repo beside it instead, for example in dependencies/.", folder, otherFolder, svc.Type, svc.Type))
 			}
 		}
 	}

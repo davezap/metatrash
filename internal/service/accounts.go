@@ -22,14 +22,15 @@ const sessionLifetime = 24 * time.Hour
 const maxAccountRecords = 10000
 
 type accountConfig struct {
-	Origin             string       `json:"origin"`
-	SMTPHost           string       `json:"smtpHost"`
-	SMTPPort           int          `json:"smtpPort"`
-	SMTPUsername       string       `json:"smtpUsername"`
-	SMTPFrom           string       `json:"smtpFrom"`
-	SMTPPasswordFile   string       `json:"smtpPasswordFile"`
-	DatabaseConfigFile string       `json:"databaseConfigFile"`
-	OAuth              *oauthConfig `json:"oauth"`
+	Origin             string        `json:"origin"`
+	SMTPHost           string        `json:"smtpHost"`
+	SMTPPort           int           `json:"smtpPort"`
+	SMTPUsername       string        `json:"smtpUsername"`
+	SMTPFrom           string        `json:"smtpFrom"`
+	SMTPPasswordFile   string        `json:"smtpPasswordFile"`
+	DatabaseConfigFile string        `json:"databaseConfigFile"`
+	OAuth              *oauthConfig  `json:"oauth"`
+	GitHub             *githubConfig `json:"github"`
 }
 
 type userAccount struct {
@@ -64,13 +65,17 @@ type accounts struct {
 	store      accountStore
 	challenges map[string]loginChallenge
 	sessions   map[string]accountSession
-	secret     []byte
-	mailSlots  chan struct{}
-	send       func(context.Context, string, string) error
+	// powUsed holds spent login proof-of-work challenges until they expire.
+	powUsed   map[string]time.Time
+	secret    []byte
+	mailSlots chan struct{}
+	send      func(context.Context, string, string) error
 	// sendInvite emails an invitation; nil when accounts are not configured.
 	sendInvite func(context.Context, string, invitationMail) error
 	// oauth is nil unless the account configuration enables OAuth agent access.
 	oauth *oauthSettings
+	// github is nil unless the account configuration enables the GitHub App.
+	github *githubSettings
 }
 
 // Email identity is case-insensitive. Do not collapse dots or plus aliases.
@@ -136,7 +141,7 @@ func (s *Service) EnableAccounts(configPath string) error {
 	if passwordText == "" {
 		return fmt.Errorf("SMTP password file is empty")
 	}
-	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
+	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, powUsed: map[string]time.Time{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
 	if cfg.OAuth != nil && cfg.OAuth.Enabled {
 		settings, err := cfg.OAuth.settings()
 		if err != nil {
@@ -146,6 +151,11 @@ func (s *Service) EnableAccounts(configPath string) error {
 	} else if cfg.OAuth != nil {
 		// Validate disabled settings too, so enabling later cannot fail on startup.
 		if _, err := cfg.OAuth.settings(); err != nil {
+			return err
+		}
+	}
+	if cfg.GitHub != nil && cfg.GitHub.Enabled {
+		if a.github, err = cfg.GitHub.settings(); err != nil {
 			return err
 		}
 	}
@@ -187,6 +197,11 @@ func (a *accounts) cleanup(now time.Time) {
 	for key, s := range a.sessions {
 		if !now.Before(s.Expires) {
 			delete(a.sessions, key)
+		}
+	}
+	for key, expires := range a.powUsed {
+		if !now.Before(expires) {
+			delete(a.powUsed, key)
 		}
 	}
 }
@@ -232,7 +247,9 @@ func (a *accounts) issue(ctx context.Context, browser, email string) error {
 	return nil
 }
 
-func (a *accounts) verify(ctx context.Context, browser, code string) (string, error) {
+// verify also returns the email the code was sent to ("" when this browser has
+// no code waiting), for the login log.
+func (a *accounts) verify(ctx context.Context, browser, code string) (string, string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := time.Now()
@@ -241,7 +258,7 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (string, er
 	c, ok := a.challenges[key]
 	failed := problem(400, "invalid_code", "That code is invalid or expired. Try again, or request a new code.")
 	if !ok || !c.Ready {
-		return "", failed
+		return "", "", failed
 	}
 	c.Attempts++
 	match := len(code) == 6 && subtle.ConstantTimeCompare([]byte(c.Digest), []byte(a.mac(key+":"+code))) == 1
@@ -251,20 +268,20 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (string, er
 		} else {
 			a.challenges[key] = c
 		}
-		return "", failed
+		return "", c.Email, failed
 	}
 	// Consume before persistence or session creation, even if either fails.
 	delete(a.challenges, key)
 	if len(a.sessions) >= 4096 {
-		return "", problem(503, "sessions_busy", "Please try again later.")
+		return "", c.Email, problem(503, "sessions_busy", "Please try again later.")
 	}
 	token, err := randomHex(32)
 	if err != nil {
-		return "", err
+		return "", c.Email, err
 	}
 	user, err := a.store.FindOrCreate(ctx, c.Email)
 	if err != nil {
-		return "", problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
+		return "", c.Email, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
 	}
 	// Bound active sessions per account; revoke the oldest when signing in again.
 	count, oldestKey := 0, ""
@@ -287,7 +304,7 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (string, er
 			delete(a.challenges, k)
 		}
 	}
-	return token, nil
+	return token, c.Email, nil
 }
 
 func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, bool, error) {

@@ -27,6 +27,8 @@ type httpAdapter struct {
 	publicHost   string
 	// oauth is nil unless accounts are enabled with oauth.enabled.
 	oauth *oauthServer
+	// github is nil unless accounts are enabled with github.enabled.
+	github *githubServer
 }
 
 func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...string) (http.Handler, error) {
@@ -67,6 +69,9 @@ func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...
 	}
 	if s.accounts != nil && s.accounts.oauth != nil {
 		h.oauth = newOAuthServer(*s.accounts.oauth, h.publicOrigin+h.basePath)
+	}
+	if s.accounts != nil && s.accounts.github != nil {
+		h.github = newGitHubServer(s.accounts.github)
 	}
 	h.mcp, err = h.mcpHandler(schema, false)
 	if err != nil {
@@ -162,7 +167,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveMCPAccount(w, r)
 		return
 	}
-	if h.serveOAuth(w, r, client) || h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
+	if h.serveOAuth(w, r, client) || h.serveGitHub(w, r, client) || h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
 		return
 	}
 	if r.URL.Path == "/api/v1/spaces/public/recent" {

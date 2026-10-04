@@ -349,10 +349,11 @@ func TestOAuthFlowAgainstDatabase(t *testing.T) {
 	if page := oauthCall(w.h, "GET", "/oauth/consent", nil, browser); !strings.Contains(html.UnescapeString(page.Body.String()), "Sign in to connect Claude") {
 		t.Fatal("sign-in prompt")
 	}
-	login := responseCookie(oauthCall(w.h, "GET", "/login", nil), loginCookie)
+	loginPage := oauthCall(w.h, "GET", "/login", nil)
+	login := responseCookie(loginPage, loginCookie)
 	sent := ""
 	w.s.accounts.send = func(_ context.Context, _, code string) error { sent = code; return nil }
-	oauthCall(w.h, "POST", "/login/send", url.Values{"email": {w.owner.Email}, "csrf": {login.Value}}, login)
+	oauthCall(w.h, "POST", "/login/send", loginSendForm(w.t, loginPage.Body.String(), w.owner.Email), login)
 	res = oauthCall(w.h, "POST", "/login/verify", url.Values{"code": {sent}, "csrf": {login.Value}}, login, browser)
 	if res.Code != 303 || res.Header().Get("Location") != "/oauth/consent" {
 		t.Fatalf("login did not continue to consent: %d %s", res.Code, res.Header().Get("Location"))

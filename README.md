@@ -84,6 +84,8 @@ key spaces take `Authorization: Bearer <key>`. See the
 - [Architecture](docs/architecture.md): spaces, accounts, sharing, website, limits.
 - [API contract](docs/api-contract.md): operations, state tokens, errors, rate limits.
 - [OAuth agent access](docs/oauth.md): decisions, flow, access rules.
+- [GitHub connection](docs/github.md): the Metatrash GitHub App, registration,
+  configuration, connect flow, webhook.
 - [Deployment and operations](docs/deployment.md): install, Apache, database,
   upgrades, recovery, testing.
 - [Roadmap](docs/roadmap.md): next work, open checks, ideas.

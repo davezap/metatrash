@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v5.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v6 (from 0.17.0).
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -21,6 +21,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
 | Configuration | `/etc/metatrash/` (root:metatrash, 0750; files 0640) |
 | Spaces, keys | `spaces.json`, `keys.json` |
 | Accounts | `accounts.json`, `account-database.json`, `smtp-password`, `database-password` |
+| GitHub App (optional) | `github-app.pem`, `github-client-secret`, `github-webhook-secret` |
 | Data | `/var/lib/metatrash` (metatrash, 0700): `repos/`, `owned-repos/`, `.service-lock` |
 | Unit | `/etc/systemd/system/metatrash.service` |
 
@@ -122,7 +123,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    sudo mariadb metatrash < deploy/account-schema-v1.sql
    head -8 deploy/account-grants.sql | sudo mariadb          # v1 grants, needed by the import
    sudo -u metatrash /usr/local/bin/metatrash accounts-migrate -database-config /etc/metatrash/account-database.json -data /var/lib/metatrash -empty
-   for v in 2 3 4 5; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
+   for v in 2 3 4 5 6; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
    sudo mariadb < deploy/account-grants.sql
    ```
 
@@ -136,7 +137,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    ```
 
 Startup refuses to run with a missing configuration, an unreachable database or
-a schema older than v5. Without the accounts setting the service runs public and
+a schema older than v6. Without the accounts setting the service runs public and
 key spaces only, with no database.
 
 ### OAuth
@@ -146,6 +147,34 @@ settings, validated even while disabled: `clientHosts` (default `claude.ai`,
 `chatgpt.com`), `accessTokenMinutes` (60), `refreshTokenDays` (30),
 `codeSeconds` (60), `grantIdleDays` (90). The issuer is `-public-url`. See
 [oauth.md](oauth.md).
+
+### GitHub
+
+Optional `"github"` section for the Metatrash GitHub App; off until
+`"enabled": true`. Registration settings, secret files and the connection flow
+are in [github.md](github.md).
+
+### Login log
+
+Each login request writes one line to the journal, for example:
+
+```
+login send ip=203.0.113.5 email=e***@gmail.com emailid=3f2a9c1b honeypot=pass pow=pass age=6s result=sent ua="Mozilla/5.0 …"
+login verify ip=203.0.113.5 email=e***@gmail.com emailid=3f2a9c1b result=ok ua="Mozilla/5.0 …"
+```
+
+`honeypot` is `pass`, `filled` or `absent` (form posted without it). `pow` is
+`pass`, `missing`, `malformed`, `forged` (not this browser's challenge),
+`expired`, `reused`, `wrong` or `busy`; `-` means the request was refused
+before the checks ran. `result` is `sent`, `blocked`, `rate_limited`,
+`invalid_email`, `bad_origin`, `bad_form`, `bad_csrf`, a mail error code, or
+for verify `ok`, `invalid_code` and similar. `emailid` links lines for one
+address until the next restart. Read them with:
+
+```
+sudo journalctl -u metatrash --since today | grep 'login '
+sudo journalctl -u metatrash --since -7d | grep 'login send' | grep -o 'honeypot=[a-z-]* pow=[a-z-]*.*result=[a-z_]*' | sort | uniq -c
+```
 
 ### Administration
 
@@ -160,10 +189,14 @@ administrator. Never edit IDs, slugs, ownership or `metatrash_account_meta`.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1, v5 and v6 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
+
+**0.17.0** needs schema v6 (`deploy/account-schema-v6.sql`, then
+`account-grants.sql`) before the new binary starts; it adds only the GitHub
+connections table. GitHub itself stays off until configured.
 
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again
@@ -192,7 +225,7 @@ accounts, spaces or memberships created since that backup.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v5 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v6 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - There is no Go toolchain on the Windows development PC. A cloud workspace
   needed Go 1.25 built from the golang/go source on GitHub and golang.org/x

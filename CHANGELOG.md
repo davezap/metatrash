@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.17.1 - Login bot checks and login log (2026-10-04)
+
+Bots were requesting login codes for addresses that never signed in (20–30 in four days), so Metatrash emailed strangers and the bounces came back to the sender.
+
+- **Honeypot**: the "email me a code" forms carry a hidden `website` field. A request that fills it in, or leaves it out, gets no code.
+- **Proof of work** (`web/login.js`): before sending, the browser finds a nonce so SHA-256(challenge ":" nonce) starts with 18 zero bits (about a quarter of a second on a desktop). The challenge is signed, bound to the login cookie, valid for 20 minutes and accepted once. Without JavaScript the page says a code needs it. Account pages now allow same-origin scripts (`script-src 'self'`).
+- Blocked requests count towards the per-IP attempt limit but not the mail budgets, so bots cannot use up real users' codes. The message does not say which check failed.
+- **Login log**: one journal line per `/login/send` and `/login/verify` request with IP, masked email, email ID, honeypot and proof-of-work results, challenge age, result and user agent. Requests refused earlier (wrong Origin, unknown fields, bad CSRF) are logged too. See docs/deployment.md, "Login log".
+- Tests: challenge checks (missing, malformed, forged, expired, reused, wrong), each bot case over HTTP with its log line, no budget spent by blocked requests, verify lines; the OAuth sign-in test and the account tests solve the proof of work like a browser.
+
+## 0.17.0 - Connect GitHub (2026-10-04)
+
+Step 2a of the folders roadmap: accounts can connect the Metatrash GitHub App. Nothing is pushed yet (2c). Details in [docs/github.md](docs/github.md).
+
+- **Schema v6** (`deploy/account-schema-v6.sql`, then `account-grants.sql`): table `metatrash_github_installations` linking app installations to accounts. Required before this binary starts.
+- **`github` section in the accounts config**: `enabled`, `appId`, `appSlug`, `clientId` and three secret files (client secret, webhook secret, private key). Off until `enabled` is true; the other fields are checked only then. Startup refuses missing files, a webhook secret under 16 characters or a non-RSA key.
+- **Your account → GitHub**: Connect GitHub sends you to install the app on GitHub and returns to `/github/callback`. The attempt is single-use, ten minutes, bound to the browser (Lax cookie) and a random state. The callback exchanges the code for a user token, checks with `/user/installations` that you can access the installation and that it is this app's, then discards the token (never stored). Each connection shows where the app is installed, a link to its GitHub settings and Disconnect (removes the link; uninstall on GitHub to remove the app). An installation belongs to one Metatrash account; up to 20 per account. Organization installs awaiting approval get an explanatory page.
+- **`/github/webhook`**: signed deliveries only (`X-Hub-Signature-256`, 8 MiB cap). App uninstall removes the link; suspend and unsuspend set its status. Push and other events are acknowledged and ignored for now.
+- App JWT signing (RS256) for calls as the app, ready for 2c.
+- The account page's `form-action` allows GitHub so the Connect redirect is not blocked.
+- Nesting refusals for GitHub folders name the clashing folder and suggest putting the repo beside it (for example under `dependencies/`).
+- Tests: config validation, JWT, webhook signatures, routes off when disabled, and the full connect / refuse / takeover / webhook / disconnect flow against a fake GitHub and MariaDB.
+
 ## 0.16.1 - deletable flag, history of deleted files (2026-10-03)
 
 From live testing of 0.16.0:
