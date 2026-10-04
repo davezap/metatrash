@@ -69,9 +69,10 @@ syncing yet. The explorer labels GitHub folders. Format in
   but not the mail budgets, and the message does not say which check failed.
   Without JavaScript no code can be sent.
 - **Login log**: every `/login/send` and `/login/verify` request writes one
-  journal line with IP, masked email (`e***@gmail.com`), an email ID (keyed
-  hash, changes on restart), both check results, the challenge age, the
-  result and the user agent. No codes, cookies or full addresses.
+  journal line with IP, the full email address, whether an account uses it,
+  both check results, the challenge age, the result and the user agent. No
+  codes or cookies. Full addresses are in the journal by the owner's choice;
+  they stay as long as journald keeps logs.
 - **Users** are keyed by an immutable `user_id`. Email is lowercased. Each user
   may own `max_private_spaces` spaces (default one, set by the administrator
   in the database).

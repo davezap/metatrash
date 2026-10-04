@@ -248,8 +248,8 @@ func (a *accounts) issue(ctx context.Context, browser, email string) error {
 }
 
 // verify also returns the email the code was sent to ("" when this browser has
-// no code waiting), for the login log.
-func (a *accounts) verify(ctx context.Context, browser, code string) (string, string, error) {
+// no code waiting) and whether signing in created the account, for the login log.
+func (a *accounts) verify(ctx context.Context, browser, code string) (token, email string, created bool, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := time.Now()
@@ -258,7 +258,7 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (string, st
 	c, ok := a.challenges[key]
 	failed := problem(400, "invalid_code", "That code is invalid or expired. Try again, or request a new code.")
 	if !ok || !c.Ready {
-		return "", "", failed
+		return "", "", false, failed
 	}
 	c.Attempts++
 	match := len(code) == 6 && subtle.ConstantTimeCompare([]byte(c.Digest), []byte(a.mac(key+":"+code))) == 1
@@ -268,20 +268,23 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (string, st
 		} else {
 			a.challenges[key] = c
 		}
-		return "", c.Email, failed
+		return "", c.Email, false, failed
 	}
 	// Consume before persistence or session creation, even if either fails.
 	delete(a.challenges, key)
 	if len(a.sessions) >= 4096 {
-		return "", c.Email, problem(503, "sessions_busy", "Please try again later.")
+		return "", c.Email, false, problem(503, "sessions_busy", "Please try again later.")
 	}
-	token, err := randomHex(32)
+	token, err = randomHex(32)
 	if err != nil {
-		return "", c.Email, err
+		return "", c.Email, false, err
 	}
+	// Only for the login log: a failed lookup reports an existing account.
+	existed, lookupErr := a.store.Exists(ctx, c.Email)
 	user, err := a.store.FindOrCreate(ctx, c.Email)
+	created = err == nil && lookupErr == nil && !existed
 	if err != nil {
-		return "", c.Email, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
+		return "", c.Email, false, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
 	}
 	// Bound active sessions per account; revoke the oldest when signing in again.
 	count, oldestKey := 0, ""
@@ -304,7 +307,7 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (string, st
 			delete(a.challenges, k)
 		}
 	}
-	return token, c.Email, nil
+	return token, c.Email, created, nil
 }
 
 func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, bool, error) {

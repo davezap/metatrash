@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"log"
@@ -24,7 +25,7 @@ import (
 // Every /login/send and /login/verify request writes one journal line, so it
 // is visible which checks a bot passes:
 //
-//	login send ip=203.0.113.5 email=e***@gmail.com emailid=3f2a9c1b honeypot=pass pow=pass age=6s result=sent ua="..."
+//	login send ip=203.0.113.5 email=emily@gmail.com account=none honeypot=pass pow=pass age=6s result=sent ua="..."
 
 const loginPowBits = 18
 const loginPowLifetime = 20 * time.Minute // the login cookie's lifetime
@@ -116,16 +117,19 @@ func honeypotStatus(r *http.Request) string {
 }
 
 // loginLog is one journal line for a /login/send or /login/verify request.
-// Never add codes, cookies or full addresses.
+// The full email address is logged (owner's choice, 0.17.2); never add codes
+// or cookies.
 type loginLog struct {
 	kind, ip, ua   string
-	email, emailID string
+	email, account string
 	honeypot, pow  string
 	age            time.Duration
 	result         string
 }
 
-func (a *accounts) logEmail(entry *loginLog, raw string) {
+// logEmail records the address and whether an account already uses it:
+// existing, none, or unknown when the database could not say.
+func (a *accounts) logEmail(ctx context.Context, entry *loginLog, raw string) {
 	email, err := normalizeEmail(raw)
 	if err != nil {
 		if strings.TrimSpace(raw) == "" {
@@ -135,17 +139,11 @@ func (a *accounts) logEmail(entry *loginLog, raw string) {
 		}
 		return
 	}
-	entry.email = maskEmail(email)
-	entry.emailID = a.mac("log-email:" + email)[:8]
-}
-
-// maskEmail keeps the first character and the domain: e***@gmail.com.
-func maskEmail(email string) string {
-	at := strings.LastIndexByte(email, '@')
-	if at < 1 {
-		return "invalid"
+	entry.email = email
+	entry.account = "unknown"
+	if exists, err := a.store.Exists(ctx, email); err == nil {
+		entry.account = map[bool]string{true: "existing", false: "none"}[exists]
 	}
-	return email[:1] + "***" + email[at:]
 }
 
 func logField(value string, limit int) string {
@@ -170,9 +168,9 @@ func (e *loginLog) write() {
 	var b strings.Builder
 	b.WriteString("login " + e.kind)
 	b.WriteString(" ip=" + logField(e.ip, 64))
-	b.WriteString(" email=" + logField(e.email, 80))
-	if e.emailID != "" {
-		b.WriteString(" emailid=" + e.emailID)
+	b.WriteString(" email=" + logField(e.email, 254))
+	if e.account != "" {
+		b.WriteString(" account=" + e.account)
 	}
 	if e.kind == "send" {
 		b.WriteString(" honeypot=" + logField(e.honeypot, 16))

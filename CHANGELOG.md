@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.2 - Login log: full address and account (2026-10-04)
+
+- Login log lines show the full email address instead of `e***@gmail.com`, and `account=existing|none|unknown` (whether an account already uses it). On a successful verify, `account=new` means that sign-in created the account. `emailid` is gone. Owner's choice: full addresses now sit in the journal for as long as journald keeps it.
+- The account store gains `Exists` (one indexed `SELECT` on `metatrash_users`; the existing grant covers it). No schema change.
+
 ## 0.17.1 - Login bot checks and login log (2026-10-04)
 
 Bots were requesting login codes for addresses that never signed in (20–30 in four days), so Metatrash emailed strangers and the bounces came back to the sender.

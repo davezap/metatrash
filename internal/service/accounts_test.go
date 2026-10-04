@@ -33,6 +33,14 @@ func (s *memoryAccountStore) FindOrCreate(_ context.Context, email string) (user
 	return user, nil
 }
 
+func (s *memoryAccountStore) Exists(_ context.Context, email string) (bool, error) {
+	if s.failure != nil {
+		return false, s.failure
+	}
+	_, ok := s.users[email]
+	return ok, nil
+}
+
 func (s *memoryAccountStore) ByID(_ context.Context, id string) (userAccount, bool, error) {
 	if s.failure != nil {
 		return userAccount{}, false, s.failure
@@ -95,11 +103,11 @@ func TestAccountsCodes(t *testing.T) {
 	}
 	original := *code
 	for i := 0; i < 5; i++ {
-		if _, _, err := a.verify(context.Background(), browser, "wrong"); err == nil {
+		if _, _, _, err := a.verify(context.Background(), browser, "wrong"); err == nil {
 			t.Fatal("bad code accepted")
 		}
 	}
-	if _, _, err := a.verify(context.Background(), browser, original); err == nil {
+	if _, _, _, err := a.verify(context.Background(), browser, original); err == nil {
 		t.Fatal("code accepted after attempt limit")
 	}
 	if err := a.issue(context.Background(), browser, email); err != nil {
@@ -108,21 +116,21 @@ func TestAccountsCodes(t *testing.T) {
 	c := a.challenges[secretDigest(browser)]
 	c.Expires = time.Now().Add(-time.Second)
 	a.challenges[secretDigest(browser)] = c
-	if _, _, err := a.verify(context.Background(), browser, *code); err == nil {
+	if _, _, _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("expired code accepted")
 	}
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	token, verified, err := a.verify(context.Background(), browser, *code)
-	if err != nil || verified != email {
-		t.Fatal(err, verified)
+	token, verified, created, err := a.verify(context.Background(), browser, *code)
+	if err != nil || verified != email || !created {
+		t.Fatal(err, verified, created)
 	}
 	user, ok, err := a.currentUser(context.Background(), token)
 	if err != nil || !ok || user.Email != email || user.MaxPrivateSpaces != 1 {
 		t.Fatal("missing verified account or incorrect allowance")
 	}
-	if _, _, err := a.verify(context.Background(), browser, *code); err == nil {
+	if _, _, _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("code replay accepted")
 	}
 	restarted, _, _ := testAccounts(t)
@@ -137,8 +145,8 @@ func TestAccountsCodes(t *testing.T) {
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := a.verify(context.Background(), browser, *code); err != nil {
-		t.Fatal(err)
+	if _, _, created, err := a.verify(context.Background(), browser, *code); err != nil || created {
+		t.Fatal(err, "existing account reported as created")
 	}
 	if store.users[email].ID != user.ID || store.users[email].MaxPrivateSpaces != 3 {
 		t.Fatal("existing account overwritten")
@@ -157,7 +165,7 @@ func TestAccountsCodes(t *testing.T) {
 	if err := a.issue(context.Background(), browser, email); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := a.verify(context.Background(), browser, *code); err == nil {
+	if _, _, _, err := a.verify(context.Background(), browser, *code); err == nil {
 		t.Fatal("database failure issued a session")
 	}
 	if _, exists := a.challenges[secretDigest(browser)]; exists {

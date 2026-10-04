@@ -159,21 +159,25 @@ are in [github.md](github.md).
 Each login request writes one line to the journal, for example:
 
 ```
-login send ip=203.0.113.5 email=e***@gmail.com emailid=3f2a9c1b honeypot=pass pow=pass age=6s result=sent ua="Mozilla/5.0 …"
-login verify ip=203.0.113.5 email=e***@gmail.com emailid=3f2a9c1b result=ok ua="Mozilla/5.0 …"
+login send ip=203.0.113.5 email=emily@gmail.com account=none honeypot=pass pow=pass age=6s result=sent ua="Mozilla/5.0 …"
+login verify ip=203.0.113.5 email=emily@gmail.com account=new result=ok ua="Mozilla/5.0 …"
 ```
+
+`account` is `existing` (an account uses this address), `none`, `new` (on a
+verify line: this sign-in created the account) or `unknown` (the database
+did not answer).
 
 `honeypot` is `pass`, `filled` or `absent` (form posted without it). `pow` is
 `pass`, `missing`, `malformed`, `forged` (not this browser's challenge),
 `expired`, `reused`, `wrong` or `busy`; `-` means the request was refused
 before the checks ran. `result` is `sent`, `blocked`, `rate_limited`,
 `invalid_email`, `bad_origin`, `bad_form`, `bad_csrf`, a mail error code, or
-for verify `ok`, `invalid_code` and similar. `emailid` links lines for one
-address until the next restart. Read them with:
+for verify `ok`, `invalid_code` and similar. Read them with:
 
 ```
 sudo journalctl -u metatrash --since today | grep 'login '
-sudo journalctl -u metatrash --since -7d | grep 'login send' | grep -o 'honeypot=[a-z-]* pow=[a-z-]*.*result=[a-z_]*' | sort | uniq -c
+sudo journalctl -u metatrash --since -7d | grep 'login send' | grep -o 'account=[a-z]* honeypot=[a-z-]* pow=[a-z-]*.*result=[a-z_]*' | sort | uniq -c
+sudo journalctl -u metatrash --since -7d -o cat | grep 'login ' | cut -d' ' -f3-   # without the journal prefix
 ```
 
 ### Administration

@@ -35,3 +35,18 @@ func testDatabase(t *testing.T) *accountDatabase {
 func TestDatabaseSchemaV6Ready(t *testing.T) {
 	testDatabase(t)
 }
+
+func TestDatabaseAccountExists(t *testing.T) {
+	db := testDatabase(t)
+	ctx := context.Background()
+	email := randomName(t, "exists-") + "@example.com"
+	if ok, err := db.Exists(ctx, email); err != nil || ok {
+		t.Fatal("unknown address reported as an account", err)
+	}
+	if _, err := db.FindOrCreate(ctx, email); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := db.Exists(ctx, email); err != nil || !ok {
+		t.Fatal("account not found", err)
+	}
+}

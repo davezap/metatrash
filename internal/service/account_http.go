@@ -319,7 +319,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	if path == "/login/send" {
 		// Run both bot checks before anything else can stop the request, so
 		// the log line always says which of them it passed.
-		a.logEmail(entry, r.PostForm.Get("email"))
+		a.logEmail(r.Context(), entry, r.PostForm.Get("email"))
 		entry.honeypot = honeypotStatus(r)
 		entry.pow, entry.age = a.checkPow(browser, r.PostForm.Get("pow"), r.PostForm.Get("nonce"), time.Now())
 	}
@@ -545,11 +545,14 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		fail(err)
 		return true
 	}
-	token, email, err := a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
-	a.logEmail(entry, email)
+	token, email, created, err := a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
+	a.logEmail(r.Context(), entry, email)
 	if err != nil {
 		fail(err)
 		return true
+	}
+	if created {
+		entry.account = "new" // this sign-in created it
 	}
 	note("ok")
 	// Revoke this browser's previous session when replacing it.

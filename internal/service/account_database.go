@@ -18,6 +18,8 @@ import (
 // stay ephemeral. A test store can exercise the email flow without a database.
 type accountStore interface {
 	FindOrCreate(context.Context, string) (userAccount, error)
+	// Exists reports whether an account uses this normalized email (login log).
+	Exists(context.Context, string) (bool, error)
 	ByID(context.Context, string) (userAccount, bool, error)
 	ChooseUsername(context.Context, string, string) error
 	Close() error
@@ -219,6 +221,17 @@ func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
 func insertAccount(ctx context.Context, tx *sql.Tx, user userAccount) error {
 	_, err := tx.ExecContext(ctx, "INSERT INTO metatrash_users (user_id, email, created_at, max_private_spaces) VALUES (?, ?, ?, ?)", user.ID, user.Email, user.CreatedAt.UTC().Format(time.RFC3339Nano), user.MaxPrivateSpaces)
 	return err
+}
+
+func (s *accountDatabase) Exists(ctx context.Context, email string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var one int
+	err := s.db.QueryRowContext(ctx, "SELECT 1 FROM metatrash_users WHERE email = ? LIMIT 1", email).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (s *accountDatabase) FindOrCreate(ctx context.Context, email string) (userAccount, error) {

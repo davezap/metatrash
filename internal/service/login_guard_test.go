@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"html"
 	"log"
 	"net/http"
@@ -92,9 +93,6 @@ func TestLoginPowChallenge(t *testing.T) {
 	if left != 0 {
 		t.Fatal("spent challenges kept after expiry")
 	}
-	if maskEmail("emily.the.main@gmail.com") != "e***@gmail.com" {
-		t.Fatal(maskEmail("emily.the.main@gmail.com"))
-	}
 }
 
 func TestLoginBotChecksHTTP(t *testing.T) {
@@ -157,13 +155,13 @@ func TestLoginBotChecksHTTP(t *testing.T) {
 			t.Fatalf("%s: status %d, code sent %v", tc.name, w.Code, *code != "")
 		}
 		line := lastLine()
-		for _, want := range []string{"login send ", "ip=198.51.100.7", "email=e***@gmail.com", "honeypot=" + tc.hp, "pow=" + tc.pow, "result=blocked", `ua="BotAgent/1.0"`} {
+		for _, want := range []string{"login send ", "ip=198.51.100.7", "email=emily.bot@gmail.com account=none", "honeypot=" + tc.hp, "pow=" + tc.pow, "result=blocked", `ua="BotAgent/1.0"`} {
 			if !strings.Contains(line, want) {
 				t.Fatalf("%s: log line %q lacks %q", tc.name, line, want)
 			}
 		}
-		if strings.Contains(line, "emily.bot") || (form.Get("pow") != "" && strings.Contains(line, form.Get("pow"))) {
-			t.Fatalf("%s: log line leaks the address or challenge: %q", tc.name, line)
+		if form.Get("pow") != "" && strings.Contains(line, form.Get("pow")) {
+			t.Fatalf("%s: log line leaks the challenge: %q", tc.name, line)
 		}
 		if tc.name == "no javascript" && !strings.Contains(w.Body.String(), "needs JavaScript") {
 			t.Fatal("no-JavaScript message missing")
@@ -182,7 +180,7 @@ func TestLoginBotChecksHTTP(t *testing.T) {
 	if w := send(form, "Mozilla/5.0", cookie); w.Code != 303 || *code == "" {
 		t.Fatalf("real browser refused: %d %s", w.Code, w.Body.String())
 	}
-	if line := lastLine(); !strings.Contains(line, "honeypot=pass pow=pass") || !strings.Contains(line, "result=sent") || !strings.Contains(line, "emailid=") {
+	if line := lastLine(); !strings.Contains(line, "honeypot=pass pow=pass") || !strings.Contains(line, "result=sent") || !strings.Contains(line, "email=person@example.com account=none ") {
 		t.Fatalf("sent line: %q", line)
 	}
 	sentCode := *code
@@ -220,16 +218,31 @@ func TestLoginBotChecksHTTP(t *testing.T) {
 	if sentCode == "000000" {
 		t.Skip("random code collided with the wrong guess")
 	}
-	if line := lastLine(); !strings.HasPrefix(line, "login verify ") || !strings.Contains(line, "email=p***@example.com") || !strings.Contains(line, "result=invalid_code") || strings.Contains(line, "pow=") {
+	if line := lastLine(); !strings.HasPrefix(line, "login verify ") || !strings.Contains(line, "email=person@example.com account=none ") || !strings.Contains(line, "result=invalid_code") || strings.Contains(line, "pow=") {
 		t.Fatalf("bad verify line: %q", line)
 	}
 	verify(sentCode)
-	if line := lastLine(); !strings.Contains(line, "result=ok") || !strings.Contains(line, "email=p***@example.com") || strings.Contains(line, sentCode) {
+	if line := lastLine(); !strings.Contains(line, "result=ok") || !strings.Contains(line, "email=person@example.com account=new ") || strings.Contains(line, sentCode) {
 		t.Fatalf("verify line: %q", line)
 	}
 	if _, ok := store.users["person@example.com"]; !ok {
 		t.Fatal("verified account missing")
 	}
+	// The address now has an account; the next request says so (and is
+	// throttled by the one-a-minute limit).
+	body, cookie = page()
+	send(loginSendForm(t, body, "Person@Example.com"), "Mozilla/5.0", cookie)
+	if line := lastLine(); !strings.Contains(line, "email=person@example.com account=existing ") || !strings.Contains(line, "result=rate_limited") {
+		t.Fatalf("existing account line: %q", line)
+	}
+	store.failure = context.DeadlineExceeded
+	body, cookie = page()
+	send(loginSendForm(t, body, "x@example.com"), "Mozilla/5.0", cookie)
+	if line := lastLine(); !strings.Contains(line, "account=unknown") {
+		t.Fatalf("database outage line: %q", line)
+	}
+	store.failure = nil
+	_, cookie = page() // a browser with no code waiting
 	verify("123456")
 	if line := lastLine(); !strings.Contains(line, "email=- ") || !strings.Contains(line, "result=invalid_code") {
 		t.Fatalf("no-code verify line: %q", line)
