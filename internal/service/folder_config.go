@@ -23,7 +23,7 @@ const (
 	maxFolderChildText   = 1000
 	maxFolderServices    = 8
 	githubDefaultBranch  = "main"
-	githubDefaultPush    = "review"
+	githubDefaultPush    = "agent"
 	githubDefaultPull    = "auto"
 	folderConfigHintText = "See the space root " + folderConfigName + " or the tool descriptions for the format."
 )
@@ -110,8 +110,8 @@ func parseFolderConfig(text string) (folderConfig, error) {
 			if svc.Branch != "" && (!gitBranchPattern.MatchString(svc.Branch) || strings.Contains(svc.Branch, "..") || strings.Contains(svc.Branch, "//") || strings.HasSuffix(svc.Branch, "/") || strings.HasSuffix(svc.Branch, ".") || strings.HasSuffix(svc.Branch, ".lock")) {
 				return c, folderConfigError("github branch is not a valid branch name.")
 			}
-			if svc.Push != "" && svc.Push != "review" && svc.Push != "auto" {
-				return c, folderConfigError(`github push must be "review" or "auto".`)
+			if svc.Push != "" && svc.Push != "agent" && svc.Push != "auto" && svc.Push != "review" {
+				return c, folderConfigError(`github push must be "agent" (the default: only the push tool sends), "auto" or "review".`)
 			}
 			if svc.Pull != "" && svc.Pull != "auto" {
 				return c, folderConfigError(`github pull must be "auto".`)

@@ -251,15 +251,18 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "POST" {
 			op = "move"
 		}
-	case "pull":
-		// GitHub folders exist only in owned spaces, so only the OAuth resource offers pull.
+	case "pull", "push", "pending":
+		// GitHub folders exist only in owned spaces, so only the OAuth resource offers these.
 		if metadataPath == "" {
 			sendError(w, missing())
 			return
 		}
 		allow = "POST"
-		if r.Method == "POST" {
-			op = "pull"
+		if resource == "pending" {
+			allow = "GET"
+		}
+		if r.Method == allow {
+			op = resource
 		}
 	default:
 		sendError(w, missing())
@@ -270,7 +273,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "move" || op == "delete" || op == "pull"
+	write := op == "write" || op == "move" || op == "delete" || op == "pull" || op == "push"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -281,8 +284,12 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, err)
 		return
 	}
-	if op == "pull" {
-		h.servePull(w, r, repo, space)
+	switch op {
+	case "pull", "push":
+		h.serveGitHubPost(w, r, op, repo, space)
+		return
+	case "pending":
+		h.servePending(w, r, repo, space)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)
@@ -324,8 +331,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 	sendJSON(w, status, value)
 }
 
-// servePull handles POST .../pull with a JSON body {"folder": "site/"}.
-func (h *httpAdapter) servePull(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
+// serveGitHubPost handles POST .../pull with {"folder": "site/"} and
+// POST .../push with {"folder", "message", "ifInState"?}.
+func (h *httpAdapter) serveGitHubPost(w http.ResponseWriter, r *http.Request, op string, repo *repository, space string) {
 	if r.URL.RawQuery != "" {
 		sendError(w, invalid("Unknown query parameter."))
 		return
@@ -335,19 +343,61 @@ func (h *httpAdapter) servePull(w http.ResponseWriter, r *http.Request, repo *re
 		sendError(w, problem(415, "invalid_request", "Use application/json."))
 		return
 	}
-	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	limit := int64(4096)
+	if op == "push" {
+		limit = 64 * 1024
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		sendError(w, problem(413, "payload_too_large", "Request exceeds the byte limit."))
 		return
 	}
 	var body struct {
-		Folder string `json:"folder"`
+		Folder    string  `json:"folder"`
+		Message   *string `json:"message"`
+		IfInState *string `json:"ifInState"`
 	}
-	if !validUnicodeJSON(b) || noDuplicateKeys(b) != nil || strictJSON(b, &body) != nil || body.Folder == "" {
-		sendError(w, invalid(`Send {"folder": "<GitHub folder>"}.`))
+	if !validUnicodeJSON(b) || noDuplicateKeys(b) != nil || strictJSON(b, &body) != nil || body.Folder == "" || (op == "pull" && (body.Message != nil || body.IfInState != nil)) || (op == "push" && body.Message == nil) {
+		if op == "pull" {
+			sendError(w, invalid(`Send {"folder": "<GitHub folder>"}.`))
+		} else {
+			sendError(w, invalid(`Send {"folder": "<GitHub folder>", "message": "<commit message>"}, optionally with "ifInState".`))
+		}
 		return
 	}
-	value, err := h.service.pull(r.Context(), repo, space, body.Folder)
+	var value any
+	if op == "pull" {
+		value, err = h.service.pull(r.Context(), repo, space, body.Folder)
+	} else {
+		identity, ok := r.Context().Value(mcpIdentityKey{}).(mcpIdentity)
+		if !ok || identity.oauth == nil {
+			sendError(w, problem(401, "unauthorized", "Missing transport credentials."))
+			return
+		}
+		var author pushAuthor
+		if author, err = h.service.pushAuthorFor(r.Context(), *identity.oauth); err == nil {
+			ifInState := ""
+			if body.IfInState != nil {
+				ifInState = *body.IfInState
+			}
+			value, err = h.service.push(r.Context(), repo, space, body.Folder, *body.Message, ifInState, author)
+		}
+	}
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	sendJSON(w, 200, value)
+}
+
+// servePending handles GET .../pending?folder=site/.
+func (h *httpAdapter) servePending(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil || len(q) != 1 || len(q["folder"]) != 1 || q.Get("folder") == "" {
+		sendError(w, invalid("Use ?folder=<GitHub folder>."))
+		return
+	}
+	value, err := h.service.pending(r.Context(), repo, space, q.Get("folder"))
 	if err != nil {
 		sendError(w, err)
 		return

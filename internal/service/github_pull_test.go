@@ -14,11 +14,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"os/exec"
 
 	"metatrash.com/metatrash"
 )
@@ -31,8 +32,13 @@ type fakeRepoFile struct {
 }
 
 type fakeCommit struct {
-	tree  string
-	files map[string]fakeRepoFile
+	tree    string
+	files   map[string]fakeRepoFile
+	parents []string
+	message string
+	author  map[string]string
+	// committerSet records a request that set a committer.
+	committerSet bool
 }
 
 type fakeRepo struct {
@@ -44,7 +50,7 @@ type fakeRepo struct {
 	exportIgnore, subst map[string]bool
 }
 
-// fakeRepoHost is a fake GitHub serving repositories for pull.
+// fakeRepoHost is a fake GitHub serving repositories for pull and push.
 type fakeRepoHost struct {
 	t           *testing.T
 	server      *httptest.Server
@@ -54,13 +60,46 @@ type fakeRepoHost struct {
 	blobFetches int
 	tarballs    int
 	tokens      []string
+	// trees holds every tree by hash (commits and createTree results).
+	trees map[string]map[string]fakeRepoFile
+	// gitDir is a scratch repository in which real git computes tree hashes.
+	gitDir string
+	// writes counts write calls; beforeRef runs before a ref update.
+	writes    int
+	beforeRef func()
+	// treeOverride, when set, replaces the hash createTree answers.
+	treeOverride string
 }
 
 func newFakeRepoHost(t *testing.T) *fakeRepoHost {
-	f := &fakeRepoHost{t: t, repos: map[string]*fakeRepo{}}
+	f := &fakeRepoHost{t: t, repos: map[string]*fakeRepo{}, trees: map[string]map[string]fakeRepoFile{}, gitDir: filepath.Join(t.TempDir(), "trees.git")}
+	if out, err := exec.Command("git", "init", "-q", "--bare", f.gitDir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
 	return f
+}
+
+// treeHash asks real git for the tree hash of files.
+func (f *fakeRepoHost) treeHash(files map[string]fakeRepoFile) string {
+	var list bytes.Buffer
+	for p, file := range files {
+		fmt.Fprintf(&list, "%s %s\t%s\x00", file.mode, f.entrySHA(file), p)
+	}
+	index := filepath.Join(f.t.TempDir(), "index")
+	run := func(input []byte, args ...string) string {
+		cmd := exec.Command("git", append([]string{"--git-dir=" + f.gitDir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
+		cmd.Stdin = bytes.NewReader(input)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			f.t.Errorf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run(list.Bytes(), "update-index", "-z", "--add", "--index-info")
+	return run(nil, "write-tree", "--missing-ok")
 }
 
 func (f *fakeRepoHost) apiBase() string { return f.server.URL + "/api" }
@@ -74,25 +113,32 @@ func fakeSHA(parts ...string) string {
 func (f *fakeRepoHost) commit(repo, branch string, files map[string]fakeRepoFile) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.commitLocked(repo, branch, files)
+}
+
+// commitLocked is commit for callers holding f.mu (beforeRef hooks).
+func (f *fakeRepoHost) commitLocked(repo, branch string, files map[string]fakeRepoFile) string {
 	r := f.repos[repo]
 	if r == nil {
 		r = &fakeRepo{defaultBranch: "main", branches: map[string]string{}, commits: map[string]fakeCommit{}, exportIgnore: map[string]bool{}, subst: map[string]bool{}}
 		f.repos[repo] = r
 	}
 	copied := map[string]fakeRepoFile{}
-	var keys []string
 	for p, file := range files {
 		if file.mode == "" {
 			file.mode = "100644"
 		}
 		copied[p] = file
-		keys = append(keys, p+file.mode+file.text)
 	}
-	sort.Strings(keys)
 	f.counter++
-	tree := fakeSHA(append([]string{"tree"}, keys...)...)
+	tree := f.treeHash(copied)
+	f.trees[tree] = copied
 	commit := fakeSHA("commit", tree, fmt.Sprint(f.counter))
-	r.commits[commit] = fakeCommit{tree: tree, files: copied}
+	var parents []string
+	if old, ok := r.branches[branch]; ok {
+		parents = []string{old}
+	}
+	r.commits[commit] = fakeCommit{tree: tree, files: copied, parents: parents}
 	r.branches[branch] = commit
 	return commit
 }
@@ -118,15 +164,23 @@ func (f *fakeRepoHost) serve(w http.ResponseWriter, r *http.Request) {
 			Repositories []string          `json:"repositories"`
 			Permissions  map[string]string `json:"permissions"`
 		}
-		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.Repositories) != 1 || body.Permissions["contents"] != "read" {
+		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.Repositories) != 1 || len(body.Permissions) != 1 {
 			w.WriteHeader(400)
 			return
 		}
-		if body.Repositories[0] == "denied" {
+		access := body.Permissions["contents"]
+		if access != "read" && access != "write" {
+			w.WriteHeader(400)
+			return
+		}
+		if body.Repositories[0] == "denied" || access == "write" && body.Repositories[0] == "readonly" {
 			w.WriteHeader(422)
 			return
 		}
 		token := "ghs_" + body.Repositories[0]
+		if access == "write" {
+			token = "ghw_" + body.Repositories[0]
+		}
 		f.tokens = append(f.tokens, token)
 		w.WriteHeader(201)
 		fmt.Fprintf(w, `{"token":%q,"expires_at":"2026-10-05T03:00:00Z"}`, token)
@@ -182,8 +236,18 @@ func (f *fakeRepoHost) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(strings.TrimPrefix(path, "/repos/"), "/", 3)
 	name := parts[0] + "/" + parts[1]
 	repo := f.repos[name]
-	if r.Header.Get("Authorization") != "Bearer ghs_"+parts[1] || r.Header.Get("X-GitHub-Api-Version") == "" {
+	auth := r.Header.Get("Authorization")
+	if auth != "Bearer ghs_"+parts[1] && auth != "Bearer ghw_"+parts[1] || r.Header.Get("X-GitHub-Api-Version") == "" {
 		w.WriteHeader(401)
+		return
+	}
+	if r.Method != http.MethodGet {
+		// Writes need a token with contents: write.
+		if auth != "Bearer ghw_"+parts[1] || repo == nil {
+			w.WriteHeader(403)
+			return
+		}
+		f.serveWrite(w, r, name, repo, parts)
 		return
 	}
 	if repo == nil {
@@ -210,13 +274,10 @@ func (f *fakeRepoHost) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(400)
 			return
 		}
-		for _, c := range repo.commits {
-			if c.tree != tree {
-				continue
-			}
+		if files, ok := f.trees[tree]; ok {
 			entries := []githubTreeEntry{}
 			dirs := map[string]bool{}
-			for p, file := range c.files {
+			for p, file := range files {
 				for i, c := range p {
 					if c == '/' {
 						dirs[p[:i]] = true
@@ -297,7 +358,7 @@ func newPullWorld(t *testing.T, storage *Storage) *pullWorld {
 	settings.webBase, settings.apiBase = host.server.URL+"/web", host.apiBase()
 	s.githubSourceHook = func(ctx context.Context, r *repository, repo string) (githubSource, error) {
 		client := newGitHubClient(settings)
-		token, err := client.installationToken(ctx, 77, repo)
+		token, err := client.installationToken(ctx, 77, repo, "read")
 		if err != nil {
 			return nil, err
 		}
@@ -463,12 +524,14 @@ func TestGitHubPull(t *testing.T) {
 	// The first pull.
 	got := w.pull("site/", "")
 	kept := []string{"README.md", "index.html", "docs/guide.md", ".gitignore", ".github/workflows/ci.yml", "run.sh", "export/ignored.txt", "version.txt"}
-	if got.Commit != first || got.UpToDate || got.Created != len(kept)-1 || got.Unchanged != 1 || got.Updated != 0 || got.Deleted != 0 || got.NewState == got.OldState || got.Folder != "site/" || got.Repo != "dave-zap/site" || got.Branch != "main" {
+	// utf16.md is held converted to UTF-8 (with a UTF-8 byte order mark).
+	const utf16Converted = "\xef\xbb\xbf# x\r\n"
+	if got.Commit != first || got.UpToDate || got.Created != len(kept) || got.Unchanged != 1 || got.Updated != 0 || got.Deleted != 0 || got.NewState == got.OldState || got.Folder != "site/" || got.Repo != "dave-zap/site" || got.Branch != "main" {
 		t.Fatalf("first pull: %+v", got)
 	}
 	reasons := skippedReasons(got)
 	wantSkipped := map[string]string{
-		"logo.png": "binary file", "latin1.txt": "Latin-1", "utf16.md": "UTF-16 text", "big.txt": "larger than", "My File.txt": "name not allowed", "-dash.md": "name not allowed",
+		"logo.png": "binary file", "latin1.txt": "Latin-1", "big.txt": "larger than", "My File.txt": "name not allowed", "-dash.md": "name not allowed",
 		strings.Repeat("d/", 8) + "too-deep.md": "name not allowed", "current": "symbolic link", "vendor/lib": "submodule",
 		".metatrash.json": "settings file", "docs/.metatrash.json": "settings file",
 	}
@@ -486,6 +549,12 @@ func TestGitHubPull(t *testing.T) {
 			t.Fatalf("site/%s: %q, want %q", p, got, want)
 		}
 	}
+	if text := w.read("site/utf16.md"); text != utf16Converted {
+		t.Fatalf("converted: %q", text)
+	}
+	if got.ConvertedCount != 1 || len(got.Converted) != 1 || got.Converted[0] != (PullConverted{"site/utf16.md", "UTF-16 LE"}) {
+		t.Fatalf("converted list: %+v", got.Converted)
+	}
 	files := w.files("site/")
 	if files["site/README.md"].ID != readmeID {
 		t.Fatal("identical file lost its ID")
@@ -493,7 +562,7 @@ func TestGitHubPull(t *testing.T) {
 	if _, ok := files["site/sub/.metatrash.json"]; !ok {
 		t.Fatal("folder settings file removed")
 	}
-	if len(files) != len(kept)+2 {
+	if len(files) != len(kept)+3 {
 		t.Fatalf("folder holds %d files: %v", len(files), files)
 	}
 	// Archives leave out export-ignore files and change export-subst ones:
@@ -502,7 +571,7 @@ func TestGitHubPull(t *testing.T) {
 		t.Fatalf("tarballs %d, blob fetches %d", w.host.tarballs, w.host.blobFetches)
 	}
 	base, ok := w.baseline("site/")
-	if !ok || base.Commit != first || base.Repo != "dave-zap/site" || base.Branch != "main" || len(base.Files) != len(kept) || base.Modes["run.sh"] != "100755" || len(base.Modes) != 1 || len(base.Skipped) != len(wantSkipped) {
+	if !ok || base.Commit != first || base.Repo != "dave-zap/site" || base.Branch != "main" || len(base.Files) != len(kept)+1 || base.Modes["run.sh"] != "100755" || len(base.Modes) != 1 || len(base.Skipped) != len(wantSkipped) {
 		t.Fatalf("baseline %+v", base)
 	}
 	for _, sk := range base.Skipped {
@@ -511,9 +580,19 @@ func TestGitHubPull(t *testing.T) {
 		}
 	}
 	for rel, blob := range base.Files {
+		if rel == "utf16.md" {
+			if blob != blobHash([]byte(utf16Converted)) || base.Converted[rel] != (githubConverted{blobHash([]byte(siteFiles()[rel].text)), "UTF-16 LE"}) {
+				t.Fatalf("converted baseline %s %+v", blob, base.Converted)
+			}
+			continue
+		}
 		if blob != blobHash([]byte(siteFiles()[rel].text)) {
 			t.Fatalf("baseline blob for %s", rel)
 		}
+	}
+	// The recorded baseline rebuilds GitHub's tree exactly.
+	if tree, err := gitTreeHash(base.githubTree()); err != nil || tree != base.Tree {
+		t.Fatalf("baseline tree %s %v, want %s", tree, err, base.Tree)
 	}
 	// History shows each pulled file once, as a create in the pull commit.
 	guide := files["site/docs/guide.md"]
@@ -543,7 +622,7 @@ func TestGitHubPull(t *testing.T) {
 	// Nothing new on GitHub: up to date, nothing written.
 	head, _ := w.repo.head(w.ctx)
 	again := w.pull("site/", "")
-	if !again.UpToDate || again.NewState != head || again.OldState != head || again.Unchanged != len(kept) || again.SkippedCount != len(wantSkipped) || again.Created+again.Updated+again.Deleted != 0 {
+	if !again.UpToDate || again.NewState != head || again.OldState != head || again.Unchanged != len(kept)+1 || again.ConvertedCount != 1 || again.SkippedCount != len(wantSkipped) || again.Created+again.Updated+again.Deleted != 0 {
 		t.Fatalf("up to date: %+v", again)
 	}
 	if after, _ := w.repo.head(w.ctx); after != head {
@@ -559,7 +638,7 @@ func TestGitHubPull(t *testing.T) {
 	delete(next, "logo.png")
 	second := w.host.commit("dave-zap/site", "main", next)
 	upd := w.pull("site/", "")
-	if upd.Commit != second || upd.Updated != 2 || upd.Created != 1 || upd.Deleted != 1 || upd.Unchanged != len(kept)-3 || upd.SkippedCount != len(wantSkipped)-1 {
+	if upd.Commit != second || upd.Updated != 2 || upd.Created != 1 || upd.Deleted != 1 || upd.Unchanged != len(kept)-2 || upd.SkippedCount != len(wantSkipped)-1 {
 		t.Fatalf("update: %+v", upd)
 	}
 	files = w.files("site/")
@@ -578,22 +657,20 @@ func TestGitHubPull(t *testing.T) {
 		t.Fatalf("updated file history %+v", h.Entries)
 	}
 
-	// Changes in the folder stop a pull until they are undone.
+	// Changes in the folder do not stop a pull when GitHub has nothing new:
+	// they stay, and are counted.
 	w.write("site/README.md", "# local edit\n")
 	w.write("site/extra.md", "extra\n")
 	w.do("delete", Input{Path: "site/docs/new.md"}, "")
-	msg = w.pullMessage("site/")
-	for _, want := range []string{"site/README.md (changed)", "site/extra.md (added)", "site/docs/new.md (deleted)", "changes since the last pull"} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("changed message %q lacks %q", msg, want)
-		}
+	if r := w.pull("site/", ""); !r.UpToDate || r.LocalChanges != 3 || r.Unchanged != len(kept)-1 {
+		t.Fatalf("local changes, nothing new: %+v", r)
 	}
 	// Folder settings files are not repository files; changing them is fine.
 	w.write("site/sub/.metatrash.json", `{"purpose":"still fine"}`)
 	w.write("site/README.md", "# Site v2\n")
 	w.do("delete", Input{Path: "site/extra.md"}, "")
 	w.write("site/docs/new.md", "New\n")
-	if r := w.pull("site/", ""); !r.UpToDate {
+	if r := w.pull("site/", ""); !r.UpToDate || r.LocalChanges != 0 {
 		t.Fatalf("restored folder: %+v", r)
 	}
 
@@ -731,11 +808,11 @@ func TestClassifyRepoEntries(t *testing.T) {
 		t.Fatalf("keep %v skipped %v", keep, skipped)
 	}
 	for content, want := range map[string]string{
-		"\xff\xfeh\x00i\x00":            "UTF-16 text",
-		"\xfe\xff\x00h\x00i":            "UTF-16 text",
-		"\xff\xfe\x00\x00h\x00\x00\x00": "UTF-32 text",
-		"\x89PNG\r\n\x1a\n\x00":         "binary file",
-		"caf\xe9":                       "Latin-1",
+		"\xff\xfe\x00\xd8i\x00":            "UTF-16 text that cannot be converted",
+		"\xfe\xff\x00h\x00":                "UTF-16 text",
+		"\xff\xfe\x00\x00\x00\x00\x11\x00": "UTF-32 text",
+		"\x89PNG\r\n\x1a\n\x00":            "binary file",
+		"caf\xe9":                          "Latin-1",
 	} {
 		if got := notTextReason([]byte(content)); !strings.Contains(got, want) {
 			t.Fatalf("reason for %q: %q, want %q", content, got, want)

@@ -160,3 +160,31 @@ func (s *Service) listConnectedSpaces(ctx context.Context, id oauthIdentity) (co
 	}
 	return result, nil
 }
+
+// pushAuthorFor returns the public username of the connection's user and the
+// app name the user approved, for signing pushes.
+func (s *Service) pushAuthorFor(ctx context.Context, id oauthIdentity) (pushAuthor, error) {
+	if s.ownedDB == nil {
+		return pushAuthor{}, problem(403, "forbidden", "Push needs a signed-in connection.")
+	}
+	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var a pushAuthor
+	err := s.ownedDB.db.QueryRowContext(lookup, `SELECT COALESCE(u.username, ''), g.client_name FROM metatrash_oauth_grants g JOIN metatrash_users u ON u.user_id = g.user_id WHERE g.grant_id = ? AND g.user_id = ?`, id.GrantID, id.UserID).Scan(&a.Username, &a.Agent)
+	if err != nil {
+		return pushAuthor{}, fmt.Errorf("push author unavailable")
+	}
+	// A GitHub account the user linked (through Connect GitHub) names them on
+	// GitHub too.
+	links, err := s.ownedDB.githubInstallations(ctx, id.UserID)
+	if err != nil {
+		return pushAuthor{}, err
+	}
+	for _, inst := range links {
+		if inst.GitHubUserID > 0 && githubLoginPattern.MatchString(inst.GitHubLogin) {
+			a.GitHubID, a.GitHubLogin = inst.GitHubUserID, inst.GitHubLogin
+			break
+		}
+	}
+	return a, nil
+}

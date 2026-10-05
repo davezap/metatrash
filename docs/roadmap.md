@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.16.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.20.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Folders: first version
 
@@ -41,8 +41,12 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
        API and one tarball, no clone). Later pulls fast-forward an unchanged
        folder. Files Metatrash cannot hold are skipped and will be carried
        through by push.
-     - 2d `pending` and `push`, relative to the baseline; GitHub moved past it
-       → stop and report.
+     - 2d `pending` and `push` — done in 0.20.0: Git Data API push on the
+       baseline tree with a tree-hash check, never forced; GitHub moved past
+       the baseline → stop. Pull merges by file (no file changed on both
+       sides) and converts UTF-16/UTF-32 to UTF-8. Push author is the
+       app (Verified) with the user as `Co-authored-by` (GitHub account when
+       linked). Hint in write/move/delete results after 30 minutes unpushed.
      - 2e `auto` mode.
      - Step 3 (ongoing pull) reuses the baseline fetch, triggered by push
        webhooks.
@@ -53,6 +57,9 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
    - After 2d: binary files (images and PDFs by content allow-list, base64 in
      the API, image content on MCP reads). Until then pull skips them and push
      carries them through.
+   - Later: consider letting push send `.github/workflows/` changes (needs
+     the app's `workflows` permission; refused for now because workflows can
+     reach CI secrets, so anyone who can push could reach them).
    - Later: a member permission "write but not push", so working agents edit
      and a supervising agent reviews `pending` and pushes. Possibly a GitHub
      service on the space root (the whole space as one repo, so no other

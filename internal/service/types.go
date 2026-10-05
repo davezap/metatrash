@@ -53,6 +53,9 @@ type Mutation struct {
 	OldState string `json:"oldState"`
 	NewState string `json:"newState"`
 	File     File   `json:"file"`
+	// Hint reminds the agent of changes in a GitHub folder that have waited
+	// unpushed for a while (see unpushedHint).
+	Hint string `json:"hint,omitempty"`
 }
 
 type WriteResult struct {

@@ -45,6 +45,15 @@ type Service struct {
 	lockPath   string
 	// githubSourceHook replaces the GitHub reader in tests.
 	githubSourceHook func(ctx context.Context, r *repository, repo string) (githubSource, error)
+	// githubPushHook replaces the GitHub writer in tests.
+	githubPushHook func(ctx context.Context, r *repository, repo string) (githubPusher, error)
+	// githubLocks holds one mutex per GitHub folder (see githubFolderLock).
+	githubLocks sync.Map
+	// githubHints holds, per GitHub folder, the earliest time the next
+	// unpushed-changes hint may be given (see unpushedHint).
+	githubHints sync.Map
+	// clock replaces time.Now in tests.
+	clock func() time.Time
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -251,7 +260,19 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 				return nil, problem(403, "protected_file", folderConfigName+" files cannot be moved; write the new one and delete the old one.")
 			}
 		}
-		return s.queued(ctx, func() (any, error) { return s.mutate(ctx, r, space, op, in) })
+		value, err := s.queued(ctx, func() (any, error) { return s.mutate(ctx, r, space, op, in) })
+		if err != nil {
+			return nil, err
+		}
+		switch v := value.(type) {
+		case WriteResult:
+			v.Hint = s.unpushedHint(ctx, r, v.NewState, in.Path)
+			value = v
+		case Mutation:
+			v.Hint = s.unpushedHint(ctx, r, v.NewState, in.Path, in.From, in.To)
+			value = v
+		}
+		return value, nil
 	default:
 		return nil, invalid("Unknown operation.")
 	}

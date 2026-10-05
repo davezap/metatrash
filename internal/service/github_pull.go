@@ -12,9 +12,11 @@ import (
 )
 
 // GitHub step 2c: pull fills a GitHub folder from its repository and records
-// the commit it came from (the baseline). Push (2d) builds on the baseline:
-// files Metatrash cannot hold are skipped here and carried through untouched
-// there, so nothing on GitHub is lost.
+// the commit it came from (the baseline). Push (2d, github_push.go) builds on
+// the baseline: files Metatrash cannot hold are skipped here and carried
+// through untouched there, so nothing on GitHub is lost. UTF-16 and UTF-32
+// text with a byte order mark is converted to UTF-8 here and goes back to
+// GitHub only when an agent edits it.
 //
 // Baselines live in the space's own Git, in the service file
 // .metatrash/github.json, written in the same commit as the pulled files.
@@ -42,6 +44,15 @@ type githubBaseline struct {
 	// Modes lists files whose mode is not 100644 (executables).
 	Modes   map[string]string `json:"modes,omitempty"`
 	Skipped []githubSkipped   `json:"skipped,omitempty"`
+	// Converted lists files pull converted from UTF-16 or UTF-32 to UTF-8;
+	// their Files entry is the converted blob.
+	Converted map[string]githubConverted `json:"converted,omitempty"`
+	// State is the space revision holding the baseline content of the
+	// folder's files (set by push; for a pull, the pull commit, found by its
+	// summary). FileStates overrides it for files whose local change a merging
+	// pull kept.
+	State      string            `json:"state,omitempty"`
+	FileStates map[string]string `json:"fileStates,omitempty"`
 }
 
 // githubSkipped is a repository file the folder does not hold.
@@ -91,6 +102,20 @@ type PullResult struct {
 	// Skipped lists at most maxPullListed entries; SkippedCount is the total.
 	Skipped      []PullSkipped `json:"skipped"`
 	SkippedCount int           `json:"skippedCount"`
+	// Converted lists at most maxPullListed files held as UTF-8 that are
+	// UTF-16 or UTF-32 on GitHub; ConvertedCount is the total.
+	Converted      []PullConverted `json:"converted"`
+	ConvertedCount int             `json:"convertedCount"`
+	// LocalChanges counts files changed here since the last pull or push that
+	// the pull left in place and push would send (see pending).
+	LocalChanges int `json:"localChanges"`
+}
+
+// PullConverted names a file pull converted to UTF-8 (with a UTF-8 byte
+// order mark), by its path in the space.
+type PullConverted struct {
+	Path     string `json:"path"`
+	Encoding string `json:"encoding"`
 }
 
 func githubConflict(message string) *Error { return problem(409, "conflict", message) }
@@ -209,15 +234,16 @@ func textContent(b []byte) bool {
 }
 
 // notTextReason says why content cannot be held, precisely enough for an
-// agent to tell the owner what to fix. UTF-16 comes almost always from
-// Windows PowerShell 5.1 redirection (echo "x" > file).
+// agent to tell the owner what to fix. UTF-16 and UTF-32 text with a byte
+// order mark is converted on pull; it lands here only when it does not decode
+// cleanly or holds NUL characters.
 func notTextReason(b []byte) string {
-	const fix = "; Metatrash holds UTF-8 text only, re-save it as UTF-8"
+	const fix = " that cannot be converted to UTF-8 (invalid characters or NUL); Metatrash holds UTF-8 text only, re-save it as UTF-8"
 	switch {
 	case bytes.HasPrefix(b, []byte{0xFF, 0xFE, 0, 0}) || bytes.HasPrefix(b, []byte{0, 0, 0xFE, 0xFF}):
 		return "UTF-32 text" + fix
 	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}) || bytes.HasPrefix(b, []byte{0xFE, 0xFF}):
-		return "UTF-16 text (often written by Windows PowerShell 5.1)" + fix
+		return "UTF-16 text" + fix
 	case bytes.IndexByte(b, 0) >= 0:
 		return "binary file"
 	default:
@@ -246,9 +272,70 @@ func sameRecords(a, b map[string]record) bool {
 	return true
 }
 
+// localChanges compares a folder's repository files with its baseline:
+// rel -> "added", "modified" or "deleted".
+func localChanges(base githubBaseline, local map[string]record) map[string]string {
+	out := map[string]string{}
+	for rel, f := range local {
+		if blob, ok := base.Files[rel]; !ok {
+			out[rel] = "added"
+		} else if blob != f.Blob {
+			out[rel] = "modified"
+		}
+	}
+	for rel := range base.Files {
+		if _, ok := local[rel]; !ok {
+			out[rel] = "deleted"
+		}
+	}
+	return out
+}
+
+// pullPlan is what applyPull writes, worked out before the write queue.
+type pullPlan struct {
+	result    PullResult
+	svc       folderService
+	folder    string
+	seenHead  string
+	base      githubBaseline
+	hasBase   bool
+	seenLocal map[string]record
+	writes    map[string][]byte // rel -> content to create or replace
+	deletes   []string          // rel
+	baseline  githubBaseline
+}
+
+// listResult fills the skipped and converted lists of a result from a baseline.
+func (result *PullResult) listFrom(b githubBaseline, folder string) {
+	result.SkippedCount = len(b.Skipped)
+	for i, sk := range b.Skipped {
+		if i == maxPullListed {
+			break
+		}
+		result.Skipped = append(result.Skipped, PullSkipped{Path: sk.Path, Reason: sk.Reason})
+	}
+	paths := make([]string, 0, len(b.Converted))
+	for rel := range b.Converted {
+		paths = append(paths, rel)
+	}
+	sort.Strings(paths)
+	result.ConvertedCount = len(paths)
+	for i, rel := range paths {
+		if i == maxPullListed {
+			break
+		}
+		result.Converted = append(result.Converted, PullConverted{Path: folder + rel, Encoding: b.Converted[rel].Encoding})
+	}
+}
+
 // pull runs the pull tool on a repository the caller's access check admitted
 // for writing. GitHub is read outside the write queue; the queue re-checks
 // that the folder, its settings and its baseline did not change meanwhile.
+//
+// A folder with local changes (since the last pull or push) still pulls when
+// no file changed on both sides: GitHub's changes are applied, the local ones
+// stay, and they remain pending for push. A file changed on both sides stops
+// the pull (conflict) unless both made the same change. No line-level merging.
 func (s *Service) pull(ctx context.Context, r *repository, space, folderArg string) (any, error) {
 	ctx, cancel := context.WithTimeout(ctx, githubPullTimeout)
 	defer cancel()
@@ -278,24 +365,15 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 		hasBase = false
 	}
 	local := localRepoFiles(files, folder)
+	changed := map[string]string{}
 	if hasBase {
-		var changed []string
-		for rel, f := range local {
-			if blob, ok := base.Files[rel]; !ok {
-				changed = append(changed, folder+rel+" (added)")
-			} else if blob != f.Blob {
-				changed = append(changed, folder+rel+" (changed)")
-			}
-		}
-		for rel := range base.Files {
-			if _, ok := local[rel]; !ok {
-				changed = append(changed, folder+rel+" (deleted)")
-			}
-		}
-		if len(changed) > 0 {
-			return nil, githubConflict(fmt.Sprintf("%s has changes since the last pull (commit %s): %s. Pull only updates an unchanged folder; pushing changes comes in a later version. To discard them, restore those files (history and read with a revision), then pull again.", folder, short(base.Commit), listSome(changed)))
-		}
+		changed = localChanges(base, local)
 	}
+	unlock, err := s.githubFolderLock(r, folder)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if err := s.rates.reserve(allowance{"github:pull:" + space, githubPullsPerSpace, githubPullWindow}); err != nil {
 		return nil, err
 	}
@@ -307,17 +385,31 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 	if err != nil {
 		return nil, err
 	}
-	result := PullResult{Space: space, Folder: folder, Repo: svc.Repo, Branch: svc.Branch, Commit: commit, OldState: head, NewState: head, Skipped: []PullSkipped{}}
+	result := PullResult{Space: space, Folder: folder, Repo: svc.Repo, Branch: svc.Branch, Commit: commit, OldState: head, NewState: head, Skipped: []PullSkipped{}, Converted: []PullConverted{}}
+	// Local changes push would send: files .gitignore excludes stay out of
+	// the count (they still count as changes when GitHub adds the same path).
+	ignore, err := r.folderIgnore(ctx, local)
+	if err != nil {
+		return nil, err
+	}
+	pushable := func(changed map[string]string) int {
+		n := 0
+		for rel, how := range changed {
+			if _, tracked := base.skippedReason(rel); how != "added" || tracked || !ignore.ignored(rel) {
+				n++
+			}
+		}
+		return n
+	}
 	if hasBase && base.Commit == commit {
 		result.UpToDate = true
-		result.Unchanged = len(local)
-		result.SkippedCount = len(base.Skipped)
-		for i, sk := range base.Skipped {
-			if i == maxPullListed {
-				break
+		result.LocalChanges = pushable(changed)
+		for rel := range base.Files {
+			if _, ok := changed[rel]; !ok {
+				result.Unchanged++
 			}
-			result.Skipped = append(result.Skipped, PullSkipped{Path: sk.Path, Reason: sk.Reason})
 		}
+		result.listFrom(base, folder)
 		return result, nil
 	}
 	entries, err := source.tree(ctx, treeHash)
@@ -325,7 +417,38 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 		return nil, err
 	}
 	keep, skipped := classifyRepoEntries(folder, entries, r.limits.MaxFileBytes)
-	if !hasBase {
+	newTree := treeFromEntries(entries)
+	githubChanged := map[string]bool{}
+	if hasBase {
+		githubChanged = changedPaths(base.githubTree(), newTree)
+		var overlap []string
+		for rel, how := range changed {
+			if !githubChanged[rel] {
+				continue
+			}
+			e, onGitHub := newTree[rel]
+			f, here := local[rel]
+			if onGitHub == here && (!here || e.sha == f.Blob) {
+				// The same change on both sides: both deleted, or the same content.
+				delete(changed, rel)
+				continue
+			}
+			overlap = append(overlap, folder+rel+" ("+how+" here, changed on GitHub)")
+		}
+		if len(overlap) > 0 {
+			return nil, githubConflict(fmt.Sprintf("Files changed both here and on GitHub since commit %s (GitHub is now at %s): %s. Pull merges only when no file changed on both sides; it never merges lines. To keep your version of a file, copy it outside %s, restore the pulled version (pending gives baseState; read the file with that revision and write it back, or delete a file you added), pull, then reapply your edit and push.", short(base.Commit), short(commit), listSome(overlap), folder))
+		}
+		// A local file standing where the repository holds a file pull skipped
+		// keeps that file skipped while GitHub leaves it alone.
+		for rel, how := range changed {
+			if sk, wasSkipped := base.skippedReason(rel); how == "added" && wasSkipped && !githubChanged[rel] {
+				if _, ok := keep[rel]; ok {
+					delete(keep, rel)
+					skipped = append(skipped, sk)
+				}
+			}
+		}
+	} else {
 		// First pull: what the folder already holds must match the repository.
 		skippedPaths := map[string]bool{}
 		for _, sk := range skipped {
@@ -356,11 +479,19 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 	if len(keep) > 4*r.limits.MaxFiles || candidateBytes > 4*r.limits.MaxCurrentTextBytes {
 		return nil, problem(507, "storage_limit", fmt.Sprintf("%s is too large for this space: %d files, %d bytes of text (the space holds at most %d files and %d bytes).", svc.Repo, len(keep), candidateBytes, r.limits.MaxFiles, r.limits.MaxCurrentTextBytes))
 	}
+	// Files GitHub did not change and the folder already holds need no
+	// download; neither do files the folder holds identical copies of.
+	reuse := map[string]bool{}
 	want := map[string]string{}
 	for rel, e := range keep {
-		if f, ok := local[rel]; !ok || f.Blob != e.SHA {
-			want[rel] = e.SHA
+		if _, held := base.Files[rel]; hasBase && held && !githubChanged[rel] {
+			reuse[rel] = true
+			continue
 		}
+		if f, ok := local[rel]; ok && f.Blob == e.SHA {
+			continue
+		}
+		want[rel] = e.SHA
 	}
 	content := map[string][]byte{}
 	if len(want) > 0 {
@@ -368,19 +499,103 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			return nil, err
 		}
 	}
+	converted := map[string]string{}
 	for rel := range want {
 		b, ok := content[rel]
 		if !ok || blobHash(b) != want[rel] {
 			return nil, errGitHubUnavailable
 		}
-		if !textContent(b) {
-			e := keep[rel]
+		if textContent(b) {
+			continue
+		}
+		e := keep[rel]
+		if out, encoding, ok := convertUnicode(b); ok {
+			if int64(len(out)) <= r.limits.MaxFileBytes {
+				content[rel] = out
+				converted[rel] = encoding
+				continue
+			}
 			delete(keep, rel)
 			delete(content, rel)
-			skipped = append(skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: notTextReason(b)})
+			skipped = append(skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: fmt.Sprintf("%s text, larger than the space's file limit (%d bytes) once converted to UTF-8", encoding, r.limits.MaxFileBytes)})
+			continue
 		}
+		delete(keep, rel)
+		delete(content, rel)
+		skipped = append(skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: notTextReason(b)})
 	}
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Path < skipped[j].Path })
+	plan := pullPlan{result: result, svc: svc, folder: folder, seenHead: head, base: base, hasBase: hasBase, seenLocal: local, writes: map[string][]byte{}}
+	plan.baseline = githubBaseline{Repo: svc.Repo, Branch: svc.Branch, Commit: commit, Tree: treeHash, PulledAt: time.Now().UTC().Format(time.RFC3339), Files: map[string]string{}, Skipped: skipped}
+	baseline := &plan.baseline
+	for rel, e := range keep {
+		blob := e.SHA
+		switch {
+		case reuse[rel]:
+			blob = base.Files[rel]
+			if c, ok := base.Converted[rel]; ok {
+				if baseline.Converted == nil {
+					baseline.Converted = map[string]githubConverted{}
+				}
+				baseline.Converted[rel] = c
+			}
+		case converted[rel] != "":
+			blob = blobHash(content[rel])
+			if baseline.Converted == nil {
+				baseline.Converted = map[string]githubConverted{}
+			}
+			baseline.Converted[rel] = githubConverted{GitHubBlob: e.SHA, Encoding: converted[rel]}
+		}
+		baseline.Files[rel] = blob
+		if e.Mode != "100644" {
+			if baseline.Modes == nil {
+				baseline.Modes = map[string]string{}
+			}
+			baseline.Modes[rel] = e.Mode
+		}
+		if _, mine := changed[rel]; mine {
+			continue // the local change stays, still pending for push
+		}
+		if f, ok := local[rel]; ok && f.Blob == blob {
+			plan.result.Unchanged++
+			continue
+		}
+		b, ok := content[rel]
+		if !ok {
+			return nil, errGitHubUnavailable
+		}
+		plan.writes[rel] = b
+	}
+	for rel := range local {
+		_, kept := keep[rel]
+		_, mine := changed[rel]
+		if !kept && !mine {
+			plan.deletes = append(plan.deletes, rel)
+		}
+	}
+	sort.Strings(plan.deletes)
+	// Kept local changes to files the baseline holds: their baseline content
+	// stays where it was recorded before.
+	if len(changed) > 0 {
+		state, err := r.baselineState(ctx, head, folder, base)
+		if err != nil {
+			return nil, err
+		}
+		for rel, how := range changed {
+			if _, held := baseline.Files[rel]; !held || how == "added" {
+				continue
+			}
+			if baseline.FileStates == nil {
+				baseline.FileStates = map[string]string{}
+			}
+			if s, ok := base.FileStates[rel]; ok {
+				baseline.FileStates[rel] = s
+			} else if state != "" {
+				baseline.FileStates[rel] = state
+			}
+		}
+	}
+	plan.result.LocalChanges = pushable(changed)
 	// Exact space totals after the pull.
 	count, total := 0, int64(0)
 	for p, f := range files {
@@ -389,33 +604,37 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			total += f.Bytes
 		}
 	}
-	var repoBytes int64
-	for _, e := range keep {
-		repoBytes += e.Size
+	final := map[string]int64{}
+	for rel, f := range local {
+		final[rel] = f.Bytes
 	}
-	if count+len(keep) > r.limits.MaxFiles || total+repoBytes > r.limits.MaxCurrentTextBytes {
-		return nil, problem(507, "storage_limit", fmt.Sprintf("%s does not fit in this space: it needs %d files and %d bytes of text, and with the rest of the space that makes %d files and %d bytes (the space holds at most %d files and %d bytes).", svc.Repo, len(keep), repoBytes, count+len(keep), total+repoBytes, r.limits.MaxFiles, r.limits.MaxCurrentTextBytes))
+	for _, rel := range plan.deletes {
+		delete(final, rel)
 	}
-	value, err := s.queued(ctx, func() (any, error) {
-		return s.applyPull(ctx, r, result, svc, folder, head, base, hasBase, local, keep, skipped, content, treeHash)
-	})
-	if err != nil {
-		return nil, err
+	for rel, b := range plan.writes {
+		final[rel] = int64(len(b))
 	}
-	return value, nil
+	var folderBytes int64
+	for _, n := range final {
+		folderBytes += n
+	}
+	if count+len(final) > r.limits.MaxFiles || total+folderBytes > r.limits.MaxCurrentTextBytes {
+		return nil, problem(507, "storage_limit", fmt.Sprintf("%s does not fit in this space: the folder needs %d files and %d bytes of text, and with the rest of the space that makes %d files and %d bytes (the space holds at most %d files and %d bytes).", svc.Repo, len(final), folderBytes, count+len(final), total+folderBytes, r.limits.MaxFiles, r.limits.MaxCurrentTextBytes))
+	}
+	return s.queued(ctx, func() (any, error) { return s.applyPull(ctx, r, plan) })
 }
 
-// applyPull commits a fetched repository snapshot into the folder. It runs in
-// the write queue and refuses if the folder, its settings or its baseline
-// changed since pull looked at them.
-func (s *Service) applyPull(ctx context.Context, r *repository, result PullResult, svc folderService, folder, seenHead string, base githubBaseline, hasBase bool, seenLocal map[string]record, keep map[string]githubTreeEntry, skipped []githubSkipped, content map[string][]byte, treeHash string) (any, error) {
+// applyPull commits a pull plan. It runs in the write queue and refuses if
+// the folder, its settings or its baseline changed since pull looked at them.
+func (s *Service) applyPull(ctx context.Context, r *repository, plan pullPlan) (any, error) {
+	folder, result := plan.folder, plan.result
 	head, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return nil, err
 	}
-	if head != seenHead {
+	if head != plan.seenHead {
 		current, err := r.githubFolderService(ctx, files, folder)
-		if err != nil || current != svc {
+		if err != nil || current != plan.svc {
 			return nil, githubConflict(folder + " settings changed during the pull; pull again.")
 		}
 		baselines, err := r.githubBaselines(ctx, head)
@@ -423,45 +642,31 @@ func (s *Service) applyPull(ctx context.Context, r *repository, result PullResul
 			return nil, err
 		}
 		now, has := baselines[folder]
-		if has != hasBase || (has && now.Commit != base.Commit) {
-			return nil, githubConflict(folder + " was pulled by someone else meanwhile; pull again.")
+		if has != plan.hasBase || (has && now.Commit != plan.base.Commit) {
+			return nil, githubConflict(folder + " was pulled or pushed by someone else meanwhile; pull again.")
 		}
-		if !sameRecords(localRepoFiles(files, folder), seenLocal) {
+		if !sameRecords(localRepoFiles(files, folder), plan.seenLocal) {
 			return nil, githubConflict(folder + " changed during the pull; pull again.")
 		}
 	}
 	result.OldState = head
 	texts := map[string]string{}
 	var changes []commitChange
-	for rel, f := range seenLocal {
-		if _, ok := keep[rel]; !ok {
-			delete(files, folder+rel)
-			changes = append(changes, commitChange{f.ID, "delete", folder + rel})
-			result.Deleted++
-		}
+	for _, rel := range plan.deletes {
+		f := plan.seenLocal[rel]
+		delete(files, folder+rel)
+		changes = append(changes, commitChange{f.ID, "delete", folder + rel})
+		result.Deleted++
 	}
-	paths := make([]string, 0, len(keep))
-	for rel := range keep {
+	paths := make([]string, 0, len(plan.writes))
+	for rel := range plan.writes {
 		paths = append(paths, rel)
 	}
 	sort.Strings(paths)
-	baseline := githubBaseline{Repo: svc.Repo, Branch: svc.Branch, Commit: result.Commit, Tree: treeHash, PulledAt: time.Now().UTC().Format(time.RFC3339), Files: map[string]string{}, Skipped: skipped}
 	for _, rel := range paths {
-		e := keep[rel]
-		baseline.Files[rel] = e.SHA
-		if e.Mode != "100644" {
-			if baseline.Modes == nil {
-				baseline.Modes = map[string]string{}
-			}
-			baseline.Modes[rel] = e.Mode
-		}
+		b := plan.writes[rel]
 		p := folder + rel
-		f, exists := seenLocal[rel]
-		if exists && f.Blob == e.SHA {
-			result.Unchanged++
-			continue
-		}
-		b := content[rel]
+		f, exists := plan.seenLocal[rel]
 		operation := "write"
 		if !exists {
 			id, err := randomHex(16)
@@ -491,24 +696,17 @@ func (s *Service) applyPull(ctx context.Context, r *repository, result PullResul
 	if err != nil {
 		return nil, err
 	}
-	baselines[folder] = baseline
+	baselines[folder] = plan.baseline
 	stored, err := json.Marshal(baselines)
 	if err != nil {
 		return nil, err
 	}
-	summary := fmt.Sprintf("pull %s %s@%s into %s", svc.Repo, svc.Branch, short(result.Commit), folder)
-	state, err := r.commitFiles(ctx, head, files, texts, map[string][]byte{githubBaselinePath: stored}, changes, summary)
+	state, err := r.commitFiles(ctx, head, files, texts, map[string][]byte{githubBaselinePath: stored}, changes, pullSummary(plan.svc.Repo, plan.svc.Branch, result.Commit, folder))
 	if err != nil {
 		return nil, err
 	}
 	result.NewState = state
-	result.SkippedCount = len(skipped)
-	for i, sk := range skipped {
-		if i == maxPullListed {
-			break
-		}
-		result.Skipped = append(result.Skipped, PullSkipped{Path: sk.Path, Reason: sk.Reason})
-	}
+	result.listFrom(plan.baseline, folder)
 	return result, nil
 }
 

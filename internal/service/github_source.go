@@ -46,6 +46,22 @@ func (s *Service) githubSourceFor(ctx context.Context, r *repository, repo strin
 	if s.githubSourceHook != nil {
 		return s.githubSourceHook(ctx, r, repo)
 	}
+	return s.githubRepoClient(ctx, r, repo, "read")
+}
+
+// githubPusherFor returns a writer for repo, with a token that may write its
+// contents. Tests replace it with githubPushHook.
+func (s *Service) githubPusherFor(ctx context.Context, r *repository, repo string) (githubPusher, error) {
+	if s.githubPushHook != nil {
+		return s.githubPushHook(ctx, r, repo)
+	}
+	return s.githubRepoClient(ctx, r, repo, "write")
+}
+
+// githubRepoClient finds the space owner's installation for the repository
+// owner and asks for a token limited to that repository and contents access
+// ("read" or "write").
+func (s *Service) githubRepoClient(ctx context.Context, r *repository, repo, access string) (*githubRepoReader, error) {
 	if s.accounts == nil || s.accounts.github == nil || s.ownedDB == nil {
 		return nil, problem(403, "forbidden", "GitHub is not enabled on this Metatrash server.")
 	}
@@ -62,28 +78,28 @@ func (s *Service) githubSourceFor(ctx context.Context, r *repository, repo strin
 			continue
 		}
 		if inst.Status != "active" {
-			return nil, problem(403, "forbidden", fmt.Sprintf("The Metatrash GitHub app is suspended on %s. Unsuspend it on GitHub, then pull again.", inst.AccountLogin))
+			return nil, problem(403, "forbidden", fmt.Sprintf("The Metatrash GitHub app is suspended on %s. Unsuspend it on GitHub, then try again.", inst.AccountLogin))
 		}
 		client := newGitHubClient(s.accounts.github)
-		token, err := client.installationToken(ctx, inst.InstallationID, repo)
+		token, err := client.installationToken(ctx, inst.InstallationID, repo, access)
 		if err != nil {
 			return nil, err
 		}
 		return &githubRepoReader{client: client, token: token, repo: repo}, nil
 	}
-	return nil, problem(403, "forbidden", fmt.Sprintf("The space owner has no GitHub connection for %s. On Your account, use Connect GitHub to install the Metatrash app on %s (or Link an existing installation), then pull again.", owner, owner))
+	return nil, problem(403, "forbidden", fmt.Sprintf("The space owner has no GitHub connection for %s. On Your account, use Connect GitHub to install the Metatrash app on %s (or Link an existing installation), then try again.", owner, owner))
 }
 
-// installationToken asks for a token limited to one repository with read
-// access to its contents. GitHub refuses (404/422) when the installation
-// does not include the repository.
-func (c *githubClient) installationToken(ctx context.Context, installationID int64, repo string) (string, error) {
+// installationToken asks for a token limited to one repository with read or
+// write access to its contents. GitHub refuses (404/422) when the
+// installation does not include the repository or lacks the permission.
+func (c *githubClient) installationToken(ctx context.Context, installationID int64, repo, access string) (string, error) {
 	_, name, _ := strings.Cut(repo, "/")
 	jwt, err := c.settings.appJWT(time.Now())
 	if err != nil {
 		return "", err
 	}
-	body, _ := json.Marshal(map[string]any{"repositories": []string{name}, "permissions": map[string]string{"contents": "read"}})
+	body, _ := json.Marshal(map[string]any{"repositories": []string{name}, "permissions": map[string]string{"contents": access}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.settings.apiBase+"/app/installations/"+strconv.FormatInt(installationID, 10)+"/access_tokens", bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -95,6 +111,9 @@ func (c *githubClient) installationToken(ctx context.Context, installationID int
 	}
 	status, err := c.do(req, 64*1024, &out)
 	if status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
+		if access == "write" {
+			return "", problem(403, "forbidden", fmt.Sprintf("The Metatrash GitHub app cannot write to %s. On GitHub, open the app's installation settings (Configure): add the repository under Repository access, and accept any pending permission request (Contents: read and write). Then push again.", repo))
+		}
 		return "", problem(403, "forbidden", fmt.Sprintf("The Metatrash GitHub app cannot reach %s. On GitHub, open the app's installation settings (Configure), add the repository under Repository access, then pull again.", repo))
 	}
 	if err != nil {
@@ -114,11 +133,27 @@ type githubRepoReader struct {
 }
 
 func (g *githubRepoReader) get(ctx context.Context, path string, limit int64, out any) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.client.settings.apiBase+"/repos/"+g.repo+path, nil)
+	return g.send(ctx, http.MethodGet, path, nil, limit, out)
+}
+
+// send makes one API call on the repository; body, when set, is sent as JSON.
+func (g *githubRepoReader) send(ctx context.Context, method, path string, body any, limit int64, out any) (int, error) {
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return 0, err
+		}
+		reader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, g.client.settings.apiBase+"/repos/"+g.repo+path, reader)
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+g.token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	return g.client.do(req, limit, out)
 }
 
@@ -289,4 +324,93 @@ func (g *githubRepoReader) tarball(ctx context.Context, commit string, want map[
 			got[rel] = b
 		}
 	}
+}
+
+// githubPusher writes to one repository through the Git Data API: blobs and
+// trees, a commit, then a non-forced branch update.
+type githubPusher interface {
+	branchHead(ctx context.Context, branch string) (commit, tree string, err error)
+	// createTree applies changes on top of base and returns the new tree.
+	createTree(ctx context.Context, base string, changes []githubTreeChange) (string, error)
+	// createCommit returns the new commit and the tree GitHub recorded in it.
+	createCommit(ctx context.Context, c githubNewCommit) (commit, tree string, err error)
+	// updateRef moves branch to commit without force. It returns
+	// errGitHubMovedAhead when the branch no longer points at the parent.
+	updateRef(ctx context.Context, branch, commit string) error
+}
+
+// githubTreeChange is one entry for createTree: Content set writes a file,
+// Content nil deletes the path.
+type githubTreeChange struct {
+	Path    string
+	Mode    string
+	Content *string
+}
+
+type githubNewCommit struct {
+	Message, Tree, Parent string
+}
+
+var errGitHubMovedAhead = errors.New("github branch moved")
+
+func (g *githubRepoReader) createTree(ctx context.Context, base string, changes []githubTreeChange) (string, error) {
+	entries := make([]map[string]any, 0, len(changes))
+	for _, c := range changes {
+		e := map[string]any{"path": c.Path, "mode": c.Mode, "type": "blob"}
+		if c.Content != nil {
+			e["content"] = *c.Content
+		} else {
+			e["sha"] = nil
+		}
+		entries = append(entries, e)
+	}
+	var out struct {
+		SHA string `json:"sha"`
+	}
+	if _, err := g.send(ctx, http.MethodPost, "/git/trees", map[string]any{"base_tree": base, "tree": entries}, maxGitHubTreeBytes, &out); err != nil {
+		return "", err
+	}
+	if !hashPattern.MatchString(out.SHA) {
+		return "", errGitHubUnavailable
+	}
+	return out.SHA, nil
+}
+
+func (g *githubRepoReader) createCommit(ctx context.Context, c githubNewCommit) (string, string, error) {
+	// No author or committer: GitHub records the app's bot and signs the
+	// commit (Verified). It does not sign commits with a custom author or
+	// committer. The Metatrash user is named in a Co-authored-by trailer.
+	body := map[string]any{"message": c.Message, "tree": c.Tree, "parents": []string{c.Parent}}
+	var out struct {
+		SHA  string `json:"sha"`
+		Tree struct {
+			SHA string `json:"sha"`
+		} `json:"tree"`
+	}
+	if _, err := g.send(ctx, http.MethodPost, "/git/commits", body, 1<<20, &out); err != nil {
+		return "", "", err
+	}
+	if !hashPattern.MatchString(out.SHA) || !hashPattern.MatchString(out.Tree.SHA) {
+		return "", "", errGitHubUnavailable
+	}
+	return out.SHA, out.Tree.SHA, nil
+}
+
+func (g *githubRepoReader) updateRef(ctx context.Context, branch, commit string) error {
+	var out struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	status, err := g.send(ctx, http.MethodPatch, "/git/refs/heads/"+escapeBranch(branch), map[string]any{"sha": commit, "force": false}, 1<<20, &out)
+	if status == http.StatusUnprocessableEntity || status == http.StatusConflict {
+		return errGitHubMovedAhead
+	}
+	if err != nil {
+		return err
+	}
+	if out.Object.SHA != commit {
+		return errGitHubUnavailable
+	}
+	return nil
 }

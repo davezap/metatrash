@@ -94,7 +94,8 @@ func (h *httpAdapter) serveMCPAccount(w http.ResponseWriter, r *http.Request) {
 // serveAccountREST is the OAuth-protected REST resource (D2):
 // GET /api/v1/account/spaces lists connected spaces and
 // /api/v1/account/spaces/{space}/{file,files,history,move} mirror the
-// anonymous routes with the same access check as MCP. {space} is "public", an
+// anonymous routes with the same access check as MCP, plus pull, pending and
+// push for GitHub folders. {space} is "public", an
 // ID, or owner/slug as two path segments.
 func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, client string) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -148,6 +149,8 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 		sendError(w, missing())
 		return
 	}
+	// The identity rides along for push, which signs commits with it.
+	r = r.WithContext(context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: client, oauth: &id}))
 	h.serveRESTOperation(w, r, resource, metadataPath, func(write bool) (*repository, string, error) {
 		return h.service.agentSpaceAccess(r.Context(), id, space, client, write)
 	})
