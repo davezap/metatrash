@@ -17,13 +17,17 @@ import (
 )
 
 const branch = "refs/heads/main"
-const indexPath = ".metatrash/files.json"
+const serviceDir = ".metatrash/"
+const indexPath = serviceDir + "files.json"
 
 type repository struct {
 	path   string
 	limits Storage
 	// owned marks account-owned spaces, the only ones that may attach services.
 	owned bool
+	// owner is the owning account's user ID (owned spaces only); a GitHub
+	// folder pulls through that account's GitHub connections.
+	owner string
 }
 
 // Git receives arguments directly, never through a shell. Ignore inherited Git overrides.
@@ -125,10 +129,30 @@ func dirBytes(path string) (int64, error) {
 	return size, err
 }
 
-// Stage objects outside the repository. Over-budget writes leave no unreachable objects behind.
-// id names the changed file in the commit message; it is passed separately
-// because a deleted file is no longer in files.
+// commitChange names one file a commit touches; history finds a file's
+// commits by these lines ("<id> <operation> <path>").
+type commitChange struct {
+	id, operation, path string
+}
+
+// commit records a single-file change. id names the changed file in the commit
+// message; it is passed separately because a deleted file is no longer in files.
 func (r *repository) commit(ctx context.Context, old string, files map[string]record, changedPath, id string, text *string, operation string) (string, error) {
+	var texts map[string]string
+	if text != nil {
+		texts = map[string]string{changedPath: *text}
+	}
+	return r.commitFiles(ctx, old, files, texts, nil, []commitChange{{id, operation, changedPath}}, "")
+}
+
+// commitFiles writes one commit holding files (the complete new index). texts
+// gives the content of files whose blob is new; their records get the blob
+// hash. service replaces or adds the service's own files under .metatrash/
+// (other than the index); the ones already in old are carried forward. The
+// message is the optional summary line followed by one line per change.
+//
+// Stage objects outside the repository. Over-budget writes leave no unreachable objects behind.
+func (r *repository) commitFiles(ctx context.Context, old string, files map[string]record, texts map[string]string, service map[string][]byte, changes []commitChange, summary string) (string, error) {
 	if len(files) > r.limits.MaxFiles {
 		return "", storageLimit()
 	}
@@ -148,14 +172,54 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 	if err := os.Mkdir(stage, 0700); err != nil {
 		return "", err
 	}
-	if text != nil {
-		b, err := git(ctx, r.path, stage, []byte(*text), "hash-object", "-w", "--stdin")
+	if len(texts) == 1 {
+		for p, text := range texts {
+			b, err := git(ctx, r.path, stage, []byte(text), "hash-object", "-w", "--stdin")
+			if err != nil {
+				return "", err
+			}
+			f := files[p]
+			f.Blob = strings.TrimSpace(string(b))
+			files[p] = f
+		}
+	} else if len(texts) > 1 {
+		// Many blobs: one git process reading files written to the staging area.
+		contentDir := filepath.Join(stagingDir, "content")
+		if err := os.Mkdir(contentDir, 0700); err != nil {
+			return "", err
+		}
+		paths := make([]string, 0, len(texts))
+		for p := range texts {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		var list bytes.Buffer
+		for i, p := range paths {
+			name := filepath.Join(contentDir, fmt.Sprintf("%06d", i))
+			if err := os.WriteFile(name, []byte(texts[p]), 0600); err != nil {
+				return "", err
+			}
+			list.WriteString(name + "\n")
+		}
+		b, err := git(ctx, r.path, stage, list.Bytes(), "hash-object", "-w", "--no-filters", "--stdin-paths")
 		if err != nil {
 			return "", err
 		}
-		f := files[changedPath]
-		f.Blob = strings.TrimSpace(string(b))
-		files[changedPath] = f
+		hashes := strings.Fields(string(b))
+		if len(hashes) != len(paths) {
+			return "", fmt.Errorf("git hash-object returned %d hashes for %d files", len(hashes), len(paths))
+		}
+		for i, p := range paths {
+			if !hashPattern.MatchString(hashes[i]) {
+				return "", fmt.Errorf("invalid blob hash")
+			}
+			f := files[p]
+			f.Blob = hashes[i]
+			files[p] = f
+		}
+		if err := os.RemoveAll(contentDir); err != nil {
+			return "", err
+		}
 	}
 	index := make(map[string]storedRecord, len(files))
 	for p, f := range files {
@@ -170,6 +234,29 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 		return "", err
 	}
 	entries := []string{"100644 " + strings.TrimSpace(string(b)) + "\t" + indexPath + "\x00"}
+	serviceBlobs := map[string]string{}
+	if old != "" {
+		carried, err := r.serviceFiles(ctx, old)
+		if err != nil {
+			return "", err
+		}
+		for p, blob := range carried {
+			serviceBlobs[p] = blob
+		}
+	}
+	for p, content := range service {
+		if !strings.HasPrefix(p, serviceDir) || p == indexPath {
+			return "", fmt.Errorf("invalid service file %s", p)
+		}
+		b, err := git(ctx, r.path, stage, content, "hash-object", "-w", "--stdin")
+		if err != nil {
+			return "", err
+		}
+		serviceBlobs[p] = strings.TrimSpace(string(b))
+	}
+	for p, blob := range serviceBlobs {
+		entries = append(entries, "100644 "+blob+"\t"+p+"\x00")
+	}
 	for p, f := range files {
 		entries = append(entries, "100644 "+f.Blob+"\t"+p+"\x00")
 	}
@@ -189,8 +276,14 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 	if old != "" {
 		args = append(args, "-p", old)
 	}
-	message := id + " " + operation + " " + changedPath + "\n"
-	b, err = git(ctx, r.path, stage, []byte(message), args...)
+	var message strings.Builder
+	if summary != "" {
+		message.WriteString(summary + "\n\n")
+	}
+	for _, c := range changes {
+		message.WriteString(c.id + " " + c.operation + " " + c.path + "\n")
+	}
+	b, err = git(ctx, r.path, stage, []byte(message.String()), args...)
 	if err != nil {
 		return "", err
 	}
@@ -239,6 +332,44 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 		return "", err
 	}
 	return commit, nil
+}
+
+// serviceFiles lists the service's own files under .metatrash/ in a revision,
+// other than the index, as path -> blob hash. Agents never see or write them.
+func (r *repository) serviceFiles(ctx context.Context, revision string) (map[string]string, error) {
+	b, err := git(ctx, r.path, "", nil, "ls-tree", "-r", "-z", revision, "--", serviceDir)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, entry := range strings.Split(string(b), "\x00") {
+		if entry == "" {
+			continue
+		}
+		meta, path, ok := strings.Cut(entry, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 || fields[0] != "100644" || fields[1] != "blob" || !hashPattern.MatchString(fields[2]) || !strings.HasPrefix(path, serviceDir) {
+			return nil, fmt.Errorf("invalid service file entry")
+		}
+		if path != indexPath {
+			out[path] = fields[2]
+		}
+	}
+	return out, nil
+}
+
+// serviceFile returns one service file's content in a revision, or nil when
+// the revision has none.
+func (r *repository) serviceFile(ctx context.Context, revision, path string) ([]byte, error) {
+	files, err := r.serviceFiles(ctx, revision)
+	if err != nil {
+		return nil, err
+	}
+	blob, ok := files[path]
+	if !ok {
+		return nil, nil
+	}
+	return r.blob(ctx, blob)
 }
 
 // provision opens a space repository, creating it with the protected README

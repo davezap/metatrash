@@ -34,7 +34,8 @@ Each space is its own bare Git repository with a protected root `README.md`.
   in `<data>/owned-repos/<space_id>.git`. Reachable by agents only through OAuth.
 
 Files have a stable 32-hex ID that survives edits and moves, kept in a
-service-owned `.metatrash/files.json` index committed with the content. Every
+service-owned `.metatrash/files.json` index committed with the content (GitHub
+baselines sit beside it in `.metatrash/github.json`). Every
 read returns the space `state` (HEAD hash) and every write or move must pass it
 back as `ifInState`. Messaging is a folder convention (inbox, processing,
 archive), not a broker. Files can be deleted (except `README.md` and the root

@@ -39,7 +39,7 @@ type mcpInput struct {
 	To         string  `json:"to"`
 }
 
-const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value (owner/slug, or public) as the space argument of read, list, history, write, move and delete. Start in a space by reading its root .metatrash.json, which describes the space and its folders; a folder may have its own .metatrash.json, and when it has none, list it. Writes need ifInState from a read or list of the same space."
+const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value (owner/slug, or public) as the space argument of read, list, history, write, move and delete. Start in a space by reading its root .metatrash.json, which describes the space and its folders; a folder may have its own .metatrash.json, and when it has none, list it. Writes need ifInState from a read or list of the same space. A folder whose .metatrash.json has a github service mirrors a GitHub repository: call pull to fill or update it from GitHub."
 
 // mcpHandler builds the anonymous /mcp server, or with account set the OAuth
 // /mcp/account server, which adds the spaces tool and checks every operation
@@ -59,6 +59,10 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 	server := mcp.NewServer(&mcp.Implementation{Name: "metatrash", Version: metatrash.Version}, options)
 	if account {
 		for _, tool := range catalog.AccountTools {
+			if tool.Name == "pull" {
+				server.AddTool(tool, h.mcpPull)
+				continue
+			}
 			if tool.Name != "spaces" {
 				return nil, fmt.Errorf("unknown MCP account tool %q", tool.Name)
 			}
@@ -229,6 +233,36 @@ func decodeMCPInput(raw []byte, args *mcpInput) error {
 		return invalid("Invalid argument fields.")
 	}
 	return nil
+}
+
+// mcpPull is the pull tool on /mcp/account: {space, folder}. It needs write
+// access to the space, like any other change.
+func (h *httpAdapter) mcpPull(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	identity, ok := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
+	if !ok || identity.oauth == nil {
+		return mcpFailure(problem(401, "unauthorized", "Missing transport credentials.")), nil
+	}
+	raw := req.Params.Arguments
+	var args struct {
+		Space  string `json:"space"`
+		Folder string `json:"folder"`
+	}
+	if len(raw) > 4096 || !validUnicodeJSON(raw) || noDuplicateKeys(raw) != nil || strictJSON(raw, &args) != nil || args.Space == "" || args.Folder == "" {
+		return mcpFailure(invalid("pull takes space and folder.")), nil
+	}
+	repo, space, err := h.service.agentSpaceAccess(ctx, *identity.oauth, args.Space, identity.client, true)
+	if err != nil {
+		return mcpFailure(err), nil
+	}
+	value, err := h.service.pull(ctx, repo, space, args.Folder)
+	if err != nil {
+		return mcpFailure(err), nil
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return mcpFailure(err), nil
+	}
+	return &mcp.CallToolResult{StructuredContent: value, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
 }
 
 func mcpFailure(err error) *mcp.CallToolResult {

@@ -129,7 +129,7 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	if init.status != 200 || !strings.Contains(init.result["instructions"].(string), "Call spaces first") {
 		t.Fatalf("initialize: %d %v", init.status, init.result)
 	}
-	if list := w.mcp(token, "tools/list", map[string]any{}, ""); len(list.result["tools"].([]any)) != 7 {
+	if list := w.mcp(token, "tools/list", map[string]any{}, ""); len(list.result["tools"].([]any)) != 8 {
 		t.Fatalf("tools: %v", list.result)
 	}
 	spaces := w.tool(token, "spaces", map[string]any{}, "")["spaces"].([]any)

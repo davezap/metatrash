@@ -43,6 +43,8 @@ type Service struct {
 	stop       chan struct{}
 	done       chan struct{}
 	lockPath   string
+	// githubSourceHook replaces the GitHub reader in tests.
+	githubSourceHook func(ctx context.Context, r *repository, repo string) (githubSource, error)
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -450,21 +452,30 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		}
 		return result, nil
 	}
-	b, err := git(ctx, r.path, "", nil, "log", "--first-parent", "--fixed-strings", "--grep="+in.ID+" ", "--format=%H%x09%cI%x09%s", "--max-count="+strconv.Itoa(c.Limit+1), "--skip="+strconv.Itoa(c.Offset), state, "--")
+	// A commit message holds one "<id> <operation> <path>" line per file it
+	// touched, after an optional summary (a pull touches many files).
+	b, err := git(ctx, r.path, "", nil, "log", "--first-parent", "--fixed-strings", "--grep="+in.ID+" ", "--format=%x1e%H%x09%cI%n%B", "--max-count="+strconv.Itoa(c.Limit+1), "--skip="+strconv.Itoa(c.Offset), state, "--")
 	if err != nil {
 		return nil, err
 	}
 	entries := []HistoryEntry{}
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		if line == "" {
+	for _, record := range strings.Split(string(b), "\x1e") {
+		if strings.TrimSpace(record) == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 {
+		header, body, _ := strings.Cut(record, "\n")
+		parts := strings.SplitN(header, "\t", 2)
+		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid history entry")
 		}
-		message := strings.SplitN(parts[2], " ", 3)
-		if len(message) != 3 || message[0] != in.ID {
+		var message []string
+		for _, line := range strings.Split(body, "\n") {
+			if fields := strings.SplitN(line, " ", 3); len(fields) == 3 && fields[0] == in.ID {
+				message = fields
+				break
+			}
+		}
+		if message == nil {
 			return nil, fmt.Errorf("invalid history identity")
 		}
 		stamp, err := time.Parse(time.RFC3339, parts[1])

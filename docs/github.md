@@ -2,7 +2,8 @@
 
 Metatrash mirrors GitHub folders (a `.metatrash.json` `github` service) to
 repositories through the **Metatrash GitHub App**. Step 2a (0.17.0) connects
-accounts to the app; pushing arrives in 2c. See [roadmap.md](roadmap.md).
+accounts to the app, 2b (0.18.0) allows dot names, 2c (0.19.0) pulls a
+repository into its folder; pushing arrives in 2d. See [roadmap.md](roadmap.md).
 
 ## Registering the app
 
@@ -124,10 +125,54 @@ and no re-including files inside an excluded folder. A test checks the matcher
 against `git check-ignore`. `.metatrash.json` files are Metatrash's and are
 never pushed.
 
+## Pull (0.19.0)
+
+An agent calls `pull` with a space and a GitHub folder (MCP on `/mcp/account`,
+or `POST /api/v1/account/spaces/{space}/pull`). The rules agents see are in
+[api-contract.md](api-contract.md#pull-github-folders); this is how it works.
+
+1. **Checks first, in the space.** The folder's `.metatrash.json` gives `repo`
+   and `branch`. With a baseline for the same repo and branch, the folder must
+   be unchanged since it; otherwise pull refuses before calling GitHub.
+2. **Token.** Among the **space owner's** linked installations, the one whose
+   account is the repository owner (case-insensitive). None → `forbidden`
+   telling the owner to connect or link it; suspended → `forbidden`. An app
+   JWT gets an installation token limited to that one repository and
+   `contents: read`; GitHub refusing it (the installation does not include the
+   repository) → `forbidden` telling the owner to add the repository under the
+   app's Repository access. Tokens are used for this pull only and not stored.
+3. **Read GitHub, outside the write queue.** `GET /repos/{repo}/branches/{branch}`
+   (404 → the repository's default branch is named), the recursive tree
+   (truncated → `storage_limit`), then the commit's **tarball** (followed to
+   `codeload.github.com` without the token; capped at 256 MiB compressed),
+   keeping only wanted files whose content matches their tree blob hash. Files
+   the tarball leaves out or changes (`export-ignore`, `export-subst` in
+   `.gitattributes`) come from the blob API, up to 200. Files already in the
+   folder with the same blob are not downloaded.
+4. **Classify.** Kept: UTF-8 text, modes 100644 and 100755, within the file
+   limit and the path rules. Skipped with a reason: binaries, oversize, names
+   Metatrash refuses, symbolic links, submodules, `.metatrash.json`.
+5. **Apply, in the write queue.** If the space moved on meanwhile, pull
+   refuses when the folder's files, its settings or its baseline changed (the
+   rest of the space may change freely). One commit writes the files and the
+   new baseline together, so they cannot disagree.
+
+**Baselines** live in the space's Git as the service file
+`.metatrash/github.json` (agents cannot read or write `.metatrash/`): per
+folder, the repo, branch, commit, tree, time, every held file's path and blob
+hash (the same hash on GitHub and in the space), non-default modes
+(executables) and the skipped files with blob, mode and reason. Push (2d) will
+diff the folder against `files`, build on the baseline tree so skipped files
+are carried through untouched, and stop if the branch has moved past
+`commit`. Every commit carries the file forward; deleting a folder's
+`.metatrash.json` leaves its baseline in place, and a baseline for another
+repo or branch is ignored.
+
 ## Storage (schema v6)
 
 `metatrash_github_installations`: installation ID (primary key), Metatrash
 account, the GitHub user who linked it, where the app is installed (login and
 `User`/`Organization`), status (`active` or `suspended`) and times. No tokens.
-Calls made as the app (from 2c) use a short-lived JWT signed with the private
-key to get installation tokens on demand.
+Calls made as the app use a short-lived JWT signed with the private key to get
+installation tokens on demand. Pull baselines are in each space's Git, not in
+the database (no schema change in 0.19.0).

@@ -35,9 +35,12 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
        account; connect and signed webhook delivery work.
      - 2b dot names and `.gitignore` — done in 0.18.0, with Link an existing
        installation (for apps installed from GitHub's page first).
-     - 2c baseline: the first sync fills a GitHub folder from the repo and
-       records the commit it came from (installation token from the app JWT,
-       GitHub API, no clone).
+     - 2c baseline — done in 0.19.0: the `pull` tool fills a GitHub folder
+       from the repo and records the commit it came from in
+       `.metatrash/github.json` (installation token from the app JWT, GitHub
+       API and one tarball, no clone). Later pulls fast-forward an unchanged
+       folder. Files Metatrash cannot hold are skipped and will be carried
+       through by push.
      - 2d `pending` and `push`, relative to the baseline; GitHub moved past it
        → stop and report.
      - 2e `auto` mode.
@@ -47,6 +50,9 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
      have one rule to learn): no GitHub folder inside or around another.
      Related repos sit side by side, e.g. under `dependencies/`. The refusal
      names the clashing folder and suggests that.
+   - After 2d: binary files (images and PDFs by content allow-list, base64 in
+     the API, image content on MCP reads). Until then pull skips them and push
+     carries them through.
    - Later: a member permission "write but not push", so working agents edit
      and a supervising agent reviews `pending` and pushes. Possibly a GitHub
      service on the space root (the whole space as one repo, so no other

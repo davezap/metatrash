@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.0 - Pull a GitHub folder from its repository (2026-10-05)
+
+Step 2c of the folders roadmap: the baseline that push (2d) will build on. No schema change. Details in [docs/github.md](docs/github.md#pull-0190).
+
+- **`pull` tool** on `/mcp/account` (and `POST /api/v1/account/spaces/{space}/pull`): `{space, folder}` fills a GitHub folder from its `repo` and `branch` and records the commit it came from. Needs write access.
+  - First pull: the folder must be empty apart from `.metatrash.json` files, or hold identical copies (they keep their IDs). Anything else is refused with `conflict`, naming the files and why.
+  - Later pulls bring an unchanged folder up to the branch's latest commit (create, write, delete; IDs kept). If files changed since the last pull, `conflict` lists them (pushing them is 2d). Nothing new returns `upToDate: true` without writing.
+  - Files Metatrash cannot hold are skipped and listed with a reason: binary or non-UTF-8, over the file limit, names outside the path rules, symbolic links, submodules, `.metatrash.json`. They stay on GitHub untouched; push will carry them through.
+  - The whole pull is one commit (summary line plus one line per file); `history` shows pulled files as `create`/`write`/`delete`.
+- **How it reads GitHub**: an installation token from the space owner's connection for the repository's owner, limited to that repository and read access; branch head, recursive tree, one tarball (redirect followed without the token), blob API for files the archive leaves out or changes. Every file is checked against its blob hash. GitHub is read outside the write queue; the queue then refuses if the folder, its settings or its baseline changed meanwhile.
+- **Baselines** in each space's Git as the service file `.metatrash/github.json` (repo, branch, commit, tree, held files with blob hashes, executable modes, skipped files), written in the same commit as the files. Agents cannot read or write it. Every commit now carries `.metatrash/` service files forward.
+- Clear refusals: not a GitHub folder, unknown branch (names the default branch), empty repository, no GitHub connection for that owner, suspended installation, repository not in the installation, space storage limits with the totals. 10 pulls per space per 10 minutes.
+- Commits may now touch many files: history reads every `<id> <operation> <path>` line of a commit message, not only the first.
+- Tool schema 0.6.0: `pull` in `accountTools`, error codes `conflict` and `github_unavailable`, the account instructions mention pull. Disconnect → Connect in Claude to refresh it.
+- Tests: pull against a fake GitHub (first pull, clashes, identical files, every skip reason, tarball fallback, up to date, update with deletes, changed folder, branch and repo changes, denied and missing repos, empty repo, two GitHub folders, a write racing the pull), storage limits, the rate limit, and end to end through `/mcp/account` and REST with installations from the database.
+
 ## 0.18.0 - Dot names in GitHub folders, .gitignore, link existing installations (2026-10-05)
 
 Step 2b of the folders roadmap, plus a fix found in the 2a live check. The roadmap now puts a baseline sync (fill a GitHub folder from its repo) before `pending`/`push`, since push never forces and nearly every repo already has commits.

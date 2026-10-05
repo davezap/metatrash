@@ -251,6 +251,16 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "POST" {
 			op = "move"
 		}
+	case "pull":
+		// GitHub folders exist only in owned spaces, so only the OAuth resource offers pull.
+		if metadataPath == "" {
+			sendError(w, missing())
+			return
+		}
+		allow = "POST"
+		if r.Method == "POST" {
+			op = "pull"
+		}
 	default:
 		sendError(w, missing())
 		return
@@ -260,7 +270,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "move" || op == "delete"
+	write := op == "write" || op == "move" || op == "delete" || op == "pull"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -269,6 +279,10 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		sendError(w, err)
+		return
+	}
+	if op == "pull" {
+		h.servePull(w, r, repo, space)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)
@@ -308,6 +322,37 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		status = 201
 	}
 	sendJSON(w, status, value)
+}
+
+// servePull handles POST .../pull with a JSON body {"folder": "site/"}.
+func (h *httpAdapter) servePull(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
+	if r.URL.RawQuery != "" {
+		sendError(w, invalid("Unknown query parameter."))
+		return
+	}
+	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || kind != "application/json" {
+		sendError(w, problem(415, "invalid_request", "Use application/json."))
+		return
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil {
+		sendError(w, problem(413, "payload_too_large", "Request exceeds the byte limit."))
+		return
+	}
+	var body struct {
+		Folder string `json:"folder"`
+	}
+	if !validUnicodeJSON(b) || noDuplicateKeys(b) != nil || strictJSON(b, &body) != nil || body.Folder == "" {
+		sendError(w, invalid(`Send {"folder": "<GitHub folder>"}.`))
+		return
+	}
+	value, err := h.service.pull(r.Context(), repo, space, body.Folder)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	sendJSON(w, 200, value)
 }
 
 // credentialInQuery reports a key or access_token parameter, including

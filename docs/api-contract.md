@@ -25,7 +25,7 @@ For key spaces, REST and `/mcp` carry space-scoped bearer credentials through th
 
 ### OAuth agent access
 
-Account-owned private spaces are reached only through OAuth, at the MCP endpoint `/mcp/account` and the REST routes under `/api/v1/account/` (each is its own protected resource; a token works only where it was issued). Requests carry `Authorization: Bearer <access token>`; without a valid token the response is 401 with `WWW-Authenticate: Bearer resource_metadata="…", scope="spaces:read spaces:write"` (plus `error="invalid_token"` for a bad or expired token). The MCP endpoint adds a `spaces` tool and REST adds `GET /api/v1/account/spaces`; both list the public space and the connected private spaces with `read_only` or `read_write` access. Other operations take the same arguments as the anonymous routes. `spaces` returns each private space's `space` name as `owner/slug` (the owner's username and the space slug, as in the website URL `/spaces/{owner}/{slug}/`) together with its immutable 32-hex `id`. The `space` argument accepts `public`, `owner/slug` or a space ID; a bare slug returns `not_found` with a hint to use `owner/slug`. REST takes `owner/slug` as two path segments: `/api/v1/account/spaces/{owner}/{slug}/{file,files,history,move}`. Results and cursors on these endpoints name private spaces by `owner/slug` whichever form was passed. Only spaces connected to the app are matched, and `not_found` tells the agent to call `spaces`.
+Account-owned private spaces are reached only through OAuth, at the MCP endpoint `/mcp/account` and the REST routes under `/api/v1/account/` (each is its own protected resource; a token works only where it was issued). Requests carry `Authorization: Bearer <access token>`; without a valid token the response is 401 with `WWW-Authenticate: Bearer resource_metadata="…", scope="spaces:read spaces:write"` (plus `error="invalid_token"` for a bad or expired token). The MCP endpoint adds the `spaces` and `pull` tools and REST adds `GET /api/v1/account/spaces` and `POST …/pull`; both list the public space and the connected private spaces with `read_only` or `read_write` access. Other operations take the same arguments as the anonymous routes. `spaces` returns each private space's `space` name as `owner/slug` (the owner's username and the space slug, as in the website URL `/spaces/{owner}/{slug}/`) together with its immutable 32-hex `id`. The `space` argument accepts `public`, `owner/slug` or a space ID; a bare slug returns `not_found` with a hint to use `owner/slug`. REST takes `owner/slug` as two path segments: `/api/v1/account/spaces/{owner}/{slug}/{file,files,history,move}`. Results and cursors on these endpoints name private spaces by `owner/slug` whichever form was passed. Only spaces connected to the app are matched, and `not_found` tells the agent to call `spaces`.
 
 Effective access is the user's consent for that app intersected with current ownership or active membership, the owner's per-member app permission and the token scope, checked once per operation before quotas and Git. Unconnected, unknown and key-protected spaces return `not_found`; suspended membership returns `forbidden`; a write without read/write access returns 403 `insufficient_scope` (REST adds an RFC 6750 challenge). The public space keeps its anonymous rules. Space keys are never accepted on OAuth routes, and `key` or `access_token` query parameters are refused on every route. See [oauth.md](oauth.md).
 
@@ -40,6 +40,18 @@ Root `README.md` is operator-managed, readable and versioned. Reject writes, mov
 ## Delete
 
 `delete` removes one file at `path`, with `ifInState` checked like write and move, and returns the removed file with old/new states. The commit records a `delete` operation for the file's ID. Earlier revisions stay readable with `read` and a `revision`, and `history` of the deleted ID still works and ends with the `delete` entry. `README.md` and the root `.metatrash.json` cannot be deleted (`protected_file`). There are no directory deletes.
+
+## Pull (GitHub folders)
+
+`pull` (MCP on `/mcp/account`; REST `POST /api/v1/account/spaces/{space}/pull` with JSON `{"folder": "site/"}`) fills a GitHub folder from its repository and branch and records the commit it came from (the baseline). It needs write access and takes no `ifInState`: the service checks the folder itself.
+
+- **First pull** (no baseline, or the folder's `repo` or `branch` changed since): the folder must be empty apart from `.metatrash.json` files, or hold files identical to the repository's. Otherwise `conflict`, naming up to ten files and why (differs, not in the repository, cannot be held). Identical files keep their IDs.
+- **Later pulls**: if no file in the folder changed since the baseline, the folder follows the branch's latest commit (create, write, delete; IDs kept for files that stay). If files changed, `conflict` lists them; pushing is not built yet, so the agent restores them or moves them out. Nothing new on GitHub returns `upToDate: true` and writes nothing.
+- Repository files Metatrash cannot hold are skipped and listed (`skipped`, first 50; `skippedCount`): binary or non-UTF-8 content, files over the space's file limit, names outside the path rules (spaces, other characters, a leading hyphen, more than 8 levels or 240 characters), symbolic links, submodules and `.metatrash.json` files. They stay on GitHub untouched.
+- `.metatrash.json` files inside the folder are Metatrash's and are never touched by pull.
+- One commit holds the whole pull: a summary line, then one line per file, so `history` shows each pulled file as `create`, `write` or `delete`.
+- Limits: the space's file count and text bytes after the pull (else `storage_limit` with the totals), 10 pulls per space per 10 minutes, three minutes per pull.
+- Errors: `invalid_request` (not a GitHub folder, unknown branch with the default branch named, empty repository), `forbidden` (no GitHub connection for the repository owner on the space owner's account, a suspended installation, or the app cannot reach the repository), `conflict`, `storage_limit`, `github_unavailable` (502).
 
 ## Folder configuration (`.metatrash.json`)
 
@@ -56,14 +68,14 @@ A folder may describe itself in a `.metatrash.json` inside it; the space root al
 ```
 
 - A JSON object; every key optional; unknown keys and duplicate keys refused. `purpose` up to 2,000 characters; `children` up to 200 entries, each key one file name or folder name ending in `/`, each text up to 1,000 characters.
-- `services` up to 8, at most one per type. Only `github` exists: `repo` is `owner/name`; `branch` defaults to `main`; `push` is `review` (default) or `auto`; `pull` is `auto` (default). Nothing is synced yet (0.16.0 records the designation and the boundary only).
+- `services` up to 8, at most one per type. Only `github` exists: `repo` is `owner/name`; `branch` defaults to `main`; `push` is `review` (default) or `auto`; `pull` is `auto` (default). The `pull` tool fills the folder from its repository (below); pushing is not built yet.
 - Services are allowed only in account-owned spaces, never on the space root, and a folder may not have a service of a type that a folder above or below it already has (no GitHub folder inside or around another). Different types may nest. The refusal names the clashing folder and suggests putting the repo beside it (for example under `dependencies/`).
 - Files under a GitHub folder belong to that repository; files outside it are space-only and never synced.
 - `actions` is reserved and refused until folder actions exist.
 - `.metatrash.json` files cannot be moved (move source or destination); write the new one and delete the old one. A folder's file can be deleted, which removes its description and services; the root one cannot.
 - New spaces start with a root `.metatrash.json` whose `purpose` names the space. At startup the service adds one, as its own commit, to any space without it; a space at its storage limit is skipped with a log line.
 
-Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in each repository. Commit metadata and file changes together. This small index preserves identity and history through moves without depending on Git rename guesses or a separate database. Exclude it from user listings, but include it in repository storage accounting.
+Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in each repository. Commit metadata and file changes together. This small index preserves identity and history through moves without depending on Git rename guesses or a separate database. Exclude it from user listings, but include it in repository storage accounting. Other service files under `.metatrash/` (so far `github.json`, the GitHub baselines) are carried forward by every commit and are never visible to agents.
 
 ## Revision tokens and atomic mutations
 
@@ -157,11 +169,12 @@ Every domain error is `{"error":{"code":"...","message":"..."}}`. Do not expose 
 | 401 | `unauthorized` |
 | 403 | `forbidden`, `protected_file` |
 | 404 | `not_found` |
-| 409 | `state_mismatch`, `destination_exists` |
+| 409 | `state_mismatch`, `destination_exists`, `conflict` |
 | 413 | `payload_too_large` |
 | 429 | `rate_limited` |
 | 507 | `storage_limit` |
 | 503 | `queue_full` |
+| 502 | `github_unavailable` |
 | 500 | `internal_error` |
 
 State mismatches include `currentState` after authorization. Rate/queue errors include `retryAfterSeconds`; REST also sends `Retry-After`. REST creation returns 201; other successful operations return 200. Unknown fields and duplicate query parameters are rejected. Unsupported methods return 405 with `Allow`, unsupported mutation media types return 415; both use `invalid_request`.

@@ -1,12 +1,12 @@
 {
-  "schemaVersion": "0.5.2",
+  "schemaVersion": "0.6.0",
   "status": "implemented",
   "description": "Git-backed text storage; messaging via file conventions. Each folder may describe itself in .metatrash.json; read the space root one first.",
   "mcp": {
     "endpoint": "/mcp",
     "tools": "tools/list exposes tools only; tools/call uses the shared service.",
     "accountEndpoint": "/mcp/account",
-    "accountTools": "The OAuth endpoint adds the spaces tool. Space arguments there are 'public' or the owner/slug names returned by spaces; space IDs are also accepted. Results name owned spaces by owner/slug. The anonymous /mcp endpoint accepts configured space names only."
+    "accountTools": "The OAuth endpoint adds the spaces and pull tools. Space arguments there are 'public' or the owner/slug names returned by spaces; space IDs are also accepted. Results name owned spaces by owner/slug. The anonymous /mcp endpoint accepts configured space names only."
   },
   "authentication": {
     "public": "No key required.",
@@ -700,6 +700,14 @@
       "method": "GET",
       "path": "/api/v1/account/spaces",
       "note": "OAuth only. Operation routes are also available as /api/v1/account/spaces/{space}/... where {space} is public, an ID, or {owner}/{slug}."
+    },
+    "pull": {
+      "method": "POST",
+      "path": "/api/v1/account/spaces/{space}/pull",
+      "body": [
+        "folder"
+      ],
+      "note": "OAuth only."
     }
   },
   "errorSchema": {
@@ -722,6 +730,8 @@
               "rate_limited",
               "storage_limit",
               "queue_full",
+              "conflict",
+              "github_unavailable",
               "internal_error"
             ]
           },
@@ -749,7 +759,7 @@
     ],
     "additionalProperties": false
   },
-  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema.",
+  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema. conflict and github_unavailable come from pull.",
   "accountTools": [
     {
       "name": "spaces",
@@ -808,6 +818,132 @@
         },
         "required": [
           "spaces"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pull",
+      "description": "Fill a GitHub folder from its repository (the github service in the folder's .metatrash.json: repo and branch, default main) and record the commit it came from. The first pull needs the folder empty apart from .metatrash.json files, or holding identical copies; it refuses and names any other files. Later pulls update an unchanged folder to the branch's latest commit (creating, updating and deleting files) and refuse if files changed since the last pull. Repository files Metatrash cannot hold (binary, over the file limit, names outside the path rules, symbolic links, submodules, .metatrash.json) are skipped and listed; they stay on GitHub untouched. Needs write access. Errors: conflict (folder not ready, see message), forbidden (no GitHub connection or the app cannot reach the repo), storage_limit, github_unavailable.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+          },
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 241,
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,6}[A-Za-z0-9._][A-Za-z0-9._-]*/?$",
+            "description": "The GitHub folder, for example site/ (the folder holding the .metatrash.json with the github service)."
+          }
+        },
+        "required": [
+          "space",
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string",
+            "description": "Folder prefix, ending in /."
+          },
+          "repo": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Repository commit the folder now matches."
+          },
+          "oldState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "newState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Space state after the pull; equals oldState when upToDate."
+          },
+          "upToDate": {
+            "type": "boolean",
+            "description": "True when the folder already matched the branch; nothing was written."
+          },
+          "created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "array",
+            "maxItems": 50,
+            "description": "Repository files not held in the folder (first 50), by path in the repository.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "skippedCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "space",
+          "folder",
+          "repo",
+          "branch",
+          "commit",
+          "oldState",
+          "newState",
+          "upToDate",
+          "created",
+          "updated",
+          "deleted",
+          "unchanged",
+          "skipped",
+          "skippedCount"
         ],
         "additionalProperties": false
       }

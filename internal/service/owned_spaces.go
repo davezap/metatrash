@@ -240,6 +240,7 @@ func (s *Service) prepareOwnedSpace(ctx context.Context, space ownedSpace) error
 		if err != nil {
 			return nil, err
 		}
+		repo.owner = space.OwnerID
 		if space.State == "provisioning" {
 			result, err := s.ownedDB.db.ExecContext(ctx, "UPDATE metatrash_spaces SET provisioning_state = 'ready' WHERE space_id = ? AND owner_user_id = ? AND provisioning_state = 'provisioning'", space.ID, space.OwnerID)
 			if err != nil {
