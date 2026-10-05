@@ -206,6 +206,8 @@ var accountNotices = map[string]string{
 	"invite-limited": "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
 	"invite-failed":  "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
 	"invite-daily":   "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
+	"space-web":      "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
+	"space-private":  "The space is private again: only you and its members can browse it.",
 }
 
 // inviteMailsPerOwnerDay caps invitation emails per owner across all their spaces.

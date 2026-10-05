@@ -85,6 +85,7 @@ type browserNode struct {
 	Service   string // set on folders with a service attached, e.g. "GitHub owner/repo"
 	Count     int
 	Selected  bool
+	Open      bool // a folder holding the selected file
 	Children  []*browserNode
 }
 
@@ -129,8 +130,12 @@ func (h *httpAdapter) serveRecent(w http.ResponseWriter, r *http.Request, client
 }
 
 type browserPage struct {
-	Private           bool
+	Private bool
+	// Web marks a private space its owner made readable on the web; Member
+	// is set when the viewer is its owner or a member.
+	Web, Member       bool
 	SpaceName         string
+	SpaceRef          string // owner/slug
 	BasePath, MCPURL  string
 	AccountMCPURL     string // sign-in endpoint; empty when OAuth is off
 	AccountsEnabled   bool
@@ -180,6 +185,9 @@ func fileTree(files map[string]record, selected string, spaceRoot ...string) []*
 				node.Selected = path == selected
 			}
 			node.Count++
+			if i < len(parts)-1 && strings.HasPrefix(selected, strings.Join(parts[:i+1], "/")+"/") {
+				node.Open = true
+			}
 			parent = node
 		}
 	}
@@ -240,7 +248,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	if path == "/" {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	} else {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; img-src https: data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src https: data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {

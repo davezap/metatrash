@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.20.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.21.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Folders: first version
 
@@ -105,6 +105,33 @@ Also in 0.15.1:
   spaces are connected.
 
 ## Owner checks still to run
+
+From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
+
+- **Push merge:** edit a file on GitHub, have the agent push (expect "moved
+  ahead"), pull (expect GitHub's change merged, local edits kept and still
+  pending), push again.
+- **Overlap:** change the same file on GitHub and in the space; pull should
+  stop with `conflict` naming it.
+- **Unpushed hint:** leave an edit unpushed for more than 30 minutes, then
+  write, move or delete in that folder; the result should carry `hint`, and
+  `pending` should show `oldestChange`.
+- **Verified badge:** a pushed commit shows Verified on GitHub, with you as
+  co-author (commit `400dd57` was co-authored; the badge was not checked).
+- **Workflows permission dropped:** the app's installation page no longer
+  lists Workflows; a pull of a repository with `.github/workflows/` still
+  works, and a push changing one is refused.
+- **Push webhook:** after a commit to panda-madness, the app's Advanced tab
+  lists a `push` delivery (needed for step 3).
+- **Readable on the web (0.21.0):** apply schema v7 first. Make a space
+  readable, read the warning, open it in a private window (no sign-in), make
+  it private again (the private window gets the sign-in page). An agent
+  connected by another account still cannot reach it.
+- **Explorer navigation (0.21.0):** open folders, click between Markdown and
+  text files (no reload, folders stay open), use back and forward, reload a
+  nested file (its folders open).
+
+Earlier checks:
 
 - Restart the service; Claude and ChatGPT reconnect by refreshing silently.
 - With two accounts: set a member's app permission to read only; suspend,

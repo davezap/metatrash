@@ -1,4 +1,4 @@
--- Runtime permissions for the service's database login, schema v1-v6.
+-- Runtime permissions for the service's database login, schema v1-v7.
 -- Run as database administrator after the schema scripts. Safe to repeat.
 -- For loopback TCP use 'metatrash_accounts'@'127.0.0.1' throughout instead.
 -- The login needs no DDL, FILE or administration privileges.
@@ -11,6 +11,8 @@ GRANT UPDATE (username) ON metatrash.metatrash_users TO 'metatrash_accounts'@'lo
 -- v3 owned spaces
 GRANT SELECT, INSERT ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (provisioning_state) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
+-- v7 web-readable spaces
+GRANT UPDATE (visibility) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 -- v4 memberships and invitations
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_memberships TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (status, updated_at) ON metatrash.metatrash_memberships TO 'metatrash_accounts'@'localhost';

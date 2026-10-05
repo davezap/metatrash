@@ -18,7 +18,7 @@ counters and one write queue:
 | --- | --- | --- |
 | MCP (Streamable HTTP, stateless) | `/mcp` | `/mcp/account` |
 | REST | `/api/v1/spaces/…` | `/api/v1/account/…` |
-| Website (read-only) | `/`, `/spaces/public/…` | `/spaces/{username}/{slug}/…`, `/account` |
+| Website (read-only) | `/`, `/spaces/public/…`, spaces their owner made readable on the web | `/spaces/{username}/{slug}/…`, `/account` |
 
 ## Spaces
 
@@ -46,8 +46,9 @@ describes the folder (purpose, children) and the services attached to it,
 validated on write. The only service so far is `github`, which designates a
 folder as a repository: files under it belong to the repo, files outside it
 are space-only. Services are allowed only in owned spaces, never on the root,
-and never nested inside or around a folder with the same service type. No
-syncing yet. The explorer labels GitHub folders. Format in
+and never nested inside or around a folder with the same service type. Agents
+sync a GitHub folder with `pull`, `pending` and `push` (see
+[github.md](github.md)). The explorer labels GitHub folders. Format in
 [api-contract.md](api-contract.md).
 
 ## Accounts
@@ -127,9 +128,12 @@ CSRF value, bounded form fields and a per-user attempt limit.
 | Owner | read | read/write, as consented |
 | Active member | read | consent ∩ owner's app permission |
 | Suspended member | denied | denied (`forbidden`) |
-| Anyone else | not found | not found |
+| Anyone, space readable on the web | read (website only) | not found |
+| Anyone else | not found (signed out: sign-in page) | not found |
 
-Human browsing is read-only for everyone, owners included. Access is checked on
+Only the owner can make a space readable on the web (Your account → My
+Spaces), behind a warning, and make it private again; it changes the website
+only. Human browsing is read-only for everyone, owners included. Access is checked on
 every request, before quotas are charged or Git is touched.
 
 ## Website
@@ -137,15 +141,18 @@ every request, before quotas are charged or Git is touched.
 - Home page: introduction, Claude/ChatGPT connection tabs, and the ten most
   recently touched public files, refreshed by JSON from
   `/api/v1/spaces/public/recent` once a minute while the tab is visible.
-- Explorer: a folder tree (collapsed by default, with recursive counts) beside
-  the document. Markdown renders with the embedded Slate 0.9.2 viewer in
-  read-only mode; other files show as escaped text, which is also the fallback
-  without JavaScript.
+- Explorer: a folder tree (with recursive counts; the folders leading to the
+  current file open) beside the document. Clicking a file fetches it and
+  swaps only the document, with the address bar and history updated, so the
+  tree keeps its open folders (`web/document.js`; whole pages without
+  JavaScript or when a fetch fails). Markdown renders with the embedded Slate
+  0.9.2 viewer in read-only mode, mounted once per page; other files show as
+  escaped text, which is also the fallback without JavaScript.
 - Legacy `?path=` links redirect (308) to clean document URLs.
 - Assets come only from an explicit embedded allowlist, never from space
   storage. CSP allows same-origin scripts only where needed; space text is
-  always escaped. Private pages are no-store, no-referrer and noindex, and block
-  external images.
+  always escaped. Private pages (including spaces readable on the web) are
+  no-store, no-referrer and noindex, and block external images.
 - `-public-url` lets the site live under a folder; Go adds the prefix to every
   link, redirect, form and cookie name.
 

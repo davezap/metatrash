@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v6 (from 0.17.0).
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v7 (from 0.21.0).
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -123,7 +123,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    sudo mariadb metatrash < deploy/account-schema-v1.sql
    head -8 deploy/account-grants.sql | sudo mariadb          # v1 grants, needed by the import
    sudo -u metatrash /usr/local/bin/metatrash accounts-migrate -database-config /etc/metatrash/account-database.json -data /var/lib/metatrash -empty
-   for v in 2 3 4 5 6; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
+   for v in 2 3 4 5 6 7; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
    sudo mariadb < deploy/account-grants.sql
    ```
 
@@ -137,7 +137,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    ```
 
 Startup refuses to run with a missing configuration, an unreachable database or
-a schema older than v6. Without the accounts setting the service runs public and
+a schema older than v7. Without the accounts setting the service runs public and
 key spaces only, with no database.
 
 ### OAuth
@@ -193,7 +193,7 @@ administrator. Never edit IDs, slugs, ownership or `metatrash_account_meta`.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1, v5 and v6 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1, v5, v6 and v7 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -201,6 +201,22 @@ its guarded `UPDATE metatrash_account_meta`.
 **0.17.0** needs schema v6 (`deploy/account-schema-v6.sql`, then
 `account-grants.sql`) before the new binary starts; it adds only the GitHub
 connections table. GitHub itself stays off until configured.
+
+**0.21.0** needs schema v7 before the new binary starts:
+
+```sh
+sudo systemctl stop metatrash
+sudo mariadb metatrash < deploy/account-schema-v7.sql
+sudo mariadb < deploy/account-grants.sql
+# install the new binary (upgrade.sh), then
+sudo systemctl start metatrash
+```
+
+v7 lets a space's `visibility` be `web` (readable in the website explorer)
+and grants the service `UPDATE (visibility)`. Every space stays `private`
+until its owner changes it. To roll back to 0.20.x, set every space back to
+`private` first (`UPDATE metatrash_spaces SET visibility = 'private'`), then
+`schema_version` to 6.
 
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again
@@ -229,7 +245,7 @@ accounts, spaces or memberships created since that backup.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v6 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v7 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - There is no Go toolchain on the Windows development PC. A cloud workspace
   needed Go 1.25 built from the golang/go source on GitHub and golang.org/x

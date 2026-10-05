@@ -17,8 +17,17 @@ import (
 // from OwnerID alone; there is no independently editable owner membership.
 type ownedSpace struct {
 	ID, OwnerID, Name, Slug, State string
-	CreatedAt                      time.Time
+	// Visibility is "private" (owner and members) or "web" (also readable by
+	// anyone in the website's read-only explorer). Agent access is the same
+	// for both.
+	Visibility string
+	CreatedAt  time.Time
 }
+
+const (
+	spacePrivate = "private"
+	spaceWeb     = "web"
+)
 
 const ownedSpaceColumns = "space_id, owner_user_id, name, slug, provisioning_state, created_at, visibility"
 const ownedSpaceREADME = "# Private space\n\nThis space belongs to its human owner. Human browsing is read-only.\nThe owner can invite people through Your account. Agents reach this space only\nthrough apps that the owner or a member connected with OAuth and chose this\nspace for; the owner decides whether members' apps may write.\n\nAgents: start by reading .metatrash.json in the space root. It describes\nthe space and its folders; a folder may have its own .metatrash.json.\n"
@@ -117,14 +126,15 @@ func normalizeSpaceName(name, slug string) (string, string, error) {
 	return name, slug, nil
 }
 
-func scanOwnedSpace(row accountScanner) (ownedSpace, error) {
+// scanOwnedSpace reads ownedSpaceColumns, then any extra columns into extra.
+func scanOwnedSpace(row accountScanner, extra ...any) (ownedSpace, error) {
 	var space ownedSpace
-	var created, visibility string
-	if err := row.Scan(&space.ID, &space.OwnerID, &space.Name, &space.Slug, &space.State, &created, &visibility); err != nil {
+	var created string
+	if err := row.Scan(append([]any{&space.ID, &space.OwnerID, &space.Name, &space.Slug, &space.State, &created, &space.Visibility}, extra...)...); err != nil {
 		return space, err
 	}
 	name, slug, err := normalizeSpaceName(space.Name, space.Slug)
-	if err != nil || name != space.Name || slug != space.Slug || !idPattern.MatchString(space.ID) || !idPattern.MatchString(space.OwnerID) || visibility != "private" || (space.State != "provisioning" && space.State != "ready") {
+	if err != nil || name != space.Name || slug != space.Slug || !idPattern.MatchString(space.ID) || !idPattern.MatchString(space.OwnerID) || (space.Visibility != spacePrivate && space.Visibility != spaceWeb) || (space.State != "provisioning" && space.State != "ready") {
 		return space, fmt.Errorf("invalid stored space metadata")
 	}
 	space.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
@@ -301,6 +311,35 @@ func (s *Service) loadOwnedSpaces(ctx context.Context, db *accountDatabase) erro
 				return fmt.Errorf("cannot open owned space %s; restore its repository before restarting", space.ID)
 			}
 			log.Printf("owned space %s still provisioning; reservation retained", space.ID)
+		}
+	}
+	return nil
+}
+
+// setSpaceVisibility lets an owner make a ready space readable on the web, or
+// private again. Only the website's explorer changes; agents still need an
+// approved app connection.
+func (db *accountDatabase) setSpaceVisibility(ctx context.Context, ownerID, spaceID, visibility string) error {
+	if !idPattern.MatchString(ownerID) || !idPattern.MatchString(spaceID) || (visibility != spacePrivate && visibility != spaceWeb) {
+		return invalid("Invalid space setting.")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result, err := db.db.ExecContext(ctx, "UPDATE metatrash_spaces SET visibility = ? WHERE space_id = ? AND owner_user_id = ? AND provisioning_state = 'ready'", visibility, spaceID, ownerID)
+	if err != nil {
+		return fmt.Errorf("cannot update space visibility")
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("cannot update space visibility")
+	} else if n == 0 {
+		// Unchanged rows also count as 0 in MariaDB; check the space exists.
+		var current string
+		err := db.db.QueryRowContext(ctx, "SELECT visibility FROM metatrash_spaces WHERE space_id = ? AND owner_user_id = ? AND provisioning_state = 'ready'", spaceID, ownerID).Scan(&current)
+		if err == sql.ErrNoRows {
+			return missing()
+		}
+		if err != nil {
+			return fmt.Errorf("cannot update space visibility")
 		}
 	}
 	return nil

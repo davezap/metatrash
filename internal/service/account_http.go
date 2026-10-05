@@ -42,6 +42,7 @@ type accountPage struct {
 	MembershipUnavailable      bool
 	MembershipCSRF             map[string]string
 	SpaceCSRF, SpaceName       string
+	VisibilityCSRF             string
 	SpaceNameError             string
 	Spaces                     []accountSpace
 	SpacesUnavailable          bool
@@ -116,6 +117,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 			}
 		}
 		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
+		page.VisibilityCSRF = h.service.accounts.mac("space-visibility:" + cookieToken(r, h.sessionCookieName()))
 		var err error
 		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
 		if err != nil {
@@ -164,7 +166,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -210,6 +212,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 				return true
 			}
 			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)}
+			if path == "/account" {
+				page.Notice = h.takeNotice(w, r)
+			}
 			if sharingRoute {
 				page.Sharing, err = h.humanSharing(r.Context(), user, sharingID)
 				if err != nil {
@@ -296,6 +301,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	if path == "/account/spaces" {
 		allowed["name"], allowed["slug"] = true, true
 	}
+	if path == "/account/spaces/visibility" {
+		allowed["space"], allowed["visibility"] = true, true
+	}
 	if path == "/account/username" {
 		allowed["username"] = true
 	}
@@ -328,7 +336,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || githubRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if membershipRoute || githubRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -342,6 +350,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		}
 		if path == "/account/spaces" {
 			csrf = a.mac("space-create:" + session)
+		}
+		if path == "/account/spaces/visibility" {
+			csrf = a.mac("space-visibility:" + session)
 		}
 		if path == "/account/apps/revoke" {
 			csrf = a.mac("apps-revoke:" + session)
@@ -367,6 +378,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if githubRoute {
 		h.submitGitHub(w, r, session, path)
+		return true
+	}
+	if path == "/account/spaces/visibility" {
+		h.submitSpaceVisibility(w, r, session)
 		return true
 	}
 	if path == "/account/apps/revoke" {
@@ -647,4 +662,48 @@ func (h *httpAdapter) deriveNewSpaceSlug(ctx context.Context, user userAccount, 
 		}
 	}
 	return slug, nil
+}
+
+// submitSpaceVisibility handles POST /account/spaces/visibility: the owner
+// makes a space readable by anyone in the website explorer ("web") or private
+// again. Agent access is not affected.
+func (h *httpAdapter) submitSpaceVisibility(w http.ResponseWriter, r *http.Request, session string) {
+	a := h.service.accounts
+	user, signedIn, err := a.currentUser(r.Context(), session)
+	if err != nil {
+		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
+		return
+	}
+	if !signedIn {
+		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+		return
+	}
+	if h.service.ownedDB == nil {
+		sendError(w, problem(503, "unavailable", "Your spaces are temporarily unavailable."))
+		return
+	}
+	visibility := r.PostForm.Get("visibility")
+	err = h.service.rates.take(allowance{"space-visibility:user:" + user.ID, 30, 600})
+	if err == nil {
+		err = h.service.ownedDB.setSpaceVisibility(r.Context(), user.ID, r.PostForm.Get("space"), visibility)
+	}
+	if err != nil {
+		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The space setting could not be saved. Reload before retrying."}
+		status := http.StatusServiceUnavailable
+		var p *Error
+		if errors.As(err, &p) {
+			status, page.Message = p.Status, p.Message
+			if p.RetryAfterSeconds > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+			}
+		}
+		h.renderAccount(w, r, status, page)
+		return
+	}
+	notice := "space-private"
+	if visibility == spaceWeb {
+		notice = "space-web"
+	}
+	accountCookie(w, h.noticeCookieName(), notice, 60)
+	http.Redirect(w, r, h.basePath+"/account#my-spaces", http.StatusSeeOther)
 }

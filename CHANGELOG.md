@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.21.0 - Spaces readable on the web; explorer without page reloads (2026-10-05)
+
+**Needs schema v7** before the new binary starts: stop the service, back up, apply `deploy/account-schema-v7.sql`, then `deploy/account-grants.sql` again (see [docs/deployment.md](docs/deployment.md#upgrades-backups-and-rollback)).
+
+- **Readable on the web.** On Your account → My Spaces, an owner can make a space readable by anyone in the website's read-only explorer, signed in or not, and make it private again. Going public sits behind "Make readable on the web…", which warns that anyone with the link can read every file as it changes and asks for confirmation. Website only: agents still reach the space only through app connections the owner or a member approved, and nobody can change files from the website. Pages stay `noindex`. The explorer bar shows "Readable on the web"; only the owner may change the setting.
+  - Stored in the existing `metatrash_spaces.visibility` column, now `private` or `web` (schema v7 replaces the `private`-only check and grants the service `UPDATE (visibility)`).
+  - A signed-out visitor to a private (or missing) space still gets the sign-in page, so a private space's existence is not revealed.
+- **Explorer opens files without reloading the page.** Clicking a file in the tree fetches it and swaps only the document (heading, text, Markdown preview), updates the address bar and browser history (back and forward work), and leaves the tree and its open folders as they were. Slate mounts once per page and is given each new document. Without JavaScript, or if a fetch fails or the session expired, links load whole pages as before. Explorer pages now allow same-origin `connect-src` for this.
+- On a full page load the tree opens the folders that lead to the current file.
+- Tests: the web-readable toggle and access rules against MariaDB (signed out, stranger, owner, member's other space, wrong token, bad value, a member trying to toggle, agent access unchanged, back to private); the tree's open folders. In-page navigation was checked in headless Chromium (no reload, folders kept, Markdown and text swaps, back and forward, no console errors).
+
 ## 0.20.0 - Pending and push; pull merges and converts UTF-16 (2026-10-05)
 
 Step 2d of the folders roadmap: agents send a GitHub folder's changes back to GitHub. Details in [docs/github.md](docs/github.md#push-0200).
