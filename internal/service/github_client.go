@@ -98,20 +98,19 @@ func (c *githubClient) userRequest(ctx context.Context, token, path string, limi
 	return err
 }
 
-// verifyInstallation checks with the user's token that the user can access
-// installationID of this app, and returns the link to store. The callback's
-// installation_id is attacker-controlled until this check passes.
-func (c *githubClient) verifyInstallation(ctx context.Context, token string, installationID int64) (githubInstallation, error) {
+// userInstallations returns the GitHub user behind token and every
+// installation of this app that the user can access (up to 500).
+func (c *githubClient) userInstallations(ctx context.Context, token string) (githubUser, []githubInstallation, error) {
 	var user githubUser
 	if err := c.userRequest(ctx, token, "/user", 64*1024, &user); err != nil {
-		return githubInstallation{}, err
+		return user, nil, err
 	}
 	if user.ID <= 0 || !githubLoginPattern.MatchString(user.Login) {
-		return githubInstallation{}, errGitHubUnavailable
+		return user, nil, errGitHubUnavailable
 	}
+	list := []githubInstallation{}
 	for page := 1; page <= 5; page++ {
 		var out struct {
-			TotalCount    int `json:"total_count"`
 			Installations []struct {
 				ID      int64 `json:"id"`
 				AppID   int64 `json:"app_id"`
@@ -123,14 +122,11 @@ func (c *githubClient) verifyInstallation(ctx context.Context, token string, ins
 			} `json:"installations"`
 		}
 		if err := c.userRequest(ctx, token, "/user/installations?per_page=100&page="+strconv.Itoa(page), 2*1024*1024, &out); err != nil {
-			return githubInstallation{}, err
+			return user, nil, err
 		}
 		for _, item := range out.Installations {
-			if item.ID != installationID {
-				continue
-			}
 			if item.AppID != c.settings.appID {
-				break
+				continue
 			}
 			status := "active"
 			if item.SuspendedAt != nil && *item.SuspendedAt != "" {
@@ -139,12 +135,28 @@ func (c *githubClient) verifyInstallation(ctx context.Context, token string, ins
 			inst := githubInstallation{InstallationID: item.ID, GitHubUserID: user.ID, GitHubLogin: user.Login,
 				AccountLogin: item.Account.Login, AccountType: item.Account.Type, Status: status}
 			if !validGitHubInstallation(inst) {
-				return githubInstallation{}, errGitHubUnavailable
+				return user, nil, errGitHubUnavailable
 			}
-			return inst, nil
+			list = append(list, inst)
 		}
 		if len(out.Installations) < 100 {
 			break
+		}
+	}
+	return user, list, nil
+}
+
+// verifyInstallation checks with the user's token that the user can access
+// installationID of this app, and returns the link to store. The callback's
+// installation_id is attacker-controlled until this check passes.
+func (c *githubClient) verifyInstallation(ctx context.Context, token string, installationID int64) (githubInstallation, error) {
+	_, list, err := c.userInstallations(ctx, token)
+	if err != nil {
+		return githubInstallation{}, err
+	}
+	for _, inst := range list {
+		if inst.InstallationID == installationID {
+			return inst, nil
 		}
 	}
 	return githubInstallation{}, problem(403, "forbidden", "Your GitHub account cannot access that installation of the Metatrash app.")
@@ -171,6 +183,13 @@ func (s *githubSettings) appJWT(now time.Time) (string, error) {
 // installURL is where a user installs (or reconfigures) the app.
 func (s *githubSettings) installURL(state string) string {
 	return fmt.Sprintf("%s/apps/%s/installations/new?state=%s", s.webBase, s.appSlug, url.QueryEscape(state))
+}
+
+// authorizeURL asks the user to authorize the app without installing it, for
+// linking installations that already exist. redirectURI must be the app's
+// Callback URL.
+func (s *githubSettings) authorizeURL(state, redirectURI string) string {
+	return s.webBase + "/login/oauth/authorize?" + url.Values{"client_id": {s.clientID}, "state": {state}, "redirect_uri": {redirectURI}}.Encode()
 }
 
 // installationSettingsURL is the installation's page on GitHub, where it can

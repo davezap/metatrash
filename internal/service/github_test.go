@@ -433,3 +433,112 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 		t.Fatalf("member links %+v", list)
 	}
 }
+
+// Link an existing installation: authorize only, then link every installation
+// of the app the GitHub user can see that no other account has.
+func TestGitHubLinkExistingAgainstDatabase(t *testing.T) {
+	w := newOAuthWorld(t)
+	ctx := context.Background()
+	fake := newFakeGitHub(t)
+	cfg := githubTestConfig(t, pkcs1PEM(githubTestKey(t)))
+	settings, err := cfg.settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.webBase, settings.apiBase = fake.server.URL+"/web", fake.server.URL+"/api"
+	w.s.accounts.github = settings
+	w.h.github = newGitHubServer(settings)
+	personal, org, other := randomInstallationID(t), randomInstallationID(t), randomInstallationID(t)
+	fake.installations = []map[string]any{
+		{"id": personal, "app_id": 4242, "account": map[string]any{"login": "dave-zap", "type": "User"}},
+		{"id": org, "app_id": 4242, "account": map[string]any{"login": "zaptronics", "type": "Organization"}},
+		{"id": other, "app_id": 7, "account": map[string]any{"login": "dave-zap", "type": "User"}},
+	}
+	owner, member := w.session(w.owner), w.session(w.member)
+	link := func(cookie *http.Cookie) (*http.Cookie, string) {
+		t.Helper()
+		resp := oauthCall(w.h, "POST", "/account/github/link", url.Values{"csrf": {w.s.accounts.mac("github-link:" + cookie.Value)}}, cookie)
+		if resp.Code != 303 {
+			t.Fatalf("link: %d %s", resp.Code, resp.Body.String())
+		}
+		location, _ := url.Parse(resp.Header().Get("Location"))
+		q := location.Query()
+		if location.Path != "/web/login/oauth/authorize" || q.Get("client_id") != "Iv23liTestClient" || q.Get("redirect_uri") != "https://metatrash.com/github/callback" || len(q.Get("state")) != 64 {
+			t.Fatalf("authorize URL %s", location)
+		}
+		browser := responseCookie(resp, w.h.githubCookieName())
+		return &http.Cookie{Name: browser.Name, Value: browser.Value}, q.Get("state")
+	}
+	callback := func(browser *http.Cookie, query url.Values) *httptest.ResponseRecorder {
+		return oauthCall(w.h, "GET", "/github/callback?"+query.Encode(), nil, browser)
+	}
+	links := func(user userAccount) map[int64]string {
+		list, err := w.db.githubInstallations(ctx, user.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[int64]string{}
+		for _, inst := range list {
+			m[inst.InstallationID] = inst.AccountLogin
+		}
+		return m
+	}
+
+	page := oauthCall(w.h, "GET", "/account", nil, owner)
+	if !strings.Contains(page.Body.String(), "Link an existing installation") {
+		t.Fatal("account page lacks the link button")
+	}
+	// The no-state reply (installed from GitHub's page) points at the link button.
+	if resp := callback(nil, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(personal)}, "setup_action": {"install"}}); resp.Code != 400 || !strings.Contains(resp.Body.String(), "Link an existing installation") {
+		t.Fatalf("no-state reply: %d", resp.Code)
+	}
+	// A cancelled authorization.
+	browser, state := link(owner)
+	if resp := callback(browser, url.Values{"error": {"access_denied"}, "error_description": {"The user has denied your application access."}, "state": {state}}); resp.Code != 200 || !strings.Contains(resp.Body.String(), "cancelled") || len(links(w.owner)) != 0 {
+		t.Fatalf("cancelled: %d", resp.Code)
+	}
+	// A rejected code; a missing code.
+	browser, state = link(owner)
+	if resp := callback(browser, url.Values{"code": {"bad"}, "state": {state}}); resp.Code != 400 {
+		t.Fatalf("bad code: %d", resp.Code)
+	}
+	browser, state = link(owner)
+	if resp := callback(browser, url.Values{"state": {state}}); resp.Code != 400 {
+		t.Fatalf("no code: %d", resp.Code)
+	}
+	// The member links the organization first, so the owner's link takes the rest.
+	if err := w.db.linkGitHubInstallation(ctx, githubInstallation{InstallationID: org, UserID: w.member.ID, GitHubUserID: 43, GitHubLogin: "gh-other", AccountLogin: "zaptronics", AccountType: "Organization", Status: "active"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	browser, state = link(owner)
+	resp := callback(browser, url.Values{"code": {"good-me"}, "state": {state}})
+	body := resp.Body.String()
+	if resp.Code != 200 || !strings.Contains(body, "Connected the Metatrash app on dave-zap") || !strings.Contains(body, "Not connected") || !strings.Contains(body, "zaptronics") || strings.Contains(body, `http-equiv="refresh"`) {
+		t.Fatalf("partial link: %d %s", resp.Code, body)
+	}
+	if got := links(w.owner); len(got) != 1 || got[personal] != "dave-zap" {
+		t.Fatalf("owner links %v", got)
+	}
+	// Linking again refreshes, and nothing is left for the member to take.
+	browser, state = link(owner)
+	if resp := callback(browser, url.Values{"code": {"good-me"}, "state": {state}}); resp.Code != 200 {
+		t.Fatalf("relink: %d", resp.Code)
+	}
+	if err := w.db.unlinkGitHubInstallation(ctx, w.member.ID, org); err != nil {
+		t.Fatal(err)
+	}
+	browser, state = link(owner)
+	if resp := callback(browser, url.Values{"code": {"good-me"}, "state": {state}}); resp.Code != 200 || !strings.Contains(resp.Body.String(), `http-equiv="refresh"`) || len(links(w.owner)) != 2 {
+		t.Fatalf("full link: %d %v", resp.Code, links(w.owner))
+	}
+	browser, state = link(member)
+	if resp := callback(browser, url.Values{"code": {"good-other"}, "state": {state}}); resp.Code != 409 || len(links(w.member)) != 0 {
+		t.Fatalf("everything taken: %d", resp.Code)
+	}
+	// A GitHub user with no installation of this app.
+	fake.installations = []map[string]any{{"id": other, "app_id": 7, "account": map[string]any{"login": "x", "type": "User"}}}
+	browser, state = link(member)
+	if resp := callback(browser, url.Values{"code": {"good-other"}, "state": {state}}); resp.Code != 404 || !strings.Contains(resp.Body.String(), "No installation found") {
+		t.Fatalf("none: %d", resp.Code)
+	}
+}

@@ -43,6 +43,9 @@ type githubPending struct {
 	UserID  string
 	State   string
 	Expires time.Time
+	// Link is an authorization-only attempt: link every installation of the
+	// app the user can see, rather than one just installed.
+	Link bool
 }
 
 func newGitHubServer(settings *githubSettings) *githubServer {
@@ -107,8 +110,10 @@ func (h *httpAdapter) serveGitHub(w http.ResponseWriter, r *http.Request, client
 
 // githubCallback is GitHub's return after installing or authorizing the app
 // (the app's Callback URL, with "Request user authorization during
-// installation"). The query is code, installation_id, setup_action and the
-// state we sent. Account routes reject queries, hence this separate route.
+// installation"). After an install the query is code, installation_id,
+// setup_action and the state we sent; after Link an existing installation it
+// is code and state; a cancelled authorization sends error fields instead.
+// Account routes reject queries, hence this separate route.
 func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, client string) {
 	g := h.github
 	if r.Method != http.MethodGet {
@@ -130,7 +135,7 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 		return
 	}
 	for key, values := range query {
-		if len(values) != 1 || !(key == "code" || key == "installation_id" || key == "setup_action" || key == "state") {
+		if len(values) != 1 || !(key == "code" || key == "installation_id" || key == "setup_action" || key == "state" || key == "error" || key == "error_description" || key == "error_uri") {
 			fail(400, "GitHub sent an unexpected reply", "Start again from Your account.")
 			return
 		}
@@ -141,7 +146,15 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 	pending, ok := g.take(browser)
 	state := query.Get("state")
 	if !ok || state == "" || subtle.ConstantTimeCompare([]byte(pending.State), []byte(state)) != 1 {
-		fail(400, "Connect GitHub from Your account", "This GitHub reply did not match a connection started in this browser in the last ten minutes. If you installed the Metatrash app on GitHub directly, finish by choosing Connect GitHub on Your account.")
+		fail(400, "Connect GitHub from Your account", "This GitHub reply did not match a connection started in this browser in the last ten minutes. If you installed the Metatrash app on GitHub directly, finish by choosing Link an existing installation on Your account.")
+		return
+	}
+	if query.Has("error") {
+		fail(200, "GitHub was not connected", "The GitHub authorization was cancelled. You can try again from Your account.")
+		return
+	}
+	if pending.Link {
+		h.githubLinkAll(w, r, pending, query.Get("code"), fail)
 		return
 	}
 	if query.Get("setup_action") == "request" {
@@ -184,9 +197,73 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 	h.renderGitHub(w, 200, githubPage{OK: true, Title: "GitHub connected", Message: "Connected the Metatrash app on " + inst.AccountLogin + " (signed in to GitHub as " + inst.GitHubLogin + ").", ContinueURL: back})
 }
 
-// startGitHubConnect handles the Connect GitHub form (POST, after the account
-// form checks): record the attempt and send the browser to GitHub.
-func (h *httpAdapter) startGitHubConnect(w http.ResponseWriter, r *http.Request, user userAccount) {
+// githubLinkAll finishes Link an existing installation: verify the user with
+// the code and link every installation of the app they can access that no
+// other Metatrash account has.
+func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pending githubPending, code string, fail func(int, string, string)) {
+	g := h.github
+	if code == "" || len(code) > 256 {
+		fail(400, "GitHub did not finish the connection", "GitHub returned without authorizing. Start again from Your account.")
+		return
+	}
+	if err := h.service.rates.take(allowance{"github:link:user:" + pending.UserID, 20, 600}); err != nil {
+		fail(429, "Too many attempts", "Please wait a few minutes, then connect GitHub again from Your account.")
+		return
+	}
+	db := h.service.ownedDB
+	if db == nil {
+		fail(503, "Accounts are temporarily unavailable", "Please try again shortly.")
+		return
+	}
+	token, err := g.client.exchangeCode(r.Context(), code)
+	var user githubUser
+	var list []githubInstallation
+	if err == nil {
+		user, list, err = g.client.userInstallations(r.Context(), token)
+	}
+	if err != nil {
+		status, message := 503, "GitHub could not be connected. Please try again from Your account."
+		var p *Error
+		if errors.As(err, &p) {
+			status, message = p.Status, p.Message
+		}
+		fail(status, "GitHub was not connected", message)
+		return
+	}
+	if len(list) == 0 {
+		fail(404, "No installation found", "GitHub user "+user.Login+" has no installation of the Metatrash app it can access. Choose Connect GitHub on Your account to install it.")
+		return
+	}
+	var linked, taken []string
+	for _, inst := range list {
+		inst.UserID = pending.UserID
+		err := db.linkGitHubInstallation(r.Context(), inst, g.now())
+		var p *Error
+		switch {
+		case err == nil:
+			linked = append(linked, inst.AccountLogin)
+		case errors.As(err, &p) && p.Status == 409:
+			taken = append(taken, inst.AccountLogin)
+		default:
+			fail(503, "GitHub was not connected", "GitHub could not be connected. Please try again from Your account.")
+			return
+		}
+	}
+	if len(linked) == 0 {
+		fail(409, "GitHub was not connected", "Every installation GitHub user "+user.Login+" can access ("+strings.Join(taken, ", ")+") is already connected to another Metatrash account, or is over your limit. Disconnect it there first.")
+		return
+	}
+	message := "Connected the Metatrash app on " + strings.Join(linked, ", ") + " (signed in to GitHub as " + user.Login + ")."
+	if len(taken) > 0 {
+		message += " Not connected, because another Metatrash account has it or you reached your limit: " + strings.Join(taken, ", ") + "."
+	}
+	h.renderGitHub(w, 200, githubPage{OK: len(taken) == 0, Title: "GitHub connected", Message: message, ContinueURL: h.basePath + "/account#github"})
+}
+
+// startGitHubConnect handles the Connect GitHub and Link an existing
+// installation forms (POST, after the account form checks): record the attempt
+// and send the browser to GitHub to install, or only to authorize.
+func (h *httpAdapter) startGitHubConnect(w http.ResponseWriter, r *http.Request, user userAccount, link bool) {
 	g := h.github
 	if err := h.service.rates.take(allowance{"github:connect:user:" + user.ID, 20, 600}); err != nil {
 		sendError(w, err)
@@ -214,11 +291,15 @@ func (h *httpAdapter) startGitHubConnect(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(503, "busy", "Metatrash is busy. Please try again in a few minutes."))
 		return
 	}
-	g.pending[secretDigest(browser)] = githubPending{UserID: user.ID, State: state, Expires: now.Add(githubPendingLifetime)}
+	g.pending[secretDigest(browser)] = githubPending{UserID: user.ID, State: state, Expires: now.Add(githubPendingLifetime), Link: link}
 	g.mu.Unlock()
 	// Lax: the cookie must come back on the top-level return from github.com.
 	http.SetCookie(w, &http.Cookie{Name: h.githubCookieName(), Value: browser, Path: "/", MaxAge: int(githubPendingLifetime / time.Second), Expires: now.Add(githubPendingLifetime), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	http.Redirect(w, r, g.settings.installURL(state), http.StatusSeeOther)
+	target := g.settings.installURL(state)
+	if link {
+		target = g.settings.authorizeURL(state, h.publicOrigin+h.basePath+"/github/callback")
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // githubInstallationView is one connection on Your account.
@@ -336,8 +417,8 @@ func (h *httpAdapter) submitGitHub(w http.ResponseWriter, r *http.Request, sessi
 		sendError(w, missing())
 		return
 	}
-	if path == "/account/github/connect" {
-		h.startGitHubConnect(w, r, user)
+	if path == "/account/github/connect" || path == "/account/github/link" {
+		h.startGitHubConnect(w, r, user, path == "/account/github/link")
 		return
 	}
 	installationID, parseErr := strconv.ParseInt(r.PostForm.Get("installation"), 10, 64)

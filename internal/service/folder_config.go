@@ -29,7 +29,7 @@ const (
 )
 
 var (
-	childNamePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/?$`)
+	childNamePattern  = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._-]*/?$`)
 	githubRepoPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$`)
 	gitBranchPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`)
 )
@@ -89,7 +89,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 		return c, folderConfigError(fmt.Sprintf("children is limited to %d entries.", maxFolderChildren))
 	}
 	for name, text := range c.Children {
-		if len(name) > 240 || !childNamePattern.MatchString(name) {
+		if bare := strings.TrimSuffix(name, "/"); len(name) > 240 || !childNamePattern.MatchString(name) || bare == "." || bare == ".." || strings.EqualFold(strings.TrimRight(bare, "."), ".git") {
 			return c, folderConfigError(fmt.Sprintf("children key %q must be one file or folder name (folders end in /).", name))
 		}
 		if utf8.RuneCountInString(text) > maxFolderChildText {
@@ -197,6 +197,71 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 					return folderConfigError(fmt.Sprintf("%s already has a %s service and %s folders cannot nest; choose a folder that does not contain it.", otherFolder, svc.Type, svc.Type))
 				}
 				return folderConfigError(fmt.Sprintf("%s is inside %s, which already has a %s service, and %s folders cannot nest; put this repo beside it instead, for example in dependencies/.", folder, otherFolder, svc.Type, svc.Type))
+			}
+		}
+	}
+	return nil
+}
+
+// githubFolderOf returns the GitHub folder that contains path, or "". Repos
+// never nest, so there is at most one.
+func githubFolderOf(configs map[string]folderConfig, path string) string {
+	for folder, c := range configs {
+		if folder != "" && strings.HasPrefix(path, folder) && c.has("github") {
+			return folder
+		}
+	}
+	return ""
+}
+
+// dotNameRule keeps names starting with a dot inside GitHub folders, where
+// repositories need them (.gitignore, .github/). Run under the write queue on
+// the snapshot the change applies to:
+//   - dest, when set, is a file being created, replaced or moved to; a dot
+//     name there needs a GitHub folder around it.
+//   - configPath/configText describe a folder configuration being written
+//     (configText set) or deleted (configText nil); removing a folder's GitHub
+//     service is refused while the folder still holds dot names.
+func (r *repository) dotNameRule(ctx context.Context, files map[string]record, dest, configPath string, configText *string) error {
+	needDest := dest != "" && hasDotName(dest)
+	removing := false
+	if configPath != "" {
+		if f, ok := files[configPath]; ok {
+			b, err := r.blob(ctx, f.Blob)
+			if err != nil {
+				return err
+			}
+			old, err := parseFolderConfig(string(b))
+			if err == nil && old.has("github") {
+				removing = true
+				if configText != nil {
+					if updated, err := parseFolderConfig(*configText); err == nil && updated.has("github") {
+						removing = false
+					}
+				}
+			}
+		}
+	}
+	if needDest {
+		configs, err := r.folderConfigs(ctx, files)
+		if err != nil {
+			return err
+		}
+		// The configuration being written decides for its own folder.
+		if configPath != "" && configText != nil {
+			if c, err := parseFolderConfig(*configText); err == nil {
+				configs[configFolder(configPath)] = c
+			}
+		}
+		if githubFolderOf(configs, dest) == "" {
+			return invalid(dest + ": names starting with a dot are allowed only inside a GitHub folder (a folder whose " + folderConfigName + " has a github service). Rename it, or keep it in a GitHub folder.")
+		}
+	}
+	if removing {
+		folder := configFolder(configPath)
+		for p := range files {
+			if strings.HasPrefix(p, folder) && hasDotName(p) {
+				return invalid(folder + " holds " + p + "; names starting with a dot are allowed only in GitHub folders. Move or delete such files before removing the github service.")
 			}
 		}
 	}

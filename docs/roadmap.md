@@ -27,10 +27,22 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
    - Dotfiles allowed only inside GitHub folders (`.git` never); push follows
      the folder's `.gitignore` (common patterns).
    - Never force-push: if GitHub moved ahead, `push` stops and says so.
-   - Chunks: 2a connect GitHub (app settings, install link, link check,
-     webhook signature) — built in 0.17.0, see [github.md](github.md); live
-     check waits on registering the app. 2b dotfiles and `.gitignore`; 2c
-     `pending` and `push`; 2d `auto` mode.
+   - Chunks, in this order (reordered 2026-10-05 with Dave: push needs a
+     baseline, because nearly every repo already has commits and push never
+     forces):
+     - 2a connect GitHub — done in 0.17.0, see [github.md](github.md). Checked
+       live 2026-10-04: app `metatrash-github` (App ID 5184697) on Dave's
+       account; connect and signed webhook delivery work.
+     - 2b dot names and `.gitignore` — done in 0.18.0, with Link an existing
+       installation (for apps installed from GitHub's page first).
+     - 2c baseline: the first sync fills a GitHub folder from the repo and
+       records the commit it came from (installation token from the app JWT,
+       GitHub API, no clone).
+     - 2d `pending` and `push`, relative to the baseline; GitHub moved past it
+       → stop and report.
+     - 2e `auto` mode.
+     - Step 3 (ongoing pull) reuses the baseline fetch, triggered by push
+       webhooks.
    - Repos never nest (decided 2026-10-03, kept for simplicity and so agents
      have one rule to learn): no GitHub folder inside or around another.
      Related repos sit side by side, e.g. under `dependencies/`. The refusal

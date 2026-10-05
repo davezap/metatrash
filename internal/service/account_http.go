@@ -32,6 +32,7 @@ type accountPage struct {
 	AppsUnavailable            bool
 	GitHubEnabled              bool
 	GitHubConnectCSRF          string
+	GitHubLinkCSRF             string
 	GitHubDisconnectCSRF       string
 	GitHub                     []githubInstallationView
 	GitHubUnavailable          bool
@@ -104,6 +105,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		if h.github != nil {
 			page.GitHubEnabled = true
 			page.GitHubConnectCSRF = h.service.accounts.mac("github-connect:" + cookieToken(r, h.sessionCookieName()))
+			page.GitHubLinkCSRF = h.service.accounts.mac("github-link:" + cookieToken(r, h.sessionCookieName()))
 			page.GitHubDisconnectCSRF = h.service.accounts.mac("github-disconnect:" + cookieToken(r, h.sessionCookieName()))
 			if page.Sharing == nil && page.AppSpaces == nil {
 				var githubErr error
@@ -155,7 +157,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove" || membershipAction == "agent")
 	appID := strings.TrimPrefix(path, "/account/apps/")
 	appRoute := strings.HasPrefix(path, "/account/apps/") && idPattern.MatchString(appID)
-	githubRoute := path == "/account/github/connect" || path == "/account/github/disconnect"
+	githubRoute := path == "/account/github/connect" || path == "/account/github/link" || path == "/account/github/disconnect"
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
 		suffix := "-" + secretDigest(h.basePath)[:16]

@@ -79,6 +79,16 @@ secret or a key that is not an RSA private key.
    stored. `installation_id` alone is never trusted.
 4. The link is saved and a short page continues to Your account.
 
+**Link an existing installation** covers an app installed from its GitHub
+page first (GitHub then returns without our `state`, and the callback refuses
+it). It sends the browser to `github.com/login/oauth/authorize` (client ID,
+`state`, `redirect_uri` = the callback), the same attempt cookie and state
+apply, and the callback, seeing a link attempt, verifies the user and links
+every installation of this app that the user can access. Installations that
+another Metatrash account holds (or past the limit) are listed as not
+connected. A cancelled authorization (`error=access_denied`) shows a page
+saying so.
+
 An installation belongs to one Metatrash account; another account trying to
 link it is refused until the first disconnects. An account can link up to 20
 (for example two GitHub accounts and an organization). An organization install
@@ -96,6 +106,23 @@ anything else gets 401. `installation` events for this app update links:
 events, including `push`, are acknowledged with 204 and ignored until step 3.
 A database failure answers 503, and the delivery can be redelivered from the
 app's Advanced settings page on GitHub.
+
+## Dot names and .gitignore (0.18.0)
+
+Repos need names starting with a dot (`.gitignore`, `.github/workflows/`). They
+are allowed only inside GitHub folders: writes and moves elsewhere are refused
+with the reason. `.git` (any case) is never a name, nor `.metatrash` at the
+space root (the service's index). A folder's github service cannot be removed,
+nor its `.metatrash.json` deleted, while it still holds dot names; move or
+delete them first. Underscore names (`__init__.py`, `_config.yml`) are allowed
+in every folder.
+
+Push (coming next) sends a GitHub folder's files minus what its `.gitignore`
+files exclude, as git would: comments, negation, directory-only and anchored
+patterns, `*`, `?`, `**`, classes, escapes, `.gitignore` files in subfolders,
+and no re-including files inside an excluded folder. A test checks the matcher
+against `git check-ignore`. `.metatrash.json` files are Metatrash's and are
+never pushed.
 
 ## Storage (schema v6)
 

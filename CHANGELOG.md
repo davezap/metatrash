@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.18.0 - Dot names in GitHub folders, .gitignore, link existing installations (2026-10-05)
+
+Step 2b of the folders roadmap, plus a fix found in the 2a live check. The roadmap now puts a baseline sync (fill a GitHub folder from its repo) before `pending`/`push`, since push never forces and nearly every repo already has commits.
+
+- **Dot names inside GitHub folders.** `.gitignore`, `.github/workflows/ci.yml`, `.env.example` and the like can be written, read, listed and moved inside a folder whose `.metatrash.json` has a github service. Elsewhere, writes and moves to a name starting with a dot are refused with a reason (`.metatrash.json` stays allowed in every folder). `.git` in any case (and with trailing dots) is never a name; `.metatrash` at the space root stays reserved for the service's index.
+- A folder's github service cannot be removed, nor its `.metatrash.json` deleted, while dot names remain in it; the refusal names one and says to move or delete them.
+- Names may start with an underscore everywhere (`__init__.py`, `_config.yml`); before, a name had to start with a letter or digit. A leading hyphen is still refused.
+- **`.gitignore` matching** for push: comments, negation, directory-only and anchored patterns, `*`, `?`, `**`, classes, escapes, nested `.gitignore` files, and git's rule that files inside an excluded folder stay excluded. Push (next) will send a GitHub folder's files minus these exclusions and minus every `.metatrash.json`. Not visible to agents yet.
+- **Link an existing installation** on Your account → GitHub: for an app installed from its GitHub page first, which returned to "did not match". It asks GitHub only to authorize and links every installation of the app the GitHub user can access; ones held by another Metatrash account are listed as not connected. The "did not match" page points to it. A cancelled GitHub authorization shows a page saying so.
+- Tool schema 0.5.2: path pattern allows leading dots and underscores; the write description explains dot names. Disconnect → Connect in Claude to refresh it.
+- Tests: path syntax, dot-name rules on writes, moves, config rewrites and deletes, the public space; `.gitignore` matcher compared with `git check-ignore` over 8 pattern sets; which files a GitHub folder would push; the link flow against a fake GitHub (cancel, bad code, partial and full links, all taken, none found).
+
 ## 0.17.2 - Login log: full address and account (2026-10-04)
 
 - Login log lines show the full email address instead of `e***@gmail.com`, and `account=existing|none|unknown` (whether an account already uses it). On a successful verify, `account=new` means that sign-in created the account. `emailid` is gone. Owner's choice: full addresses now sit in the journal for as long as journald keeps it.

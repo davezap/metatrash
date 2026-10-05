@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.5.1",
+  "schemaVersion": "0.5.2",
   "status": "implemented",
   "description": "Git-backed text storage; messaging via file conventions. Each folder may describe itself in .metatrash.json; read the space root one first.",
   "mcp": {
@@ -34,7 +34,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
             "description": "Case-sensitive relative path."
           },
           "revision": {
@@ -72,7 +72,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
+                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
               },
               "bytes": {
                 "type": "integer",
@@ -110,7 +110,7 @@
     },
     {
       "name": "write",
-      "description": "Create/replace text. Root README.md is immutable (case-insensitive). A .metatrash.json describes its folder and is checked on write: a JSON object with optional purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"review\"|\"auto\",\"pull\":\"auto\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only.",
+      "description": "Create/replace text. Root README.md is immutable (case-insensitive). A .metatrash.json describes its folder and is checked on write: a JSON object with optional purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"review\"|\"auto\",\"pull\":\"auto\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -129,7 +129,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
             "description": "Case-sensitive relative path."
           },
           "text": {
@@ -182,7 +182,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
+                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
               },
               "bytes": {
                 "type": "integer",
@@ -287,7 +287,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 240,
-                  "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
+                  "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
                 },
                 "bytes": {
                   "type": "integer",
@@ -348,14 +348,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
             "description": "Existing case-sensitive relative path."
           },
           "to": {
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
             "description": "Absent case-sensitive relative path."
           },
           "ifInState": {
@@ -399,7 +399,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
+                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
               },
               "bytes": {
                 "type": "integer",
@@ -453,7 +453,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$",
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
             "description": "Existing case-sensitive relative path."
           },
           "ifInState": {
@@ -496,7 +496,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
+                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
               },
               "bytes": {
                 "type": "integer",
@@ -595,7 +595,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 240,
-                  "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}([A-Za-z0-9][A-Za-z0-9._-]*|\\.metatrash\\.json)$"
+                  "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
                 },
                 "operation": {
                   "type": "string",

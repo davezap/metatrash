@@ -2,7 +2,7 @@
 
 Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
 
-MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.17.0.
+MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.18.0.
 
 ## Five operations
 
@@ -33,7 +33,7 @@ Effective access is the user's consent for that app intersected with current own
 
 A file has `id`, `path`, UTF-8 `bytes`, `protected` (immutable: `README.md`) and `deletable` (false for `README.md` and the root `.metatrash.json`); read also returns `text`. `deletable` is derived from the path, not stored in the index. Assign a random 32-character lowercase hexadecimal ID on creation. It survives edits and moves; a new file at a previously vacated path gets a new ID. IDs are unique within a space and never grant access.
 
-Paths are case-sensitive, canonical relative ASCII paths, at most 240 characters and eight segments. Each segment starts with a letter or digit and contains letters, digits, dots, underscores, or hyphens; the one exception is a last segment of exactly `.metatrash.json` (folder configuration, below). Reject empty/dot segments, backslashes, leading/trailing slashes, other hidden paths, symlinks, and file/directory collisions. Decode HTTP query encoding exactly once. Folders are implicit; no mkdir operation.
+Paths are case-sensitive, canonical relative ASCII paths, at most 240 characters and eight segments. Each segment starts with a letter, digit, underscore or dot and contains letters, digits, dots, underscores, or hyphens. A segment starting with a dot is allowed only inside a GitHub folder (a folder whose `.metatrash.json` has a github service), except a last segment of exactly `.metatrash.json` (folder configuration, below), which any folder may have; elsewhere writes and moves are refused with `invalid_request` and the reason. Never allowed: `.` and `..`, `.git` in any case, `.metatrash` as the first segment, empty segments, backslashes, leading/trailing slashes, symlinks, and file/directory collisions. A folder's github service cannot be removed, nor its `.metatrash.json` deleted, while it still holds names starting with a dot. Decode HTTP query encoding exactly once. Folders are implicit; no mkdir operation.
 
 Root `README.md` is operator-managed, readable and versioned. Reject writes, moves and deletes with either source or destination equal to that name, case-insensitively. Hidden service metadata and Git internals are never exposed as files. Accept empty text; reject NUL and invalid Unicode; preserve text and line endings exactly.
 

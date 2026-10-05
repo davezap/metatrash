@@ -65,7 +65,8 @@
 <p><a href="{{.SettingsURL}}" rel="noopener noreferrer">Choose repositories or uninstall on GitHub</a></p>
 <form method="post" action="{{$.BasePath}}/account/github/disconnect"><input type="hidden" name="csrf" value="{{$.GitHubDisconnectCSRF}}"><input type="hidden" name="installation" value="{{.ID}}"><button class="button" type="submit">Disconnect</button></form></li>{{else}}<li>GitHub is not connected.</li>{{end}}</ul>{{end}}
 <form method="post" action="{{.BasePath}}/account/github/connect"><input type="hidden" name="csrf" value="{{.GitHubConnectCSRF}}"><button class="button" type="submit">{{if .GitHub}}Connect another GitHub account{{else}}Connect GitHub{{end}} →</button></form>
-<p class="hint">GitHub asks you to install the app and sign in, then sends you back here. Disconnecting stops Metatrash using that installation but leaves the app installed on GitHub; uninstall it there to remove it completely.</p></section>{{end}}
+<form method="post" action="{{.BasePath}}/account/github/link"><input type="hidden" name="csrf" value="{{.GitHubLinkCSRF}}"><button class="button button-quiet" type="submit">Link an existing installation</button></form>
+<p class="hint">Connect GitHub asks you to install the app and sign in, then sends you back here. If the app is already installed (for example, you installed it from its GitHub page), use Link an existing installation: GitHub only asks you to sign in, and every installation your GitHub account can see is connected. Disconnecting stops Metatrash using that installation but leaves the app installed on GitHub; uninstall it there to remove it completely.</p></section>{{end}}
 <form method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit">Sign out</button></form>
 {{else}}
 <p class="eyebrow">A space of your own</p><h1>{{if .Verify}}Check your email.{{else}}Sign in or register.{{end}}</h1>

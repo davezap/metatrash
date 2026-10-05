@@ -60,9 +60,20 @@ func TestParseFolderConfig(t *testing.T) {
 			t.Errorf("%s: valid=%v config=%v, want config %v", path, validPath(path), isFolderConfig(path), want)
 		}
 	}
-	for _, path := range []string{".metatrash/files.json", "a/.git", ".gitignore", "a/.metatrash.json/b"} {
+	// Syntax only: dot names pass here and are checked against GitHub folders on write.
+	for _, path := range []string{".metatrash/files.json", ".Metatrash/x", "a/.git", "a/.GIT/config", "a/.git./x", "a/./b", "a/../b", "..", "-a", "a/-b", "a//b", "a/"} {
 		if validPath(path) {
 			t.Errorf("%s accepted as a path", path)
+		}
+	}
+	for _, path := range []string{".gitignore", "a/.github/workflows/ci.yml", "a/.metatrash/x", "pkg/__init__.py", "_config.yml", "a/.metatrash.json/b", "a/.gitignore"} {
+		if !validPath(path) {
+			t.Errorf("%s refused as a path", path)
+		}
+	}
+	for path, want := range map[string]bool{"a/b": false, ".metatrash.json": false, "a/.metatrash.json": false, ".gitignore": true, "a/.github/ci.yml": true, "a/.metatrash.json/b": true} {
+		if hasDotName(path) != want {
+			t.Errorf("hasDotName(%s) = %v", path, !want)
 		}
 	}
 }

@@ -268,6 +268,11 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if !ok {
 			return nil, missing()
 		}
+		if isFolderConfig(in.Path) {
+			if err := r.dotNameRule(ctx, files, "", in.Path, nil); err != nil {
+				return nil, err
+			}
+		}
 		delete(files, in.Path)
 		state, err := r.commit(ctx, head, files, in.Path, f.ID, nil, "delete")
 		if err != nil {
@@ -277,6 +282,19 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	}
 	if op == "write" && isFolderConfig(in.Path) {
 		if err := r.checkFolderConfig(ctx, files, in.Path, *in.Text); err != nil {
+			return nil, err
+		}
+	}
+	if op == "write" {
+		configPath := ""
+		if isFolderConfig(in.Path) {
+			configPath = in.Path
+		}
+		if err := r.dotNameRule(ctx, files, in.Path, configPath, in.Text); err != nil {
+			return nil, err
+		}
+	} else if op == "move" {
+		if err := r.dotNameRule(ctx, files, in.To, "", nil); err != nil {
 			return nil, err
 		}
 	}

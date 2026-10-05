@@ -104,5 +104,32 @@ func deletable(path string, protected bool) bool {
 	return !protected && !strings.EqualFold(path, "README.md") && path != folderConfigName
 }
 
-func validPath(path string) bool { return len(path) <= 240 && pathPattern.MatchString(path) }
-func storageLimit() error        { return problem(507, "storage_limit", "Space storage limit reached.") }
+// validPath checks path syntax only. ".", "..", ".git" (any case, trailing
+// dots ignored as Windows does) are never names, and ".metatrash" at the root
+// is the service's own index. Other names starting with a dot are allowed only
+// inside a GitHub folder, which a write checks against the space (dotNameRule).
+func validPath(path string) bool {
+	if len(path) > 240 || !pathPattern.MatchString(path) {
+		return false
+	}
+	for i, segment := range strings.Split(path, "/") {
+		lower := strings.TrimRight(strings.ToLower(segment), ".")
+		if segment == "." || segment == ".." || lower == ".git" || (i == 0 && lower == ".metatrash") {
+			return false
+		}
+	}
+	return true
+}
+
+// hasDotName reports a path segment starting with a dot, other than a final
+// .metatrash.json (allowed in every folder).
+func hasDotName(path string) bool {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		if strings.HasPrefix(segment, ".") && !(i == len(segments)-1 && segment == folderConfigName) {
+			return true
+		}
+	}
+	return false
+}
+func storageLimit() error { return problem(507, "storage_limit", "Space storage limit reached.") }
