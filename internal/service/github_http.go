@@ -113,6 +113,7 @@ func (h *httpAdapter) serveGitHub(w http.ResponseWriter, r *http.Request, client
 // installation"). After an install the query is code, installation_id,
 // setup_action and the state we sent; after Link an existing installation it
 // is code and state; a cancelled authorization sends error fields instead.
+// Authorization replies may also carry iss, GitHub's issuer identifier.
 // Account routes reject queries, hence this separate route.
 func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, client string) {
 	g := h.github
@@ -134,11 +135,20 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 		fail(400, "GitHub sent an unexpected reply", "Start again from Your account.")
 		return
 	}
-	for key, values := range query {
-		if len(values) != 1 || !(key == "code" || key == "installation_id" || key == "setup_action" || key == "state" || key == "error" || key == "error_description" || key == "error_uri") {
+	// Parameters we do not use are ignored, so GitHub adding one later does
+	// not break connecting. The ones we use must appear at most once.
+	for _, key := range []string{"code", "installation_id", "setup_action", "state", "error", "iss"} {
+		if len(query[key]) > 1 {
 			fail(400, "GitHub sent an unexpected reply", "Start again from Your account.")
 			return
 		}
+	}
+	// GitHub names itself as the issuer (RFC 9207) on authorization replies.
+	// When present it must be GitHub's, so a reply from another authorization
+	// server is not taken for GitHub's.
+	if query.Has("iss") && query.Get("iss") != g.settings.webBase+"/login/oauth" {
+		fail(400, "GitHub sent an unexpected reply", "Start again from Your account.")
+		return
 	}
 	// The attempt is single-use whatever happens next.
 	browser := cookieToken(r, h.githubCookieName())

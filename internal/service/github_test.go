@@ -296,10 +296,11 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	if resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "state": {state}}); resp.Code != 400 {
 		t.Fatalf("spent attempt reused: %d", resp.Code)
 	}
-	// Unexpected parameters are refused.
+	// Repeated parameters we use are refused (unknown ones are ignored; the
+	// real connection below carries one).
 	browser, state = connect(owner)
-	if resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "state": {state}, "extra": {"1"}}); resp.Code != 400 {
-		t.Fatalf("extra parameter: %d", resp.Code)
+	if resp := callback(browser, url.Values{"code": {"good-me", "good-other"}, "installation_id": {fmt.Sprint(mine)}, "state": {state}}); resp.Code != 400 || !strings.Contains(resp.Body.String(), "unexpected reply") {
+		t.Fatalf("repeated parameter: %d", resp.Code)
 	}
 	// A code GitHub rejects.
 	browser, state = connect(owner)
@@ -324,7 +325,7 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 
 	// The real thing.
 	browser, state = connect(owner)
-	resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "setup_action": {"install"}, "state": {state}})
+	resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "setup_action": {"install"}, "state": {state}, "future_param": {"1"}})
 	if resp.Code != 200 || !strings.Contains(resp.Body.String(), "GitHub connected") || !strings.Contains(resp.Body.String(), `http-equiv="refresh" content="2;url=/account#github"`) {
 		t.Fatalf("callback: %d %s", resp.Code, resp.Body.String())
 	}
@@ -510,8 +511,13 @@ func TestGitHubLinkExistingAgainstDatabase(t *testing.T) {
 	if err := w.db.linkGitHubInstallation(ctx, githubInstallation{InstallationID: org, UserID: w.member.ID, GitHubUserID: 43, GitHubLogin: "gh-other", AccountLogin: "zaptronics", AccountType: "Organization", Status: "active"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	// GitHub's issuer identifier (RFC 9207) is accepted; another issuer is not.
 	browser, state = link(owner)
-	resp := callback(browser, url.Values{"code": {"good-me"}, "state": {state}})
+	if resp := callback(browser, url.Values{"code": {"good-me"}, "state": {state}, "iss": {"https://evil.example/login/oauth"}}); resp.Code != 400 || !strings.Contains(resp.Body.String(), "unexpected reply") {
+		t.Fatalf("foreign iss: %d", resp.Code)
+	}
+	browser, state = link(owner)
+	resp := callback(browser, url.Values{"code": {"good-me"}, "state": {state}, "iss": {w.h.github.settings.webBase + "/login/oauth"}})
 	body := resp.Body.String()
 	if resp.Code != 200 || !strings.Contains(body, "Connected the Metatrash app on dave-zap") || !strings.Contains(body, "Not connected") || !strings.Contains(body, "zaptronics") || strings.Contains(body, `http-equiv="refresh"`) {
 		t.Fatalf("partial link: %d %s", resp.Code, body)

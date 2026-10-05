@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.1 - GitHub callback accepts iss (2026-10-05)
+
+- Link an existing installation failed live with "GitHub sent an unexpected reply": GitHub now adds `iss=https://github.com/login/oauth` (the RFC 9207 issuer identifier) to authorization replies, and the callback refused unknown parameters.
+- The callback now ignores parameters it does not use, so future additions by GitHub do not break connecting. The ones it uses (`code`, `installation_id`, `setup_action`, `state`, `error`, `iss`) must appear at most once, and `iss`, when present, must be GitHub's issuer.
+- `upgrade.sh` starts with `#!/bin/bash` (the `#` was missing).
+
 ## 0.19.0 - Pull a GitHub folder from its repository (2026-10-05)
 
 Step 2c of the folders roadmap: the baseline that push (2d) will build on. No schema change. Details in [docs/github.md](docs/github.md#pull-0190).

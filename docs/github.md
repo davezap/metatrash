@@ -71,8 +71,11 @@ secret or a key that is not an RSA private key.
    GitHub sends the browser back.
 2. The user installs the app (or changes an existing installation) and
    authorizes it. GitHub returns to `/github/callback` with `code`,
-   `installation_id`, `setup_action` and `state`. Account routes refuse query
-   strings, hence the separate route. Other parameters are refused.
+   `installation_id`, `setup_action` and `state`, and may add `iss`, GitHub's
+   issuer identifier (RFC 9207), which must then be
+   `https://github.com/login/oauth`. Account routes refuse query strings,
+   hence the separate route. Other parameters are ignored, so GitHub adding one
+   does not break connecting; the ones used must appear at most once.
 3. The callback checks the cookie and `state`, spends the attempt, exchanges
    `code` for a user token, reads `/user` and finds `installation_id` in
    `/user/installations` (and checks it is this app's). The token proves the
