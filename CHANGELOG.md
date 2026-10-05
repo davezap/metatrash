@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.2 - Pull says why a file is not text (2026-10-05)
+
+- Found in the first live pull: a README written by Windows PowerShell 5.1 (`echo "# name" >> README.md` from GitHub's setup snippet) is UTF-16 and was skipped as "binary file (not UTF-8 text)". The agent guessed the cause, but the reason now says it: "UTF-16 text (often written by Windows PowerShell 5.1); Metatrash holds UTF-8 text only, re-save it as UTF-8". Also UTF-32 (by byte-order mark), "binary file" (NUL bytes), and otherwise "not UTF-8: text in another encoding such as Latin-1 or Windows-1252 (re-save it as UTF-8), or a binary file".
+- No conversion: files keep their exact bytes on GitHub; pull only explains the skip.
+
 ## 0.19.1 - GitHub callback accepts iss (2026-10-05)
 
 - Link an existing installation failed live with "GitHub sent an unexpected reply": GitHub now adds `iss=https://github.com/login/oauth` (the RFC 9207 issuer identifier) to authorization replies, and the callback refused unknown parameters.

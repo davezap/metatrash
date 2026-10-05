@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -207,6 +208,23 @@ func textContent(b []byte) bool {
 	return utf8.Valid(b) && !strings.ContainsRune(string(b), 0)
 }
 
+// notTextReason says why content cannot be held, precisely enough for an
+// agent to tell the owner what to fix. UTF-16 comes almost always from
+// Windows PowerShell 5.1 redirection (echo "x" > file).
+func notTextReason(b []byte) string {
+	const fix = "; Metatrash holds UTF-8 text only, re-save it as UTF-8"
+	switch {
+	case bytes.HasPrefix(b, []byte{0xFF, 0xFE, 0, 0}) || bytes.HasPrefix(b, []byte{0, 0, 0xFE, 0xFF}):
+		return "UTF-32 text" + fix
+	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}) || bytes.HasPrefix(b, []byte{0xFE, 0xFF}):
+		return "UTF-16 text (often written by Windows PowerShell 5.1)" + fix
+	case bytes.IndexByte(b, 0) >= 0:
+		return "binary file"
+	default:
+		return "not UTF-8: text in another encoding such as Latin-1 or Windows-1252 (re-save it as UTF-8), or a binary file"
+	}
+}
+
 func listSome(items []string) string {
 	sort.Strings(items)
 	if len(items) > 10 {
@@ -359,7 +377,7 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			e := keep[rel]
 			delete(keep, rel)
 			delete(content, rel)
-			skipped = append(skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: "binary file (not UTF-8 text)"})
+			skipped = append(skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: notTextReason(b)})
 		}
 	}
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Path < skipped[j].Path })

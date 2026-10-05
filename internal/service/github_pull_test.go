@@ -412,6 +412,7 @@ func siteFiles() map[string]fakeRepoFile {
 		"run.sh":                   {text: "#!/bin/sh\necho hi\n", mode: "100755"},
 		"logo.png":                 {text: "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"},
 		"latin1.txt":               {text: "caf\xe9\n"},
+		"utf16.md":                 {text: "\xff\xfe#\x00 \x00x\x00\r\x00\n\x00"},
 		"big.txt":                  {text: strings.Repeat("x", 70000)},
 		"My File.txt":              {text: "spaces\n"},
 		"-dash.md":                 {text: "dash\n"},
@@ -467,7 +468,7 @@ func TestGitHubPull(t *testing.T) {
 	}
 	reasons := skippedReasons(got)
 	wantSkipped := map[string]string{
-		"logo.png": "binary", "latin1.txt": "binary", "big.txt": "larger than", "My File.txt": "name not allowed", "-dash.md": "name not allowed",
+		"logo.png": "binary file", "latin1.txt": "Latin-1", "utf16.md": "UTF-16 text", "big.txt": "larger than", "My File.txt": "name not allowed", "-dash.md": "name not allowed",
 		strings.Repeat("d/", 8) + "too-deep.md": "name not allowed", "current": "symbolic link", "vendor/lib": "submodule",
 		".metatrash.json": "settings file", "docs/.metatrash.json": "settings file",
 	}
@@ -728,6 +729,17 @@ func TestClassifyRepoEntries(t *testing.T) {
 	}, 100)
 	if len(keep) != 1 || keep["ok.md"].SHA != sha || len(skipped) != 4 {
 		t.Fatalf("keep %v skipped %v", keep, skipped)
+	}
+	for content, want := range map[string]string{
+		"\xff\xfeh\x00i\x00":            "UTF-16 text",
+		"\xfe\xff\x00h\x00i":            "UTF-16 text",
+		"\xff\xfe\x00\x00h\x00\x00\x00": "UTF-32 text",
+		"\x89PNG\r\n\x1a\n\x00":         "binary file",
+		"caf\xe9":                       "Latin-1",
+	} {
+		if got := notTextReason([]byte(content)); !strings.Contains(got, want) {
+			t.Fatalf("reason for %q: %q, want %q", content, got, want)
+		}
 	}
 	if blobHash([]byte("hello\n")) != "ce013625030ba8dba906f756967f9e9ca394464a" {
 		t.Fatal("blob hash differs from git hash-object")
