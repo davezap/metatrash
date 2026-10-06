@@ -1,6 +1,32 @@
 # Roadmap
 
-Open work after 0.21.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.22.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+
+## Sign-in methods
+
+Decided with Dave 2026-10-06 (`notes/auth-handoff.md` in the `dave-zap/metatrash`
+space): passkeys are the primary sign-in, an authenticator app (TOTP) an optional
+alternative, both opt-in. Email codes are demoted to a backup and may later be
+turned off per account, or site-wide. Recovery must exist before anyone can turn
+email off. The OAuth server for agents is unchanged.
+
+1. Schema v8, Sign-in methods on Your account, confirm it's you (step-up) —
+   done in 0.22.0.
+2. Passkeys: add, sign in (button and autofill), rename, remove — done in
+   0.22.0. Standard library only.
+3. Authenticator app: enrol with a QR code (generated server-side as SVG) and a
+   text secret, confirm a code to enable, sign in with a code. Needs a server
+   key to encrypt TOTP secrets: **open question** — `accounts.json` (a key file
+   path, like `smtpPasswordFile`) or an environment variable.
+4. Recovery codes (about 10, single use, shown once, regenerate) and the
+   per-account "Allow sign-in by email code" switch (off only with a passkey
+   or authenticator app plus recovery codes). Notices for every change.
+5. Later: whether to remove email codes site-wide (needs an answer for sign-up
+   and for recovery after losing every device and code).
+
+Possible extras: when a passkey that is not registered tries to sign in, tell
+the browser to forget it (`PublicKeyCredential.signalUnknownCredential`, Chrome
+132+), so removed passkeys stop being offered.
 
 ## Folders: first version
 
@@ -143,6 +169,15 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
   `/docs/` page: no `robots` meta. A web-readable or public space's top-level
   file: none either; a file in a subfolder: `noindex, nofollow`. Optionally
   ask Google Search Console to inspect `/docs/legal/privacy.md`.
+
+- **Passkeys (0.22.0):** apply schema v8 first. On Your account → Sign-in
+  methods, add a passkey on your phone or computer (sign in fresh, or use
+  Email me a code to confirm). You should get a notice email. Sign out, then
+  sign in with the passkey button, and again by picking the passkey in the
+  email field's suggestions. Leave it more than 10 minutes, then confirm with
+  the passkey before removing it. Try a second device: a phone through the
+  QR code (hybrid) and a password manager. `journalctl` shows
+  `login passkey … result=ok`.
 
 Earlier checks:
 

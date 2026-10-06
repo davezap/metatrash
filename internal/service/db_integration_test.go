@@ -8,7 +8,7 @@ import (
 )
 
 // Optional integration checks against a disposable MariaDB database at schema
-// v7 with the documented runtime grants. Set METATRASH_TEST_DB_CONFIG to the
+// v8 with the documented runtime grants. Set METATRASH_TEST_DB_CONFIG to the
 // path of an account database configuration file to run them; they are skipped
 // otherwise. Never point this at a production database: tests create rows.
 // Recreate the database before each run; owned spaces from an earlier run point
@@ -32,7 +32,7 @@ func testDatabase(t *testing.T) *accountDatabase {
 	return db
 }
 
-func TestDatabaseSchemaV7Ready(t *testing.T) {
+func TestDatabaseSchemaV8Ready(t *testing.T) {
 	testDatabase(t)
 }
 

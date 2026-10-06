@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.22.0 - Passkeys (2026-10-06)
+
+**Needs schema v8** before the new binary starts: stop the service, back up, apply `deploy/account-schema-v8.sql`, then `deploy/account-grants.sql` again (see [docs/deployment.md](docs/deployment.md#upgrades-backups-and-rollback)). No configuration change. No new Go modules.
+
+- **Sign in with a passkey.** The sign-in page has a **Sign in with a passkey** button above the email form, and needs no email address (discoverable credentials). Browsers that support it also offer passkeys in the email field's autofill (conditional UI). Without JavaScript or passkey support the button stays hidden and the email form works as before. Signing in this way never says which methods an email address has.
+- **Sign-in methods** on Your account: add a passkey (with a name, such as "Pixel phone"), rename it, remove it. The list shows when each was added and last used, and whether it is synced.
+  - **Confirm it's you.** Adding or removing a passkey needs a sign-in or confirmation within the last 10 minutes. Confirm with one of your passkeys or with a code emailed to the account's address (same mail limits as sign-in codes). Renaming needs no confirmation.
+  - **Notices.** Adding or removing a passkey emails the account a notice (best effort; it never blocks the change).
+  - Email codes stay on for everyone. Schema v8 already holds the authenticator-app (TOTP) and recovery-code tables and an `email_login` flag on accounts, all unused in this version, so the next steps need no schema change.
+- **WebAuthn**, implemented with the standard library only (like the OAuth server), in `webauthn.go`: a small CBOR reader, COSE keys ES256, EdDSA (Ed25519) and RS256 (2048–4096 bits), attestation `none` (any attestation statement is ignored), user verification required, origin and RP ID (`metatrash.com`, from the account origin) checked. Challenges are stateless and signed with the service secret for one purpose (sign in, add, confirm), bound to the browser's login cookie or the session, valid 10 minutes and accepted once. Signature counters must move forward unless they stay at zero (synced passkeys); a change in backup eligibility is refused. Up to 20 passkeys per account.
+- Sessions record when they last proved who the user is (`AuthAt`); a sign-in by code or passkey sets it. Sessions are still in memory, so a restart signs everyone out as before.
+- Login log lines for passkey sign-ins read `login passkey ip=… email=… account=existing result=ok`; failures log the code, such as `unknown_passkey` or `invalid_passkey`.
+- Account pages load the new `/assets/passkey.js`.
+- Tests: CBOR edge cases, COSE keys (off-curve point, 1024-bit RSA, unsupported algorithm), registration and sign-in with software ES256, Ed25519 and RS256 authenticators, and refusals (no user verification, wrong origin, RP ID, type, cross-origin, forged, expired, replayed or wrong-purpose challenge, bad signature, other user handle, counter going back, backup eligibility change). Against MariaDB: the whole flow over HTTP (confirm required, email confirmation with wrong code and from another session, add, replay, duplicate, sign in, replay, unknown passkey, challenge from another browser, confirm with passkey, another account's passkey, rename, remove, removed passkey refused, notices). In headless Chromium with a virtual authenticator on `https://metatrash.com` (real TLS): email sign-in, add, sign-in through autofill and through the button, confirm with a passkey, the browser refusing a second passkey on the same authenticator, remove, removed passkey refused, no unexpected console errors.
+
 ## 0.21.2 - About page from the docs space; links in documents (2026-10-06)
 
 No schema or configuration change.

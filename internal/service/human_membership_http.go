@@ -202,12 +202,16 @@ func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Reque
 // Notices are fixed keys carried across the post-redirect in a short-lived cookie;
 // account routes take no query parameters.
 var accountNotices = map[string]string{
-	"invite-sent":    "Invitation emailed. They sign in with that address and accept from Your account.",
-	"invite-limited": "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
-	"invite-failed":  "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
-	"invite-daily":   "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
-	"space-web":      "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
-	"space-private":  "The space is private again: only you and its members can browse it.",
+	"invite-sent":      "Invitation emailed. They sign in with that address and accept from Your account.",
+	"invite-limited":   "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
+	"invite-failed":    "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
+	"invite-daily":     "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
+	"space-web":        "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
+	"space-private":    "The space is private again: only you and its members can browse it.",
+	"signin-confirmed": "Confirmed. For the next 10 minutes you can add or remove sign-in methods.",
+	"passkey-added":    "Passkey added. Next time, choose Sign in with a passkey. We’ve emailed you a notice of this change.",
+	"passkey-renamed":  "Passkey renamed.",
+	"passkey-removed":  "Passkey removed. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }
 
 // inviteMailsPerOwnerDay caps invitation emails per owner across all their spaces.

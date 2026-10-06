@@ -52,6 +52,8 @@ type accountPage struct {
 	Disabled, Verify, SignedIn bool
 	CSRF, Email, Message       string
 	Pow                        string // login proof-of-work challenge
+	LoginPasskey               string // WebAuthn request options for passkey sign-in
+	SignIn                     *signInPage
 	PowBits                    int
 	Notice                     string
 	UsernameCSRF, Username     string
@@ -118,6 +120,12 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 				}
 			}
 		}
+		if page.Sharing == nil && page.AppSpaces == nil && h.service.ownedDB != nil {
+			var ok bool
+			if page.SignIn, ok = h.signInSection(r, page.User); !ok {
+				status = http.StatusServiceUnavailable
+			}
+		}
 		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
 		page.VisibilityCSRF = h.service.accounts.mac("space-visibility:" + cookieToken(r, h.sessionCookieName()))
 		var err error
@@ -142,7 +150,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 }
 
 func (a *accounts) loginPage(browser string) accountPage {
-	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits}
+	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now())}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cleanup(time.Now())
@@ -168,7 +176,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -177,7 +185,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		// form-action against the redirect target too.
 		formAction += " " + h.github.settings.webBase
 	}
-	// script-src 'self' is for login.js (the login form's proof of work).
+	// script-src 'self' is for login.js (the login form's proof of work) and
+	// passkey.js (the browser's passkey prompts).
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
 	// no-referrer makes browsers send Origin: null on HTML form POSTs.
 	w.Header().Set("Referrer-Policy", "same-origin")
@@ -261,7 +270,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	// set to the failure each check would cause before that check runs.
 	var entry *loginLog
 	note := func(string) {}
-	if path == "/login/send" || path == "/login/verify" {
+	if path == "/login/send" || path == "/login/verify" || path == "/login/passkey" {
 		entry = &loginLog{kind: strings.TrimPrefix(path, "/login/"), ip: client, ua: r.UserAgent(), result: "bad_origin"}
 		defer entry.write()
 		note = func(result string) { entry.result = result }
@@ -280,6 +289,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	formLimit := int64(2048)
 	if path == "/account/apps/spaces" {
 		formLimit = 16384 // one field per space
+	}
+	if path == "/login/passkey" || path == "/account/confirm/passkey" || path == "/account/passkeys/add" {
+		formLimit = 16384 // WebAuthn responses in base64url
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
 	if err := r.ParseForm(); err != nil {
@@ -321,6 +333,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	if path == "/login/verify" {
 		allowed["code"] = true
 	}
+	for _, field := range signInFormFields[path] {
+		allowed[field] = true
+	}
 	for key, values := range r.PostForm {
 		if !(allowed[key] || (path == "/account/apps/spaces" && spaceFieldPattern.MatchString(key))) || len(values) != 1 {
 			sendError(w, invalid("Unknown or duplicate form field."))
@@ -338,7 +353,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || githubRoute || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if membershipRoute || githubRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -365,6 +380,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if githubRoute {
 			csrf = a.mac("github-" + strings.TrimPrefix(path, "/account/github/") + ":" + session)
 		}
+		if signInRoutes[path] {
+			csrf = a.signInCSRF(path, session)
+		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
@@ -372,6 +390,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if membershipRoute {
 		h.submitHumanMembership(w, r, session, membershipAction)
+		return true
+	}
+	if signInRoutes[path] {
+		h.submitSignIn(w, r, session, path, client)
 		return true
 	}
 	if path == "/account/apps/spaces" {
@@ -502,6 +524,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		a.mu.Lock()
 		delete(a.sessions, secretDigest(session))
 		delete(a.challenges, secretDigest(browser))
+		delete(a.challenges, confirmKey(session))
 		a.mu.Unlock()
 		accountCookie(w, sessionCookie, "", -1)
 		accountCookie(w, loginCookie, "", -1)
@@ -564,14 +587,29 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		fail(err)
 		return true
 	}
-	token, email, created, err := a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
-	a.logEmail(r.Context(), entry, email)
-	if err != nil {
-		fail(err)
-		return true
-	}
-	if created {
-		entry.account = "new" // this sign-in created it
+	var token string
+	if path == "/login/passkey" {
+		var user userAccount
+		token, user, err = h.passkeySignIn(r, browser)
+		if user.Email != "" {
+			entry.email, entry.account = user.Email, "existing"
+		}
+		if err != nil {
+			fail(err)
+			return true
+		}
+	} else {
+		var email string
+		var created bool
+		token, email, created, err = a.verify(r.Context(), browser, strings.TrimSpace(r.PostForm.Get("code")))
+		a.logEmail(r.Context(), entry, email)
+		if err != nil {
+			fail(err)
+			return true
+		}
+		if created {
+			entry.account = "new" // this sign-in created it
+		}
 	}
 	note("ok")
 	// Revoke this browser's previous session when replacing it.

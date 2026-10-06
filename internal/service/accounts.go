@@ -60,7 +60,14 @@ type loginChallenge struct {
 type accountSession struct {
 	UserID  string
 	Expires time.Time
+	// AuthAt is when this session last proved who the user is: signing in,
+	// or confirming on Your account. Changing sign-in methods needs it recent.
+	AuthAt time.Time
 }
+
+// stepUpWindow is how long after signing in or confirming a session may
+// change sign-in methods.
+const stepUpWindow = 10 * time.Minute
 
 type accounts struct {
 	mu         sync.Mutex
@@ -73,6 +80,11 @@ type accounts struct {
 	secret    []byte
 	mailSlots chan struct{}
 	send      func(context.Context, string, string) error
+	// sendConfirm emails a code that confirms a signed-in user before they
+	// change sign-in methods.
+	sendConfirm func(context.Context, string, string) error
+	// sendNotice emails a security notice (subject, body); nil sends nothing.
+	sendNotice func(ctx context.Context, email, subject, body string) error
 	// sendInvite emails an invitation; nil when accounts are not configured.
 	sendInvite func(context.Context, string, invitationMail) error
 	// oauth is nil unless the account configuration enables OAuth agent access.
@@ -189,6 +201,12 @@ func (s *Service) EnableAccounts(configPath string) error {
 	a.send = func(ctx context.Context, email, code string) error {
 		return sendLoginMail(ctx, cfg, passwordText, email, code)
 	}
+	a.sendConfirm = func(ctx context.Context, email, code string) error {
+		return sendConfirmMail(ctx, cfg, passwordText, email, code)
+	}
+	a.sendNotice = func(ctx context.Context, email, subject, body string) error {
+		return sendMail(ctx, cfg, passwordText, email, subject, body)
+	}
 	a.sendInvite = func(ctx context.Context, email string, m invitationMail) error {
 		return sendMail(ctx, cfg, passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
 	}
@@ -216,6 +234,20 @@ func (a *accounts) cleanup(now time.Time) {
 }
 
 func (a *accounts) issue(ctx context.Context, browser, email string) error {
+	return a.issueCode(ctx, secretDigest(browser), email, a.send)
+}
+
+// confirmKey is where a signed-in session's confirmation code waits.
+func confirmKey(session string) string {
+	return secretDigest("confirm:" + session)
+}
+
+// issueCode emails a new six-digit code to email and keeps it under key,
+// replacing any code already there.
+func (a *accounts) issueCode(ctx context.Context, key, email string, send func(context.Context, string, string) error) error {
+	if send == nil {
+		return problem(503, "mail_unavailable", "We could not send a code. Please try again later.")
+	}
 	select {
 	case a.mailSlots <- struct{}{}:
 		defer func() { <-a.mailSlots }()
@@ -227,7 +259,6 @@ func (a *accounts) issue(ctx context.Context, browser, email string) error {
 		return err
 	}
 	code := fmt.Sprintf("%06d", n.Int64())
-	key := secretDigest(browser)
 	challenge := loginChallenge{Email: email, Digest: a.mac(key + ":" + code), Expires: time.Now().Add(codeLifetime)}
 	a.mu.Lock()
 	a.cleanup(time.Now())
@@ -238,7 +269,7 @@ func (a *accounts) issue(ctx context.Context, browser, email string) error {
 	a.challenges[key] = challenge
 	a.mu.Unlock()
 	// Do not hold the account lock during network I/O. A newer send wins.
-	err = a.send(ctx, email, code)
+	err = send(ctx, email, code)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if current, ok := a.challenges[key]; ok && current.Digest == challenge.Digest {
@@ -263,11 +294,41 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 	defer a.mu.Unlock()
 	now := time.Now()
 	a.cleanup(now)
-	key := secretDigest(browser)
+	email, err = a.checkCodeLocked(secretDigest(browser), code)
+	if err != nil {
+		return "", email, false, err
+	}
+	if len(a.sessions) >= 4096 {
+		return "", email, false, problem(503, "sessions_busy", "Please try again later.")
+	}
+	// Only for the login log: a failed lookup reports an existing account.
+	existed, lookupErr := a.store.Exists(ctx, email)
+	user, err := a.store.FindOrCreate(ctx, email)
+	created = err == nil && lookupErr == nil && !existed
+	if err != nil {
+		return "", email, false, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
+	}
+	token, err = a.startSessionLocked(user.ID, now)
+	if err != nil {
+		return "", email, false, err
+	}
+	// A successful login also invalidates outstanding codes for this email.
+	for k, pending := range a.challenges {
+		if pending.Email == email {
+			delete(a.challenges, k)
+		}
+	}
+	return token, email, created, nil
+}
+
+// checkCodeLocked checks a code waiting under key and consumes it when it
+// matches. It returns the email the code was sent to ("" when none waits).
+// Five wrong attempts discard the code. Callers hold mu.
+func (a *accounts) checkCodeLocked(key, code string) (string, error) {
 	c, ok := a.challenges[key]
 	failed := problem(400, "invalid_code", "That code is invalid or expired. Try again, or request a new code.")
 	if !ok || !c.Ready {
-		return "", "", false, failed
+		return "", failed
 	}
 	c.Attempts++
 	match := len(code) == 6 && subtle.ConstantTimeCompare([]byte(c.Digest), []byte(a.mac(key+":"+code))) == 1
@@ -277,29 +338,28 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 		} else {
 			a.challenges[key] = c
 		}
-		return "", c.Email, false, failed
+		return c.Email, failed
 	}
 	// Consume before persistence or session creation, even if either fails.
 	delete(a.challenges, key)
+	return c.Email, nil
+}
+
+// startSessionLocked creates a session for userID that has just proved who
+// the user is. Callers hold mu.
+func (a *accounts) startSessionLocked(userID string, now time.Time) (string, error) {
 	if len(a.sessions) >= 4096 {
-		return "", c.Email, false, problem(503, "sessions_busy", "Please try again later.")
+		return "", problem(503, "sessions_busy", "Please try again later.")
 	}
-	token, err = randomHex(32)
+	token, err := randomHex(32)
 	if err != nil {
-		return "", c.Email, false, err
-	}
-	// Only for the login log: a failed lookup reports an existing account.
-	existed, lookupErr := a.store.Exists(ctx, c.Email)
-	user, err := a.store.FindOrCreate(ctx, c.Email)
-	created = err == nil && lookupErr == nil && !existed
-	if err != nil {
-		return "", c.Email, false, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
+		return "", err
 	}
 	// Bound active sessions per account; revoke the oldest when signing in again.
 	count, oldestKey := 0, ""
 	var oldest time.Time
 	for k, session := range a.sessions {
-		if session.UserID == user.ID {
+		if session.UserID == userID {
 			count++
 			if oldestKey == "" || session.Expires.Before(oldest) {
 				oldest, oldestKey = session.Expires, k
@@ -309,14 +369,35 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 	if count >= 8 {
 		delete(a.sessions, oldestKey)
 	}
-	a.sessions[secretDigest(token)] = accountSession{UserID: user.ID, Expires: time.Now().Add(sessionLifetime)}
-	// A successful login also invalidates outstanding codes for this email.
-	for k, pending := range a.challenges {
-		if pending.Email == c.Email {
-			delete(a.challenges, k)
-		}
+	a.sessions[secretDigest(token)] = accountSession{UserID: userID, Expires: now.Add(sessionLifetime), AuthAt: now}
+	return token, nil
+}
+
+// sessionFresh reports whether the session signed in or confirmed within
+// stepUpWindow, and until when.
+func (a *accounts) sessionFresh(token string, now time.Time) (bool, time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session, ok := a.sessions[secretDigest(token)]
+	if !ok || !now.Before(session.Expires) || session.AuthAt.IsZero() {
+		return false, time.Time{}
 	}
-	return token, c.Email, created, nil
+	until := session.AuthAt.Add(stepUpWindow)
+	return now.Before(until), until
+}
+
+// markConfirmed records that the session's user has just proved who they are.
+func (a *accounts) markConfirmed(token string, userID string, now time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := secretDigest(token)
+	session, ok := a.sessions[key]
+	if !ok || session.UserID != userID || !now.Before(session.Expires) {
+		return false
+	}
+	session.AuthAt = now
+	a.sessions[key] = session
+	return true
 }
 
 func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, bool, error) {

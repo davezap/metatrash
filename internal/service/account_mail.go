@@ -18,6 +18,20 @@ func sendLoginMail(ctx context.Context, cfg accountConfig, password, email, code
 	return sendMail(ctx, cfg, password, email, "Your Metatrash login code", body)
 }
 
+func sendConfirmMail(ctx context.Context, cfg accountConfig, password, email, code string) error {
+	body := "Your Metatrash confirmation code is: " + code + "\n\nYou asked to confirm it’s you before changing how you sign in. Enter it on Your account at " + cfg.Origin + "/account.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not request it, someone may be signed in to your account: sign in yourself and review your sign-in methods.\n"
+	return sendMail(ctx, cfg, password, email, "Your Metatrash confirmation code", body)
+}
+
+// signInMethodMail is the notice sent when a sign-in method is added or
+// removed. name is user-chosen and goes only in the body, stripped of controls.
+func signInMethodMail(origin, change, name string, when time.Time) string {
+	return "A sign-in method was " + change + " on your Metatrash account: " + mailText(name) + "\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"If this was you, there is nothing to do.\n" +
+		"If it was not, sign in at " + origin + "/login, review Sign-in methods on Your account and remove anything you do not recognise.\n"
+}
+
 // invitationMail is the invitation email. The subject is fixed ASCII; owner
 // and space names go only in the quoted-printable body, stripped of controls.
 type invitationMail struct {

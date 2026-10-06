@@ -137,7 +137,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    ```
 
 Startup refuses to run with a missing configuration, an unreachable database or
-a schema older than v7. Without the accounts setting the service runs public and
+a schema older than v8. Without the accounts setting the service runs public and
 key spaces only, with no database.
 
 ### OAuth
@@ -205,7 +205,7 @@ administrator. Never edit IDs, slugs, ownership or `metatrash_account_meta`.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1, v5, v6 and v7 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v8 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -229,6 +229,24 @@ and grants the service `UPDATE (visibility)`. Every space stays `private`
 until its owner changes it. To roll back to 0.20.x, set every space back to
 `private` first (`UPDATE metatrash_spaces SET visibility = 'private'`), then
 `schema_version` to 6.
+
+**0.22.0** needs schema v8 before the new binary starts:
+
+```sh
+sudo systemctl stop metatrash
+sudo mariadb metatrash < deploy/account-schema-v8.sql
+sudo mariadb < deploy/account-grants.sql
+# install the new binary (upgrade.sh), then
+sudo systemctl start metatrash
+```
+
+v8 adds the sign-in method tables (`metatrash_passkeys`, `metatrash_totp`,
+`metatrash_recovery_codes`) and an `email_login` column on `metatrash_users`
+(default 1), and grants the service access to them. 0.22.0 uses only the
+passkeys table. Passkeys are bound to the host name of `origin` in
+`accounts.json` (`metatrash.com`): changing that host makes every passkey
+unusable. To roll back to 0.21.x, set `schema_version` to 7; the new tables
+can stay.
 
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again
@@ -257,7 +275,7 @@ accounts, spaces or memberships created since that backup.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v7 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v8 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - There is no Go toolchain on the Windows development PC. A cloud workspace
   needed Go 1.25 built from the golang/go source on GitHub and golang.org/x
