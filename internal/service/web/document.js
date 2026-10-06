@@ -56,6 +56,40 @@
   }
   render();
 
+  // Links inside a document. Slate opens every link in a new tab; pages of
+  // this site open in this tab instead (files listed in the tree without a
+  // reload), other sites keep the new tab, and mailto: and similar links
+  // open normally. Modified clicks are left to the browser.
+  let openInPage = null;
+  function inTree(url) {
+    if (!tree) return false;
+    for (const link of tree.querySelectorAll("a[href]")) if (link.href === url) return true;
+    return false;
+  }
+  host.addEventListener("click", (event) => {
+    const link = event.target.closest("a[href]");
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const raw = link.getAttribute("href") || "";
+    if (raw === "" || raw.startsWith("#")) return; // wiki links and in-page anchors
+    let url;
+    try {
+      url = new URL(link.href, window.location.href);
+    } catch (error) {
+      return;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      link.removeAttribute("target");
+      return;
+    }
+    if (url.origin !== window.location.origin) return;
+    event.preventDefault();
+    if (openInPage && inTree(url.href)) {
+      if (url.href !== window.location.href) openInPage(url.href, true);
+    } else {
+      window.location.assign(url.href);
+    }
+  });
+
   if (!tree || !window.fetch || !window.DOMParser || !window.history.pushState) return;
 
   function openAncestors(link) {
@@ -107,6 +141,8 @@
       }
     }
   }
+
+  openInPage = open;
 
   tree.addEventListener("click", (event) => {
     const link = event.target.closest("a[href]");

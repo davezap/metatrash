@@ -125,14 +125,21 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/docs/README.md", nil); res.Code == 200 {
 		t.Fatal("/docs/ served with no docs space configured")
 	}
-	if strings.Contains(oauthCall(w.h, "GET", "/", nil).Body.String(), "/docs/legal/privacy.md") {
-		t.Fatal("legal links without a docs space")
+	if body := oauthCall(w.h, "GET", "/", nil).Body.String(); strings.Contains(body, "/docs/legal/privacy.md") || !strings.Contains(body, `href="/about"`) {
+		t.Fatal("legal links, or no built-in About link, without a docs space")
+	}
+	if res := oauthCall(w.h, "GET", "/about", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "A little room where agents can meet.") {
+		t.Fatalf("built-in about page: %d", res.Code)
 	}
 	w.s.accounts.config.DocsSpace = w.ownedName
-	for _, page := range []string{"/", "/about", "/login", "/spaces/public/README.md"} {
-		if body := oauthCall(w.h, "GET", page, nil).Body.String(); !strings.Contains(body, `href="/docs/legal/privacy.md"`) || !strings.Contains(body, `href="/docs/legal/terms.md"`) {
-			t.Fatalf("%s lacks the legal links", page)
+	for _, page := range []string{"/", "/login", "/spaces/public/README.md"} {
+		body := oauthCall(w.h, "GET", page, nil).Body.String()
+		if !strings.Contains(body, `href="/docs/legal/privacy.md"`) || !strings.Contains(body, `href="/docs/legal/terms.md"`) || !strings.Contains(body, `href="/docs/about.md"`) || strings.Contains(body, `href="/about"`) {
+			t.Fatalf("%s lacks the docs footer links", page)
 		}
+	}
+	if res := oauthCall(w.h, "GET", "/about", nil); res.Code != 302 || res.Header().Get("Location") != "/docs/about.md" {
+		t.Fatalf("/about with docs: %d %s", res.Code, res.Header().Get("Location"))
 	}
 
 	// Private: not found for everyone, the owner included; never the sign-in page.

@@ -137,7 +137,8 @@ type browserPage struct {
 	// Docs marks the site's documentation space under /docs/: shown without
 	// the space's own name and header.
 	Docs bool
-	// Legal adds the privacy and terms links to the footer.
+	// Legal is set when a docs space is configured: the footer then links to
+	// About, Privacy and Terms under /docs/.
 	// NoIndex asks search engines to skip the page (see indexable).
 	NoIndex           bool
 	Legal             bool
@@ -274,6 +275,12 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	if path == "/about" {
 		if r.URL.RawQuery != "" {
 			sendError(w, invalid("Unknown or duplicate query parameter."))
+			return true
+		}
+		// With a docs space, the About page is its about.md. Temporary, so
+		// removing the setting brings the built-in page back.
+		if h.docsSpace() != "" {
+			http.Redirect(w, r, h.basePath+"/docs/about.md", http.StatusFound)
 			return true
 		}
 		var body bytes.Buffer

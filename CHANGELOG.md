@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.2 - About page from the docs space; links in documents (2026-10-06)
+
+No schema or configuration change.
+
+- **About from the docs space.** With `docsSpace` set, `/about` redirects (302, temporary) to `/docs/about.md` and every footer's About link points there. Without it, the built-in About page is unchanged. The About text now lives as `about.md` in dave-zap/metatrash-com.
+- **Links in documents** (explorer and `/docs/`). Slate opens every link in a new tab; now links to this site open in the same tab: files listed in the tree without a reload (relative links like `terms.md` or `../about.md` and absolute ones like `/docs/legal/terms.md`), other pages of the site with a normal load. Links to other sites still open in a new tab. `mailto:` and other non-web links open normally, without an empty tab. Ctrl/Cmd/Shift/Alt-clicks are left to the browser. In `web/document.js`; Slate is unchanged.
+- Tests: built-in `/about` without a docs space, the redirect and footer About links with one. In headless Chromium: relative, `../` and absolute links between docs pages without reloads, back button, a link to `/`, an external link in a new tab, `mailto:` without `target`, no console errors.
+
 ## 0.21.1 - Site docs under /docs/; privacy and terms links; search indexing (2026-10-06)
 
 No schema change. Optional setting `"docsSpace": "owner/slug"` in `accounts.json` (see [docs/deployment.md](docs/deployment.md#site-docs)).

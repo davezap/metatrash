@@ -135,6 +135,10 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
   Privacy and Terms; both open under `/docs/legal/…` with no space header;
   clicking around the tree stays under `/docs/`. Make the space private: `/docs/`
   is not found (no sign-in page). Make it readable again.
+- **About and links (0.21.2):** the footer About and `/about` open
+  `/docs/about.md`. In it, the GitHub link opens a new tab, the email link
+  opens your mail app, and a link to another docs page (try
+  `[Terms](legal/terms.md)`) opens in the same tab without a reload.
 - **Search indexing (0.21.1):** view source (or response headers) on a
   `/docs/` page: no `robots` meta. A web-readable or public space's top-level
   file: none either; a file in a subfolder: `noindex, nofollow`. Optionally
