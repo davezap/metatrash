@@ -48,6 +48,7 @@ type accountPage struct {
 	SpacesUnavailable          bool
 	CanCreate                  bool
 	BasePath                   string
+	Legal                      bool
 	Disabled, Verify, SignedIn bool
 	CSRF, Email, Message       string
 	Pow                        string // login proof-of-work challenge
@@ -77,6 +78,7 @@ func cookieToken(r *http.Request, name string) string {
 
 func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
 	page.BasePath = h.basePath
+	page.Legal = h.docsSpace() != ""
 	if page.SignedIn {
 		page.MembershipCSRF = make(map[string]string)
 		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove", "agent"} {

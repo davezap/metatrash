@@ -133,7 +133,14 @@ type browserPage struct {
 	Private bool
 	// Web marks a private space its owner made readable on the web; Member
 	// is set when the viewer is its owner or a member.
-	Web, Member       bool
+	Web, Member bool
+	// Docs marks the site's documentation space under /docs/: shown without
+	// the space's own name and header.
+	Docs bool
+	// Legal adds the privacy and terms links to the footer.
+	// NoIndex asks search engines to skip the page (see indexable).
+	NoIndex           bool
+	Legal             bool
 	SpaceName         string
 	SpaceRef          string // owner/slug
 	BasePath, MCPURL  string
@@ -145,6 +152,14 @@ type browserPage struct {
 	State, Path, Text string
 	Tree              []*browserNode
 	Recent            []recentFile
+}
+
+// Search engines may index the site's pages, everything under /docs/, and in
+// spaces anyone can read under /spaces/ (the public space and spaces readable
+// on the web) only the files in the space's top folder. Nested files and
+// members-only spaces are noindex.
+func indexable(path string) bool {
+	return !strings.Contains(path, "/")
 }
 
 func fileURL(path string) string {
@@ -262,7 +277,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 			return true
 		}
 		var body bytes.Buffer
-		if err := browserTemplate.Execute(&body, browserPage{BasePath: h.basePath, About: true, AccountsEnabled: h.service.accounts != nil}); err != nil {
+		if err := browserTemplate.Execute(&body, browserPage{BasePath: h.basePath, About: true, AccountsEnabled: h.service.accounts != nil, Legal: h.docsSpace() != ""}); err != nil {
 			sendError(w, err)
 			return true
 		}
@@ -295,7 +310,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 			return true
 		}
 	}
-	page := browserPage{BasePath: h.basePath, MCPURL: h.publicOrigin + h.basePath + "/mcp", Home: path == "/", AccountsEnabled: h.service.accounts != nil}
+	page := browserPage{BasePath: h.basePath, MCPURL: h.publicOrigin + h.basePath + "/mcp", Home: path == "/", AccountsEnabled: h.service.accounts != nil, Legal: h.docsSpace() != ""}
 	if h.oauth != nil {
 		page.AccountMCPURL = h.oauth.mcpResource
 	}
@@ -314,6 +329,10 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		if q.Has("path") {
 			http.Redirect(w, r, h.basePath+fileURL(page.Path), http.StatusPermanentRedirect)
 			return true
+		}
+		if !indexable(page.Path) {
+			page.NoIndex = true
+			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)

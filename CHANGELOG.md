@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.21.1 - Site docs under /docs/; privacy and terms links; search indexing (2026-10-06)
+
+No schema change. Optional setting `"docsSpace": "owner/slug"` in `accounts.json` (see [docs/deployment.md](docs/deployment.md#site-docs)).
+
+- **`/docs/`** shows the configured space as part of the website: the same read-only explorer (in-page navigation, Markdown preview) at `/docs/…` instead of `/spaces/owner/slug/…`, without the space bar (owner, space name, visibility) and without GitHub folder labels; the explorer heading reads DOCS. `/docs` redirects to `/docs/`, which shows `README.md`.
+  - Only while the space is readable on the web. Otherwise, and for any missing file, `/docs/…` is not found for everyone, the owner and members included, and never sends anyone to sign in. The docs pages never look at the visitor's session.
+  - Search engines may index every `/docs/` page (no `noindex`). Still `no-store`. The space's own `/spaces/…` address keeps working as before.
+  - Anyone with write access to that space (the owner, members whose apps may write) changes what the site shows under `/docs/`.
+- **Footer links** to Privacy (`/docs/legal/privacy.md`) and Terms (`/docs/legal/terms.md`) on every page (home, about, explorers, account and sign-in, app consent, GitHub return), shown only when `docsSpace` is set.
+- **Search engines under `/spaces/`:** in spaces anyone can read (the public space and spaces readable on the web), only files in the space's top folder are indexable; files in subfolders get `noindex, nofollow` (meta tag and `X-Robots-Tag`). Members-only pages, errors and sign-in redirects stay `noindex`. The warning before making a space readable on the web now says so. Before, the public space was indexable throughout and web-readable spaces not at all.
+- The owned-space explorer is now one handler shared by `/spaces/…` and `/docs/`; behaviour of `/spaces/…` is unchanged.
+- Tests: `/docs/` against MariaDB (not configured, private space for signed out and owner, web-readable page without space chrome and with `/docs/` tree links, `/docs` redirect, missing file, query, POST, back to private) and the footer links on home, about, sign-in and public explorer; indexing of `/docs/` files, a web-readable space's top folder and subfolder, a members-only page, and the public space's top folder and subfolder. In headless Chromium: tree clicks and back stay under `/docs/` without reloads; the footer Terms link opens the page.
+
 ## 0.21.0 - Spaces readable on the web; explorer without page reloads (2026-10-05)
 
 **Needs schema v7** before the new binary starts: stop the service, back up, apply `deploy/account-schema-v7.sql`, then `deploy/account-grants.sql` again (see [docs/deployment.md](docs/deployment.md#upgrades-backups-and-rollback)).

@@ -141,7 +141,7 @@ type oauthPage struct {
 	ContinueURL                    string
 	ClientName, ClientHost, Email  string
 	CSRF, LogoutCSRF               string
-	WantWrite                      bool
+	WantWrite, Legal               bool
 	Spaces                         []oauthConsentSpace
 	// First-space setup on the consent page, for accounts with no space yet.
 	Setup, NeedUsername       bool
@@ -153,6 +153,7 @@ type oauthPage struct {
 
 func (h *httpAdapter) renderOAuth(w http.ResponseWriter, status int, page oauthPage, formTarget string) {
 	page.BasePath = h.basePath
+	page.Legal = h.docsSpace() != ""
 	formAction := "'self'"
 	if formTarget != "" {
 		formAction += " " + formTarget

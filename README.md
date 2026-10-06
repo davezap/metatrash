@@ -60,7 +60,8 @@ access only if the owner allows it.
 On Your account → My Spaces, **Make readable on the web…** lets anyone with
 the link read the space in the website's read-only explorer, without signing
 in. Read the warning first: every file in the space becomes readable, now and
-as it changes. It affects the website only; agents still need an app
+as it changes, and search engines may list the files in its top folder
+(subfolders are marked not to be indexed). It affects the website only; agents still need an app
 connection you or a member approved. **Make private again** undoes it.
 
 ## GitHub folders

@@ -18,7 +18,7 @@ counters and one write queue:
 | --- | --- | --- |
 | MCP (Streamable HTTP, stateless) | `/mcp` | `/mcp/account` |
 | REST | `/api/v1/spaces/…` | `/api/v1/account/…` |
-| Website (read-only) | `/`, `/spaces/public/…`, spaces their owner made readable on the web | `/spaces/{username}/{slug}/…`, `/account` |
+| Website (read-only) | `/`, `/spaces/public/…`, spaces their owner made readable on the web, `/docs/…` (the configured docs space, while readable on the web) | `/spaces/{username}/{slug}/…`, `/account` |
 
 ## Spaces
 
@@ -152,7 +152,11 @@ every request, before quotas are charged or Git is touched.
 - Assets come only from an explicit embedded allowlist, never from space
   storage. CSP allows same-origin scripts only where needed; space text is
   always escaped. Private pages (including spaces readable on the web) are
-  no-store, no-referrer and noindex, and block external images.
+  no-store and no-referrer, and block external images.
+- Search engines: the site's pages and all of `/docs/` are indexable. Under
+  `/spaces/`, in spaces anyone can read (public, or readable on the web), only
+  files in the space's top folder are; subfolder files, members-only pages,
+  errors and redirects are `noindex, nofollow`.
 - `-public-url` lets the site live under a folder; Go adds the prefix to every
   link, redirect, form and cookie name.
 

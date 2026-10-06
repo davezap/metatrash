@@ -31,6 +31,9 @@ type accountConfig struct {
 	DatabaseConfigFile string        `json:"databaseConfigFile"`
 	OAuth              *oauthConfig  `json:"oauth"`
 	GitHub             *githubConfig `json:"github"`
+	// DocsSpace, when set, is the owner/slug of a space shown as the site's
+	// documentation under /docs/ while its owner keeps it readable on the web.
+	DocsSpace string `json:"docsSpace"`
 }
 
 type userAccount struct {
@@ -157,6 +160,12 @@ func (s *Service) EnableAccounts(configPath string) error {
 	if cfg.GitHub != nil && cfg.GitHub.Enabled {
 		if a.github, err = cfg.GitHub.settings(); err != nil {
 			return err
+		}
+	}
+	if cfg.DocsSpace != "" {
+		owner, slug, ok := strings.Cut(cfg.DocsSpace, "/")
+		if !ok || len(owner) > 32 || !usernamePattern.MatchString(owner) || len(slug) > 48 || !usernamePattern.MatchString(slug) {
+			return fmt.Errorf("docsSpace must be a space name like owner/slug")
 		}
 	}
 	if _, err := rand.Read(a.secret); err != nil {

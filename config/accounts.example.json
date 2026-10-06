@@ -6,6 +6,7 @@
   "smtpFrom": "david@204am.com",
   "smtpPasswordFile": "/etc/metatrash/smtp-password",
   "databaseConfigFile": "/etc/metatrash/account-database.json",
+  "docsSpace": "",
   "oauth": {
     "enabled": false,
     "clientHosts": ["claude.ai", "chatgpt.com"],

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"metatrash.com/metatrash"
@@ -95,6 +96,18 @@ func TestSmoke(t *testing.T) {
 	decode(call("GET", "/api/v1/spaces/public/history?id="+write.File.ID, "", nil, 200), &history)
 	if len(history.Entries) != 2 || history.Entries[0].Operation != "move" {
 		t.Fatal("history did not follow the move")
+	}
+	// Search engines: the public space's top folder only.
+	for page, index := range map[string]bool{"/spaces/public/README.md": true, "/spaces/public/archive/a.txt": false} {
+		r := httptest.NewRequest("GET", page, nil)
+		r.RemoteAddr = "127.0.0.1:12345"
+		res := httptest.NewRecorder()
+		h.ServeHTTP(res, r)
+		tagged := res.Header().Get("X-Robots-Tag") == "noindex, nofollow" && strings.Contains(res.Body.String(), `name="robots" content="noindex, nofollow"`)
+		clean := res.Header().Get("X-Robots-Tag") == "" && !strings.Contains(res.Body.String(), `name="robots"`)
+		if res.Code != 200 || (index && !clean) || (!index && !tagged) {
+			t.Fatalf("%s: %d header %q", page, res.Code, res.Header().Get("X-Robots-Tag"))
+		}
 	}
 	call("DELETE", "/api/v1/spaces/public/file?path=README.md", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=.metatrash.json", "", map[string]any{"ifInState": moved.NewState}, 403)

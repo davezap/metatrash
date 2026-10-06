@@ -76,11 +76,12 @@ func (h *httpAdapter) githubCookieName() string {
 // githubPage is the page shown on return from GitHub.
 type githubPage struct {
 	BasePath, Title, Message, ContinueURL string
-	OK                                    bool
+	OK, Legal                             bool
 }
 
 func (h *httpAdapter) renderGitHub(w http.ResponseWriter, status int, page githubPage) {
 	page.BasePath = h.basePath
+	page.Legal = h.docsSpace() != ""
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")

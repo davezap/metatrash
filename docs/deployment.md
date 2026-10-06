@@ -154,6 +154,17 @@ Optional `"github"` section for the Metatrash GitHub App; off until
 `"enabled": true`. Registration settings, secret files and the connection flow
 are in [github.md](github.md).
 
+### Site docs
+
+Optional `"docsSpace": "owner/slug"` (from 0.21.1) shows that space under
+`/docs/` as part of the website, without its owner and space header, and adds
+Privacy and Terms links to every page's footer, pointing at
+`/docs/legal/privacy.md` and `/docs/legal/terms.md`. The space must be
+readable on the web (Your account → My Spaces); while it is not, `/docs/` is
+not found for everyone. Anyone with write access to the space changes what the
+site shows there. Search engines may index every `/docs/` page. Empty or absent: no `/docs/`,
+no footer links.
+
 ### Login log
 
 Each login request writes one line to the journal, for example:

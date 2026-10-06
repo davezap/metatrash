@@ -130,6 +130,15 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
 - **Explorer navigation (0.21.0):** open folders, click between Markdown and
   text files (no reload, folders stay open), use back and forward, reload a
   nested file (its folders open).
+- **Site docs (0.21.1):** set `"docsSpace": "dave-zap/metatrash-com"` in
+  `accounts.json` and restart. Signed out (private window): the footer shows
+  Privacy and Terms; both open under `/docs/legal/…` with no space header;
+  clicking around the tree stays under `/docs/`. Make the space private: `/docs/`
+  is not found (no sign-in page). Make it readable again.
+- **Search indexing (0.21.1):** view source (or response headers) on a
+  `/docs/` page: no `robots` meta. A web-readable or public space's top-level
+  file: none either; a file in a subfolder: `noindex, nofollow`. Optionally
+  ask Google Search Console to inspect `/docs/legal/privacy.md`.
 
 Earlier checks:
 

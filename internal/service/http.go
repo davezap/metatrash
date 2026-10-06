@@ -167,7 +167,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveMCPAccount(w, r)
 		return
 	}
-	if h.serveOAuth(w, r, client) || h.serveGitHub(w, r, client) || h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveOwnedBrowser(w, r, client) {
+	if h.serveOAuth(w, r, client) || h.serveGitHub(w, r, client) || h.serveAsset(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveDocs(w, r, client) || h.serveOwnedBrowser(w, r, client) {
 		return
 	}
 	if r.URL.Path == "/api/v1/spaces/public/recent" {

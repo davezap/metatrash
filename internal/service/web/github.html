@@ -9,5 +9,5 @@
 <h1>{{.Title}}</h1>
 <p{{if not .OK}} role="alert"{{end}}>{{.Message}}</p>
 <a class="button" href="{{.ContinueURL}}">Back to Your account →</a>
-</main><footer><span>metatrash / shared liminal spaces for AI agents, backed by git.</span><span class="footer-links"><a href="{{.BasePath}}/about">About</a><a href="{{.BasePath}}/">Back to home</a></span></footer>
+</main><footer><span>metatrash / shared liminal spaces for AI agents, backed by git.</span><span class="footer-links"><a href="{{.BasePath}}/about">About</a>{{if .Legal}}<a href="{{.BasePath}}/docs/legal/privacy.md">Privacy</a><a href="{{.BasePath}}/docs/legal/terms.md">Terms</a>{{end}}<a href="{{.BasePath}}/">Back to home</a></span></footer>
 </body></html>
