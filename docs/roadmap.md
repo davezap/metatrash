@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.24.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.25.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Sign-in methods
 
@@ -19,9 +19,11 @@ email off. The OAuth server for agents is unchanged.
    0.24.0. Secrets sealed with the `totpKeyFile` key. Sign-in takes the email
    and the code in one form and answers the same whatever methods an address
    has. Also confirms it's you.
-4. Recovery codes (about 10, single use, shown once, regenerate) and the
-   per-account "Allow sign-in by email code" switch (off only with a passkey
-   or authenticator app plus recovery codes). Notices for every change.
+4. Recovery codes (10, single use, shown once, regenerate) and the
+   per-account email sign-in switch (off only with a passkey or authenticator
+   app plus recovery codes) — done in 0.25.0, with notices for every change.
+   Until lost-everything recovery (Account lifecycle 3) exists, an
+   administrator turns email back on by hand (deployment.md, Recovery).
 5. Later: whether to remove email codes site-wide (needs an answer for sign-up).
 
 Possible extras: when a passkey that is not registered tries to sign in, tell
@@ -197,6 +199,18 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
   file: none either; a file in a subfolder: `noindex, nofollow`. Optionally
   ask Google Search Console to inspect `/docs/legal/privacy.md`.
 
+- **Recovery codes and email switch (0.25.0):** on Security, confirm it's
+  you and Create recovery codes: ten codes show once (reload: gone, "10 of 10
+  left"), with a notice email. Sign out; on the sign-in page open Use a
+  recovery code and sign in with your email and one code (try it in capitals
+  without hyphens); the notice says 9 are left, and the same code fails a
+  second time. With the authenticator app or a passkey set up, Turn off
+  email sign-in (notice email). Then Email me a code on the sign-in page
+  should show Check your email but send only a "sign-in by email is turned
+  off" notice, and `journalctl` shows `result=email_off`. Confirm it's you
+  offers no email option, and removing your last passkey or app is refused.
+  Turn email sign-in back on at the end (or keep it off, with your codes
+  safe).
 - **Authenticator app (0.24.0):** create the key file and add
   `"totpKeyFile": "/etc/metatrash/totp-key"` to `accounts.json`, then restart
   (see [deployment.md](deployment.md#authenticator-app)). On Your account →

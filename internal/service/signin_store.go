@@ -13,9 +13,8 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-// Sign-in methods (schema v8): passkeys. The email-code switch, the
-// authenticator-app and the recovery-code tables exist from v8 but are not
-// used yet.
+// Sign-in methods (schema v8): passkeys. The authenticator app is in
+// totp.go; recovery codes and the email-code switch are in recovery.go.
 
 const maxPasskeysPerUser = 20
 const maxPasskeyNameRunes = 64
@@ -230,6 +229,10 @@ func (db *accountDatabase) removePasskey(ctx context.Context, userID, passkeyID 
 		return "", fmt.Errorf("account database unavailable")
 	}
 	defer tx.Rollback()
+	var one int
+	if err := tx.QueryRowContext(ctx, "SELECT 1 FROM metatrash_users WHERE user_id = ? FOR UPDATE", userID).Scan(&one); err != nil {
+		return "", fmt.Errorf("account database unavailable")
+	}
 	var name string
 	if err := tx.QueryRowContext(ctx, "SELECT name FROM metatrash_passkeys WHERE passkey_id = ? AND user_id = ? FOR UPDATE", passkeyID, userID).Scan(&name); err == sql.ErrNoRows {
 		return "", problem(404, "not_found", "That passkey no longer exists. Reload the page.")
@@ -238,6 +241,9 @@ func (db *accountDatabase) removePasskey(ctx context.Context, userID, passkeyID 
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_passkeys WHERE passkey_id = ? AND user_id = ?", passkeyID, userID); err != nil {
 		return "", fmt.Errorf("account database unavailable")
+	}
+	if err := keepSignInLocked(ctx, tx, userID); err != nil {
+		return "", err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("account database unavailable")

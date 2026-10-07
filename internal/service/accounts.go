@@ -97,6 +97,9 @@ type accounts struct {
 	github *githubSettings
 	// totpKey seals authenticator-app secrets; nil without totpKeyFile.
 	totpKey cipher.AEAD
+	// recoveryReveals holds new recovery codes until their page shows them
+	// once (recovery.go).
+	recoveryReveals map[string]recoveryReveal
 }
 
 // Email identity is case-insensitive. Do not collapse dots or plus aliases.
@@ -162,7 +165,7 @@ func (s *Service) EnableAccounts(configPath string) error {
 	if passwordText == "" {
 		return fmt.Errorf("SMTP password file is empty")
 	}
-	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, powUsed: map[string]time.Time{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
+	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, powUsed: map[string]time.Time{}, recoveryReveals: map[string]recoveryReveal{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
 	if cfg.OAuth != nil && cfg.OAuth.Enabled {
 		settings, err := cfg.OAuth.settings()
 		if err != nil {
@@ -242,6 +245,11 @@ func (a *accounts) cleanup(now time.Time) {
 			delete(a.powUsed, key)
 		}
 	}
+	for key, r := range a.recoveryReveals {
+		if !now.Before(r.Expires) {
+			delete(a.recoveryReveals, key)
+		}
+	}
 }
 
 func (a *accounts) issue(ctx context.Context, browser, email string) error {
@@ -311,6 +319,17 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 	}
 	if len(a.sessions) >= 4096 {
 		return "", email, false, problem(503, "sessions_busy", "Please try again later.")
+	}
+	// An account can turn email sign-in off (recovery.go). Checked here too,
+	// not only when sending, in case it was turned off after the code was sent.
+	if db, ok := a.store.(*accountDatabase); ok {
+		allowed, err := db.emailLoginAllowed(ctx, email)
+		if err != nil {
+			return "", email, false, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
+		}
+		if !allowed {
+			return "", email, false, problem(400, "email_login_off", "Email sign-in is turned off for this account. Use a passkey, your authenticator app or a recovery code.")
+		}
 	}
 	// Only for the login log: a failed lookup reports an existing account.
 	existed, lookupErr := a.store.Exists(ctx, email)

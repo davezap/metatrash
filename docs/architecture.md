@@ -76,10 +76,24 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   unknown address or an account without the app, gives the same answer, and
   each address (and each account when confirming) has five attempts per 15
   minutes.
+- **Recovery codes and the email switch** (0.25.0, `recovery.go`): ten
+  single-use codes per account (12 characters from a 31-letter alphabet,
+  about 59 bits each), shown once and stored in `metatrash_recovery_codes` as
+  SHA-256 salted with the user ID; creating new ones replaces the old. A code
+  signs in with the email address, like the authenticator app (same answer
+  for every failure, five attempts per address per 15 minutes), and the
+  account is emailed how many are left. `metatrash_users.email_login` turns
+  emailed codes off per account, allowed only with a passkey or authenticator
+  app and unused recovery codes. While it is off, `/login/send` emails a
+  notice instead of a code (the page looks the same), `/login/verify` and
+  emailed confirmation refuse, and the last passkey or authenticator app
+  cannot be removed (checked in the same transaction, under the user row's
+  lock).
 - **Confirm it's you** (step-up): each session records when it last proved
   who the user is. Adding or removing a sign-in method needs that within ten
   minutes; otherwise the user confirms with a passkey, the authenticator app
-  or an emailed code (same mail limits as sign-in). Changes email the account
+  or an emailed code (same mail limits as sign-in; not while email sign-in is
+  off). Signing in with a recovery code counts as recent. Changes email the account
   a notice.
 - **Send limits**: per email 1/minute and 3/hour, per IP 10/hour, 100/day in
   total, plus a separate 30-attempts-per-IP-per-10-minutes limit. All delivery
@@ -93,7 +107,7 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   minutes and accepted once. Blocked requests count towards the attempt limit
   but not the mail budgets, and the message does not say which check failed.
   Without JavaScript no code can be sent.
-- **Login log**: every `/login/send`, `/login/verify`, `/login/passkey` and `/login/totp` request writes one
+- **Login log**: every `/login/send`, `/login/verify`, `/login/passkey`, `/login/totp` and `/login/recovery` request writes one
   journal line with IP, the full email address, whether an account uses it,
   both check results, the challenge age, the result and the user agent. No
   codes or cookies. Full addresses are in the journal by the owner's choice;

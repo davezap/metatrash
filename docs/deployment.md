@@ -191,7 +191,11 @@ Each login request writes one line to the journal, for example:
 login send ip=203.0.113.5 email=emily@gmail.com account=none honeypot=pass pow=pass age=6s result=sent ua="Mozilla/5.0 …"
 login verify ip=203.0.113.5 email=emily@gmail.com account=new result=ok ua="Mozilla/5.0 …"
 login totp ip=203.0.113.5 email=emily@gmail.com account=existing result=invalid_code ua="Mozilla/5.0 …"
+login recovery ip=203.0.113.5 email=emily@gmail.com account=existing result=ok ua="Mozilla/5.0 …"
 ```
+
+A send line ends `result=email_off` when the account has turned email sign-in
+off: no code was sent, the account was emailed a notice instead.
 
 `account` is `existing` (an account uses this address), `none`, `new` (on a
 verify line: this sign-in created the account) or `unknown` (the database
@@ -272,6 +276,11 @@ to offer it; without it the release behaves like 0.23.0. To roll back to 0.23.x,
 install the older binary: authenticator apps already set up stay in the table,
 unused, and work again after upgrading.
 
+**0.25.0** needs no schema or configuration change (it uses the v8
+`metatrash_recovery_codes` table and `email_login` column). Rolling back to
+0.24.x is safe but weakens accounts that turned email sign-in off: the older
+binary ignores the switch, so emailed codes sign them in again.
+
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again
 later instead of recreating tables. Never restore an old database backup over
@@ -293,6 +302,18 @@ accounts, spaces or memberships created since that backup.
 - Git history is not a backup. Do not run Git maintenance or external writers
   against live repositories. Existing space READMEs are not changed by
   rebuilding; only new spaces get the current template.
+
+### An account locked out with email sign-in off
+
+Until self-service recovery exists (see the roadmap), an administrator can
+turn email sign-in back on for one account after checking who is asking (for
+example, a reply from that address):
+
+```sh
+sudo mariadb metatrash -e "UPDATE metatrash_users SET email_login = 1 WHERE email = 'name@example.com'"
+```
+
+They can then sign in with an emailed code and create new recovery codes.
 
 ## Testing
 

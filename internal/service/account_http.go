@@ -59,8 +59,12 @@ type accountPage struct {
 	LoginPasskey               string // WebAuthn request options for passkey sign-in
 	// TOTPLogin offers sign-in with an authenticator app; TOTPOpen and
 	// TOTPEmail show that form again after it failed.
-	TOTPLogin, TOTPOpen    bool
-	TOTPEmail              string
+	TOTPLogin, TOTPOpen bool
+	TOTPEmail           string
+	// RecoveryOpen and RecoveryEmail show the recovery-code form again
+	// after it failed.
+	RecoveryOpen           bool
+	RecoveryEmail          string
 	SignIn                 *signInPage
 	PowBits                int
 	Notice                 string
@@ -238,7 +242,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -332,7 +336,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	// set to the failure each check would cause before that check runs.
 	var entry *loginLog
 	note := func(string) {}
-	if path == "/login/send" || path == "/login/verify" || path == "/login/passkey" || path == "/login/totp" {
+	if path == "/login/send" || path == "/login/verify" || path == "/login/passkey" || path == "/login/totp" || path == "/login/recovery" {
 		entry = &loginLog{kind: strings.TrimPrefix(path, "/login/"), ip: client, ua: r.UserAgent(), result: "bad_origin"}
 		defer entry.write()
 		note = func(result string) { entry.result = result }
@@ -598,6 +602,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if path == "/login/totp" {
 			page.TOTPOpen, page.TOTPEmail = true, r.PostForm.Get("email")
 		}
+		if path == "/login/recovery" {
+			page.RecoveryOpen, page.RecoveryEmail = true, r.PostForm.Get("email")
+		}
 		var p *Error
 		if errors.As(err, &p) {
 			note(p.Code)
@@ -639,11 +646,31 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			fail(err)
 			return true
 		}
-		if err := a.issue(r.Context(), browser, email); err != nil {
+		// An account that turned email sign-in off gets a notice instead of
+		// a code. The page looks the same either way, so it does not tell
+		// anyone how an address signs in.
+		send, result := a.send, "sent"
+		if h.service.ownedDB != nil {
+			allowed, err := h.service.ownedDB.emailLoginAllowed(r.Context(), email)
+			if err != nil {
+				fail(problem(503, "account_unavailable", "Sign-in is temporarily unavailable. Please try again later."))
+				return true
+			}
+			if !allowed {
+				send = func(ctx context.Context, email, _ string) error {
+					if a.sendNotice == nil {
+						return errors.New("no mail")
+					}
+					return a.sendNotice(ctx, email, "Metatrash sign-in by email is turned off", emailLoginOffMail(a.config.Origin))
+				}
+				result = "email_off"
+			}
+		}
+		if err := a.issueCode(r.Context(), secretDigest(browser), email, send); err != nil {
 			fail(err)
 			return true
 		}
-		note("sent")
+		note(result)
 		accountCookie(w, loginCookie, browser, 1200)
 		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return true
@@ -665,6 +692,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		}
 	} else if path == "/login/totp" {
 		token, _, err = h.totpSignIn(r.Context(), r.PostForm.Get("email"), r.PostForm.Get("code"), entry)
+		if err != nil {
+			fail(err)
+			return true
+		}
+	} else if path == "/login/recovery" {
+		token, _, err = h.recoverySignIn(r.Context(), r.PostForm.Get("email"), r.PostForm.Get("code"), entry)
 		if err != nil {
 			fail(err)
 			return true

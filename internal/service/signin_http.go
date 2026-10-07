@@ -13,11 +13,13 @@ import (
 
 // Sign-in methods on Your account (0.22.0): confirming it's you (step-up)
 // and managing passkeys; and signing in with a passkey. The authenticator
-// app (0.24.0) is in totp.go.
+// app (0.24.0) is in totp.go; recovery codes and the email sign-in switch
+// (0.25.0) are in recovery.go.
 //
 // Adding or removing a passkey needs a session that signed in or confirmed
 // within stepUpWindow. Confirming uses one of the user's passkeys, their
-// authenticator app or a code emailed to the account's address.
+// authenticator app or a code emailed to the account's address (unless the
+// account turned email sign-in off).
 
 // signInRoutes are the POST routes of the Sign-in methods section. Each has
 // its own session-bound CSRF token.
@@ -32,6 +34,8 @@ var signInRoutes = map[string]bool{
 	"/account/totp/start":      true,
 	"/account/totp/enable":     true,
 	"/account/totp/remove":     true,
+	"/account/recovery/create": true,
+	"/account/email-login":     true,
 }
 
 // signInFormFields are the fields each route accepts besides csrf.
@@ -48,6 +52,9 @@ var signInFormFields = map[string][]string{
 	"/account/totp/enable":     {"code"},
 	"/account/totp/remove":     nil,
 	"/login/totp":              {"email", "code"},
+	"/account/recovery/create": nil,
+	"/account/email-login":     {"email_login"},
+	"/login/recovery":          {"email", "code"},
 }
 
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
@@ -73,6 +80,13 @@ type signInPage struct {
 	// TOTP is the Authenticator app card; nil when the server has no
 	// totpKeyFile.
 	TOTP *totpView
+	// EmailLogin: emailed codes sign in and confirm. CanTurnOffEmail: the
+	// account has what turning it off needs (recovery.go).
+	EmailLogin, CanTurnOffEmail, Strong bool
+	Recovery                            int
+	RecoveryCreated                     string
+	// NewRecoveryCodes are shown once, right after they are created.
+	NewRecoveryCodes []string
 }
 
 func (a *accounts) signInCSRF(path, session string) string {
@@ -115,6 +129,17 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 			return page, false
 		}
 	}
+	state, err := h.service.ownedDB.signInState(r.Context(), user.ID)
+	if err != nil {
+		page.Unavailable = true
+		return page, false
+	}
+	page.EmailLogin, page.Strong, page.Recovery = state.EmailLogin, state.Strong(), state.Recovery
+	page.CanTurnOffEmail = state.Strong() && state.Recovery > 0
+	if state.RecoveryCreated > 0 {
+		page.RecoveryCreated = time.Unix(state.RecoveryCreated, 0).UTC().Format("2 Jan 2006")
+	}
+	page.NewRecoveryCodes = a.takeRecoveryReveal(session, user.ID, now)
 	a.mu.Lock()
 	c, waiting := a.challenges[confirmKey(session)]
 	page.ConfirmSent = waiting && c.Ready && now.Before(c.Expires)
@@ -191,6 +216,12 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 	ctx, now := r.Context(), time.Now()
 	notice := ""
 	err = h.service.rates.take(allowance{"signin:user:" + user.ID, 30, 600})
+	if err == nil && (path == "/account/confirm/send" || path == "/account/confirm/verify") {
+		var state signInState
+		if state, err = db.signInState(ctx, user.ID); err == nil && !state.EmailLogin {
+			err = problem(403, "email_login_off", "Email sign-in is turned off for this account, so emailed codes cannot confirm it’s you. Confirm with a passkey or your authenticator app.")
+		}
+	}
 	if err == nil {
 		switch path {
 		case "/account/confirm/send":
@@ -222,6 +253,11 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 			}
 		case "/account/confirm/totp", "/account/totp/start", "/account/totp/enable", "/account/totp/remove":
 			notice, err = h.submitTOTP(ctx, path, session, user, r.PostForm.Get("code"), now)
+		case "/account/recovery/create":
+			err = h.createRecoveryCodes(ctx, session, user, now)
+			notice = "recovery-created"
+		case "/account/email-login":
+			notice, err = h.switchEmailLogin(ctx, session, user, r.PostForm.Get("email_login"), now)
 		case "/account/passkeys/add":
 			err = h.addPasskey(r, session, user, now)
 			notice = "passkey-added"
@@ -362,13 +398,18 @@ func (h *httpAdapter) passkeySignIn(r *http.Request, browser string) (string, us
 // notifySignInChange emails the account a notice that a sign-in method was
 // added or removed. Best effort: it never delays or fails the change.
 func (h *httpAdapter) notifySignInChange(user userAccount, change, what string) {
+	body := signInMethodMail(h.service.accounts.config.Origin, change, what, time.Now())
+	h.sendSecurityNotice(user, "Sign-in method "+change+" on your Metatrash account", body)
+}
+
+// sendSecurityNotice emails the account a security notice in the background.
+func (h *httpAdapter) sendSecurityNotice(user userAccount, subject, body string) {
 	a := h.service.accounts
 	if a.sendNotice == nil || h.service.rates.take(allowance{"mail:global:day", 100, 86400}) != nil {
 		return
 	}
-	body := signInMethodMail(a.config.Origin, change, what, time.Now())
 	go func() {
-		if err := a.sendNotice(context.Background(), user.Email, "Sign-in method "+change+" on your Metatrash account", body); err != nil {
+		if err := a.sendNotice(context.Background(), user.Email, subject, body); err != nil {
 			// SMTP responses may contain addresses; never log them.
 			log.Print("sign-in method notice not sent")
 		}

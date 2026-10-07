@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.25.0 - Recovery codes and turning off email sign-in (2026-10-07)
+
+No schema or configuration change (uses the `metatrash_recovery_codes` table and `email_login` column from v8). No new Go modules.
+
+- **Recovery codes** on Your account → Security (after Confirm it's you): Create recovery codes makes ten single-use codes like `abcd-efgh-jkmn`, shown once on the next page load and never again; the section then says how many are left and when they were made. Create new codes replaces the whole set. Creating codes emails the account a notice.
+- **Sign in with a recovery code**: on the sign-in page, Use a recovery code takes the email address and a code (any case, with or without hyphens). It works like the authenticator app: every failure gets the same answer, five attempts per address per 15 minutes plus the per-IP verify limit, and the session counts as freshly confirmed. Each code works once (the row is deleted as the check, so two requests cannot both use it), and the account is emailed a notice saying how many codes are left.
+- **Turn off email sign-in**: the Email codes card shows on or off. It can be turned off only with a passkey or an authenticator app and unused recovery codes, after Confirm it's you, and back on the same way; both email a notice. While it is off:
+  - Email me a code on the sign-in page shows the usual Check your email page but sends a notice ("sign-in by email is turned off") instead of a code, so the page does not reveal how an address signs in. A code sent before the switch no longer signs in.
+  - Confirm it's you no longer offers or accepts emailed codes.
+  - The last passkey or authenticator app cannot be removed (checked in the same transaction as the removal, under the account row's lock).
+  - With three or fewer recovery codes left, Security warns to create new ones.
+- Codes have 12 characters from an alphabet without 0, 1, i, l and o (about 59 bits each) and are stored as SHA-256 salted with the user ID, never in clear. New codes wait in memory for at most ten minutes to be shown once, only to the session that created them.
+- Login log: `login recovery …` lines, and `result=email_off` on a send line when a notice went out instead of a code.
+- Docs: architecture, deployment (log lines, upgrade and rollback note, how an administrator turns email sign-in back on for a locked-out account), roadmap (step 4 done, owner check added).
+- Tests: code format and normalisation, salted digests. Against MariaDB, over HTTP: creating codes refused without confirming, shown once and only to that session, stored only as digests, the switch refused without a strong method or without codes and from a stale session, turning it off (notice, page state, confirm by email refused, last authenticator app kept, `/login/send` sends a notice not a code with the same page, an earlier code refused at verify), recovery sign-in (wrong code, malformed code, an account without codes and an unknown address all the same; right code typed in capitals without hyphens signs in fresh with a notice of 9 left; reuse refused; the sixth attempt 429), new codes replacing old ones, and turning it back on. Pages checked in headless Chromium at desktop and phone widths.
+
 ## 0.24.0 - Authenticator app (2026-10-07)
 
 No schema change (uses the `metatrash_totp` table from v8). No new Go modules. New optional setting `"totpKeyFile"` in `accounts.json`; without it nothing changes (see [docs/deployment.md](docs/deployment.md#authenticator-app)).

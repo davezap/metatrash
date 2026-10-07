@@ -32,6 +32,26 @@ func signInMethodMail(origin, change, name string, when time.Time) string {
 		"If it was not, sign in at " + origin + "/login, review Sign-in methods on Your account and remove anything you do not recognise.\n"
 }
 
+// recoveryUsedMail is the notice sent when a recovery code signs in.
+func recoveryUsedMail(origin string, left int, when time.Time) string {
+	count := strconv.Itoa(left) + " recovery codes are left."
+	if left == 1 {
+		count = "1 recovery code is left."
+	}
+	return "A recovery code was used to sign in to your Metatrash account.\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n" + count + "\n\n" +
+		"If this was you, check your passkeys and authenticator app on Security at " + origin + "/account/security, and create new recovery codes there if you are running low.\n" +
+		"If it was not, someone has one of your recovery codes: sign in, create new recovery codes (the old ones then stop working) and review your sign-in methods.\n"
+}
+
+// emailLoginOffMail is sent instead of a login code when the account has
+// turned email sign-in off.
+func emailLoginOffMail(origin string) string {
+	return "Someone asked for a Metatrash login code for this address, but you have turned off sign-in by emailed code, so no code was sent.\n\n" +
+		"To sign in, go to " + origin + "/login and use a passkey, your authenticator app or a recovery code.\n" +
+		"If you did not ask for a code, there is nothing to do: your account is unchanged.\n"
+}
+
 // invitationMail is the invitation email. The subject is fixed ASCII; owner
 // and space names go only in the quoted-printable body, stripped of controls.
 type invitationMail struct {

@@ -236,6 +236,10 @@ func (db *accountDatabase) removeTOTP(ctx context.Context, userID string) (bool,
 		return false, fmt.Errorf("account database unavailable")
 	}
 	defer tx.Rollback()
+	var one int
+	if err := tx.QueryRowContext(ctx, "SELECT 1 FROM metatrash_users WHERE user_id = ? FOR UPDATE", userID).Scan(&one); err != nil {
+		return false, fmt.Errorf("account database unavailable")
+	}
 	var enabled int64
 	if err := tx.QueryRowContext(ctx, "SELECT enabled_at FROM metatrash_totp WHERE user_id = ? FOR UPDATE", userID).Scan(&enabled); err == sql.ErrNoRows {
 		return false, problem(404, "not_found", "There is no authenticator app on this account. Reload the page.")
@@ -244,6 +248,9 @@ func (db *accountDatabase) removeTOTP(ctx context.Context, userID string) (bool,
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_totp WHERE user_id = ?", userID); err != nil {
 		return false, fmt.Errorf("account database unavailable")
+	}
+	if err := keepSignInLocked(ctx, tx, userID); err != nil {
+		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("account database unavailable")
