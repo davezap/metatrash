@@ -26,6 +26,9 @@ func TestAccountSectionsAgainstDatabase(t *testing.T) {
 		if !strings.Contains(body, `href="`+s.path+`" aria-current="page"`) || strings.Count(body, `aria-current="page"`) != 1 {
 			t.Fatalf("%s: navigation does not mark exactly this section", s.path)
 		}
+		if !strings.Contains(body, `src="/assets/account.js"`) {
+			t.Fatalf("%s: account.js not loaded", s.path)
+		}
 		if res := oauthCall(w.h, "GET", s.path, nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
 			t.Fatalf("%s without a session: %d", s.path, res.Code)
 		}
@@ -34,6 +37,9 @@ func TestAccountSectionsAgainstDatabase(t *testing.T) {
 	res := oauthCall(w.h, "GET", "/account/sharing/"+w.ownedID, nil, session)
 	if res.Code != 200 || !strings.Contains(res.Body.String(), `href="/account" aria-current="page"`) || !strings.Contains(res.Body.String(), "Invite someone") {
 		t.Fatalf("sharing page: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "GET", "/assets/account.js", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "details.pop") {
+		t.Fatalf("account.js: %d", res.Code)
 	}
 	// Only the listed sections exist.
 	if res := oauthCall(w.h, "GET", "/account/nope", nil, session); res.Code == 200 {

@@ -43,6 +43,9 @@ var slateCSS []byte
 //go:embed web/document.js
 var documentJS []byte
 
+//go:embed web/account.js
+var accountJS []byte
+
 // Only developer-owned, embedded assets belong here. Never serve space storage.
 func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/assets/") {
@@ -67,6 +70,8 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		data, kind = loginJS, "text/javascript; charset=utf-8"
 	case "/assets/passkey.js":
 		data, kind = passkeyJS, "text/javascript; charset=utf-8"
+	case "/assets/account.js":
+		data, kind = accountJS, "text/javascript; charset=utf-8"
 	default:
 		sendError(w, missing())
 		return true

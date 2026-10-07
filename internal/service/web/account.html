@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css">{{if .Pow}}<script src="{{.BasePath}}/assets/login.js" defer></script>{{end}}{{if or .LoginPasskey .SignIn}}<script src="{{.BasePath}}/assets/passkey.js" defer></script>{{end}}{{if .OAuthEnabled}}<script src="{{.BasePath}}/assets/copy.js" defer></script>{{end}}</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title><link rel="stylesheet" href="{{.BasePath}}/assets/style.css">{{if .Pow}}<script src="{{.BasePath}}/assets/login.js" defer></script>{{end}}{{if or .LoginPasskey .SignIn}}<script src="{{.BasePath}}/assets/passkey.js" defer></script>{{end}}{{if .OAuthEnabled}}<script src="{{.BasePath}}/assets/copy.js" defer></script>{{end}}{{if .SignedIn}}<script src="{{.BasePath}}/assets/account.js" defer></script>{{end}}</head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/spaces/public/">Public space ↗</a></nav></header>
