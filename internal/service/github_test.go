@@ -248,7 +248,7 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 		return w.s.accounts.mac("github-" + action + ":" + cookie.Value)
 	}
 
-	page := oauthCall(w.h, "GET", "/account", nil, owner)
+	page := oauthCall(w.h, "GET", "/account/services", nil, owner)
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "GitHub is not connected.") || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' "+settings.webBase) {
 		t.Fatalf("account page: %d %s", page.Code, page.Header().Get("Content-Security-Policy"))
 	}
@@ -326,7 +326,7 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	// The real thing.
 	browser, state = connect(owner)
 	resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "setup_action": {"install"}, "state": {state}, "future_param": {"1"}})
-	if resp.Code != 200 || !strings.Contains(resp.Body.String(), "GitHub connected") || !strings.Contains(resp.Body.String(), `http-equiv="refresh" content="2;url=/account#github"`) {
+	if resp.Code != 200 || !strings.Contains(resp.Body.String(), "GitHub connected") || !strings.Contains(resp.Body.String(), `http-equiv="refresh" content="2;url=/account/services"`) {
 		t.Fatalf("callback: %d %s", resp.Code, resp.Body.String())
 	}
 	if cleared := responseCookie(resp, w.h.githubCookieName()); cleared == nil || cleared.MaxAge >= 0 {
@@ -341,7 +341,7 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	if resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(orgID)}, "setup_action": {"update"}, "state": {state}}); resp.Code != 200 {
 		t.Fatalf("org: %d", resp.Code)
 	}
-	page = oauthCall(w.h, "GET", "/account", nil, owner)
+	page = oauthCall(w.h, "GET", "/account/services", nil, owner)
 	body := page.Body.String()
 	if !strings.Contains(body, "<strong>dave-zap</strong>") || !strings.Contains(body, "suspended on GitHub") || !strings.Contains(body, "Connect another GitHub account") ||
 		!strings.Contains(body, settings.webBase+"/settings/installations/"+fmt.Sprint(mine)) || !strings.Contains(body, settings.webBase+"/organizations/zaptronics/settings/installations/"+fmt.Sprint(orgID)) {
@@ -419,7 +419,7 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "disconnect")}, "installation": {"x"}}, owner); resp.Code != 400 {
 		t.Fatalf("bad installation field: %d", resp.Code)
 	}
-	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "disconnect")}, "installation": {fmt.Sprint(orgID)}}, owner); resp.Code != 303 || resp.Header().Get("Location") != "/account#github" || statusOf(orgID) != "gone" {
+	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "disconnect")}, "installation": {fmt.Sprint(orgID)}}, owner); resp.Code != 303 || resp.Header().Get("Location") != "/account/services" || statusOf(orgID) != "gone" {
 		t.Fatalf("disconnect: %d", resp.Code)
 	}
 	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "disconnect")}, "installation": {fmt.Sprint(orgID)}}, owner); resp.Code != 404 {
@@ -485,7 +485,7 @@ func TestGitHubLinkExistingAgainstDatabase(t *testing.T) {
 		return m
 	}
 
-	page := oauthCall(w.h, "GET", "/account", nil, owner)
+	page := oauthCall(w.h, "GET", "/account/services", nil, owner)
 	if !strings.Contains(page.Body.String(), "Link an existing installation") {
 		t.Fatal("account page lacks the link button")
 	}

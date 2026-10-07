@@ -24,6 +24,10 @@ var accountHTML string
 var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 
 type accountPage struct {
+	// Section is the account page shown: spaces, shared, security,
+	// services or profile (accountSection).
+	Section                    string
+	InvitationCount            int
 	OAuthEnabled               bool
 	AppConnectURL, AppsCSRF    string
 	AppSpacesCSRF              string
@@ -60,6 +64,17 @@ type accountPage struct {
 	User                       userAccount
 }
 
+// AnyWeb reports whether any of the user's spaces is readable on the web, so
+// My spaces explains public spaces once instead of on every row.
+func (p accountPage) AnyWeb() bool {
+	for _, space := range p.Spaces {
+		if space.Web && space.URL != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func accountCookie(w http.ResponseWriter, name, value string, age int) {
 	cookie := &http.Cookie{Name: name, Value: value, Path: "/", MaxAge: age, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode}
 	if age < 0 {
@@ -78,19 +93,60 @@ func cookieToken(r *http.Request, name string) string {
 	return cookie.Value
 }
 
+// accountSectionPaths are the account pages. Each is one section of Your
+// account, with the sections listed down the left like a space's explorer.
+var accountSectionPaths = map[string]string{
+	"/account":          "spaces",
+	"/account/shared":   "shared",
+	"/account/security": "security",
+	"/account/services": "services",
+	"/account/profile":  "profile",
+}
+
+// accountSection is the section a request belongs to, so a form that fails
+// is shown again on its own page.
+func accountSection(path string) string {
+	if section, ok := accountSectionPaths[path]; ok {
+		return section
+	}
+	switch {
+	case path == "/account/membership/accept":
+		return "shared"
+	case signInRoutes[path]:
+		return "security"
+	case strings.HasPrefix(path, "/account/apps/"), strings.HasPrefix(path, "/account/github/"):
+		return "services"
+	case path == "/account/username":
+		return "profile"
+	}
+	return "spaces"
+}
+
 func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
 	page.BasePath = h.basePath
 	page.Legal = h.docsSpace() != ""
 	if page.SignedIn {
+		if page.Section == "" {
+			page.Section = accountSection(r.URL.Path)
+		}
+		if page.AppSpaces != nil {
+			page.Section = "services"
+		}
+		if page.Sharing != nil {
+			page.Section = "spaces"
+		}
+		overview := page.Sharing == nil && page.AppSpaces == nil
 		page.MembershipCSRF = make(map[string]string)
 		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove", "agent"} {
 			page.MembershipCSRF[action] = h.service.accounts.mac("membership:" + action + ":" + cookieToken(r, h.sessionCookieName()))
 		}
-		if page.Sharing == nil && page.AppSpaces == nil {
-			var membershipErr error
-			page.Invitations, page.Joined, membershipErr = h.accountMemberships(r.Context(), page.User)
-			if membershipErr != nil {
-				page.MembershipUnavailable = true
+		// Memberships load on every page: the navigation counts invitations.
+		var membershipErr error
+		page.Invitations, page.Joined, membershipErr = h.accountMemberships(r.Context(), page.User)
+		page.InvitationCount = len(page.Invitations)
+		if membershipErr != nil {
+			page.MembershipUnavailable = true
+			if overview && page.Section == "shared" {
 				status = http.StatusServiceUnavailable
 			}
 		}
@@ -99,7 +155,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 			page.AppConnectURL = h.oauth.mcpResource
 			page.AppsCSRF = h.service.accounts.mac("apps-revoke:" + cookieToken(r, h.sessionCookieName()))
 			page.AppSpacesCSRF = h.service.accounts.mac("apps-spaces:" + cookieToken(r, h.sessionCookieName()))
-			if page.Sharing == nil && page.AppSpaces == nil {
+			if overview && page.Section == "services" {
 				var appsErr error
 				if page.Apps, appsErr = h.connectedApps(r.Context(), page.User); appsErr != nil {
 					page.AppsUnavailable = true
@@ -112,7 +168,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 			page.GitHubConnectCSRF = h.service.accounts.mac("github-connect:" + cookieToken(r, h.sessionCookieName()))
 			page.GitHubLinkCSRF = h.service.accounts.mac("github-link:" + cookieToken(r, h.sessionCookieName()))
 			page.GitHubDisconnectCSRF = h.service.accounts.mac("github-disconnect:" + cookieToken(r, h.sessionCookieName()))
-			if page.Sharing == nil && page.AppSpaces == nil {
+			if overview && page.Section == "services" {
 				var githubErr error
 				if page.GitHub, githubErr = h.githubConnections(r, page.User); githubErr != nil {
 					page.GitHubUnavailable = true
@@ -120,7 +176,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 				}
 			}
 		}
-		if page.Sharing == nil && page.AppSpaces == nil && h.service.ownedDB != nil {
+		if overview && page.Section == "security" && h.service.ownedDB != nil {
 			var ok bool
 			if page.SignIn, ok = h.signInSection(r, page.User); !ok {
 				status = http.StatusServiceUnavailable
@@ -132,7 +188,9 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
 		if err != nil {
 			page.SpacesUnavailable = true
-			status = http.StatusServiceUnavailable
+			if overview && page.Section == "spaces" {
+				status = http.StatusServiceUnavailable
+			}
 		} else {
 			page.CanCreate = page.User.Username != "" && len(page.Spaces) < page.User.MaxPrivateSpaces
 		}
@@ -176,7 +234,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/logout" && path != "/account" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -205,7 +263,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, invalid("Account routes do not accept query parameters."))
 		return true
 	}
-	if path == "/login" || path == "/account" || sharingRoute || appRoute {
+	if path == "/login" || accountSectionPaths[path] != "" || sharingRoute || appRoute {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
@@ -217,13 +275,13 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
 			return true
 		}
-		if path == "/account" || sharingRoute || appRoute {
+		if accountSectionPaths[path] != "" || sharingRoute || appRoute {
 			if !signedIn {
 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 				return true
 			}
 			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)}
-			if path == "/account" {
+			if accountSectionPaths[path] != "" {
 				page.Notice = h.takeNotice(w, r)
 			}
 			if sharingRoute {
@@ -439,7 +497,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			h.renderAccount(w, r, status, page)
 			return true
 		}
-		http.Redirect(w, r, h.basePath+"/account#connected-apps", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/account/services", http.StatusSeeOther)
 		return true
 	}
 	if path == "/account/spaces" {
@@ -665,7 +723,7 @@ func (h *httpAdapter) submitAppSpaces(w http.ResponseWriter, r *http.Request, se
 		err = h.service.ownedDB.changeGrantSpaces(r.Context(), user.ID, grantID, choices, time.Now())
 	}
 	if err == nil {
-		http.Redirect(w, r, h.basePath+"/account#connected-apps", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/account/services", http.StatusSeeOther)
 		return
 	}
 	status, message := http.StatusServiceUnavailable, "Your changes could not be saved. Reload before retrying."
@@ -745,5 +803,5 @@ func (h *httpAdapter) submitSpaceVisibility(w http.ResponseWriter, r *http.Reque
 		notice = "space-web"
 	}
 	accountCookie(w, h.noticeCookieName(), notice, 60)
-	http.Redirect(w, r, h.basePath+"/account#my-spaces", http.StatusSeeOther)
+	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 }

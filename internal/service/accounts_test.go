@@ -271,7 +271,7 @@ func TestAccountsHTTP(t *testing.T) {
 	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
 		t.Fatal("username selection failed")
 	}
-	if w := call("GET", "/account", "", nil, session); !strings.Contains(w.Body.String(), "<strong>dave-c</strong>") || strings.Contains(w.Body.String(), "Save permanent username") {
+	if w := call("GET", "/account/profile", "", nil, session); !strings.Contains(w.Body.String(), `class="big-mono">dave-c<`) || strings.Contains(w.Body.String(), "Save permanent username") {
 		t.Fatal("selected username not shown as fixed")
 	}
 	usernameForm.Set("username", "another-name")

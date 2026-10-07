@@ -19,7 +19,7 @@ func sendLoginMail(ctx context.Context, cfg accountConfig, password, email, code
 }
 
 func sendConfirmMail(ctx context.Context, cfg accountConfig, password, email, code string) error {
-	body := "Your Metatrash confirmation code is: " + code + "\n\nYou asked to confirm it’s you before changing how you sign in. Enter it on Your account at " + cfg.Origin + "/account.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not request it, someone may be signed in to your account: sign in yourself and review your sign-in methods.\n"
+	body := "Your Metatrash confirmation code is: " + code + "\n\nYou asked to confirm it’s you before changing how you sign in. Enter it on Your account at " + cfg.Origin + "/account/security.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not request it, someone may be signed in to your account: sign in yourself and review your sign-in methods.\n"
 	return sendMail(ctx, cfg, password, email, "Your Metatrash confirmation code", body)
 }
 

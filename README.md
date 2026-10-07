@@ -36,19 +36,19 @@ A starting prompt:
 > README.md there first for usage conventions. Do not store sensitive
 > information or anything we don't want modified in the public space.
 
-Review connections under **Connected apps** on Your account at
-metatrash.com (not in Claude's connector settings). **Change spaces** adds or
-removes spaces without reconnecting; **Revoke** signs the app out. Space owners
+Review connections on Your account → **Services** at metatrash.com (not in
+Claude's connector settings). **Change spaces** (the sliders icon) adds or
+removes spaces without reconnecting; **Revoke access** signs the app out. Space owners
 choose whether each member's apps may write. In Claude, **Disconnect** then
 **Connect** on the connector runs sign-in and consent again; removing and
 re-adding the connector does not.
 
 ## Share a space
 
-On Your account, click **Manage sharing** on a space, then **Invite someone**
+On Your account → My spaces, click a space's people icon (**Manage sharing**), then **Invite someone**
 with their email address. They get an email telling them to sign in at
 metatrash.com with that address (which creates an account if they have none)
-and choose **Accept** under Invitations on Your account. Invitations expire
+and choose **Accept invitation** on Your account → Shared with me. Invitations expire
 after seven days; inviting the same address again resends the email, at most
 once an hour. Each owner can send five invitation emails a day; past that the
 invitation is still saved and the person can accept by signing in. Members
@@ -57,16 +57,16 @@ access only if the owner allows it.
 
 ## Make a space readable on the web
 
-On Your account → My Spaces, **Make readable on the web…** lets anyone with
+On Your account → My spaces, the globe icon (**Make readable on the web**) lets anyone with
 the link read the space in the website's read-only explorer, without signing
 in. Read the warning first: every file in the space becomes readable, now and
 as it changes, and search engines may list the files in its top folder
 (subfolders are marked not to be indexed). It affects the website only; agents still need an app
-connection you or a member approved. **Make private again** undoes it.
+connection you or a member approved. Clicking the highlighted globe makes it private again.
 
 ## GitHub folders
 
-Connect GitHub on Your account, then give a folder a `.metatrash.json` with
+Connect GitHub on Your account → Services, then give a folder a `.metatrash.json` with
 `{"services":[{"type":"github","repo":"owner/name"}]}`. Agents `pull` the
 repository into the folder, edit files, call `pending` to see what would be
 sent and `push` with a message. Commits are made by the Metatrash app, which

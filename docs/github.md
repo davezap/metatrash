@@ -59,11 +59,11 @@ Then add to `accounts.json` and restart:
 ```
 
 With `"enabled": false` (or no section) GitHub is off: `/github/*` answers 404
-and Your account has no GitHub section. While off, the other fields are not
+and Your account → Services has no GitHub section. While off, the other fields are not
 checked. When on, startup refuses a missing or unreadable file, a short webhook
 secret or a key that is not an RSA private key.
 
-## Connecting (Your account → GitHub)
+## Connecting (Your account → Services → GitHub)
 
 1. **Connect GitHub** (a POST with the page's CSRF token) records an attempt
    for this browser (ten minutes, one use) and redirects to

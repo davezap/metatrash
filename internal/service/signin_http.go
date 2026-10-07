@@ -226,7 +226,7 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 		if notice != "" {
 			accountCookie(w, h.noticeCookieName(), notice, 60)
 		}
-		http.Redirect(w, r, h.basePath+"/account#sign-in", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/account/security", http.StatusSeeOther)
 		return
 	}
 	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "That change could not be saved. Reload the page and try again."}

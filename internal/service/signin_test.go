@@ -62,7 +62,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 
 	// A session that signed in long ago must confirm before adding a passkey.
 	session := w.session(w.owner)
-	page := oauthCall(w.h, "GET", "/account", nil, session)
+	page := oauthCall(w.h, "GET", "/account/security", nil, session)
 	body := page.Body.String()
 	if page.Code != 200 || !strings.Contains(body, `id="sign-in"`) || !strings.Contains(body, "Confirm it’s you") || strings.Contains(body, "data-passkey-create") || strings.Contains(body, "/account/confirm/passkey") {
 		t.Fatalf("account page before confirming: %d %v %v %v %v", page.Code, strings.Contains(body, `id="sign-in"`), strings.Contains(body, "Confirm it’s you"), strings.Contains(body, "data-passkey-create"), strings.Contains(body, "/account/confirm/passkey"))
@@ -85,7 +85,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	if res.Code != 303 || confirmEmail != w.owner.Email || len(confirmCode) != 6 {
 		t.Fatalf("send confirmation: %d %s", res.Code, res.Body)
 	}
-	body = oauthCall(w.h, "GET", "/account", nil, session).Body.String()
+	body = oauthCall(w.h, "GET", "/account/security", nil, session).Body.String()
 	verifyCSRF := formCSRF(t, body, "/account/confirm/verify")
 	wrong := "000000"
 	if confirmCode == wrong {
@@ -102,12 +102,12 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 		t.Fatalf("code used from another session: %d", res.Code)
 	}
 	res = oauthCall(w.h, "POST", "/account/confirm/verify", url.Values{"csrf": {verifyCSRF}, "code": {confirmCode}}, session)
-	if res.Code != 303 || res.Header().Get("Location") != "/account#sign-in" {
+	if res.Code != 303 || res.Header().Get("Location") != "/account/security" {
 		t.Fatalf("confirm: %d %s", res.Code, res.Body)
 	}
 
 	// Now the page offers to add a passkey.
-	body = oauthCall(w.h, "GET", "/account", nil, session, &http.Cookie{Name: noticeCookie, Value: "signin-confirmed"}).Body.String()
+	body = oauthCall(w.h, "GET", "/account/security", nil, session, &http.Cookie{Name: noticeCookie, Value: "signin-confirmed"}).Body.String()
 	if !strings.Contains(body, "Confirmed. For the next 10 minutes") || !strings.Contains(body, "for the next 10 minutes") {
 		t.Fatal("confirmation not shown")
 	}
@@ -128,7 +128,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	if res = oauthCall(w.h, "POST", "/account/passkeys/add", addForm, session); res.Code != 400 {
 		t.Fatalf("replayed registration: %d", res.Code)
 	}
-	body = oauthCall(w.h, "GET", "/account", nil, session).Body.String()
+	body = oauthCall(w.h, "GET", "/account/security", nil, session).Body.String()
 	options := dataOptions(t, body, "data-passkey-create")
 	if !strings.Contains(options, b64.EncodeToString(soft.id)) {
 		t.Fatal("existing passkey not excluded")
@@ -180,7 +180,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 
 	// Confirm with the passkey on a session that is not fresh.
 	stale := w.session(w.owner)
-	body = oauthCall(w.h, "GET", "/account", nil, stale).Body.String()
+	body = oauthCall(w.h, "GET", "/account/security", nil, stale).Body.String()
 	in = soft.get(t, dataOptions(t, body, "data-passkey-get"))
 	res = oauthCall(w.h, "POST", "/account/confirm/passkey", assertionForm(formCSRF(t, body, "/account/confirm/passkey"), in), stale)
 	if res.Code != 303 {
@@ -191,7 +191,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	}
 	// Another account cannot confirm with the owner's passkey.
 	memberSession := w.session(w.member)
-	body = oauthCall(w.h, "GET", "/account", nil, memberSession).Body.String()
+	body = oauthCall(w.h, "GET", "/account/security", nil, memberSession).Body.String()
 	if strings.Contains(body, "/account/confirm/passkey") {
 		t.Fatal("confirm with passkey offered without passkeys")
 	}
@@ -207,7 +207,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 		t.Fatalf("rename another account's passkey: %d", res.Code)
 	}
 	unconfirmed := w.session(w.owner)
-	body = oauthCall(w.h, "GET", "/account", nil, unconfirmed).Body.String()
+	body = oauthCall(w.h, "GET", "/account/security", nil, unconfirmed).Body.String()
 	if strings.Contains(body, "/account/passkeys/remove") {
 		t.Fatal("remove offered without confirming")
 	}
@@ -222,7 +222,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	if res = oauthCall(w.h, "POST", "/account/passkeys/remove", url.Values{"csrf": {removeCSRF}, "passkey": {list[0].ID}}, unconfirmed); res.Code != 403 {
 		t.Fatalf("remove without confirming: %d", res.Code)
 	}
-	body = oauthCall(w.h, "GET", "/account", nil, signedIn).Body.String()
+	body = oauthCall(w.h, "GET", "/account/security", nil, signedIn).Body.String()
 	if !strings.Contains(body, "Work laptop") {
 		t.Fatal("renamed passkey not listed")
 	}

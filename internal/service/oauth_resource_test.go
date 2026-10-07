@@ -282,7 +282,7 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write", w.joinID: "read_write"}, "")
 	session := w.session(w.owner)
-	page := oauthCall(w.h, "GET", "/account", nil, session)
+	page := oauthCall(w.h, "GET", "/account/services", nil, session)
 	body := page.Body.String()
 	if page.Code != 200 || !strings.Contains(body, `id="connected-apps"`) || !strings.Contains(body, "https://metatrash.com/mcp/account") || !strings.Contains(body, "Owner notes — read and write") || !strings.Contains(body, "Shared plans — read and write") || !strings.Contains(body, "claude.ai · MCP") {
 		t.Fatalf("connected apps: %d %s", page.Code, body)
@@ -310,7 +310,7 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	}
 	state := w.tool(token, "list", map[string]any{"space": w.joinID}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.joinID, "path": "a.md", "text": "x", "ifInState": state}, "insufficient_scope")
-	if body := oauthCall(w.h, "GET", "/account", nil, session).Body.String(); !strings.Contains(body, "Shared plans — read only") {
+	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "Shared plans — read only") {
 		t.Fatal("lowered permission not shown on connected apps")
 	}
 	// Revoke from Your account ends the connection at once.
@@ -332,7 +332,7 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	if res := w.mcp(token, "tools/list", map[string]any{}, ""); res.status != 401 {
 		t.Fatal("revoked token still works")
 	}
-	if body := oauthCall(w.h, "GET", "/account", nil, session).Body.String(); !strings.Contains(body, "No apps are connected.") {
+	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "No apps are connected.") {
 		t.Fatal("revoked app still listed")
 	}
 }
@@ -348,7 +348,7 @@ func TestOAuthChangeSpacesAgainstDatabase(t *testing.T) {
 		t.Fatalf("apps: %v %v", apps, err)
 	}
 	grant := apps[0].ID
-	if body := oauthCall(w.h, "GET", "/account", nil, session).Body.String(); !strings.Contains(body, `href="/account/apps/`+grant+`">Change spaces</a>`) {
+	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, `href="/account/apps/`+grant+`" title="Change spaces"`) {
 		t.Fatal("Change spaces link missing")
 	}
 

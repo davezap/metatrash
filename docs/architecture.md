@@ -144,7 +144,7 @@ CSRF value, bounded form fields and a per-user attempt limit.
 | Anyone else | not found (signed out: sign-in page) | not found |
 
 Only the owner can make a space readable on the web (Your account → My
-Spaces), behind a warning, and make it private again; it changes the website
+spaces, `/account`), behind a warning, and make it private again; it changes the website
 only. Human browsing is read-only for everyone, owners included. Access is checked on
 every request, before quotas are charged or Git is touched.
 

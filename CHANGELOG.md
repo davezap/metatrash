@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.23.0 - Account pages laid out like a space (2026-10-07)
+
+No schema or configuration change. No new Go modules.
+
+- **Your account is now one page per section**, with the sections listed down the left like a space's explorer (a row of tabs on phones):
+  - **My spaces** (`/account`, where you land), **Shared with me** (`/account/shared`: invitations and joined spaces), **Security** (`/account/security`: confirm it's you, email codes, passkeys), **Services** (`/account/services`: connected apps and folder services, GitHub for now) and **Profile** (`/account/profile`: username and email). Sign out sits at the bottom of the list.
+  - The navigation shows spaces used against your allowance and a badge with the number of pending invitations.
+  - A space's sharing page and a connected app's spaces page open inside the same layout, under My spaces and Services.
+  - Each page loads only what it shows: GitHub connections and connected apps only on Services, sign-in methods only on Security. Spaces and memberships load on every page for the navigation counts. A section's own data being unavailable still answers 503; another section's does not.
+- **Tables instead of stacked boxes.** Spaces, invitations, joined spaces, members, passkeys, connected apps and GitHub installations are one row each, with actions as small icon buttons (with tooltips and accessible names) on the right. On phones each row stacks with its icons top right.
+  - Making a space readable on the web is the globe icon: it opens the full warning in a small panel with the confirm button. Making it private again is one click on the highlighted globe.
+  - "Readable on the web" is explained once, in a note above the spaces table, shown only when at least one space is public; each public space has a **public** pill.
+  - Removing a member or passkey, revoking an app and disconnecting GitHub ask in the same kind of panel first. Renaming a passkey happens in a panel too. No JavaScript needed for any of them.
+  - Confirm with a passkey and Email me a code sit side by side; Confirm it's you and Email codes are cards side by side. Buttons are smaller.
+- **Redirects** after a change go to that change's section: sign-in methods to `/account/security`, connected apps and GitHub to `/account/services`, space visibility to `/account`, accepting an invitation to `/account/shared`. The confirmation-code email points at `/account/security`. A failed form is shown again on its own section.
+- **Explorer tree:** folders line up with the files beside them, with the open/closed arrow in the same column as the file glyph. A folder's contents indent together one step, with a faint guide line. Before, a folder looked like a child of the file above it.
+- Tests: every section over HTTP against MariaDB (its content, only its own data, exactly one current navigation entry, sign-in redirect), the sharing page under My spaces, an unknown section not served; existing tests moved to the section that now shows their content and the new redirect targets. Checked in headless Chromium at desktop and phone widths, including the panels.
+
 ## 0.22.0 - Passkeys (2026-10-06)
 
 **Needs schema v8** before the new binary starts: stop the service, back up, apply `deploy/account-schema-v8.sql`, then `deploy/account-grants.sql` again (see [docs/deployment.md](docs/deployment.md#upgrades-backups-and-rollback)). No configuration change. No new Go modules.

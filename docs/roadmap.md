@@ -15,18 +15,45 @@ email off. The OAuth server for agents is unchanged.
 2. Passkeys: add, sign in (button and autofill), rename, remove — done in
    0.22.0. Standard library only.
 3. Authenticator app: enrol with a QR code (generated server-side as SVG) and a
-   text secret, confirm a code to enable, sign in with a code. Needs a server
-   key to encrypt TOTP secrets: **open question** — `accounts.json` (a key file
-   path, like `smtpPasswordFile`) or an environment variable.
+   text secret, confirm a code to enable, sign in with a code. TOTP secrets are
+   encrypted with a server key read from a key file named in `accounts.json`
+   (`totpKeyFile`, like `smtpPasswordFile`; decided 2026-10-06). The email step
+   must answer the same whatever methods an address has.
 4. Recovery codes (about 10, single use, shown once, regenerate) and the
    per-account "Allow sign-in by email code" switch (off only with a passkey
    or authenticator app plus recovery codes). Notices for every change.
-5. Later: whether to remove email codes site-wide (needs an answer for sign-up
-   and for recovery after losing every device and code).
+5. Later: whether to remove email codes site-wide (needs an answer for sign-up).
 
 Possible extras: when a passkey that is not registered tries to sign in, tell
 the browser to forget it (`PublicKeyCredential.signalUnknownCredential`, Chrome
 132+), so removed passkeys stop being offered.
+
+## Account lifecycle
+
+Agreed with Dave 2026-10-06. Build order:
+
+1. **Change email address.** Confirm a code sent to the new address (step-up
+   first); notice to the old address. Recovery depends on it.
+2. **Sign out everywhere.** "Sign out other sessions" on Your account, and done
+   automatically after recovery and after removing a sign-in method. Sessions
+   are in memory today (a restart signs everyone out).
+3. **Lost-everything recovery** (no passkey, authenticator or recovery code,
+   email sign-in off): request by email; after a **72-hour delay**, with notices
+   sent at the start and before it completes, email sign-in is switched back on
+   for the account. Any successful sign-in in the meantime cancels it.
+4. **Delete a space** (owner, step-up, type the name). Members and connected
+   apps lose access; GitHub folders are unlinked, the repo is untouched.
+5. **Export a space** as a ZIP of HEAD (offered before deleting; also answers
+   access requests).
+6. **Delete account.** Refused while the account owns any space (delete or
+   transfer first; transfer is a later item). On confirm (step-up): the
+   account is locked at once, sessions and OAuth grants revoked, and a notice
+   is sent. **30-day grace period**: signing in during it cancels the
+   deletion. Then purge: memberships, invitations, GitHub installations,
+   passkeys, TOTP, recovery codes and the user row. Final notice email.
+7. **Privacy policy** in the docs space: passkeys, deletion and the grace
+   period, retention, backups.
+8. Later: transfer space ownership (to an active member who accepts).
 
 ## Folders: first version
 
@@ -200,13 +227,12 @@ Earlier checks:
   Hardening items from the same review: systemd resource limits, an allowlist
   for Markdown link schemes, structured security-event logging, and a
   dependency/advisory scan.
-- A focused security review of the account, sharing and OAuth code, which the
-  2026-09-30 review predates.
+- A focused security review of the account, sharing, OAuth and sign-in
+  (passkey, TOTP, recovery) code, which the 2026-09-30 review predates.
 
 ## Later
 
-- **Spaces:** rename, delete, ZIP export of HEAD, ownership transfer,
-  pagination of sharing lists over 200 entries.
+- **Spaces:** rename, pagination of sharing lists over 200 entries.
 - **Remote Git:** start with authenticated HTTPS clone/fetch. Pushes would
   bypass stable IDs, protected files, path checks, quotas and conditional
   writes, so they need validated import through the service, never a plain

@@ -48,12 +48,12 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 		t.Fatalf("member toggles: %d", res.Code)
 	}
 	res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession)
-	if res.Code != 303 || res.Header().Get("Location") != "/account#my-spaces" {
+	if res.Code != 303 || res.Header().Get("Location") != "/account" {
 		t.Fatalf("make web: %d %s", res.Code, res.Body)
 	}
 	notice := responseCookie(res, w.h.noticeCookieName())
 	account = oauthCall(w.h, "GET", "/account", nil, ownerSession, notice)
-	if body := account.Body.String(); !strings.Contains(body, accountNotices["space-web"]) || !strings.Contains(body, "Make private again") {
+	if body := account.Body.String(); !strings.Contains(body, accountNotices["space-web"]) || !strings.Contains(body, `name="visibility" value="private"`) {
 		t.Fatal("account page after making the space web-readable")
 	}
 

@@ -131,7 +131,7 @@ func TestInvitationEmailAgainstDatabase(t *testing.T) {
 		t.Fatalf("unknown notice shown: %d", page.Code)
 	}
 	// The invited person can still accept by signing in with that address.
-	if got := oauthCall(w.h, "GET", "/account", nil, w.session(guest)); !strings.Contains(got.Body.String(), "Shared plans") {
+	if got := oauthCall(w.h, "GET", "/account/shared", nil, w.session(guest)); !strings.Contains(got.Body.String(), "Shared plans") {
 		t.Fatal("guest does not see the invitation")
 	}
 }

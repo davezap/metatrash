@@ -192,9 +192,9 @@ func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Reque
 	if notice != "" {
 		accountCookie(w, h.noticeCookieName(), notice, 60)
 	}
-	target := h.basePath + "/account"
+	target := h.basePath + "/account/shared"
 	if action != "accept" {
-		target += "/sharing/" + spaceID
+		target = h.basePath + "/account/sharing/" + spaceID
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
