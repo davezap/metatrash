@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.24.0 - Authenticator app (2026-10-07)
+
+No schema change (uses the `metatrash_totp` table from v8). No new Go modules. New optional setting `"totpKeyFile"` in `accounts.json`; without it nothing changes (see [docs/deployment.md](docs/deployment.md#authenticator-app)).
+
+- **Set up an authenticator app** on Your account → Security (after Confirm it's you): the page shows a QR code and the setup key in groups of four, and the app is turned on by entering the code it shows. Starting again before finishing replaces the key; Cancel setup removes it without confirming. One authenticator app per account. Adding or removing it emails the account a notice.
+- **Sign in with an authenticator app**: on the sign-in page, Use an authenticator app takes the email address and the code in one form. A wrong code, an address without an authenticator app and an address without an account all get the same answer ("That code did not work for that email address"), and every attempt counts against that address: five per 15 minutes, plus the existing per-IP verify limit. A successful sign-in is fresh for Confirm it's you, like a passkey or an emailed code.
+- **Confirm it's you** also takes a code from the authenticator app (five attempts per account per 15 minutes); Email me a code becomes the quieter button when another method is available.
+- **TOTP** in `totp.go`: RFC 6238 with SHA-1, six digits, 30-second steps, the current step and one either side. Each step is accepted once per account (`last_used_step`, checked again in the `UPDATE`, so two requests with one code cannot both succeed). Secrets are 20 random bytes, sealed with AES-256-GCM under the key file's 32-byte key, with the user ID as additional data. The key never reaches the database.
+- **QR codes** in `qrcode.go`, standard library only: byte mode, error correction level M, versions 1–40, mask chosen by the standard penalty rules, drawn as one inline SVG path, dark on white in both colour schemes. No image request and no script.
+- Login log lines for this sign-in read `login totp ip=… email=… account=existing result=ok`; failures log `invalid_code` or `rate_limited` and the same `account` field as the other lines.
+- Docs: deployment (key file, upgrade note, schema loop now runs to v8), architecture, roadmap (step 3 done, owner check added). README and roadmap version references brought up to date.
+- Tests: RFC 6238 vectors, the ±1 step window and spent steps, sealing (other account, tampering, version, short value, fresh nonces), the key file, the `otpauth://` URI and grouped key, QR version choice and fixed patterns. Against MariaDB, over HTTP: setup refused without confirming, start and restart (new key, secret not stored in clear, page `no-store`), wrong and right first code, enabling from a stale session, second setup refused, sign-in with a spent code, an address without the app and an unknown address (same answer), sign-in with the next code (fresh session), bad CSRF, invalid address, the per-address limit (429 on the sixth attempt), confirming with the app (wrong code, right code, an account without the app), removal (notice, codes refused afterwards), cancelling an unfinished setup without a notice, and everything off without the key file. The encoder's output was decoded by zxing-cpp for 1 to 2000 bytes (versions 1–38), and the setup page's QR code decoded from headless Chromium screenshots at desktop and phone widths.
+
 ## 0.23.0 - Account pages laid out like a space (2026-10-07)
 
 No schema or configuration change. No new Go modules.

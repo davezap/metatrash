@@ -5,6 +5,7 @@
   "smtpUsername": "david@204am.com",
   "smtpFrom": "david@204am.com",
   "smtpPasswordFile": "/etc/metatrash/smtp-password",
+  "totpKeyFile": "/etc/metatrash/totp-key",
   "databaseConfigFile": "/etc/metatrash/account-database.json",
   "docsSpace": "",
   "oauth": {

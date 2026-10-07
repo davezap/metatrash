@@ -12,11 +12,12 @@ import (
 )
 
 // Sign-in methods on Your account (0.22.0): confirming it's you (step-up)
-// and managing passkeys; and signing in with a passkey.
+// and managing passkeys; and signing in with a passkey. The authenticator
+// app (0.24.0) is in totp.go.
 //
 // Adding or removing a passkey needs a session that signed in or confirmed
-// within stepUpWindow. Confirming uses one of the user's passkeys or a code
-// emailed to the account's address.
+// within stepUpWindow. Confirming uses one of the user's passkeys, their
+// authenticator app or a code emailed to the account's address.
 
 // signInRoutes are the POST routes of the Sign-in methods section. Each has
 // its own session-bound CSRF token.
@@ -27,6 +28,10 @@ var signInRoutes = map[string]bool{
 	"/account/passkeys/add":    true,
 	"/account/passkeys/rename": true,
 	"/account/passkeys/remove": true,
+	"/account/confirm/totp":    true,
+	"/account/totp/start":      true,
+	"/account/totp/enable":     true,
+	"/account/totp/remove":     true,
 }
 
 // signInFormFields are the fields each route accepts besides csrf.
@@ -38,6 +43,11 @@ var signInFormFields = map[string][]string{
 	"/account/passkeys/rename": {"passkey", "name"},
 	"/account/passkeys/remove": {"passkey"},
 	"/login/passkey":           passkeyAssertionFields,
+	"/account/confirm/totp":    {"code"},
+	"/account/totp/start":      nil,
+	"/account/totp/enable":     {"code"},
+	"/account/totp/remove":     nil,
+	"/login/totp":              {"email", "code"},
 }
 
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
@@ -60,6 +70,9 @@ type signInPage struct {
 	// passkey.js; empty when that form is not shown.
 	ConfirmOptions, CreateOptions string
 	MaxPasskeys                   bool
+	// TOTP is the Authenticator app card; nil when the server has no
+	// totpKeyFile.
+	TOTP *totpView
 }
 
 func (a *accounts) signInCSRF(path, session string) string {
@@ -95,6 +108,12 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 			view.LastUsed = time.Unix(p.LastUsedAt, 0).UTC().Format("2 Jan 2006")
 		}
 		page.Passkeys = append(page.Passkeys, view)
+	}
+	if a.totpKey != nil {
+		if page.TOTP, err = h.totpSection(r.Context(), user); err != nil {
+			page.Unavailable = true
+			return page, false
+		}
 	}
 	a.mu.Lock()
 	c, waiting := a.challenges[confirmKey(session)]
@@ -201,6 +220,8 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 			if err == nil {
 				notice = "signin-confirmed"
 			}
+		case "/account/confirm/totp", "/account/totp/start", "/account/totp/enable", "/account/totp/remove":
+			notice, err = h.submitTOTP(ctx, path, session, user, r.PostForm.Get("code"), now)
 		case "/account/passkeys/add":
 			err = h.addPasskey(r, session, user, now)
 			notice = "passkey-added"

@@ -210,6 +210,9 @@ var accountNotices = map[string]string{
 	"space-private":    "The space is private again: only you and its members can browse it.",
 	"signin-confirmed": "Confirmed. For the next 10 minutes you can add or remove sign-in methods.",
 	"passkey-added":    "Passkey added. Next time, choose Sign in with a passkey. We’ve emailed you a notice of this change.",
+	"totp-added":       "Authenticator app added. Next time, choose Use an authenticator app when you sign in. We’ve emailed you a notice of this change.",
+	"totp-removed":     "Authenticator app removed. Also delete Metatrash from the app. We’ve emailed you a notice of this change.",
+	"totp-cancelled":   "Authenticator app setup cancelled.",
 	"passkey-renamed":  "Passkey renamed.",
 	"passkey-removed":  "Passkey removed. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -22,12 +23,15 @@ const sessionLifetime = 24 * time.Hour
 const maxAccountRecords = 10000
 
 type accountConfig struct {
-	Origin             string        `json:"origin"`
-	SMTPHost           string        `json:"smtpHost"`
-	SMTPPort           int           `json:"smtpPort"`
-	SMTPUsername       string        `json:"smtpUsername"`
-	SMTPFrom           string        `json:"smtpFrom"`
-	SMTPPasswordFile   string        `json:"smtpPasswordFile"`
+	Origin           string `json:"origin"`
+	SMTPHost         string `json:"smtpHost"`
+	SMTPPort         int    `json:"smtpPort"`
+	SMTPUsername     string `json:"smtpUsername"`
+	SMTPFrom         string `json:"smtpFrom"`
+	SMTPPasswordFile string `json:"smtpPasswordFile"`
+	// TOTPKeyFile holds the key that seals authenticator-app secrets (64 hex
+	// digits). Without it the authenticator app is not offered.
+	TOTPKeyFile        string        `json:"totpKeyFile"`
 	DatabaseConfigFile string        `json:"databaseConfigFile"`
 	OAuth              *oauthConfig  `json:"oauth"`
 	GitHub             *githubConfig `json:"github"`
@@ -91,6 +95,8 @@ type accounts struct {
 	oauth *oauthSettings
 	// github is nil unless the account configuration enables the GitHub App.
 	github *githubSettings
+	// totpKey seals authenticator-app secrets; nil without totpKeyFile.
+	totpKey cipher.AEAD
 }
 
 // Email identity is case-insensitive. Do not collapse dots or plus aliases.
@@ -171,6 +177,11 @@ func (s *Service) EnableAccounts(configPath string) error {
 	}
 	if cfg.GitHub != nil && cfg.GitHub.Enabled {
 		if a.github, err = cfg.GitHub.settings(); err != nil {
+			return err
+		}
+	}
+	if cfg.TOTPKeyFile != "" {
+		if a.totpKey, err = loadTOTPKey(cfg.TOTPKeyFile); err != nil {
 			return err
 		}
 	}

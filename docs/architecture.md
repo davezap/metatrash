@@ -66,10 +66,21 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   are stateless, signed for one purpose, bound to the login cookie or the
   session, valid ten minutes and accepted once. Stored in
   `metatrash_passkeys` (schema v8), at most 20 per account.
+- **Authenticator app** (0.24.0, `totp.go`, `qrcode.go`): TOTP (RFC 6238,
+  SHA-1, six digits, 30 seconds, one step either side, each step accepted
+  once). One per account, in `metatrash_totp`; the secret is sealed with
+  AES-256-GCM under the `totpKeyFile` key, bound to the user ID. Setup shows a
+  QR code drawn server-side as inline SVG (byte mode, level M, standard
+  library) and the base32 key, and is finished by entering a code. Sign-in
+  takes the email address and a code together; every failure, including an
+  unknown address or an account without the app, gives the same answer, and
+  each address (and each account when confirming) has five attempts per 15
+  minutes.
 - **Confirm it's you** (step-up): each session records when it last proved
   who the user is. Adding or removing a sign-in method needs that within ten
-  minutes; otherwise the user confirms with a passkey or an emailed code (same
-  mail limits as sign-in). Changes email the account a notice.
+  minutes; otherwise the user confirms with a passkey, the authenticator app
+  or an emailed code (same mail limits as sign-in). Changes email the account
+  a notice.
 - **Send limits**: per email 1/minute and 3/hour, per IP 10/hour, 100/day in
   total, plus a separate 30-attempts-per-IP-per-10-minutes limit. All delivery
   limits are reserved together, so a rejected request does not consume the
@@ -82,7 +93,7 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   minutes and accepted once. Blocked requests count towards the attempt limit
   but not the mail budgets, and the message does not say which check failed.
   Without JavaScript no code can be sent.
-- **Login log**: every `/login/send`, `/login/verify` and `/login/passkey` request writes one
+- **Login log**: every `/login/send`, `/login/verify`, `/login/passkey` and `/login/totp` request writes one
   journal line with IP, the full email address, whether an account uses it,
   both check results, the challenge age, the result and the user agent. No
   codes or cookies. Full addresses are in the journal by the owner's choice;

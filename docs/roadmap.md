@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.22.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.24.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Sign-in methods
 
@@ -15,10 +15,10 @@ email off. The OAuth server for agents is unchanged.
 2. Passkeys: add, sign in (button and autofill), rename, remove — done in
    0.22.0. Standard library only.
 3. Authenticator app: enrol with a QR code (generated server-side as SVG) and a
-   text secret, confirm a code to enable, sign in with a code. TOTP secrets are
-   encrypted with a server key read from a key file named in `accounts.json`
-   (`totpKeyFile`, like `smtpPasswordFile`; decided 2026-10-06). The email step
-   must answer the same whatever methods an address has.
+   text secret, confirm a code to enable, sign in with a code — done in
+   0.24.0. Secrets sealed with the `totpKeyFile` key. Sign-in takes the email
+   and the code in one form and answers the same whatever methods an address
+   has. Also confirms it's you.
 4. Recovery codes (about 10, single use, shown once, regenerate) and the
    per-account "Allow sign-in by email code" switch (off only with a passkey
    or authenticator app plus recovery codes). Notices for every change.
@@ -197,6 +197,16 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
   file: none either; a file in a subfolder: `noindex, nofollow`. Optionally
   ask Google Search Console to inspect `/docs/legal/privacy.md`.
 
+- **Authenticator app (0.24.0):** create the key file and add
+  `"totpKeyFile": "/etc/metatrash/totp-key"` to `accounts.json`, then restart
+  (see [deployment.md](deployment.md#authenticator-app)). On Your account →
+  Security, confirm it's you, choose Set up an authenticator app, scan the QR
+  code with your phone's app (also try typing the setup key into a second
+  app), enter the code and Turn on. You should get a notice email. Sign out;
+  on the sign-in page open Use an authenticator app and sign in with your
+  email and a code. Try a wrong code and an address with no app: same
+  message. Leave it more than 10 minutes, then confirm with the app (the
+  code field in Confirm it's you) and remove it (notice email). `journalctl` shows `login totp … result=ok`.
 - **Passkeys (0.22.0):** apply schema v8 first. On Your account → Sign-in
   methods, add a passkey on your phone or computer (sign in fresh, or use
   Email me a code to confirm). You should get a notice email. Sign out, then

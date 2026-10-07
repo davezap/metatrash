@@ -22,8 +22,8 @@ import (
 // here). The challenge is signed, bound to the browser's login cookie, expires
 // with that cookie and is accepted once.
 //
-// Every /login/send and /login/verify request writes one journal line, so it
-// is visible which checks a bot passes:
+// Every /login/send, /login/verify, /login/passkey and /login/totp request
+// writes one journal line, so it is visible which checks a bot passes:
 //
 //	login send ip=203.0.113.5 email=emily@gmail.com account=none honeypot=pass pow=pass age=6s result=sent ua="..."
 

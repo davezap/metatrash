@@ -20,7 +20,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
 | Executable | `/usr/local/bin/metatrash` (root, 0755) |
 | Configuration | `/etc/metatrash/` (root:metatrash, 0750; files 0640) |
 | Spaces, keys | `spaces.json`, `keys.json` |
-| Accounts | `accounts.json`, `account-database.json`, `smtp-password`, `database-password` |
+| Accounts | `accounts.json`, `account-database.json`, `smtp-password`, `database-password`, `totp-key` |
 | GitHub App (optional) | `github-app.pem`, `github-client-secret`, `github-webhook-secret` |
 | Data | `/var/lib/metatrash` (metatrash, 0700): `repos/`, `owned-repos/`, `.service-lock` |
 | Unit | `/etc/systemd/system/metatrash.service` |
@@ -123,7 +123,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    sudo mariadb metatrash < deploy/account-schema-v1.sql
    head -8 deploy/account-grants.sql | sudo mariadb          # v1 grants, needed by the import
    sudo -u metatrash /usr/local/bin/metatrash accounts-migrate -database-config /etc/metatrash/account-database.json -data /var/lib/metatrash -empty
-   for v in 2 3 4 5 6 7; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
+   for v in 2 3 4 5 6 7 8; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
    sudo mariadb < deploy/account-grants.sql
    ```
 
@@ -147,6 +147,23 @@ settings, validated even while disabled: `clientHosts` (default `claude.ai`,
 `chatgpt.com`), `accessTokenMinutes` (60), `refreshTokenDays` (30),
 `codeSeconds` (60), `grantIdleDays` (90). The issuer is `-public-url`. See
 [oauth.md](oauth.md).
+
+### Authenticator app
+
+Optional `"totpKeyFile"` (from 0.24.0) turns on sign-in with an authenticator
+app. The file holds the key that encrypts each account's authenticator secret
+in the database: 64 hex digits, readable only by the service. Create it once:
+
+```sh
+openssl rand -hex 32 | sudo tee /etc/metatrash/totp-key >/dev/null
+sudo chown root:metatrash /etc/metatrash/totp-key && sudo chmod 0640 /etc/metatrash/totp-key
+```
+
+Back it up with `/etc/metatrash`, separately from database backups. Losing or
+changing it makes every authenticator app unusable (those accounts sign in
+with a passkey or an emailed code and set the app up again); there is no
+rotation yet. Empty or absent: the authenticator app is not offered and
+`/login/totp` answers 503.
 
 ### GitHub
 
@@ -173,6 +190,7 @@ Each login request writes one line to the journal, for example:
 ```
 login send ip=203.0.113.5 email=emily@gmail.com account=none honeypot=pass pow=pass age=6s result=sent ua="Mozilla/5.0 …"
 login verify ip=203.0.113.5 email=emily@gmail.com account=new result=ok ua="Mozilla/5.0 …"
+login totp ip=203.0.113.5 email=emily@gmail.com account=existing result=invalid_code ua="Mozilla/5.0 …"
 ```
 
 `account` is `existing` (an account uses this address), `none`, `new` (on a
@@ -247,6 +265,12 @@ passkeys table. Passkeys are bound to the host name of `origin` in
 `accounts.json` (`metatrash.com`): changing that host makes every passkey
 unusable. To roll back to 0.21.x, set `schema_version` to 7; the new tables
 can stay.
+
+**0.24.0** needs no schema change (it uses the v8 `metatrash_totp` table).
+Add `totpKeyFile` to `accounts.json` (see [Authenticator app](#authenticator-app))
+to offer it; without it the release behaves like 0.23.0. To roll back to 0.23.x,
+install the older binary: authenticator apps already set up stay in the table,
+unused, and work again after upgrading.
 
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again

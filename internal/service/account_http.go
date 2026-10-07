@@ -57,11 +57,15 @@ type accountPage struct {
 	CSRF, Email, Message       string
 	Pow                        string // login proof-of-work challenge
 	LoginPasskey               string // WebAuthn request options for passkey sign-in
-	SignIn                     *signInPage
-	PowBits                    int
-	Notice                     string
-	UsernameCSRF, Username     string
-	User                       userAccount
+	// TOTPLogin offers sign-in with an authenticator app; TOTPOpen and
+	// TOTPEmail show that form again after it failed.
+	TOTPLogin, TOTPOpen    bool
+	TOTPEmail              string
+	SignIn                 *signInPage
+	PowBits                int
+	Notice                 string
+	UsernameCSRF, Username string
+	User                   userAccount
 }
 
 // AnyWeb reports whether any of the user's spaces is readable on the web, so
@@ -208,7 +212,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 }
 
 func (a *accounts) loginPage(browser string) accountPage {
-	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now())}
+	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now()), TOTPLogin: a.totpKey != nil}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cleanup(time.Now())
@@ -234,7 +238,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -328,7 +332,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	// set to the failure each check would cause before that check runs.
 	var entry *loginLog
 	note := func(string) {}
-	if path == "/login/send" || path == "/login/verify" || path == "/login/passkey" {
+	if path == "/login/send" || path == "/login/verify" || path == "/login/passkey" || path == "/login/totp" {
 		entry = &loginLog{kind: strings.TrimPrefix(path, "/login/"), ip: client, ua: r.UserAgent(), result: "bad_origin"}
 		defer entry.write()
 		note = func(result string) { entry.result = result }
@@ -591,6 +595,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	fail := func(err error) {
 		page := a.loginPage(browser)
+		if path == "/login/totp" {
+			page.TOTPOpen, page.TOTPEmail = true, r.PostForm.Get("email")
+		}
 		var p *Error
 		if errors.As(err, &p) {
 			note(p.Code)
@@ -652,6 +659,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if user.Email != "" {
 			entry.email, entry.account = user.Email, "existing"
 		}
+		if err != nil {
+			fail(err)
+			return true
+		}
+	} else if path == "/login/totp" {
+		token, _, err = h.totpSignIn(r.Context(), r.PostForm.Get("email"), r.PostForm.Get("code"), entry)
 		if err != nil {
 			fail(err)
 			return true
