@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.1 - Try another way (2026-10-08)
+
+No schema or configuration change. No new Go modules.
+
+- **Try another way** on the Check your email page: it forgets the code waiting in this browser and goes back to the sign-in page with every method, so someone who asked for an emailed code but can't reach their email can still use a passkey, the authenticator app or a recovery code. Found by Dave testing the locked-out-of-email case. "Send a new code or use another email" is now just Send a new code (another address is under Try another way).
+- Tests: the code page offers Try another way, a bad CSRF is refused, and afterwards the sign-in page no longer waits for a code and offers recovery codes. Checked in headless Chromium.
+
 ## 0.25.0 - Recovery codes and turning off email sign-in (2026-10-07)
 
 No schema or configuration change (uses the `metatrash_recovery_codes` table and `email_login` column from v8). No new Go modules.

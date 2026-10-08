@@ -186,8 +186,19 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 		t.Fatalf("send with email off: %d, %d codes", sendRes.Code, codesSent)
 	}
 	expectNotice("you have turned off sign-in by emailed code")
-	if !strings.Contains(oauthCall(w.h, "GET", "/login", nil, login).Body.String(), "Check your email.") {
-		t.Fatal("login page differs for an account with email off")
+	waiting := oauthCall(w.h, "GET", "/login", nil, login).Body.String()
+	if !strings.Contains(waiting, "Check your email.") || !strings.Contains(waiting, `action="/login/restart"`) {
+		t.Fatal("login page differs for an account with email off, or no Try another way")
+	}
+	// Try another way goes back to every sign-in method.
+	if r := oauthCall(w.h, "POST", "/login/restart", url.Values{"csrf": {strings.Repeat("0", 64)}}, login); r.Code != 403 {
+		t.Fatalf("restart with a bad CSRF: %d", r.Code)
+	}
+	if r := oauthCall(w.h, "POST", "/login/restart", url.Values{"csrf": {login.Value}}, login); r.Code != 303 || r.Header().Get("Location") != "/login" {
+		t.Fatalf("restart: %d", r.Code)
+	}
+	if again := oauthCall(w.h, "GET", "/login", nil, login).Body.String(); strings.Contains(again, "Check your email.") || !strings.Contains(again, `action="/login/recovery"`) {
+		t.Fatal("still waiting for a code after Try another way")
 	}
 	// A code sent before email was turned off no longer signs in.
 	browser, _ := randomHex(32)

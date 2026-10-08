@@ -113,7 +113,7 @@
 .totp-setup form+form{margin-top:12px}
 .totp-secret{font-family:ui-monospace,Consolas,monospace;color:var(--text);word-spacing:4px;user-select:all;overflow-wrap:anywhere}
 @media(max-width:700px){.totp-setup{grid-template-columns:minmax(0,1fr)}}
-#recovery{margin-top:36px}#email-login form{margin-top:12px}#email-login .button{margin-top:0}
+.try-another{margin-top:30px}.try-another .link-button{font-size:14px}.try-another .hint{display:block;margin-top:6px}#recovery{margin-top:36px}#email-login form{margin-top:12px}#email-login .button{margin-top:0}
 .recovery-new{margin-top:14px;padding:16px 18px;border:1px solid var(--accent);border-radius:4px;background:var(--bg)}.recovery-new p:first-child{margin-top:0;color:var(--text)}
 .recovery-codes{display:grid;grid-template-columns:repeat(2,max-content);gap:8px 48px;margin:14px 0 0;padding:0;list-style:none;font:16px/1.6 ui-monospace,Consolas,monospace}.recovery-new+form{margin-top:16px}.recovery-codes code{color:var(--text);letter-spacing:.5px;user-select:all}
 @media(max-width:540px){.recovery-codes{grid-template-columns:max-content}}

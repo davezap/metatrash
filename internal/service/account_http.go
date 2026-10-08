@@ -242,7 +242,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -584,6 +584,15 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			return true
 		}
 		http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
+		return true
+	}
+	if path == "/login/restart" {
+		// Try another way: forget the code waiting for this browser, so the
+		// sign-in page offers every method again.
+		a.mu.Lock()
+		delete(a.challenges, secretDigest(browser))
+		a.mu.Unlock()
+		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return true
 	}
 	if path == "/logout" {
