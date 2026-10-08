@@ -54,7 +54,55 @@
       showSource();
     }
   }
-  render();
+  // The rendered document scrolls inside Slate's preview pane, which stays
+  // the same element from file to file, so each file's position is kept
+  // here by path: a file opened before comes back where it was left, a new
+  // one starts at the top, and a link with #anchor goes to that heading.
+  const positions = new Map();
+  let shown = pathOf(window.location.href);
+  function pathOf(url) {
+    const parsed = new URL(url, window.location.href);
+    parsed.hash = "";
+    return parsed.href;
+  }
+  function pane() {
+    return host.hidden ? null : host.querySelector("#previewPane");
+  }
+  function saveScroll() {
+    const scroller = pane();
+    if (scroller) positions.set(shown, scroller.scrollTop);
+  }
+  // GitHub-style heading anchors; Slate's headings also contain their "##".
+  function slug(text) {
+    return text.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s/g, "-");
+  }
+  function anchorTarget(scroller, hash) {
+    let name = hash.slice(1);
+    try {
+      name = decodeURIComponent(name);
+    } catch (error) {
+      // keep the raw name
+    }
+    if (!name) return null;
+    for (const element of scroller.querySelectorAll("[id]")) if (element.id === name) return element;
+    const wanted = slug(name);
+    for (const heading of scroller.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+      if (slug(heading.textContent) === wanted) return heading;
+    }
+    return null;
+  }
+  function restoreScroll(url) {
+    shown = pathOf(url);
+    const scroller = pane();
+    if (!scroller) return;
+    const target = anchorTarget(scroller, new URL(url, window.location.href).hash);
+    if (target) {
+      scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    } else {
+      scroller.scrollTop = positions.get(shown) || 0;
+    }
+  }
+  render().then(() => restoreScroll(window.location.href));
 
   // Links inside a document. Slate opens every link in a new tab; pages of
   // this site open in this tab instead (files listed in the tree without a
@@ -63,7 +111,8 @@
   let openInPage = null;
   function inTree(url) {
     if (!tree) return false;
-    for (const link of tree.querySelectorAll("a[href]")) if (link.href === url) return true;
+    const path = pathOf(url);
+    for (const link of tree.querySelectorAll("a[href]")) if (link.href === path) return true;
     return false;
   }
   host.addEventListener("click", (event) => {
@@ -119,6 +168,7 @@
       const page = new DOMParser().parseFromString(await response.text(), "text/html");
       const next = page.getElementById("main");
       if (!next || !next.classList.contains("document")) throw new Error("not a document");
+      saveScroll();
       for (const selector of [".tab", ".document-heading", "#document-source"]) {
         const from = next.querySelector(selector);
         const to = main.querySelector(selector);
@@ -128,8 +178,9 @@
       main.dataset.markdown = next.dataset.markdown || "false";
       document.title = page.title;
       if (push) window.history.pushState(null, "", url);
-      markCurrent(url);
+      markCurrent(pathOf(url));
       await render();
+      restoreScroll(url);
       main.scrollIntoView({ block: "start" });
     } catch (error) {
       if (error.name === "AbortError") return;

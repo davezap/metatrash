@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.28.1 - Scroll position per document (2026-10-08)
+
+No schema, configuration or grant change. No new Go modules.
+
+- **The document viewer keeps a scroll position for each file** instead of one for all of them. Following a link or a tree entry to a file not yet read in this tab now starts at its top; a file read before comes back where it was left, including with Back and Forward. Before, the preview pane stayed wherever the previous file had been scrolled to.
+- **Links with an anchor** to another file in the space (`guide.md#install`) open that file in the page and scroll to the heading, matched by its id or GitHub-style by its text. Before, those links reloaded the whole page and started at the top.
+- Positions are kept for the tab only and forgotten on reload.
+- Checked in headless Chromium: scrolling one file, opening another (top), returning (same place), Back (same place), and a link to a heading in a third file.
+
 ## 0.28.0 - Console commands (2026-10-08)
 
 No schema or configuration change. **Run `deploy/account-grants.sql` again** for one new grant, `UPDATE (max_private_spaces)` on `metatrash_users`, used only by `users set-limit` (without it that command says so; everything else works). No new Go modules.
