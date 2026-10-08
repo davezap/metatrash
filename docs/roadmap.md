@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.26.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.27.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Sign-in methods
 
@@ -22,8 +22,8 @@ email off. The OAuth server for agents is unchanged.
 4. Recovery codes (10, single use, shown once, regenerate) and the
    per-account email sign-in switch (off only with a passkey or authenticator
    app plus recovery codes) — done in 0.25.0, with notices for every change.
-   Until lost-everything recovery (Account lifecycle 3) exists, an
-   administrator turns email back on by hand (deployment.md, Recovery).
+   Someone locked out emails Dave, who turns email sign-in back on by hand
+   (deployment.md, Recovery).
 5. Later: whether to remove email codes site-wide (needs an answer for sign-up).
 
 Possible extras: when a passkey that is not registered tries to sign in, tell
@@ -43,10 +43,10 @@ Agreed with Dave 2026-10-06. Build order:
    0.27.0 (Security → Signed-in browsers; also after an email change and a
    recovery code sign-in). Sessions are still in memory (a restart signs
    everyone out).
-3. **Lost-everything recovery** (no passkey, authenticator or recovery code,
-   email sign-in off): request by email; after a **72-hour delay**, with notices
-   sent at the start and before it completes, email sign-in is switched back on
-   for the account. Any successful sign-in in the meantime cancels it.
+3. ~~Lost-everything recovery~~ dropped 2026-10-08 with Dave: someone with
+   no passkey, authenticator or recovery code and email sign-in off emails
+   Dave, who checks it's them and turns email sign-in back on by hand
+   (deployment.md, Recovery).
 4. **Delete a space** (owner, step-up, type the name). Members and connected
    apps lose access; GitHub folders are unlinked, the repo is untouched.
 5. **Export a space** as a ZIP of HEAD (offered before deleting; also answers
@@ -57,8 +57,11 @@ Agreed with Dave 2026-10-06. Build order:
    is sent. **30-day grace period**: signing in during it cancels the
    deletion. Then purge: memberships, invitations, GitHub installations,
    passkeys, TOTP, recovery codes and the user row. Final notice email.
-7. **Privacy policy** in the docs space: passkeys, deletion and the grace
-   period, retention, backups.
+7. **Update the privacy policy** (`legal/privacy.md` in the
+   `dave-zap/metatrash-com` space, live since 0.21.1) once deletion exists:
+   what sign-in methods store (passkey public keys, sealed authenticator
+   secrets, hashed recovery codes), how account deletion and the 30-day grace
+   period work, and concrete retention for logs and backups.
 8. Later: transfer space ownership (to an active member who accepts).
 
 ## Folders: first version
@@ -258,6 +261,25 @@ Earlier checks:
 - Apache and service logs contain no `mt_at_`, `mt_rt_` or `mt_ac_` values.
 - ChatGPT end to end. If it cannot use CIMD it will need Dynamic Client
   Registration, which [oauth.md](oauth.md) allows adding only if needed.
+
+## Sessions
+
+Agreed with Dave 2026-10-08, to build after the sections above.
+
+1. **Stay signed in across restarts.** Today sessions live in memory, so
+   every deploy or restart signs everyone out. Keep them in the account
+   database instead (a new schema version): a keyed digest of the token,
+   never the token, plus user, created, expires, last used and the step-up
+   time. Sign out, Sign out everywhere else and the automatic sign-outs delete
+   rows; expired rows are swept. Pending codes and other short-lived state can
+   stay in memory.
+2. **Signed-in devices table** at the bottom of Security, replacing the
+   Signed-in browsers card near the top. One row per session: device and
+   browser (from the User-Agent, e.g. "Chrome on Windows"), "this device" on
+   the current one, signed in, last used, and roughly where from if known (IP
+   or country). An ✕ on each other row signs that one out; Sign out
+   everywhere else stays above the table. Needs step 1, since the table reads
+   the stored sessions.
 
 ## Maintenance
 

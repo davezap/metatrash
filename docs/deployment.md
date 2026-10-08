@@ -27,8 +27,53 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
 
 Command line: `metatrash [-listen 127.0.0.1:8080] [-data DIR] [-config spaces.json]
 [-keys keys.json] [-accounts-config accounts.json] [-trusted-proxies CIDRs]
-[-public-url URL]`, plus the subcommands `version`, `keygen` and
-`accounts-migrate`.
+[-public-url URL]`, plus the subcommands `help`, `version`, `keygen`,
+`accounts-migrate`, `check`, `users …` and `spaces list`. `metatrash help`
+lists them.
+
+### Console commands
+
+`upgrade.sh` installs `deploy/mt` as `/usr/local/bin/mt`, a shortcut that runs
+the binary as `metatrash` through sudo, so it can read the service's files:
+
+```sh
+mt check                         # startup checks without starting the service
+mt users list                    # every account, oldest first (-json for JSON)
+mt users show dave               # one account in full (email, username or user ID)
+mt users email-login on name@example.com
+mt users set-limit dave 3        # private spaces the account may own
+mt spaces list                   # every owned space (-json for JSON)
+```
+
+They use the same `accounts.json` and account database as the service, with
+the same database login: `-accounts-config`, else `METATRASH_ACCOUNTS_CONFIG`,
+else `/etc/metatrash/accounts.json`. They run beside the service without
+stopping it, and changes apply at once (the service reads sign-in settings and
+limits from the database on each request).
+
+- **`check`** runs what startup checks, without the data directory lock:
+  `spaces.json` and keys (`-config`, `-keys`, defaults as in the unit file),
+  `accounts.json` and every file it names, the database schema, the login's
+  grants against `deploy/account-grants.sql` (missing ones fail, extra ones are
+  listed), and that each ready owned space's repository exists under `-data`.
+  It exits 1 if anything fails. Run it before `upgrade.sh`, or after editing
+  configuration and before restarting.
+- **`users list`** shows username, email, creation date, owned spaces against
+  the limit, active memberships and sign-in methods (email on or off,
+  passkeys, authenticator app, recovery codes left).
+- **`users show`** adds passkey names and last use, the authenticator app (or an
+  unfinished setup), when recovery codes were made, owned spaces, memberships,
+  invitations waiting, connected apps and GitHub installations. Sessions are in
+  memory only, so neither command can show who is signed in.
+- **`users email-login on|off`** is the switch on Security. Turning it off still
+  needs a passkey or authenticator app and recovery codes. The account is
+  emailed a notice through the service's SMTP settings (`-no-notice` skips it);
+  if the email fails the change still stands and the command says so.
+- **`users set-limit`** sets `max_private_spaces` (0 to 1000). Spaces already
+  owned stay when the limit goes below their number. It needs the 0.28.0 grant.
+- **`spaces list`** shows owned spaces with owner, name, visibility, state,
+  active members and invitations waiting. Spaces from `spaces.json` are not in
+  the database and are not listed.
 
 ## Build and install
 
@@ -292,6 +337,17 @@ sudo mariadb < deploy/account-grants.sql   # safe while 0.25.x is running
 
 Rolling back to 0.25.x is safe; addresses already changed stay changed.
 
+**0.28.0** adds console commands and the `mt` shortcut; no schema or
+configuration change. Run `deploy/account-grants.sql` again for the one new
+grant, `UPDATE (max_private_spaces)` on `metatrash_users`, which only
+`mt users set-limit` uses (everything else works without it):
+
+```sh
+sudo mariadb < deploy/account-grants.sql   # safe while 0.27.x is running
+./upgrade.sh
+mt check
+```
+
 **0.27.0** needs no schema, configuration or grant change. Rolling back to
 0.26.x is safe.
 
@@ -319,13 +375,16 @@ accounts, spaces or memberships created since that backup.
 
 ### An account locked out with email sign-in off
 
-Until self-service recovery exists (see the roadmap), an administrator can
-turn email sign-in back on for one account after checking who is asking (for
+There is no self-service recovery (decided 2026-10-08): locked-out users email
+the administrator, who can turn email sign-in back on for one account after checking who is asking (for
 example, a reply from that address):
 
 ```sh
-sudo mariadb metatrash -e "UPDATE metatrash_users SET email_login = 1 WHERE email = 'name@example.com'"
+mt users email-login on name@example.com
 ```
+
+The account is emailed a notice. Without the 0.28.0 binary, the same change in
+SQL is `UPDATE metatrash_users SET email_login = 1 WHERE email = '…'`.
 
 They can then sign in with an emailed code and create new recovery codes.
 

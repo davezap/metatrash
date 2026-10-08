@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.28.0 - Console commands (2026-10-08)
+
+No schema or configuration change. **Run `deploy/account-grants.sql` again** for one new grant, `UPDATE (max_private_spaces)` on `metatrash_users`, used only by `users set-limit` (without it that command says so; everything else works). No new Go modules.
+
+- **`metatrash help`** lists the commands. Any first argument that is not a flag is now a command, and an unknown one is an error (before, `metatrash anything` started the server). With no command, or only flags, the server starts exactly as before. `version`, `keygen` and `accounts-migrate` are unchanged; their code moved to `cmd/metatrash/console.go`. Command errors print as `metatrash: …` without a timestamp. Flags may go before or after the arguments.
+- **`mt`** shortcut (`deploy/mt`): `mt users list` runs `sudo -u metatrash /usr/local/bin/metatrash users list`. `upgrade.sh` installs it as `/usr/local/bin/mt`.
+- **`check`** runs the service's startup checks without starting it or taking the data lock: `spaces.json` and keys, `accounts.json` and the files it names (SMTP password, authenticator-app key, OAuth and GitHub settings), the schema, the database login's grants compared with `deploy/account-grants.sql` (missing fail, extra are listed), and the repository of every ready owned space. It says whether the service lock is held, and exits 1 when a check fails. Defaults are the unit file's paths. `EnableAccounts` now reads its configuration through the same function (`loadAccountSettings`), unchanged in behaviour.
+- **`users list`**: every account, oldest first, with username, email, created date, owned spaces against the limit (`2/3`), active memberships and sign-in methods (`email` or `email off`, passkeys, `app`, recovery codes left).
+- **`users show <who>`** (email in any case, username or user ID): the account in full, with passkey names, when added and last used and whether synced; the authenticator app or an unfinished setup; recovery codes left and when made; owned spaces; memberships with status and app permission; invitations waiting; connected apps that have not expired; GitHub installations.
+- **`users email-login on|off <who>`**: the Security switch for administrators, replacing the SQL in deployment.md's Recovery section. Turning it off needs what Security needs. The account is emailed a notice ("A Metatrash administrator turned sign-in by emailed code back on …") through the service's SMTP settings; `-no-notice` skips it, and a failed email is reported without undoing the change.
+- **`users set-limit <who> <n>`**: how many private spaces the account may own (0–1000). Spaces already owned stay when the limit is lower.
+- **`spaces list`**: every owned space with owner, name, visibility, state, active members and invitations waiting.
+- `list`, `show` and `spaces list` take `-json`. Commands read `accounts.json` from `-accounts-config`, else `METATRASH_ACCOUNTS_CONFIG`, else `/etc/metatrash/accounts.json`, use the service's database login and need schema v8. Names chosen by users are printed without control characters.
+- Docs: deployment (Console commands section, Recovery uses `mt users email-login on`, upgrade note).
+- Tests: a missing or unknown-field configuration refused; `accountGrants` in Go matches `deploy/account-grants.sql`. Against MariaDB: an account listed with its details; found by email in capitals, username with spaces and user ID, not by an unknown name; details of a new account; email sign-in refused off without another method, already on reported as no change, turned back on and then accepted by the service's own check; a limit over the cap refused and a new one stored; the test login's grants exactly as the file. The full suite passes against MariaDB. Checked by hand with seeded accounts: every command's output, `check` with a missing SMTP password file, missing repositories, a held lock, a missing grant and an extra one, and `set-limit` without the new grant.
+
 ## 0.27.0 - Sign out everywhere (2026-10-08)
 
 No schema, configuration or grant change. No new Go modules.

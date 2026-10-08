@@ -12,6 +12,7 @@ sudo cp -a /usr/local/bin/metatrash /usr/local/bin/metatrash.backup
 
 sudo systemctl stop metatrash
 sudo install -o root -g root -m 0755 bin/metatrash /usr/local/bin/metatrash
+sudo install -o root -g root -m 0755 deploy/mt /usr/local/bin/mt
 sudo systemctl start metatrash
 sudo systemctl status metatrash --no-pager
 

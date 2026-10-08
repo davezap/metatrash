@@ -140,66 +140,11 @@ func (a *accounts) mac(value string) string {
 
 // EnableAccounts is called once before serving HTTP, while the service owns the data lock.
 func (s *Service) EnableAccounts(configPath string) error {
-	b, err := os.ReadFile(configPath)
+	a, passwordText, err := loadAccountSettings(configPath)
 	if err != nil {
-		return fmt.Errorf("read account configuration: %w", err)
-	}
-	var cfg accountConfig
-	if err := strictJSON(b, &cfg); err != nil {
-		return fmt.Errorf("invalid account configuration")
-	}
-	origin, err := url.Parse(cfg.Origin)
-	if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || origin.ForceQuery || origin.Opaque != "" {
-		return fmt.Errorf("account origin must be an HTTPS origin without a trailing slash")
-	}
-	if cfg.SMTPHost == "" || strings.ContainsAny(cfg.SMTPHost, "/:@ \r\n") || cfg.SMTPPort < 1 || cfg.SMTPPort > 65535 || cfg.SMTPUsername == "" || cfg.SMTPPasswordFile == "" {
-		return fmt.Errorf("incomplete SMTP configuration")
-	}
-	sender, err := normalizeEmail(cfg.SMTPFrom)
-	if err != nil {
-		return fmt.Errorf("invalid SMTP sender")
-	}
-	cfg.SMTPFrom = sender
-	password, err := os.ReadFile(cfg.SMTPPasswordFile)
-	if err != nil {
-		return fmt.Errorf("read SMTP password file: %w", err)
-	}
-	passwordText := strings.TrimSpace(string(password))
-	if passwordText == "" {
-		return fmt.Errorf("SMTP password file is empty")
-	}
-	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, powUsed: map[string]time.Time{}, recoveryReveals: map[string]recoveryReveal{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
-	if cfg.OAuth != nil && cfg.OAuth.Enabled {
-		settings, err := cfg.OAuth.settings()
-		if err != nil {
-			return err
-		}
-		a.oauth = &settings
-	} else if cfg.OAuth != nil {
-		// Validate disabled settings too, so enabling later cannot fail on startup.
-		if _, err := cfg.OAuth.settings(); err != nil {
-			return err
-		}
-	}
-	if cfg.GitHub != nil && cfg.GitHub.Enabled {
-		if a.github, err = cfg.GitHub.settings(); err != nil {
-			return err
-		}
-	}
-	if cfg.TOTPKeyFile != "" {
-		if a.totpKey, err = loadTOTPKey(cfg.TOTPKeyFile); err != nil {
-			return err
-		}
-	}
-	if cfg.DocsSpace != "" {
-		owner, slug, ok := strings.Cut(cfg.DocsSpace, "/")
-		if !ok || len(owner) > 32 || !usernamePattern.MatchString(owner) || len(slug) > 48 || !usernamePattern.MatchString(slug) {
-			return fmt.Errorf("docsSpace must be a space name like owner/slug")
-		}
-	}
-	if _, err := rand.Read(a.secret); err != nil {
 		return err
 	}
+	cfg := a.config
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	store, err := openAccountDatabase(ctx, cfg.DatabaseConfigFile)
@@ -232,6 +177,73 @@ func (s *Service) EnableAccounts(configPath string) error {
 	}
 	s.accounts = a
 	return nil
+}
+
+// loadAccountSettings reads and checks accounts.json and the files it names
+// (SMTP password, OAuth, GitHub and authenticator-app settings), without
+// opening the database. The check console command uses it too.
+func loadAccountSettings(configPath string) (*accounts, string, error) {
+	b, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("read account configuration: %w", err)
+	}
+	var cfg accountConfig
+	if err := strictJSON(b, &cfg); err != nil {
+		return nil, "", fmt.Errorf("invalid account configuration")
+	}
+	origin, err := url.Parse(cfg.Origin)
+	if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || origin.ForceQuery || origin.Opaque != "" {
+		return nil, "", fmt.Errorf("account origin must be an HTTPS origin without a trailing slash")
+	}
+	if cfg.SMTPHost == "" || strings.ContainsAny(cfg.SMTPHost, "/:@ \r\n") || cfg.SMTPPort < 1 || cfg.SMTPPort > 65535 || cfg.SMTPUsername == "" || cfg.SMTPPasswordFile == "" {
+		return nil, "", fmt.Errorf("incomplete SMTP configuration")
+	}
+	sender, err := normalizeEmail(cfg.SMTPFrom)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid SMTP sender")
+	}
+	cfg.SMTPFrom = sender
+	password, err := os.ReadFile(cfg.SMTPPasswordFile)
+	if err != nil {
+		return nil, "", fmt.Errorf("read SMTP password file: %w", err)
+	}
+	passwordText := strings.TrimSpace(string(password))
+	if passwordText == "" {
+		return nil, "", fmt.Errorf("SMTP password file is empty")
+	}
+	a := &accounts{config: cfg, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, powUsed: map[string]time.Time{}, recoveryReveals: map[string]recoveryReveal{}, secret: make([]byte, 32), mailSlots: make(chan struct{}, 2)}
+	if cfg.OAuth != nil && cfg.OAuth.Enabled {
+		settings, err := cfg.OAuth.settings()
+		if err != nil {
+			return nil, "", err
+		}
+		a.oauth = &settings
+	} else if cfg.OAuth != nil {
+		// Validate disabled settings too, so enabling later cannot fail on startup.
+		if _, err := cfg.OAuth.settings(); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.GitHub != nil && cfg.GitHub.Enabled {
+		if a.github, err = cfg.GitHub.settings(); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.TOTPKeyFile != "" {
+		if a.totpKey, err = loadTOTPKey(cfg.TOTPKeyFile); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.DocsSpace != "" {
+		owner, slug, ok := strings.Cut(cfg.DocsSpace, "/")
+		if !ok || len(owner) > 32 || !usernamePattern.MatchString(owner) || len(slug) > 48 || !usernamePattern.MatchString(slug) {
+			return nil, "", fmt.Errorf("docsSpace must be a space name like owner/slug")
+		}
+	}
+	if _, err := rand.Read(a.secret); err != nil {
+		return nil, "", err
+	}
+	return a, passwordText, nil
 }
 
 // All callers hold mu. Expired entries are reclaimed and maps have hard caps.

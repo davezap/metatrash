@@ -687,7 +687,10 @@ func TestGitHubUnpushedHint(t *testing.T) {
 		t.Fatalf("oldestChange %q", p.OldestChange)
 	}
 	// 31 minutes later the next change in the folder carries the hint, once.
-	w.s.clock = func() time.Time { return start.Add(31 * time.Minute) }
+	// Count from the commit time, not start: Git keeps whole seconds, so a
+	// commit made just after a second ticks over is up to a second later
+	// than start, and 31 minutes from start would read as 30.
+	w.s.clock = func() time.Time { return oldest.Add(31 * time.Minute) }
 	if hint := write("notes/x.md", "outside\n"); hint != "" {
 		t.Fatalf("hint outside the folder %q", hint)
 	}
@@ -699,7 +702,7 @@ func TestGitHubUnpushedHint(t *testing.T) {
 		t.Fatalf("repeated hint %q", hint)
 	}
 	// Deletes and moves carry it too, 30 minutes on.
-	w.s.clock = func() time.Time { return start.Add(62 * time.Minute) }
+	w.s.clock = func() time.Time { return oldest.Add(62 * time.Minute) }
 	if m := w.do("delete", Input{Path: "h/c.md"}, "").(Mutation); !strings.Contains(m.Hint, "2 unpushed changes, the oldest from 62 minutes ago") {
 		t.Fatalf("delete hint %q", m.Hint)
 	}

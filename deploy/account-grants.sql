@@ -1,5 +1,5 @@
 -- Runtime permissions for the service's database login, schema v1-v8
--- (0.26.0 and later).
+-- (0.28.0 and later).
 -- Run as database administrator after the schema scripts. Safe to repeat.
 -- For loopback TCP use 'metatrash_accounts'@'127.0.0.1' throughout instead.
 -- The login needs no DDL, FILE or administration privileges.
@@ -41,5 +41,7 @@ GRANT UPDATE (enabled_at, last_used_step) ON metatrash.metatrash_totp TO 'metatr
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_recovery_codes TO 'metatrash_accounts'@'localhost';
 -- 0.26.0 change email address (no schema change)
 GRANT UPDATE (email) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
+-- 0.28.0 console command users set-limit (no schema change)
+GRANT UPDATE (max_private_spaces) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';
