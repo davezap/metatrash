@@ -347,6 +347,9 @@ func (h *httpAdapter) recoverySignIn(ctx context.Context, rawEmail, code string,
 	a.mu.Lock()
 	token, err := a.startSessionLocked(user.ID, now)
 	if err == nil {
+		// Someone using a recovery code has usually lost a device: sign out
+		// the sessions that device (or whoever has it) may still hold.
+		a.endOtherSessionsLocked(user.ID, token)
 		for k, pending := range a.challenges {
 			if pending.Email == user.Email {
 				delete(a.challenges, k)

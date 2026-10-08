@@ -57,7 +57,10 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   (STARTTLS required). Codes expire after ten minutes, allow five attempts and
   are kept as keyed digests in memory. Sessions last 24 hours, are held in
   memory (a restart signs everyone out) and use `__Host-` cookies with Secure,
-  HttpOnly and SameSite=Strict.
+  HttpOnly and SameSite=Strict. Security → Signed-in browsers counts the
+  account's other sessions and signs them out (0.27.0); the same happens
+  after removing a passkey or the authenticator app, turning off email
+  sign-in, changing the email address and signing in with a recovery code.
 - **Passkeys** (0.22.0, `webauthn.go`, `signin_*.go`, `web/passkey.js`):
   WebAuthn with the standard library only. Sign-in needs no email
   (discoverable credentials; a button and the email field's autofill).

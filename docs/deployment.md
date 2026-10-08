@@ -121,7 +121,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
 
    ```sh
    sudo mariadb metatrash < deploy/account-schema-v1.sql
-   head -8 deploy/account-grants.sql | sudo mariadb          # v1 grants, needed by the import
+   sed -n '/^-- v1 /,/^-- v2 /p' deploy/account-grants.sql | sudo mariadb   # v1 grants, needed by the import
    sudo -u metatrash /usr/local/bin/metatrash accounts-migrate -database-config /etc/metatrash/account-database.json -data /var/lib/metatrash -empty
    for v in 2 3 4 5 6 7 8; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
    sudo mariadb < deploy/account-grants.sql
@@ -291,6 +291,9 @@ sudo mariadb < deploy/account-grants.sql   # safe while 0.25.x is running
 ```
 
 Rolling back to 0.25.x is safe; addresses already changed stay changed.
+
+**0.27.0** needs no schema, configuration or grant change. Rolling back to
+0.26.x is safe.
 
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again

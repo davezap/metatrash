@@ -409,6 +409,38 @@ func (a *accounts) startSessionLocked(userID string, now time.Time) (string, err
 	return token, nil
 }
 
+// otherSessions counts the user's unexpired sessions besides token.
+func (a *accounts) otherSessions(userID, token string, now time.Time) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	keep, n := secretDigest(token), 0
+	for k, session := range a.sessions {
+		if k != keep && session.UserID == userID && now.Before(session.Expires) {
+			n++
+		}
+	}
+	return n
+}
+
+// endOtherSessions signs the user out everywhere except the session token and
+// returns how many sessions it ended. Sessions live only in memory.
+func (a *accounts) endOtherSessions(userID, token string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.endOtherSessionsLocked(userID, token)
+}
+
+func (a *accounts) endOtherSessionsLocked(userID, token string) int {
+	keep, n := secretDigest(token), 0
+	for k, session := range a.sessions {
+		if k != keep && session.UserID == userID {
+			delete(a.sessions, k)
+			n++
+		}
+	}
+	return n
+}
+
 // sessionFresh reports whether the session signed in or confirmed within
 // stepUpWindow, and until when.
 func (a *accounts) sessionFresh(token string, now time.Time) (bool, time.Time) {

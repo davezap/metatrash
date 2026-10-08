@@ -331,7 +331,9 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 		t.Fatalf("member confirm: %d", res.Code)
 	}
 
-	// Remove it: a notice, and its codes no longer sign in.
+	// Remove it: a notice, its codes no longer sign in, and the account's
+	// other sessions are signed out.
+	elsewhere := w.session(w.owner)
 	res = oauthCall(w.h, "POST", "/account/totp/remove", url.Values{"csrf": {csrf("/account/totp/remove", stale)}}, stale)
 	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "totp-removed" {
 		t.Fatalf("remove: %d %s", res.Code, res.Body)
@@ -339,6 +341,12 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	expectNotice("A sign-in method was removed on your Metatrash account: authenticator app")
 	if _, ok, _ := w.db.totp(ctx, w.owner.ID); ok {
 		t.Fatal("not removed")
+	}
+	if _, ok, _ := a.currentUser(ctx, elsewhere.Value); ok {
+		t.Fatal("other session still signed in")
+	}
+	if _, ok, _ := a.currentUser(ctx, member.Value); !ok {
+		t.Fatal("another account's session signed out")
 	}
 	login = oauthCall(w.h, "GET", "/login", nil)
 	browser = responseCookie(login, loginCookie)

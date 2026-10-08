@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.0 - Sign out everywhere (2026-10-08)
+
+No schema, configuration or grant change. No new Go modules.
+
+- **Signed-in browsers** card on Your account → Security: "You’re signed in here and in 2 other browsers" (or "and nowhere else"), with **Sign out everywhere else** when there are others. It needs no Confirm it's you, since it can only sign people out; this browser stays signed in. The journal gets `account sessions-end user=<id> ended=<n>`.
+- **Signed out automatically** everywhere but the browser making the change after removing a passkey, removing the authenticator app (not cancelling an unfinished setup), turning off email sign-in, and changing the email address; their confirmations now say so. **Signing in with a recovery code** signs out every other session too, since it usually means a lost device.
+- Connected apps (OAuth) are not affected: revoke them under Services. Sessions are still in memory only, so a restart still signs everyone out.
+- Docs: deployment's fresh-install grant step took the first 8 lines of `account-grants.sql`, which since 0.26.0's longer header misses the `metatrash_account_meta` grant (the import then fails with "both account schema tables must exist"); it now takes the v1 block by its comment.
+- Tests: counting and ending other sessions (expired ones not counted, other accounts untouched). Against MariaDB, over HTTP: the card's count, Sign out everywhere else ending the other two sessions and keeping this one and another account's, the card afterwards, and a signed-out browser sent to sign in; other sessions signed out after removing a passkey, removing the authenticator app, turning off email sign-in, changing the email address and a recovery code sign-in, with the acting session kept.
+
 ## 0.26.0 - Change email address (2026-10-08)
 
 No schema or configuration change. **Run `deploy/account-grants.sql` again** before starting the new binary: the service now needs `UPDATE (email)` on `metatrash_users` (without it, entering the code fails with "temporarily unavailable" and nothing changes). No new Go modules.

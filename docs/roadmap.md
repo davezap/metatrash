@@ -39,8 +39,10 @@ Agreed with Dave 2026-10-06. Build order:
    (Security → Email address; notices to both addresses; a taken address
    gets a notice instead of a code).
 2. **Sign out everywhere.** "Sign out other sessions" on Your account, and done
-   automatically after recovery and after removing a sign-in method. Sessions
-   are in memory today (a restart signs everyone out).
+   automatically after recovery and after removing a sign-in method. Done in
+   0.27.0 (Security → Signed-in browsers; also after an email change and a
+   recovery code sign-in). Sessions are still in memory (a restart signs
+   everyone out).
 3. **Lost-everything recovery** (no passkey, authenticator or recovery code,
    email sign-in off): request by email; after a **72-hour delay**, with notices
    sent at the start and before it completes, email sign-in is switched back on
@@ -201,6 +203,13 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
   file: none either; a file in a subfolder: `noindex, nofollow`. Optionally
   ask Google Search Console to inspect `/docs/legal/privacy.md`.
 
+- **Sign out everywhere (0.27.0):** sign in on two browsers (say your phone
+  and a private window). On Security, Signed-in browsers says "and in 1 other
+  browser"; Sign out everywhere else, then reload the other browser: it shows
+  the sign-in page. Sign in there again, then remove a passkey (or turn off
+  email sign-in, change your address, or sign in with a recovery code) in the
+  first browser: the other one is signed out again. `journalctl` shows
+  `account sessions-end … ended=1`.
 - **Change email address (0.26.0):** run `deploy/account-grants.sql` first.
   On Security, confirm it's you, enter a second address you own under Email
   address and Send a code. Enter the code: the page shows the new address,

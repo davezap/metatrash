@@ -234,6 +234,13 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	if list, _ = w.db.passkeys(ctx, w.owner.ID); len(list) != 0 {
 		t.Fatal("passkey not removed")
 	}
+	// Removing a sign-in method signs out the account's other sessions.
+	if _, ok, _ := w.s.accounts.currentUser(ctx, unconfirmed.Value); ok {
+		t.Fatal("other session still signed in after removing a passkey")
+	}
+	if _, ok, _ := w.s.accounts.currentUser(ctx, signedIn.Value); !ok {
+		t.Fatal("this session signed out by removing a passkey")
+	}
 	// A removed passkey can no longer sign in.
 	login = oauthCall(w.h, "GET", "/login", nil)
 	browser = responseCookie(login, loginCookie)

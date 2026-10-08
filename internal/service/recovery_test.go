@@ -161,6 +161,14 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, session); r.StatusCode != 303 || noticeOf(r) != "" {
 		t.Fatalf("off again: %d", r.StatusCode)
 	}
+	// Turning email sign-in off signs out the account's other sessions.
+	if _, ok, _ := a.currentUser(ctx, stale.Value); ok {
+		t.Fatal("other session still signed in after email sign-in was turned off")
+	}
+	if _, ok, _ := a.currentUser(ctx, session.Value); !ok {
+		t.Fatal("this session signed out")
+	}
+	stale = w.session(w.owner)
 	body = page(stale)
 	if !strings.Contains(body, "Email codes <span class=\"pill\">off</span>") || strings.Contains(body, "/account/confirm/send") || !strings.Contains(body, "Confirm with your authenticator app.") {
 		t.Fatal("security page with email off")
@@ -248,6 +256,12 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 	}
 	if fresh, _ := a.sessionFresh(signedIn.Value, time.Now()); !fresh {
 		t.Fatal("recovery sign-in is not fresh")
+	}
+	// A recovery code signs out every other session of the account.
+	for _, c := range []*http.Cookie{session, stale} {
+		if _, ok, _ := a.currentUser(ctx, c.Value); ok {
+			t.Fatal("session survived a recovery code sign-in")
+		}
 	}
 	expectNotice("9 recovery codes are left")
 	if r := signIn(w.owner.Email, codes[3]); r.StatusCode != 400 {

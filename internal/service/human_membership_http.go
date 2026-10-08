@@ -211,16 +211,17 @@ var accountNotices = map[string]string{
 	"signin-confirmed":       "Confirmed. For the next 10 minutes you can change your email address and sign-in methods.",
 	"passkey-added":          "Passkey added. Next time, choose Sign in with a passkey. We’ve emailed you a notice of this change.",
 	"totp-added":             "Authenticator app added. Next time, choose Use an authenticator app when you sign in. We’ve emailed you a notice of this change.",
-	"totp-removed":           "Authenticator app removed. Also delete Metatrash from the app. We’ve emailed you a notice of this change.",
+	"totp-removed":           "Authenticator app removed and your other sessions signed out. Also delete Metatrash from the app. We’ve emailed you a notice of this change.",
 	"totp-cancelled":         "Authenticator app setup cancelled.",
 	"recovery-created":       "New recovery codes created. Save them now: they are shown only once. We’ve emailed you a notice of this change.",
-	"email-login-off":        "Email sign-in is off. Sign in with a passkey, your authenticator app or a recovery code. We’ve emailed you a notice of this change.",
+	"email-login-off":        "Email sign-in is off and your other sessions are signed out. Sign in with a passkey, your authenticator app or a recovery code. We’ve emailed you a notice of this change.",
 	"email-login-on":         "Email sign-in is back on. We’ve emailed you a notice of this change.",
 	"email-change-sent":      "Code sent. Check the new address and enter the code under Email address.",
-	"email-changed":          "Email address changed. Sign in with the new address from now on. We’ve emailed a notice to both addresses.",
+	"email-changed":          "Email address changed and your other sessions signed out. Sign in with the new address from now on. We’ve emailed a notice to both addresses.",
 	"email-change-cancelled": "Email address change cancelled. Your address is unchanged.",
 	"passkey-renamed":        "Passkey renamed.",
-	"passkey-removed":        "Passkey removed. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
+	"sessions-ended":         "Signed out everywhere else. This browser is still signed in.",
+	"passkey-removed":        "Passkey removed and your other sessions signed out. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }
 
 // inviteMailsPerOwnerDay caps invitation emails per owner across all their spaces.

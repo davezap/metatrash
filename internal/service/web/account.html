@@ -98,6 +98,9 @@
 <form method="post" action="{{$.BasePath}}/account/email/cancel"><input type="hidden" name="csrf" value="{{index .CSRF "email/cancel"}}"><button class="button button-quiet" type="submit">Cancel</button></form></div>
 {{else if .Fresh}}<form method="post" action="{{$.BasePath}}/account/email/change"><input type="hidden" name="csrf" value="{{index .CSRF "email/change"}}"><label for="new-email">New email address</label><div class="inline-form"><input id="new-email" name="email" type="email" maxlength="254" autocomplete="email" required><button class="button" type="submit">Send a code</button></div><p class="hint">We email a code to the new address to check it’s yours. Once you enter it, you sign in and get notices there, and we tell this address about the change.</p></form>
 {{else}}<p>You sign in, confirm changes and get notices and invitations at this address.</p><p class="hint">To change it, confirm it’s you.</p>{{end}}</section>
+<section class="card" id="sessions"><h2>Signed-in browsers</h2><p>You’re signed in here{{if .OtherSessions}} and in {{.OtherSessions}} other {{if eq .OtherSessions 1}}browser{{else}}browsers{{end}}{{else}}, and nowhere else{{end}}.</p>
+{{if .OtherSessions}}<form method="post" action="{{$.BasePath}}/account/sessions/end"><input type="hidden" name="csrf" value="{{index .CSRF "sessions/end"}}"><button class="button button-quiet button-flush" type="submit">Sign out everywhere else</button></form>{{end}}
+<p class="hint">Removing a passkey or the authenticator app, turning off email sign-in, changing your email address or signing in with a recovery code also signs out every other browser.</p></section>
 </div>
 <h2>Passkeys <span class="cell-muted">{{len .Passkeys}} of 20</span></h2>
 <ul class="rows rows-passkeys"><li class="row row-head" aria-hidden="true"><span>Name</span><span>Added</span><span>Last used</span><span></span></li>

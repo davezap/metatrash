@@ -39,6 +39,7 @@ var signInRoutes = map[string]bool{
 	"/account/email/change":    true,
 	"/account/email/verify":    true,
 	"/account/email/cancel":    true,
+	"/account/sessions/end":    true,
 }
 
 // signInFormFields are the fields each route accepts besides csrf.
@@ -61,6 +62,7 @@ var signInFormFields = map[string][]string{
 	"/account/email/change":    {"email"},
 	"/account/email/verify":    {"code"},
 	"/account/email/cancel":    nil,
+	"/account/sessions/end":    nil,
 }
 
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
@@ -95,6 +97,8 @@ type signInPage struct {
 	NewRecoveryCodes []string
 	// EmailChangeTo is the new address a code was sent to, while it waits.
 	EmailChangeTo string
+	// OtherSessions counts the account's other signed-in browsers.
+	OtherSessions int
 }
 
 func (a *accounts) signInCSRF(path, session string) string {
@@ -149,6 +153,7 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 	}
 	page.NewRecoveryCodes = a.takeRecoveryReveal(session, user.ID, now)
 	page.EmailChangeTo = a.pendingEmailChange(session, now)
+	page.OtherSessions = a.otherSessions(user.ID, session, now)
 	a.mu.Lock()
 	c, waiting := a.challenges[confirmKey(session)]
 	page.ConfirmSent = waiting && c.Ready && now.Before(c.Expires)
@@ -200,6 +205,15 @@ func readPasskeyAssertion(r *http.Request) (passkeyAssertion, error) {
 	}
 	p.handle, err = formBytes(r, "user_handle", 64, false)
 	return p, err
+}
+
+// signsOutOthers are the changes after which the account's other sessions
+// are signed out: removing a sign-in method or changing the address.
+var signsOutOthers = map[string]bool{
+	"passkey-removed": true,
+	"totp-removed":    true,
+	"email-login-off": true,
+	"email-changed":   true,
 }
 
 var errConfirmFirst = problem(403, "confirm_required", "Confirm it’s you first. Adding or removing a sign-in method needs a sign-in or confirmation within the last 10 minutes.")
@@ -295,7 +309,16 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 				h.notifySignInChange(user, "removed", "passkey \""+name+"\"")
 			}
 			notice = "passkey-removed"
+		case "/account/sessions/end":
+			n := a.endOtherSessions(user.ID, session)
+			log.Printf("account sessions-end user=%s ended=%d", user.ID, n)
+			notice = "sessions-ended"
 		}
+	}
+	if err == nil && signsOutOthers[notice] {
+		// Whoever may have been signed in elsewhere loses the account along
+		// with the method or address they could have used to get back in.
+		a.endOtherSessions(user.ID, session)
 	}
 	if err == nil {
 		if notice != "" {

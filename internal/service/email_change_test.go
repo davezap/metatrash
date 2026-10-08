@@ -144,6 +144,13 @@ func TestChangeEmailAgainstDatabase(t *testing.T) {
 	if waiting {
 		t.Fatal("login code for the old address survived")
 	}
+	// The change signs out the account's other sessions, not this one.
+	if _, ok, _ := a.currentUser(ctx, other.Value); ok {
+		t.Fatal("other session still signed in after the change")
+	}
+	if _, ok, _ := a.currentUser(ctx, stale.Value); ok {
+		t.Fatal("stale session still signed in after the change")
+	}
 	if body := page(session); !strings.Contains(body, fresh) || strings.Contains(body, "We’ve sent a code to") {
 		t.Fatal("security page after the change")
 	}
