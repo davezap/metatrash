@@ -281,6 +281,17 @@ unused, and work again after upgrading.
 0.24.x is safe but weakens accounts that turned email sign-in off: the older
 binary ignores the switch, so emailed codes sign them in again.
 
+**0.26.0** needs no schema or configuration change, but run
+`deploy/account-grants.sql` again before starting it: changing an email
+address needs `UPDATE (email)` on `metatrash_users`.
+
+```sh
+sudo mariadb < deploy/account-grants.sql   # safe while 0.25.x is running
+./upgrade.sh
+```
+
+Rolling back to 0.25.x is safe; addresses already changed stay changed.
+
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again
 later instead of recreating tables. Never restore an old database backup over
@@ -314,6 +325,10 @@ sudo mariadb metatrash -e "UPDATE metatrash_users SET email_login = 1 WHERE emai
 ```
 
 They can then sign in with an emailed code and create new recovery codes.
+
+Users change their own address on Security (0.26.0). The journal line
+`account email-change user=<id> result=ok` records each change; the
+addresses are only in the notice emails.
 
 ## Testing
 

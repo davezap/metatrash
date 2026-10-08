@@ -36,6 +36,9 @@ var signInRoutes = map[string]bool{
 	"/account/totp/remove":     true,
 	"/account/recovery/create": true,
 	"/account/email-login":     true,
+	"/account/email/change":    true,
+	"/account/email/verify":    true,
+	"/account/email/cancel":    true,
 }
 
 // signInFormFields are the fields each route accepts besides csrf.
@@ -55,6 +58,9 @@ var signInFormFields = map[string][]string{
 	"/account/recovery/create": nil,
 	"/account/email-login":     {"email_login"},
 	"/login/recovery":          {"email", "code"},
+	"/account/email/change":    {"email"},
+	"/account/email/verify":    {"code"},
+	"/account/email/cancel":    nil,
 }
 
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
@@ -87,6 +93,8 @@ type signInPage struct {
 	RecoveryCreated                     string
 	// NewRecoveryCodes are shown once, right after they are created.
 	NewRecoveryCodes []string
+	// EmailChangeTo is the new address a code was sent to, while it waits.
+	EmailChangeTo string
 }
 
 func (a *accounts) signInCSRF(path, session string) string {
@@ -140,6 +148,7 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 		page.RecoveryCreated = time.Unix(state.RecoveryCreated, 0).UTC().Format("2 Jan 2006")
 	}
 	page.NewRecoveryCodes = a.takeRecoveryReveal(session, user.ID, now)
+	page.EmailChangeTo = a.pendingEmailChange(session, now)
 	a.mu.Lock()
 	c, waiting := a.challenges[confirmKey(session)]
 	page.ConfirmSent = waiting && c.Ready && now.Before(c.Expires)
@@ -258,6 +267,15 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 			notice = "recovery-created"
 		case "/account/email-login":
 			notice, err = h.switchEmailLogin(ctx, session, user, r.PostForm.Get("email_login"), now)
+		case "/account/email/change":
+			err = h.startEmailChange(ctx, session, client, user, r.PostForm.Get("email"), now)
+			notice = "email-change-sent"
+		case "/account/email/verify":
+			_, err = h.finishEmailChange(ctx, session, user, strings.TrimSpace(r.PostForm.Get("code")), now)
+			notice = "email-changed"
+		case "/account/email/cancel":
+			a.cancelEmailChange(session)
+			notice = "email-change-cancelled"
 		case "/account/passkeys/add":
 			err = h.addPasskey(r, session, user, now)
 			notice = "passkey-added"

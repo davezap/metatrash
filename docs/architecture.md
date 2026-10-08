@@ -95,6 +95,13 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   or an emailed code (same mail limits as sign-in; not while email sign-in is
   off). Signing in with a recovery code counts as recent. Changes email the account
   a notice.
+- **Change email address** (0.26.0, `email_change.go`): after confirming,
+  a six-digit code goes to the new address and waits under the session (ten
+  minutes, five tries); entering it updates `metatrash_users.email` under the
+  user row's lock, drops codes waiting for either address, and emails a
+  notice to both. An address that already has an account gets a notice
+  instead of a code (same page), and the unique key refuses a late clash.
+  Five changes started per account a day, plus the send limits below.
 - **Send limits**: per email 1/minute and 3/hour, per IP 10/hour, 100/day in
   total, plus a separate 30-attempts-per-IP-per-10-minutes limit. All delivery
   limits are reserved together, so a rejected request does not consume the
@@ -112,7 +119,8 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   both check results, the challenge age, the result and the user agent. No
   codes or cookies. Full addresses are in the journal by the owner's choice;
   they stay as long as journald keeps logs.
-- **Users** are keyed by an immutable `user_id`. Email is lowercased. Each user
+- **Users** are keyed by an immutable `user_id`. Email is lowercased and can
+  be changed by the user (above). Each user
   may own `max_private_spaces` spaces (default one, set by the administrator
   in the database).
 - **Usernames** are chosen once on Your account: 3–32 lowercase ASCII letters or

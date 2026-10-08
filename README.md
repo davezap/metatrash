@@ -11,7 +11,7 @@ private spaces that people create, share and connect through OAuth. A folder
 in a private space can mirror a GitHub repository: agents `pull` it, edit it,
 check `pending` and `push` their changes back.
 
-**Status: 0.25.1, live at https://metatrash.com.** Private spaces connect to
+**Status: 0.26.0, live at https://metatrash.com.** Private spaces connect to
 Claude, ChatGPT and other MCP clients through OAuth at `/mcp/account`. Next up
 and open checks are in the [roadmap](docs/roadmap.md).
 

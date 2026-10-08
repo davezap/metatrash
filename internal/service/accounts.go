@@ -87,6 +87,9 @@ type accounts struct {
 	// sendConfirm emails a code that confirms a signed-in user before they
 	// change sign-in methods.
 	sendConfirm func(context.Context, string, string) error
+	// sendEmailChange emails a code that confirms a new address before the
+	// account moves to it (email_change.go).
+	sendEmailChange func(context.Context, string, string) error
 	// sendNotice emails a security notice (subject, body); nil sends nothing.
 	sendNotice func(ctx context.Context, email, subject, body string) error
 	// sendInvite emails an invitation; nil when accounts are not configured.
@@ -217,6 +220,9 @@ func (s *Service) EnableAccounts(configPath string) error {
 	}
 	a.sendConfirm = func(ctx context.Context, email, code string) error {
 		return sendConfirmMail(ctx, cfg, passwordText, email, code)
+	}
+	a.sendEmailChange = func(ctx context.Context, email, code string) error {
+		return sendEmailChangeMail(ctx, cfg, passwordText, email, code)
 	}
 	a.sendNotice = func(ctx context.Context, email, subject, body string) error {
 		return sendMail(ctx, cfg, passwordText, email, subject, body)

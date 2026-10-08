@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.26.0 - Change email address (2026-10-08)
+
+No schema or configuration change. **Run `deploy/account-grants.sql` again** before starting the new binary: the service now needs `UPDATE (email)` on `metatrash_users` (without it, entering the code fails with "temporarily unavailable" and nothing changes). No new Go modules.
+
+- **Change email address** on Your account → Security, in a new Email address card (Profile links to it). After Confirm it's you, enter the new address and Send a code: a six-digit code goes to the new address, and entering it moves the account there. The code waits for ten minutes, only for the session that asked (another session of the same account cannot use it), five wrong tries discard it, and Cancel forgets it. Entering the code does not need a fresh confirmation, so the ten-minute confirmation window does not race the email.
+- **Notices to both addresses** once it changes: the old address is told the account moved, to which address, and what to do if it was not the owner (sign in with a passkey, authenticator app or recovery code and change it back, or reply to the email); the new address is told it is now the account's address.
+- **An address that already has an account** gets a notice ("this address already has its own Metatrash account") instead of a code, and the page looks the same as for a free address, so the form does not reveal which addresses have accounts. The database's unique key is the final check; a clash at that point is refused without changing anything.
+- After the change, codes still waiting for either address are dropped (a login code for the old address would otherwise create a new account there). Sessions, passkeys, the authenticator app, recovery codes, spaces and memberships stay with the account; the authenticator app and recovery codes now sign in with the new address. Pending invitations sent to the old address stay addressed to it (owners invite the new address again); invitations already sent to the new address now show under Shared with me. Passkeys saved in password managers may still be labelled with the old address.
+- Limits: five changes started per account a day, plus the usual mail limits on the new address and the IP. The journal gets `account email-change user=<id> result=ok` (no addresses).
+- Confirm it's you and Ready for changes now mention the email address.
+- Tests: against MariaDB, over HTTP: refused before confirming, an invalid address and the current address (in capitals) refused, a taken address gets a notice and no code, Cancel, the code from another session refused, a wrong code, the change itself with the confirmation window expired (stored address, lookup by the new address, the old one free, both notices, an old-address login code dropped), the code refused a second time, and the database refusing a stale old address or a taken new one. Without the new grant the change fails safely. Checked in headless Chromium.
+
 ## 0.25.1 - Try another way (2026-10-08)
 
 No schema or configuration change. No new Go modules.

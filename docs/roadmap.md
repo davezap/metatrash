@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.25.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.26.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Sign-in methods
 
@@ -35,7 +35,9 @@ the browser to forget it (`PublicKeyCredential.signalUnknownCredential`, Chrome
 Agreed with Dave 2026-10-06. Build order:
 
 1. **Change email address.** Confirm a code sent to the new address (step-up
-   first); notice to the old address. Recovery depends on it.
+   first); notice to the old address. Recovery depends on it. Done in 0.26.0
+   (Security → Email address; notices to both addresses; a taken address
+   gets a notice instead of a code).
 2. **Sign out everywhere.** "Sign out other sessions" on Your account, and done
    automatically after recovery and after removing a sign-in method. Sessions
    are in memory today (a restart signs everyone out).
@@ -199,6 +201,14 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
   file: none either; a file in a subfolder: `noindex, nofollow`. Optionally
   ask Google Search Console to inspect `/docs/legal/privacy.md`.
 
+- **Change email address (0.26.0):** run `deploy/account-grants.sql` first.
+  On Security, confirm it's you, enter a second address you own under Email
+  address and Send a code. Enter the code: the page shows the new address,
+  and both addresses get a notice. Sign out and sign in with an emailed code
+  to the new address (and the authenticator app or a recovery code with the
+  new address). Try an address that already has an account: it gets a
+  "already has its own Metatrash account" email and no code. Change back at
+  the end if you like. `journalctl` shows `account email-change … result=ok`.
 - **Recovery codes and email switch (0.25.0):** on Security, confirm it's
   you and Create recovery codes: ten codes show once (reload: gone, "10 of 10
   left"), with a notice email. Sign out; on the sign-in page open Use a

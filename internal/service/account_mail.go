@@ -23,6 +23,35 @@ func sendConfirmMail(ctx context.Context, cfg accountConfig, password, email, co
 	return sendMail(ctx, cfg, password, email, "Your Metatrash confirmation code", body)
 }
 
+func sendEmailChangeMail(ctx context.Context, cfg accountConfig, password, email, code string) error {
+	body := "Your Metatrash code to confirm this email address is: " + code + "\n\nYou asked to make this the email address of your Metatrash account. Enter the code on Security at " + cfg.Origin + "/account/security.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not ask for this, ignore this email: nothing changes unless the code is entered.\n"
+	return sendMail(ctx, cfg, password, email, "Confirm your new Metatrash email address", body)
+}
+
+// emailChangeTakenMail is sent instead of a code when someone asks to move
+// their account to an address that already has an account.
+func emailChangeTakenMail(origin string) string {
+	return "Someone signed in to Metatrash asked to change their account's email address to this address. This address already has its own Metatrash account, so no code was sent and nothing changed.\n\n" +
+		"If it was you, sign in with this address at " + origin + "/login instead. An address can belong to only one account.\n" +
+		"If it was not you, there is nothing to do: your account is unchanged.\n"
+}
+
+// emailChangedOldMail is the notice sent to the previous address.
+func emailChangedOldMail(origin, from, to string, when time.Time) string {
+	return "The email address of your Metatrash account was changed from " + from + " to " + to + ".\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"This address no longer signs in to the account or receives its notices.\n\n" +
+		"If this was you, there is nothing to do.\n" +
+		"If it was not, someone is signed in to your account. Sign in at " + origin + "/login with a passkey, your authenticator app or a recovery code (using the new address), change the address back on Security and review your sign-in methods. If you cannot sign in, reply to this email.\n"
+}
+
+// emailChangedNewMail is the notice sent to the new address.
+func emailChangedNewMail(origin, from, to string, when time.Time) string {
+	return "This is now the email address of your Metatrash account (it was " + from + ").\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"Sign in at " + origin + "/login with " + to + ". Notices about your account and invitations sent to this address come here.\n"
+}
+
 // signInMethodMail is the notice sent when a sign-in method is added or
 // removed. name is user-chosen and goes only in the body, stripped of controls.
 func signInMethodMail(origin, change, name string, when time.Time) string {
