@@ -24,9 +24,11 @@ var accountHTML string
 var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
 
 type accountPage struct {
-	// Section is the account page shown: spaces, shared, security,
-	// services or profile (accountSection).
+	// Section is the account page shown: spaces, security, services or
+	// profile (accountSection). Filter is which spaces Spaces lists: all,
+	// mine or shared (accountSpaceFilters).
 	Section                    string
+	Filter                     string
 	InvitationCount            int
 	OAuthEnabled               bool
 	AppConnectURL, AppsCSRF    string
@@ -72,8 +74,11 @@ type accountPage struct {
 	User                   userAccount
 }
 
+// SpaceTotal counts the spaces Spaces lists under All: owned and joined.
+func (p accountPage) SpaceTotal() int { return len(p.Spaces) + len(p.Joined) }
+
 // AnyWeb reports whether any of the user's spaces is readable on the web, so
-// My spaces explains public spaces once instead of on every row.
+// Spaces explains public spaces once instead of on every row.
 func (p accountPage) AnyWeb() bool {
 	for _, space := range p.Spaces {
 		if space.Web && space.URL != "" {
@@ -105,10 +110,20 @@ func cookieToken(r *http.Request, name string) string {
 // account, with the sections listed down the left like a space's explorer.
 var accountSectionPaths = map[string]string{
 	"/account":          "spaces",
-	"/account/shared":   "shared",
+	"/account/mine":     "spaces",
+	"/account/shared":   "spaces",
 	"/account/security": "security",
 	"/account/services": "services",
 	"/account/profile":  "profile",
+}
+
+// accountSpaceFilters are the filters of Spaces, one table of the spaces the
+// user owns and the spaces they joined. Each filter is its own address, so
+// it works without JavaScript and an old link to Shared with me still works.
+var accountSpaceFilters = map[string]string{
+	"/account":        "all",
+	"/account/mine":   "mine",
+	"/account/shared": "shared",
 }
 
 // accountSection is the section a request belongs to, so a form that fails
@@ -119,7 +134,7 @@ func accountSection(path string) string {
 	}
 	switch {
 	case path == "/account/membership/accept":
-		return "shared"
+		return "spaces"
 	case signInRoutes[path]:
 		return "security"
 	case strings.HasPrefix(path, "/account/apps/"), strings.HasPrefix(path, "/account/github/"):
@@ -136,6 +151,9 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 	if page.SignedIn {
 		if page.Section == "" {
 			page.Section = accountSection(r.URL.Path)
+		}
+		if page.Filter = accountSpaceFilters[r.URL.Path]; page.Filter == "" {
+			page.Filter = "all"
 		}
 		if page.AppSpaces != nil {
 			page.Section = "services"
@@ -154,7 +172,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		page.InvitationCount = len(page.Invitations)
 		if membershipErr != nil {
 			page.MembershipUnavailable = true
-			if overview && page.Section == "shared" {
+			if overview && page.Section == "spaces" && page.Filter != "mine" {
 				status = http.StatusServiceUnavailable
 			}
 		}
@@ -196,7 +214,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
 		if err != nil {
 			page.SpacesUnavailable = true
-			if overview && page.Section == "spaces" {
+			if overview && page.Section == "spaces" && page.Filter != "shared" {
 				status = http.StatusServiceUnavailable
 			}
 		} else {

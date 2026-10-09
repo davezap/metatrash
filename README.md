@@ -45,10 +45,10 @@ re-adding the connector does not.
 
 ## Share a space
 
-On Your account → My spaces, click a space's people icon (**Manage sharing**), then **Invite someone**
+On Your account → Spaces, click a space's people icon (**Manage sharing**), then **Invite someone**
 with their email address. They get an email telling them to sign in at
 metatrash.com with that address (which creates an account if they have none)
-and choose **Accept invitation** on Your account → Shared with me. Invitations expire
+and choose **Accept invitation** at the top of Your account → Spaces. Invitations expire
 after seven days; inviting the same address again resends the email, at most
 once an hour. Each owner can send five invitation emails a day; past that the
 invitation is still saved and the person can accept by signing in. Members
@@ -57,7 +57,7 @@ access only if the owner allows it.
 
 ## Make a space readable on the web
 
-On Your account → My spaces, the globe icon (**Make readable on the web**) lets anyone with
+On Your account → Spaces, the globe icon (**Make readable on the web**) lets anyone with
 the link read the space in the website's read-only explorer, without signing
 in. Read the warning first: every file in the space becomes readable, now and
 as it changes, and search engines may list the files in its top folder

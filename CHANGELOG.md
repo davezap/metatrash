@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.29.0 - One Spaces page (2026-10-09)
+
+No schema, configuration or grant change. No new Go modules.
+
+- **My spaces and Shared with me are now one page, Spaces** (`/account`): one table of the spaces you own and the spaces you joined, with filters **All**, **Mine** (with the allowance, `2/3`) and **Shared with me**. The filters are links (`/account`, `/account/mine`, `/account/shared`), so they need no JavaScript and old links to Shared with me still work. The Access column says `owner` (plus `public` when readable on the web) or `member` (or `suspended`); the address shows whose space it is. Owned rows keep their open, sharing and globe actions; joined rows have open.
+- **Invitations sit at the top of Spaces** under All and Shared with me, in a highlighted box with **Accept invitation** and a line saying no username or space of your own is needed. Before, someone invited landed on My spaces, which was about creating spaces, with the invitation only a count in the navigation (off screen on phones), and some thought they had to create a space to accept.
+- The navigation has one **Spaces** entry, showing waiting invitations as a badge, otherwise the number of spaces. "Choose your public username to create a space" is now a plain hint under the table instead of a highlighted box, and Create a private space is not shown under Shared with me.
+- The invitation email says to open `/account` and choose Accept invitation at the top of Spaces, and that no username or space is needed. The sign-in page hint tells invited people to sign in with the invited address, instead of saying to choose a username and create a space.
+- Accepting still returns to Shared with me, where the joined space now appears. Either half of the page being unavailable shows its own message; the page answers 503 only when the filter shown depends on it.
+- README and deployment docs name Spaces instead of My spaces / Shared with me.
+- Tests: the sections test covers the three filters (one filter marked, the Spaces nav entry marked on all three, no create form under Shared with me); against MariaDB, an invited guest sees Accept invitation under All and Shared with me but not Mine, an account without invitations sees no Invitations box; the email's wording. Full suite passes against MariaDB. Checked in headless Chromium at 1300px and 400px with owned, public, joined and suspended spaces and an invitation, and for an invited account with no username.
+
 ## 0.28.1 - Scroll position per document (2026-10-08)
 
 No schema, configuration or grant change. No new Go modules.

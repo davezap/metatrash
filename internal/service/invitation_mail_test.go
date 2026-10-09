@@ -19,7 +19,7 @@ func TestInvitationMailMessage(t *testing.T) {
 	if strings.ContainsAny(body[:strings.Index(body, "\n")], "\r") || strings.Contains(body, "\nBcc:") {
 		t.Fatalf("control characters survived: %q", body)
 	}
-	for _, want := range []string{`dave-zap invited you to their Metatrash space "ŌtautahiBcc: victim@example.com" (dave-zap/otautahi).`, "https://metatrash.com/login", "(guest@example.com)", "10 October 2026 01:02 UTC", "Accept under Invitations"} {
+	for _, want := range []string{`dave-zap invited you to their Metatrash space "ŌtautahiBcc: victim@example.com" (dave-zap/otautahi).`, "https://metatrash.com/login", "(guest@example.com)", "10 October 2026 01:02 UTC", "https://metatrash.com/account and choose Accept invitation"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
@@ -133,5 +133,16 @@ func TestInvitationEmailAgainstDatabase(t *testing.T) {
 	// The invited person can still accept by signing in with that address.
 	if got := oauthCall(w.h, "GET", "/account/shared", nil, w.session(guest)); !strings.Contains(got.Body.String(), "Shared plans") {
 		t.Fatal("guest does not see the invitation")
+	}
+	// Waiting invitations lead Spaces under All and Shared with me, not Mine.
+	guestSession := w.session(guest)
+	accept := `action="/account/membership/accept"`
+	for path, want := range map[string]bool{"/account": true, "/account/shared": true, "/account/mine": false} {
+		if got := strings.Contains(oauthCall(w.h, "GET", path, nil, guestSession).Body.String(), accept); got != want {
+			t.Fatalf("guest %s shows the invitation: %v", path, got)
+		}
+	}
+	if strings.Contains(oauthCall(w.h, "GET", "/account", nil, session).Body.String(), `id="invites-heading"`) {
+		t.Fatal("invitations section shown without invitations")
 	}
 }

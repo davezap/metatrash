@@ -222,7 +222,7 @@ Optional `"docsSpace": "owner/slug"` (from 0.21.1) shows that space under
 `/docs/` as part of the website, without its owner and space header, and adds
 Privacy and Terms links to every page's footer, pointing at
 `/docs/legal/privacy.md` and `/docs/legal/terms.md`. The space must be
-readable on the web (Your account → My spaces); while it is not, `/docs/` is
+readable on the web (Your account → Spaces); while it is not, `/docs/` is
 not found for everyone. Anyone with write access to the space changes what the
 site shows there. The space's `about.md` replaces the built-in About page: `/about` redirects to
 `/docs/about.md` (from 0.21.2). Search engines may index every `/docs/` page. Empty or absent: no `/docs/`,

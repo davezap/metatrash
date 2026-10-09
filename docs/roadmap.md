@@ -2,6 +2,33 @@
 
 Open work after 0.27.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
+## Priority: per-file write checks
+
+Agreed with Dave 2026-10-08, ahead of the sections below. Today `ifInState`
+must equal the space HEAD (`mutate` in `service.go`), so any write anywhere in
+a space makes every other agent's token stale. Agents working in separate
+subfolders, with no files in common, keep failing each other's writes with
+`state_mismatch` and burn reads and writes (and rate limit) on retries.
+
+- Keep `ifInState` and the API as they are. On a mismatch, compare the index
+  entries (`.metatrash/files.json`) at `ifInState` and at HEAD for the paths
+  the operation touches (write: `path`; move: `from` and `to`; delete:
+  `path`). If none changed, apply the operation on top of HEAD instead of
+  refusing. `ifInState` must still be a commit reachable from HEAD.
+- Rules that read other files still check against HEAD: `.metatrash.json`
+  validation and dot-name rules, GitHub folder services, storage limits.
+  Writes to a `.metatrash.json` may need the strict check.
+- An optional strict mode (for example `"strict": true`) keeps today's
+  whole-space check for agents that write one file based on another.
+- Results return `newState` as today; say in the result when the write was
+  rebased onto a newer state, so agents know other files may have moved.
+- Update api-contract.md ("Revision tokens"), tool-schema.json descriptions,
+  the MCP server instructions and the public guide
+  `guides/working-with-agents.md` in `dave-zap/metatrash-com`.
+- Tests: two agents writing different files from the same state both succeed;
+  same file still conflicts; move into a path created since `ifInState`
+  conflicts; unreachable or unknown `ifInState` is refused.
+
 ## Sign-in methods
 
 Decided with Dave 2026-10-06 (`notes/auth-handoff.md` in the `dave-zap/metatrash`

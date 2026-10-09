@@ -13,7 +13,7 @@ type humanInvitation struct {
 	ID, SpaceID, Name, Owner, Email, Status, Expires string
 }
 type joinedHumanSpace struct {
-	Name, Owner, URL, Status string
+	Name, Owner, Slug, URL, Status string
 }
 type humanMember struct {
 	ID, Email, Username, Status, AgentPermission string
@@ -60,12 +60,12 @@ func (h *httpAdapter) accountMemberships(ctx context.Context, user userAccount) 
 	joined := []joinedHumanSpace{}
 	for rows.Next() {
 		var item joinedHumanSpace
-		var id, slug string
-		if err := rows.Scan(&id, &item.Name, &slug, &item.Owner, &item.Status); err != nil {
+		var id string
+		if err := rows.Scan(&id, &item.Name, &item.Slug, &item.Owner, &item.Status); err != nil {
 			return nil, nil, err
 		}
 		if item.Status == "active" && h.service.ownedRepository(id) != nil {
-			item.URL = h.ownedSpaceURL(item.Owner, slug)
+			item.URL = h.ownedSpaceURL(item.Owner, item.Slug)
 		}
 		joined = append(joined, item)
 	}

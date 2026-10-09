@@ -96,7 +96,7 @@ func (m invitationMail) body(origin string) string {
 	return owner + " invited you to their Metatrash space \"" + mailText(m.SpaceName) + "\" (" + mailText(m.SpaceAddress) + ").\n\n" +
 		"To accept:\n" +
 		"1. Sign in at " + origin + "/login with this email address (" + m.Email + "). If you do not have an account yet, signing in creates one.\n" +
-		"2. On Your account, choose Accept under Invitations.\n\n" +
+		"2. Open " + origin + "/account and choose Accept invitation at the top of Spaces. You do not need to choose a username or create a space.\n\n" +
 		"The invitation expires on " + m.Expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n" +
 		"Members browse the space read-only and can connect their own AI apps to it.\n\n" +
 		"If you were not expecting this, ignore this email. Nothing changes unless you accept.\n"
