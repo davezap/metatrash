@@ -84,7 +84,9 @@ Agreed with Dave 2026-10-06. Build order:
    deletion. Then purge: memberships, invitations, GitHub installations,
    passkeys, TOTP, recovery codes and the user row. Final notice email.
 7. **Update the privacy policy** (`legal/privacy.md` in the
-   `dave-zap/metatrash-com` space, live since 0.21.1) once deletion exists:
+   `dave-zap/metatrash-com` space, live since 0.21.1) once deletion exists
+   (sign-in sessions, device label and IP with 24-hour retention, added
+   2026-10-09):
    what sign-in methods store (passkey public keys, sealed authenticator
    secrets, hashed recovery codes), how account deletion and the 30-day grace
    period work, and concrete retention for logs and backups.
@@ -195,15 +197,6 @@ Also in 0.15.1:
   spaces are connected.
 
 ## Owner checks still to run
-
-From 0.32.0 (2026-10-09), schema v11 first:
-
-- **Signed-in devices:** sign in again after the upgrade (sessions from
-  0.31.0 show as "Unknown browser" with no address). Security → Signed-in
-  devices lists this browser first with "this device" and its address. Sign
-  in from your phone: it appears with its browser. Sign the phone out with
-  its ✕; the phone is signed out, the PC isn't. `mt users show <you>` lists
-  the sessions under Signed in.
 
 From 0.30.0 (2026-10-09), schema v9 first:
 
@@ -330,7 +323,7 @@ Agreed with Dave 2026-10-08, to build after the sections above.
    or country). An ✕ on each other row signs that one out; Sign out
    everywhere else stays above the table. Needs step 1, since the table reads
    the stored sessions. Done in 0.32.0 (schema v11: `device` and `ip`
-   columns). Location is the sign-in IP address; a country would need a
+   columns; checked live 2026-10-09). Location is the sign-in IP address; a country would need a
    GeoIP database. Times are relative ("3 hours ago"), so no time zones.
 
 ## Maintenance
