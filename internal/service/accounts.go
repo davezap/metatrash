@@ -62,8 +62,10 @@ type loginChallenge struct {
 }
 
 type accountSession struct {
-	UserID  string
-	Expires time.Time
+	UserID   string
+	Created  time.Time
+	Expires  time.Time
+	LastUsed time.Time
 	// AuthAt is when this session last proved who the user is: signing in,
 	// or confirming on Your account. Changing sign-in methods needs it recent.
 	AuthAt time.Time
@@ -79,6 +81,9 @@ type accounts struct {
 	store      accountStore
 	challenges map[string]loginChallenge
 	sessions   map[string]accountSession
+	// sessionSwept is when expired sessions were last deleted from the
+	// database (sessions.go).
+	sessionSwept time.Time
 	// powUsed holds spent login proof-of-work challenges until they expire.
 	powUsed   map[string]time.Time
 	secret    []byte
@@ -160,6 +165,10 @@ func (s *Service) EnableAccounts(configPath string) error {
 		return err
 	}
 	a.store = store
+	if err := a.loadStoredSessions(ctx, time.Now()); err != nil {
+		store.Close()
+		return err
+	}
 	a.send = func(ctx context.Context, email, code string) error {
 		return sendLoginMail(ctx, cfg, passwordText, email, code)
 	}
@@ -335,7 +344,7 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 	if err != nil {
 		return "", email, false, err
 	}
-	if len(a.sessions) >= 4096 {
+	if len(a.sessions) >= maxSessions {
 		return "", email, false, problem(503, "sessions_busy", "Please try again later.")
 	}
 	// An account can turn email sign-in off (recovery.go). Checked here too,
@@ -391,102 +400,4 @@ func (a *accounts) checkCodeLocked(key, code string) (string, error) {
 	// Consume before persistence or session creation, even if either fails.
 	delete(a.challenges, key)
 	return c.Email, nil
-}
-
-// startSessionLocked creates a session for userID that has just proved who
-// the user is. Callers hold mu.
-func (a *accounts) startSessionLocked(userID string, now time.Time) (string, error) {
-	if len(a.sessions) >= 4096 {
-		return "", problem(503, "sessions_busy", "Please try again later.")
-	}
-	token, err := randomHex(32)
-	if err != nil {
-		return "", err
-	}
-	// Bound active sessions per account; revoke the oldest when signing in again.
-	count, oldestKey := 0, ""
-	var oldest time.Time
-	for k, session := range a.sessions {
-		if session.UserID == userID {
-			count++
-			if oldestKey == "" || session.Expires.Before(oldest) {
-				oldest, oldestKey = session.Expires, k
-			}
-		}
-	}
-	if count >= 8 {
-		delete(a.sessions, oldestKey)
-	}
-	a.sessions[secretDigest(token)] = accountSession{UserID: userID, Expires: now.Add(sessionLifetime), AuthAt: now}
-	return token, nil
-}
-
-// otherSessions counts the user's unexpired sessions besides token.
-func (a *accounts) otherSessions(userID, token string, now time.Time) int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	keep, n := secretDigest(token), 0
-	for k, session := range a.sessions {
-		if k != keep && session.UserID == userID && now.Before(session.Expires) {
-			n++
-		}
-	}
-	return n
-}
-
-// endOtherSessions signs the user out everywhere except the session token and
-// returns how many sessions it ended. Sessions live only in memory.
-func (a *accounts) endOtherSessions(userID, token string) int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.endOtherSessionsLocked(userID, token)
-}
-
-func (a *accounts) endOtherSessionsLocked(userID, token string) int {
-	keep, n := secretDigest(token), 0
-	for k, session := range a.sessions {
-		if k != keep && session.UserID == userID {
-			delete(a.sessions, k)
-			n++
-		}
-	}
-	return n
-}
-
-// sessionFresh reports whether the session signed in or confirmed within
-// stepUpWindow, and until when.
-func (a *accounts) sessionFresh(token string, now time.Time) (bool, time.Time) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	session, ok := a.sessions[secretDigest(token)]
-	if !ok || !now.Before(session.Expires) || session.AuthAt.IsZero() {
-		return false, time.Time{}
-	}
-	until := session.AuthAt.Add(stepUpWindow)
-	return now.Before(until), until
-}
-
-// markConfirmed records that the session's user has just proved who they are.
-func (a *accounts) markConfirmed(token string, userID string, now time.Time) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	key := secretDigest(token)
-	session, ok := a.sessions[key]
-	if !ok || session.UserID != userID || !now.Before(session.Expires) {
-		return false
-	}
-	session.AuthAt = now
-	a.sessions[key] = session
-	return true
-}
-
-func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, bool, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.cleanup(time.Now())
-	session, ok := a.sessions[secretDigest(token)]
-	if !ok {
-		return userAccount{}, false, nil
-	}
-	return a.store.ByID(ctx, session.UserID)
 }

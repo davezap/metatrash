@@ -55,8 +55,9 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
 
 - **Sign-in**: email address plus a six-digit code sent through Gmail SMTP
   (STARTTLS required). Codes expire after ten minutes, allow five attempts and
-  are kept as keyed digests in memory. Sessions last 24 hours, are held in
-  memory (a restart signs everyone out) and use `__Host-` cookies with Secure,
+  are kept as keyed digests in memory. Sessions last 24 hours and are kept
+  in memory and in `metatrash_sessions` (SHA-256 of the token, never the
+  token), so restarts keep people signed in (0.31.0); they use `__Host-` cookies with Secure,
   HttpOnly and SameSite=Strict. Security → Signed-in browsers counts the
   account's other sessions and signs them out (0.27.0); the same happens
   after removing a passkey or the authenticator app, turning off email
@@ -239,8 +240,8 @@ every request, before quotas are charged or Git is touched.
   responses carry `Retry-After`.
 - Storage per space: 64 KiB per file, 1,000 files, 16 MiB current text,
   128 MiB repository including history; 32 queued writes service-wide.
-- Counters, sessions, pending OAuth requests and pagination cursors are in
-  memory and reset on restart.
+- Counters, sign-in codes, pending OAuth requests and pagination cursors are
+  in memory and reset on restart. Sessions survive restarts (0.31.0).
 
 ## Security notes
 

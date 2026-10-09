@@ -310,8 +310,12 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 			}
 			notice = "passkey-removed"
 		case "/account/sessions/end":
-			n := a.endOtherSessions(user.ID, session)
-			log.Printf("account sessions-end user=%s ended=%d", user.ID, n)
+			var n int
+			n, err = a.endOtherSessions(user.ID, session)
+			log.Printf("account sessions-end user=%s ended=%d stored=%v", user.ID, n, err == nil)
+			if err != nil {
+				err = problem(503, "sessions_not_stored", "The other browsers are signed out for now, but that could not be saved and they may be signed in again after the next restart. Try again shortly.")
+			}
 			notice = "sessions-ended"
 		}
 	}

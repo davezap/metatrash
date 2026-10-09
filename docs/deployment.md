@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v9 (from 0.30.0).
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v10 (from 0.31.0).
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -63,8 +63,8 @@ limits from the database on each request).
   passkeys, authenticator app, recovery codes left).
 - **`users show`** adds passkey names and last use, the authenticator app (or an
   unfinished setup), when recovery codes were made, owned spaces, memberships,
-  invitations waiting, connected apps and GitHub installations. Sessions are in
-  memory only, so neither command can show who is signed in.
+  invitations waiting, connected apps and GitHub installations. Neither shows
+  who is signed in yet; sessions are rows in `metatrash_sessions` (0.31.0).
 - **`users email-login on|off`** is the switch on Security. Turning it off still
   needs a passkey or authenticator app and recovery codes. The account is
   emailed a notice through the service's SMTP settings (`-no-notice` skips it);
@@ -182,7 +182,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    ```
 
 Startup refuses to run with a missing configuration, an unreachable database or
-a schema older than v9. Without the accounts setting the service runs public and
+a schema older than v10. Without the accounts setting the service runs public and
 key spaces only, with no database.
 
 ### OAuth
@@ -274,7 +274,7 @@ moves memberships and app connections and keeps the old address.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v9 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v10 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -350,6 +350,28 @@ sudo mariadb < deploy/account-grants.sql   # safe while 0.27.x is running
 mt check
 ```
 
+**0.31.0** needs schema v10 and the grants before the new binary starts.
+`upgrade.sh` restarts the service, so apply them first; 0.30.x keeps running
+on v10 until it restarts:
+
+```sh
+sudo mariadb metatrash < deploy/account-schema-v10.sql
+sudo mariadb < deploy/account-grants.sql
+./upgrade.sh
+mt check
+```
+
+v10 adds `metatrash_sessions` (one row per signed-in browser: the SHA-256 of
+the cookie's token, never the token, with user, created, expires, last
+confirmed and last used) and grants `SELECT, INSERT, DELETE` and
+`UPDATE (auth_at, last_used_at)` on it. From then on a restart or deploy keeps
+everyone signed in. This upgrade itself still signs everyone out once (0.30.x
+kept sessions in memory). The journal shows `account sessions-loaded count=N`
+at startup. Restoring a database backup brings back sessions that were signed
+out since it was taken (each lasts at most 24 hours). To roll back to 0.30.x,
+set `schema_version` to 9; the table is ignored and everyone is signed out on
+that restart.
+
 **0.30.0** needs schema v9 and the grants before the new binary starts.
 `upgrade.sh` restarts the service, so apply them first; 0.29.x keeps running
 on v9 until it restarts:
@@ -417,7 +439,7 @@ addresses are only in the notice emails.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v8 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v10 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - There is no Go toolchain on the Windows development PC. A cloud workspace
   needed Go 1.25 built from the golang/go source on GitHub and golang.org/x

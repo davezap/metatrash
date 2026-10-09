@@ -666,8 +666,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return true
 	}
 	if path == "/logout" {
+		a.endSession(session)
 		a.mu.Lock()
-		delete(a.sessions, secretDigest(session))
 		delete(a.challenges, secretDigest(browser))
 		delete(a.challenges, confirmKey(session))
 		a.mu.Unlock()
@@ -796,9 +796,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	note("ok")
 	// Revoke this browser's previous session when replacing it.
-	a.mu.Lock()
-	delete(a.sessions, secretDigest(session))
-	a.mu.Unlock()
+	a.endSession(session)
 	accountCookie(w, sessionCookie, token, int(sessionLifetime/time.Second))
 	accountCookie(w, loginCookie, "", -1)
 	// Continue an app connection that sent this browser to sign in. The pending

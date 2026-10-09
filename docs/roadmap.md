@@ -68,8 +68,7 @@ Agreed with Dave 2026-10-06. Build order:
 2. **Sign out everywhere.** "Sign out other sessions" on Your account, and done
    automatically after recovery and after removing a sign-in method. Done in
    0.27.0 (Security → Signed-in browsers; also after an email change and a
-   recovery code sign-in). Sessions are still in memory (a restart signs
-   everyone out).
+   recovery code sign-in). Sessions survive restarts since 0.31.0.
 3. ~~Lost-everything recovery~~ dropped 2026-10-08 with Dave: someone with
    no passkey, authenticator or recovery code and email sign-in off emails
    Dave, who checks it's them and turns email sign-in back on by hand
@@ -197,6 +196,15 @@ Also in 0.15.1:
 
 ## Owner checks still to run
 
+From 0.31.0 (2026-10-09), schema v10 first:
+
+- **Stay signed in:** the upgrade signs everyone out once. Sign in, confirm
+  on Security (step-up), then `sudo systemctl restart metatrash`: still
+  signed in, still confirmed for the rest of the 10 minutes, and the journal
+  shows `account sessions-loaded count=1` or more. Sign in in a second
+  browser, Sign out everywhere else, restart: the second browser stays signed
+  out. Sign out, restart, Back: still signed out.
+
 From 0.30.0 (2026-10-09), schema v9 first:
 
 - **Transfer:** on a test space, invite a second account, accept, confirm
@@ -311,7 +319,10 @@ Agreed with Dave 2026-10-08, to build after the sections above.
    never the token, plus user, created, expires, last used and the step-up
    time. Sign out, Sign out everywhere else and the automatic sign-outs delete
    rows; expired rows are swept. Pending codes and other short-lived state can
-   stay in memory.
+   stay in memory. Done in 0.31.0 (schema v10, `metatrash_sessions`). The
+   digest is SHA-256 of the 256-bit random token, as for OAuth tokens; a key
+   would need a secret that also survives restarts and adds nothing against a
+   token that size.
 2. **Signed-in devices table** at the bottom of Security, replacing the
    Signed-in browsers card near the top. One row per session: device and
    browser (from the User-Agent, e.g. "Chrome on Windows"), "this device" on

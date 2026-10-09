@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.31.0 - Stay signed in across restarts (2026-10-09)
+
+**Needs schema v10 and the grants before the new binary starts** (`deploy/account-schema-v10.sql`, then `deploy/account-grants.sql`; see deployment.md). No configuration change. No new Go modules.
+
+- **A restart or deploy no longer signs everyone out.** Sessions are now also stored in the new `metatrash_sessions` table and loaded at startup (`account sessions-loaded count=N` in the journal). The upgrade to 0.31.0 itself still signs everyone out once.
+- What is stored per session: the SHA-256 of the cookie's random token (the token itself is never stored), the user, created and expiry times, when the session last signed in or confirmed (so the 10-minute step-up window survives a restart too) and when it was last used (written at most every 5 minutes, for the signed-in devices table that comes next).
+- A session is stored before its cookie is set; if the database can't store it, sign-in fails with "temporarily unavailable" rather than giving a session that would vanish on restart. Sign out, replacing a browser's session, Sign out everywhere else, the automatic sign-outs (after removing a sign-in method, changing the email address, a recovery code sign-in) and the per-account limit of 8 delete the rows. If Sign out everywhere else can't delete them, the other browsers are still signed out in the running service and the page says it couldn't be saved. Expired rows are swept at startup and at most hourly on sign-in. Sign-in codes, pending app connections and other short-lived state stay in memory.
+- Schema v10: `metatrash_sessions`. New grants: `SELECT, INSERT, DELETE` and `UPDATE (auth_at, last_used_at)` on it. `mt check` reports v10.
+- Tests (new `TestSessionsSurviveRestart`, `TestSignOutSurvivesRestart`, against MariaDB): only the digest is stored; sessions, their accounts and the step-up window come back in a fresh process; a stale step-up stays stale; signing out (through the web form), Sign out everywhere else and the ninth sign-in's eviction stay done after a restart; last use is written; expired rows are neither loaded nor kept. Full suite passes against MariaDB. Smoke-tested the binary: a stored session signs in after start, an expired one is swept.
+
 ## 0.30.0 - Transfer space ownership (2026-10-09)
 
 **Needs schema v9 and the grants before the new binary starts** (`deploy/account-schema-v9.sql`, then `deploy/account-grants.sql`; see deployment.md). No configuration change. No new Go modules.
