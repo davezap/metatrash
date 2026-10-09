@@ -414,6 +414,11 @@ func printUser(w io.Writer, u service.AdminUserDetail) {
 			fmt.Fprintf(t, "  %s\tconnected by %s\t%s\n", g.Account, g.GitHubLogin, g.Status)
 		}
 	})
+	section(w, "Signed in", len(u.Sessions), func(t *tabwriter.Writer) {
+		for _, s := range u.Sessions {
+			fmt.Fprintf(t, "  %s\t%s\tsince %s\tlast used %s\n", orDash(oneLine(s.Device)), orDash(s.IP), minute(s.CreatedAt), minute(s.LastUsedAt))
+		}
+	})
 }
 
 func section(w io.Writer, title string, n int, rows func(*tabwriter.Writer)) {

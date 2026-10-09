@@ -345,7 +345,7 @@ func (h *httpAdapter) recoverySignIn(ctx context.Context, rawEmail, code string,
 	}
 	now := time.Now()
 	a.mu.Lock()
-	token, err := a.startSessionLocked(user.ID, now)
+	token, err := a.startSessionLocked(ctx, user.ID, now)
 	if err == nil {
 		// Someone using a recovery code has usually lost a device: sign out
 		// the sessions that device (or whoever has it) may still hold.

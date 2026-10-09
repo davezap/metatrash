@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,7 +33,7 @@ const maxSessions = 4096
 const maxUserSessions = 8
 
 func (db *accountDatabase) checkSessionSchema(ctx context.Context) error {
-	bad := fmt.Errorf("account schema v10 required; follow docs/deployment.md")
+	bad := fmt.Errorf("account schema v11 required; follow docs/deployment.md")
 	var count int
 	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'metatrash_sessions' AND engine = 'InnoDB'").Scan(&count); err != nil || count != 1 {
 		return bad
@@ -42,7 +43,7 @@ func (db *accountDatabase) checkSessionSchema(ctx context.Context) error {
 	if err := db.db.QueryRowContext(ctx, "SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ','), COALESCE(SUM(non_unique), 0), COUNT(sub_part) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'metatrash_sessions' AND index_name = 'PRIMARY'").Scan(&columns, &nonUnique, &prefixes); err != nil || columns.String != "session_digest" || nonUnique != 0 || prefixes != 0 {
 		return bad
 	}
-	rows, err := db.db.QueryContext(ctx, "SELECT session_digest, user_id, created_at, expires_at, auth_at, last_used_at FROM metatrash_sessions LIMIT 0")
+	rows, err := db.db.QueryContext(ctx, "SELECT session_digest, user_id, created_at, expires_at, auth_at, last_used_at, device, ip FROM metatrash_sessions LIMIT 0")
 	if err != nil {
 		return bad
 	}
@@ -60,22 +61,22 @@ func (db *accountDatabase) loadSessions(ctx context.Context, now time.Time) (map
 	if _, err := db.db.ExecContext(ctx, "DELETE FROM metatrash_sessions WHERE expires_at <= ?", now.Unix()); err != nil {
 		return nil, fmt.Errorf("cannot sweep expired sessions")
 	}
-	rows, err := db.db.QueryContext(ctx, "SELECT session_digest, user_id, created_at, expires_at, auth_at, last_used_at FROM metatrash_sessions WHERE expires_at > ? ORDER BY created_at DESC LIMIT ?", now.Unix(), maxSessions)
+	rows, err := db.db.QueryContext(ctx, "SELECT session_digest, user_id, created_at, expires_at, auth_at, last_used_at, device, ip FROM metatrash_sessions WHERE expires_at > ? ORDER BY created_at DESC LIMIT ?", now.Unix(), maxSessions)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read sessions")
 	}
 	defer rows.Close()
 	sessions := map[string]accountSession{}
 	for rows.Next() {
-		var key, user string
+		var key, user, device, ip string
 		var created, expires, authAt, used int64
-		if err := rows.Scan(&key, &user, &created, &expires, &authAt, &used); err != nil {
+		if err := rows.Scan(&key, &user, &created, &expires, &authAt, &used, &device, &ip); err != nil {
 			return nil, fmt.Errorf("cannot read sessions")
 		}
 		if len(key) != 64 || !isLowerHex(key) || len(user) != 32 || !isLowerHex(user) {
 			return nil, fmt.Errorf("invalid session records")
 		}
-		s := accountSession{UserID: user, Created: time.Unix(created, 0), Expires: time.Unix(expires, 0)}
+		s := accountSession{UserID: user, Created: time.Unix(created, 0), Expires: time.Unix(expires, 0), Device: device, IP: ip}
 		if authAt > 0 {
 			s.AuthAt = time.Unix(authAt, 0)
 		}
@@ -97,6 +98,20 @@ func unixOrZero(t time.Time) int64 {
 	return t.Unix()
 }
 
+// clip keeps printable ASCII and at most n bytes.
+func clip(s string, n int) string {
+	s = strings.Map(func(c rune) rune {
+		if c < 32 || c > 126 {
+			return -1
+		}
+		return c
+	}, s)
+	if len(s) > n {
+		s = s[:n]
+	}
+	return s
+}
+
 func isLowerHex(s string) bool {
 	return strings.Trim(s, "0123456789abcdef") == ""
 }
@@ -104,8 +119,8 @@ func isLowerHex(s string) bool {
 func (db *accountDatabase) insertSession(key string, s accountSession) error {
 	ctx, cancel := sessionContext()
 	defer cancel()
-	_, err := db.db.ExecContext(ctx, "INSERT INTO metatrash_sessions (session_digest, user_id, created_at, expires_at, auth_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)",
-		key, s.UserID, s.Created.Unix(), s.Expires.Unix(), unixOrZero(s.AuthAt), unixOrZero(s.LastUsed))
+	_, err := db.db.ExecContext(ctx, "INSERT INTO metatrash_sessions (session_digest, user_id, created_at, expires_at, auth_at, last_used_at, device, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		key, s.UserID, s.Created.Unix(), s.Expires.Unix(), unixOrZero(s.AuthAt), unixOrZero(s.LastUsed), s.Device, s.IP)
 	return err
 }
 
@@ -165,8 +180,9 @@ func (a *accounts) loadStoredSessions(ctx context.Context, now time.Time) error 
 }
 
 // startSessionLocked creates a session for userID that has just proved who
-// the user is, and stores it before returning its token. Callers hold mu.
-func (a *accounts) startSessionLocked(userID string, now time.Time) (string, error) {
+// the user is, and stores it before returning its token. The browser and
+// address come from ctx (withSessionOrigin). Callers hold mu.
+func (a *accounts) startSessionLocked(ctx context.Context, userID string, now time.Time) (string, error) {
 	if len(a.sessions) >= maxSessions {
 		return "", problem(503, "sessions_busy", "Please try again later.")
 	}
@@ -191,7 +207,8 @@ func (a *accounts) startSessionLocked(userID string, now time.Time) (string, err
 			return "", unavailable
 		}
 	}
-	session := accountSession{UserID: userID, Created: now, Expires: now.Add(sessionLifetime), AuthAt: now, LastUsed: now}
+	origin := originFrom(ctx)
+	session := accountSession{UserID: userID, Created: now, Expires: now.Add(sessionLifetime), AuthAt: now, LastUsed: now, Device: clip(origin.Device, 64), IP: clip(origin.IP, 45)}
 	key := secretDigest(token)
 	if db := a.sessionDB(); db != nil {
 		if now.Sub(a.sessionSwept) >= sessionSweepEvery {
@@ -329,4 +346,71 @@ func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, 
 		}
 	}
 	return a.store.ByID(ctx, session.UserID)
+}
+
+// sessionView is one row of the signed-in devices table on Security.
+type sessionView struct {
+	ID, Device, IP     string
+	SignedIn, LastUsed string
+	Current            bool
+}
+
+// sessionRowID names a session in the devices table without revealing its
+// digest. It changes when the service restarts; a stale form just fails.
+func (a *accounts) sessionRowID(key string) string {
+	return a.mac("session-row:" + key)[:32]
+}
+
+// userSessions lists the user's unexpired sessions: this one first, then the
+// most recently used.
+func (a *accounts) userSessions(userID, token string, now time.Time) []sessionView {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	current := secretDigest(token)
+	type row struct {
+		view sessionView
+		used time.Time
+	}
+	var rows []row
+	for k, s := range a.sessions {
+		if s.UserID != userID || !now.Before(s.Expires) {
+			continue
+		}
+		v := sessionView{ID: a.sessionRowID(k), Device: s.Device, IP: s.IP, SignedIn: sinceText(s.Created, now), LastUsed: sinceText(s.LastUsed, now), Current: k == current}
+		if v.Device == "" {
+			v.Device = "Unknown browser"
+		}
+		if v.Current {
+			v.LastUsed = "now"
+		}
+		rows = append(rows, row{v, s.LastUsed})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].view.Current != rows[j].view.Current {
+			return rows[i].view.Current
+		}
+		if !rows[i].used.Equal(rows[j].used) {
+			return rows[i].used.After(rows[j].used)
+		}
+		return rows[i].view.ID < rows[j].view.ID
+	})
+	views := make([]sessionView, len(rows))
+	for i, r := range rows {
+		views[i] = r.view
+	}
+	return views
+}
+
+// endSessionByID signs out one of the user's other sessions, by its row ID
+// in the devices table. found is false when it is not (or no longer) there.
+func (a *accounts) endSessionByID(userID, token, id string) (found bool, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	current := secretDigest(token)
+	for k, s := range a.sessions {
+		if k != current && s.UserID == userID && len(id) == 32 && a.sessionRowID(k) == id {
+			return true, a.endSessionsLocked(k)
+		}
+	}
+	return false, nil
 }

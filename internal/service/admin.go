@@ -49,6 +49,17 @@ type AdminUserDetail struct {
 	Invitations          []AdminInvitation   `json:"invitations"`
 	Apps                 []AdminApp          `json:"apps"`
 	GitHub               []AdminInstallation `json:"github"`
+	// Sessions are the signed-in browsers stored in the database; last use
+	// there lags by up to five minutes.
+	Sessions []AdminSession `json:"sessions"`
+}
+
+type AdminSession struct {
+	Device     string    `json:"device"`
+	IP         string    `json:"ip"`
+	CreatedAt  time.Time `json:"createdAt"`
+	LastUsedAt time.Time `json:"lastUsedAt,omitzero"`
+	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
 type AdminPasskey struct {
@@ -106,7 +117,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v10.
+// a notice is sent, its SMTP settings) and checks the schema is v11.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -128,9 +139,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 10 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 11 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v10 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v11 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -222,7 +233,7 @@ func unixTime(seconds int64) time.Time {
 func (d *AdminDB) UserDetail(ctx context.Context, u AdminUser) (AdminUserDetail, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	detail := AdminUserDetail{AdminUser: u, PasskeyList: []AdminPasskey{}, MemberOf: []AdminMembership{}, Invitations: []AdminInvitation{}, Apps: []AdminApp{}, GitHub: []AdminInstallation{}}
+	detail := AdminUserDetail{AdminUser: u, PasskeyList: []AdminPasskey{}, MemberOf: []AdminMembership{}, Invitations: []AdminInvitation{}, Apps: []AdminApp{}, GitHub: []AdminInstallation{}, Sessions: []AdminSession{}}
 	fail := fmt.Errorf("account database unavailable")
 	db := d.store.db
 	if err := eachRow(ctx, db, func(scan func(...any) error) error {
@@ -307,6 +318,18 @@ WHERE i.email = ? AND i.status = 'pending' AND i.expires_at > ? ORDER BY i.creat
 		detail.GitHub = append(detail.GitHub, g)
 		return nil
 	}, "SELECT account_login, github_login, status FROM metatrash_github_installations WHERE user_id = ? ORDER BY created_at, installation_id", u.ID); err != nil {
+		return detail, fail
+	}
+	if err := eachRow(ctx, db, func(scan func(...any) error) error {
+		var s AdminSession
+		var created, used, expires int64
+		if err := scan(&s.Device, &s.IP, &created, &used, &expires); err != nil {
+			return err
+		}
+		s.CreatedAt, s.LastUsedAt, s.ExpiresAt = unixTime(created), unixTime(used), unixTime(expires)
+		detail.Sessions = append(detail.Sessions, s)
+		return nil
+	}, "SELECT device, ip, created_at, last_used_at, expires_at FROM metatrash_sessions WHERE user_id = ? AND expires_at > ? ORDER BY last_used_at DESC, created_at DESC", u.ID, time.Now().Unix()); err != nil {
 		return detail, fail
 	}
 	return detail, nil
@@ -466,7 +489,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v10 ready") {
+	if !add("schema", store.ready(ctx), "v11 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)

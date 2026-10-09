@@ -40,6 +40,7 @@ var signInRoutes = map[string]bool{
 	"/account/email/verify":    true,
 	"/account/email/cancel":    true,
 	"/account/sessions/end":    true,
+	"/account/sessions/remove": true,
 }
 
 // signInFormFields are the fields each route accepts besides csrf.
@@ -63,6 +64,7 @@ var signInFormFields = map[string][]string{
 	"/account/email/verify":    {"code"},
 	"/account/email/cancel":    nil,
 	"/account/sessions/end":    nil,
+	"/account/sessions/remove": {"session"},
 }
 
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
@@ -97,7 +99,9 @@ type signInPage struct {
 	NewRecoveryCodes []string
 	// EmailChangeTo is the new address a code was sent to, while it waits.
 	EmailChangeTo string
-	// OtherSessions counts the account's other signed-in browsers.
+	// Sessions are the signed-in devices, this one first; OtherSessions
+	// counts the rest.
+	Sessions      []sessionView
 	OtherSessions int
 }
 
@@ -153,6 +157,7 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 	}
 	page.NewRecoveryCodes = a.takeRecoveryReveal(session, user.ID, now)
 	page.EmailChangeTo = a.pendingEmailChange(session, now)
+	page.Sessions = a.userSessions(user.ID, session, now)
 	page.OtherSessions = a.otherSessions(user.ID, session, now)
 	a.mu.Lock()
 	c, waiting := a.challenges[confirmKey(session)]
@@ -317,6 +322,17 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 				err = problem(503, "sessions_not_stored", "The other browsers are signed out for now, but that could not be saved and they may be signed in again after the next restart. Try again shortly.")
 			}
 			notice = "sessions-ended"
+		case "/account/sessions/remove":
+			var found bool
+			found, err = a.endSessionByID(user.ID, session, r.PostForm.Get("session"))
+			log.Printf("account session-end user=%s found=%v stored=%v", user.ID, found, err == nil)
+			switch {
+			case err != nil:
+				err = problem(503, "sessions_not_stored", "That device is signed out for now, but that could not be saved and it may be signed in again after the next restart. Try again shortly.")
+			case !found:
+				err = problem(404, "session_not_found", "That device is already signed out. Reload the page to see the current list.")
+			}
+			notice = "session-ended"
 		}
 	}
 	if err == nil && signsOutOthers[notice] {
@@ -427,7 +443,7 @@ func (h *httpAdapter) passkeySignIn(r *http.Request, browser string) (string, us
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	token, err := a.startSessionLocked(user.ID, now)
+	token, err := a.startSessionLocked(ctx, user.ID, now)
 	if err != nil {
 		return "", user, err
 	}

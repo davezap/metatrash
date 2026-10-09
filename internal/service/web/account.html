@@ -92,9 +92,6 @@
 <form method="post" action="{{$.BasePath}}/account/email/cancel"><input type="hidden" name="csrf" value="{{index .CSRF "email/cancel"}}"><button class="button button-quiet" type="submit">Cancel</button></form></div>
 {{else if .Fresh}}<form method="post" action="{{$.BasePath}}/account/email/change"><input type="hidden" name="csrf" value="{{index .CSRF "email/change"}}"><label for="new-email">New email address</label><div class="inline-form"><input id="new-email" name="email" type="email" maxlength="254" autocomplete="email" required><button class="button" type="submit">Send a code</button></div><p class="hint">We email a code to the new address to check it’s yours. Once you enter it, you sign in and get notices there, and we tell this address about the change.</p></form>
 {{else}}<p>You sign in, confirm changes and get notices and invitations at this address.</p><p class="hint">To change it, confirm it’s you.</p>{{end}}</section>
-<section class="card" id="sessions"><h2>Signed-in browsers</h2><p>You’re signed in here{{if .OtherSessions}} and in {{.OtherSessions}} other {{if eq .OtherSessions 1}}browser{{else}}browsers{{end}}{{else}}, and nowhere else{{end}}.</p>
-{{if .OtherSessions}}<form method="post" action="{{$.BasePath}}/account/sessions/end"><input type="hidden" name="csrf" value="{{index .CSRF "sessions/end"}}"><button class="button button-quiet button-flush" type="submit">Sign out everywhere else</button></form>{{end}}
-<p class="hint">Removing a passkey or the authenticator app, turning off email sign-in, changing your email address or signing in with a recovery code also signs out every other browser.</p></section>
 </div>
 <h2>Passkeys <span class="cell-muted">{{len .Passkeys}} of 20</span></h2>
 <ul class="rows rows-passkeys"><li class="row row-head" aria-hidden="true"><span>Name</span><span>Added</span><span>Last used</span><span></span></li>
@@ -129,6 +126,14 @@
 {{else}}<p>Recovery codes let you sign in if you lose your passkeys and authenticator app. You need them before you can turn off email sign-in.</p>{{end}}
 {{if .Fresh}}<form method="post" action="{{$.BasePath}}/account/recovery/create"><input type="hidden" name="csrf" value="{{index .CSRF "recovery/create"}}"><button class="button{{if or .Recovery .NewRecoveryCodes}} button-quiet button-flush{{end}}" type="submit">{{if or .Recovery .NewRecoveryCodes}}Create new codes{{else}}{{template "i-plus"}}Create recovery codes{{end}}</button></form>{{if .Recovery}}<p class="hint">Your current codes stop working when you create new ones.</p>{{end}}
 {{else}}<p class="hint">To create {{if .Recovery}}new {{end}}recovery codes, confirm it’s you above.</p>{{end}}
+<h2 id="sessions">Signed-in devices <span class="cell-muted">{{len .Sessions}}</span></h2>
+{{if .OtherSessions}}<form method="post" action="{{$.BasePath}}/account/sessions/end"><input type="hidden" name="csrf" value="{{index .CSRF "sessions/end"}}"><button class="button button-quiet button-flush" type="submit">Sign out everywhere else</button></form>
+{{else}}<p>Only this device is signed in.</p>{{end}}
+<ul class="rows rows-sessions"><li class="row row-head" aria-hidden="true"><span>Device</span><span>Signed in</span><span>Last used</span><span>From</span><span></span></li>
+{{range .Sessions}}<li class="row"><span class="cell-main"><strong>{{.Device}}</strong>{{if .Current}} <span class="pill">this device</span>{{end}}</span><span class="cell-muted"><span class="m-label">Signed in </span>{{.SignedIn}}</span><span class="cell-muted"><span class="m-label">Last used </span>{{.LastUsed}}</span><span class="cell-muted"><span class="m-label">From </span>{{if .IP}}{{.IP}}{{else}}unknown{{end}}</span>
+<span class="actions">{{if not .Current}}<form method="post" action="{{$.BasePath}}/account/sessions/remove"><input type="hidden" name="csrf" value="{{index $.SignIn.CSRF "sessions/remove"}}"><input type="hidden" name="session" value="{{.ID}}"><button class="icon" type="submit" title="Sign out" aria-label="Sign out {{.Device}}, signed in {{.SignedIn}}">{{template "i-x"}}</button></form>{{end}}</span></li>
+{{end}}</ul>
+<p class="hint">Sessions last 24 hours. Removing a passkey or the authenticator app, turning off email sign-in, changing your email address or signing in with a recovery code also signs out every other device.</p>
 {{end}}</div>{{else}}<p class="hint">Sign-in methods are not available on this server.</p>{{end}}
 
 {{else if eq .Section "services"}}

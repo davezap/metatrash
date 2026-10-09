@@ -57,9 +57,11 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   (STARTTLS required). Codes expire after ten minutes, allow five attempts and
   are kept as keyed digests in memory. Sessions last 24 hours and are kept
   in memory and in `metatrash_sessions` (SHA-256 of the token, never the
-  token), so restarts keep people signed in (0.31.0); they use `__Host-` cookies with Secure,
-  HttpOnly and SameSite=Strict. Security → Signed-in browsers counts the
-  account's other sessions and signs them out (0.27.0); the same happens
+  token), so restarts keep people signed in (0.31.0); Security → Signed-in
+  devices lists them with browser, sign-in address and last use, and signs
+  out any one (0.32.0); they use `__Host-` cookies with Secure,
+  HttpOnly and SameSite=Strict. Sign out everywhere else (0.27.0) ends the
+  account's other sessions; the same happens
   after removing a passkey or the authenticator app, turning off email
   sign-in, changing the email address and signing in with a recovery code.
 - **Passkeys** (0.22.0, `webauthn.go`, `signin_*.go`, `web/passkey.js`):

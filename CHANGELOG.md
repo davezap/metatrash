@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.32.0 - Signed-in devices (2026-10-09)
+
+**Needs schema v11 before the new binary starts** (`deploy/account-schema-v11.sql`; see deployment.md). No new grants, no configuration change, no new Go modules. Sessions survive the upgrade.
+
+- **Security → Signed-in devices** replaces the Signed-in browsers card near the top with a table at the bottom: one row per session with the browser and system ("Chrome on Windows", "Safari on iPhone"), signed in and last used ("3 hours ago"; relative, so no time zones), and the address it signed in from. This browser comes first, marked **this device**, then the most recently used. Each other row has an **✕** that signs that one out (no confirmation needed, as for Sign out everywhere else, which stays above the table). Rows name sessions by an opaque ID, never the stored digest. Narrow screens label each value.
+- The browser label is made from the User-Agent at sign-in and only the label is stored; the address comes from the trusted proxy's `X-Forwarded-For`. Both are deleted with the session. Sessions from 0.31.0 show "Unknown browser" and "unknown".
+- `mt users show` lists the account's sessions under **Signed in** (device, address, since, last use).
+- Schema v11: `device` and `ip` columns on `metatrash_sessions`. `mt check` reports v11.
+- Tests: browser labels for Chrome, Edge, Safari, Firefox, Opera, Samsung Internet on Windows, Mac, iPhone, iPad, Android, Linux and ChromeOS; relative times; the devices table (order, this device without a button, others with one, no other account's sessions, no digests in the page); signing one out (and not this browser, another account's, unknown IDs or with another form's CSRF token), kept after a restart; device and address stored and restored; an authenticator sign-in records its address. Full suite passes against MariaDB. Checked the console output and the table in headless Chromium at 1300px and 400px.
+
 ## 0.31.0 - Stay signed in across restarts (2026-10-09)
 
 **Needs schema v10 and the grants before the new binary starts** (`deploy/account-schema-v10.sql`, then `deploy/account-grants.sql`; see deployment.md). No configuration change. No new Go modules.

@@ -118,6 +118,8 @@
 .filters a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .rows-members .row{grid-template-columns:minmax(0,1.6fr) 100px minmax(0,1.2fr) 90px}
 .rows-passkeys .row{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) 90px}
+.rows-sessions .row{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.1fr) 60px}
+.m-label{display:none}
 #totp{margin-top:36px}
 .totp-setup{display:grid;grid-template-columns:200px minmax(0,1fr);gap:24px;align-items:start;margin-top:14px}
 .qr{display:block;width:200px;height:200px;border-radius:4px}
@@ -187,6 +189,7 @@
 .nav-rule{margin:0;padding:0;border:0}.nav-count:not(.nav-new){display:none}.nav-new{margin-left:2px}
 .acct-main{padding:20px 16px 50px}
 .row-head{display:none}
+.m-label{display:inline}
 .row{grid-template-columns:minmax(0,1fr) auto!important;gap:4px 10px}
 .row>:not(.cell-main):not(.actions){grid-column:1}
 .row>.actions{grid-column:2;grid-row:1 / span 4;align-self:start}

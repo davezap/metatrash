@@ -66,6 +66,8 @@ type accountSession struct {
 	Created  time.Time
 	Expires  time.Time
 	LastUsed time.Time
+	// Device and IP describe the browser that signed in (device.go).
+	Device, IP string
 	// AuthAt is when this session last proved who the user is: signing in,
 	// or confirming on Your account. Changing sign-in methods needs it recent.
 	AuthAt time.Time
@@ -365,7 +367,7 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 	if err != nil {
 		return "", email, false, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
 	}
-	token, err = a.startSessionLocked(user.ID, now)
+	token, err = a.startSessionLocked(ctx, user.ID, now)
 	if err != nil {
 		return "", email, false, err
 	}

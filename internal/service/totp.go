@@ -322,7 +322,7 @@ func (h *httpAdapter) totpSignIn(ctx context.Context, rawEmail, code string, ent
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	token, err := a.startSessionLocked(user.ID, now)
+	token, err := a.startSessionLocked(ctx, user.ID, now)
 	if err != nil {
 		return "", user, err
 	}

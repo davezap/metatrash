@@ -238,6 +238,7 @@ var accountNotices = map[string]string{
 	"email-change-cancelled":  "Email address change cancelled. Your address is unchanged.",
 	"passkey-renamed":         "Passkey renamed.",
 	"sessions-ended":          "Signed out everywhere else. This browser is still signed in.",
+	"session-ended":           "That device is signed out.",
 	"passkey-removed":         "Passkey removed and your other sessions signed out. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }
 

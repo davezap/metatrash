@@ -196,14 +196,14 @@ Also in 0.15.1:
 
 ## Owner checks still to run
 
-From 0.31.0 (2026-10-09), schema v10 first:
+From 0.32.0 (2026-10-09), schema v11 first:
 
-- **Stay signed in:** the upgrade signs everyone out once. Sign in, confirm
-  on Security (step-up), then `sudo systemctl restart metatrash`: still
-  signed in, still confirmed for the rest of the 10 minutes, and the journal
-  shows `account sessions-loaded count=1` or more. Sign in in a second
-  browser, Sign out everywhere else, restart: the second browser stays signed
-  out. Sign out, restart, Back: still signed out.
+- **Signed-in devices:** sign in again after the upgrade (sessions from
+  0.31.0 show as "Unknown browser" with no address). Security → Signed-in
+  devices lists this browser first with "this device" and its address. Sign
+  in from your phone: it appears with its browser. Sign the phone out with
+  its ✕; the phone is signed out, the PC isn't. `mt users show <you>` lists
+  the sessions under Signed in.
 
 From 0.30.0 (2026-10-09), schema v9 first:
 
@@ -254,8 +254,8 @@ From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
   ask Google Search Console to inspect `/docs/legal/privacy.md`.
 
 - **Sign out everywhere (0.27.0):** sign in on two browsers (say your phone
-  and a private window). On Security, Signed-in browsers says "and in 1 other
-  browser"; Sign out everywhere else, then reload the other browser: it shows
+  and a private window). On Security, Signed-in devices lists the other
+  browser; Sign out everywhere else, then reload the other browser: it shows
   the sign-in page. Sign in there again, then remove a passkey (or turn off
   email sign-in, change your address, or sign in with a recovery code) in the
   first browser: the other one is signed out again. `journalctl` shows
@@ -319,7 +319,7 @@ Agreed with Dave 2026-10-08, to build after the sections above.
    never the token, plus user, created, expires, last used and the step-up
    time. Sign out, Sign out everywhere else and the automatic sign-outs delete
    rows; expired rows are swept. Pending codes and other short-lived state can
-   stay in memory. Done in 0.31.0 (schema v10, `metatrash_sessions`). The
+   stay in memory. Done in 0.31.0 (checked live 2026-10-09) (schema v10, `metatrash_sessions`). The
    digest is SHA-256 of the 256-bit random token, as for OAuth tokens; a key
    would need a secret that also survives restarts and adds nothing against a
    token that size.
@@ -329,7 +329,9 @@ Agreed with Dave 2026-10-08, to build after the sections above.
    the current one, signed in, last used, and roughly where from if known (IP
    or country). An ✕ on each other row signs that one out; Sign out
    everywhere else stays above the table. Needs step 1, since the table reads
-   the stored sessions.
+   the stored sessions. Done in 0.32.0 (schema v11: `device` and `ip`
+   columns). Location is the sign-in IP address; a country would need a
+   GeoIP database. Times are relative ("3 hours ago"), so no time zones.
 
 ## Maintenance
 

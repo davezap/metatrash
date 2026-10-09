@@ -758,6 +758,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		fail(err)
 		return true
 	}
+	// The session about to start records this browser and address.
+	r = r.WithContext(withSessionOrigin(r.Context(), sessionOrigin{Device: deviceLabel(r.UserAgent()), IP: client}))
 	var token string
 	if path == "/login/passkey" {
 		var user userAccount

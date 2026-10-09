@@ -285,6 +285,12 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	if user, ok, _ := a.currentUser(ctx, signedIn.Value); !ok || user.ID != w.owner.ID {
 		t.Fatal("wrong session")
 	}
+	a.mu.Lock()
+	from := a.sessions[secretDigest(signedIn.Value)].IP
+	a.mu.Unlock()
+	if from != "192.0.2.1" {
+		t.Fatalf("session records sign-in address %q", from)
+	}
 	if fresh, _ := a.sessionFresh(signedIn.Value, time.Now()); !fresh {
 		t.Fatal("authenticator sign-in is not fresh")
 	}

@@ -1,5 +1,5 @@
--- Runtime permissions for the service's database login, schema v1-v10
--- (0.31.0 and later).
+-- Runtime permissions for the service's database login, schema v1-v11
+-- (0.32.0 and later; v11 needs no new grants).
 -- Run as database administrator after the schema scripts. Safe to repeat.
 -- For loopback TCP use 'metatrash_accounts'@'127.0.0.1' throughout instead.
 -- The login needs no DDL, FILE or administration privileges.
