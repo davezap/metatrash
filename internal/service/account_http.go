@@ -65,10 +65,16 @@ type accountPage struct {
 	TOTPEmail           string
 	// RecoveryOpen and RecoveryEmail show the recovery-code form again
 	// after it failed.
-	RecoveryOpen           bool
-	RecoveryEmail          string
-	SignIn                 *signInPage
-	PowBits                int
+	RecoveryOpen  bool
+	RecoveryEmail string
+	SignIn        *signInPage
+	PowBits       int
+	// ContinueURL makes the page reload itself from this site: a link from
+	// another site arrives without the SameSite=Strict session cookie.
+	ContinueURL string
+	// SignedInAs is the account this browser is signed in to while a code
+	// for another address waits: entering it switches accounts.
+	SignedInAs             string
 	Notice                 string
 	UsernameCSRF, Username string
 	User                   userAccount
@@ -296,6 +302,15 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			return true
 		}
 		session := cookieToken(r, sessionCookie)
+		// The session cookie is SameSite=Strict, so a link from another site
+		// (an invitation email open in webmail) arrives without it even when
+		// this browser is signed in. Reload once from this site, which sends
+		// it, before treating the browser as signed out. The reload is
+		// same-origin, so it cannot loop.
+		if session == "" && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+			h.renderAccount(w, r, 200, accountPage{ContinueURL: h.basePath + path})
+			return true
+		}
 		user, signedIn, err := a.currentUser(r.Context(), session)
 		if err != nil {
 			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
@@ -328,11 +343,22 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			h.renderAccount(w, r, 200, page)
 			return true
 		}
+		browser := cookieToken(r, loginCookie)
 		if signedIn {
+			// A code was sent for another address from this signed-in
+			// browser: show where to enter it, saying that it switches
+			// accounts, rather than going back to the account signed in.
+			if browser != "" {
+				if page := a.loginPage(browser); page.Verify && !strings.EqualFold(page.Email, user.Email) {
+					page.SignedInAs = user.Email
+					accountCookie(w, loginCookie, browser, 1200)
+					h.renderAccount(w, r, 200, page)
+					return true
+				}
+			}
 			http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 			return true
 		}
-		browser := cookieToken(r, loginCookie)
 		if browser == "" {
 			var err error
 			browser, err = randomHex(32)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.29.1 - Links from email keep you signed in; switching accounts by code (2026-10-09)
+
+No schema, configuration or grant change. No new Go modules.
+
+- **Following a link from another site no longer looks signed out.** The session cookie is SameSite=Strict, so a link opened from webmail (the invitation email's `/account` link) arrived without it and went to sign-in even in a signed-in browser. Account pages and `/login`, reached from another site without a session cookie (`Sec-Fetch-Site: cross-site`), now answer with a "Continue to Metatrash" page that reloads itself from this site at once, which sends the cookie: signed-in browsers land on their account, signed-out ones go to sign-in as before. The cookie stays Strict; this is the same reload the app-connection flow already uses. Browsers that don't send `Sec-Fetch-Site` behave as before.
+- **Asking for a code for another address in a signed-in browser shows where to enter it.** Before, the code was emailed but the page went straight back to the account already signed in. Now the code page says "This browser is signed in as A. Entering the code signs it in as B instead", with a link to stay signed in as A. Entering the code switches accounts and ends A's session in this browser (as sign-in already did). With no code waiting, `/login` in a signed-in browser still goes to the account.
+- Tests (new `account_switch_test.go`): cross-site visits to `/account`, `/account/shared` and `/login` get the reload page; the same-origin reload reaches the account with the cookie and sign-in without it; no reload when the cookie is present; a signed-in browser asking for a second address's code sees the switch notice, the code signs it in as the second account and the first session ends. Full suite passes against MariaDB. Checked both pages in headless Chromium.
+
 ## 0.29.0 - One Spaces page (2026-10-09)
 
 No schema, configuration or grant change. No new Go modules.
