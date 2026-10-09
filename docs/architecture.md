@@ -150,6 +150,27 @@ CSRF value, bounded form fields and a per-user attempt limit.
   refunded automatically.
 - `metatrash_spaces.owner_user_id` is the only record of ownership; owners have
   no membership row.
+- **Transfer** (0.30.0, schema v9). The owner offers the space to an active
+  member with a username (step-up required); one offer per space in
+  `metatrash_space_transfers`, seven days, cancelled by the owner, declined
+  by the member, and withdrawn if the member is suspended or removed. The
+  member accepts from Spaces. Acceptance, in one transaction with the space
+  row locked first and then the new owner's row: rechecks the offer, active
+  membership, username, no own space at the slug, no alias of theirs at the
+  slug for another space, and the allowance; moves `owner_user_id`; deletes
+  the new owner's membership and inserts the old owner's (active,
+  read_write); moves `member_user_id` on consent rows (NULL for the new
+  owner, the old owner's ID for theirs) so later membership changes apply;
+  records the old owner/slug in `metatrash_space_aliases`. The open
+  repository's owner is updated after commit, so GitHub folders use the new
+  owner's installations.
+- **Old addresses** stay with the space: the website answers
+  `/spaces/{old}/{slug}/…` with 301 to the current address for anyone who may
+  see the space (others get what any private address gives), `/docs/` keeps
+  serving a docs space configured by its old address, and agents may pass
+  the old owner/slug (results use the current name). The old owner cannot
+  create or accept another space at that slug. If the space comes back to
+  them it takes its address back and that alias is deleted.
 
 ## Sharing
 

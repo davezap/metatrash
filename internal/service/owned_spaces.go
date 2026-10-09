@@ -170,6 +170,15 @@ func (db *accountDatabase) reserveOwnedSpace(ctx context.Context, ownerID, id, n
 	if err != sql.ErrNoRows {
 		return ownedSpace{}, fmt.Errorf("cannot read space reservation")
 	}
+	// The address of a space this owner transferred away keeps leading to it.
+	var movedName string
+	err = tx.QueryRowContext(ctx, "SELECT s.name FROM metatrash_space_aliases a JOIN metatrash_spaces s ON s.space_id = a.space_id WHERE a.owner_user_id = ? AND a.slug = ?", ownerID, slug).Scan(&movedName)
+	if err == nil {
+		return ownedSpace{}, problem(409, "reserved", "The address "+owner.Username+"/"+slug+" is reserved: it still leads to “"+movedName+"”, which you transferred to someone else. Choose a different name.")
+	}
+	if err != sql.ErrNoRows {
+		return ownedSpace{}, fmt.Errorf("cannot read space reservation")
+	}
 	var count int
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_spaces WHERE owner_user_id = ?", ownerID).Scan(&count); err != nil {
 		return ownedSpace{}, fmt.Errorf("cannot check owned-space allowance")
@@ -219,6 +228,24 @@ func (s *Service) createOwnedSpace(ctx context.Context, ownerID, name, slug stri
 	return space, nil
 }
 
+// repositoryOwner is the user ID of an owned repository's current owner.
+// A transfer changes it while the repository is in use (setRepositoryOwner).
+func (s *Service) repositoryOwner(r *repository) string {
+	s.ownedMu.RLock()
+	defer s.ownedMu.RUnlock()
+	return r.owner
+}
+
+// setRepositoryOwner records a committed ownership transfer, so GitHub folders
+// pull and push through the new owner's GitHub connections.
+func (s *Service) setRepositoryOwner(id, owner string) {
+	s.ownedMu.Lock()
+	defer s.ownedMu.Unlock()
+	if repo := s.ownedRepos[id]; repo != nil {
+		repo.owner = owner
+	}
+}
+
 func (s *Service) ownedRepository(id string) *repository {
 	s.ownedMu.RLock()
 	defer s.ownedMu.RUnlock()
@@ -250,7 +277,7 @@ func (s *Service) prepareOwnedSpace(ctx context.Context, space ownedSpace) error
 		if err != nil {
 			return nil, err
 		}
-		repo.owner = space.OwnerID
+		repo.owner = space.OwnerID // not yet shared: no lock needed
 		if space.State == "provisioning" {
 			result, err := s.ownedDB.db.ExecContext(ctx, "UPDATE metatrash_spaces SET provisioning_state = 'ready' WHERE space_id = ? AND owner_user_id = ? AND provisioning_state = 'provisioning'", space.ID, space.OwnerID)
 			if err != nil {

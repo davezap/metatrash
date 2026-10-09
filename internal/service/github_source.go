@@ -65,11 +65,12 @@ func (s *Service) githubRepoClient(ctx context.Context, r *repository, repo, acc
 	if s.accounts == nil || s.accounts.github == nil || s.ownedDB == nil {
 		return nil, problem(403, "forbidden", "GitHub is not enabled on this Metatrash server.")
 	}
-	if !r.owned || r.owner == "" {
+	spaceOwner := s.repositoryOwner(r)
+	if !r.owned || spaceOwner == "" {
 		return nil, problem(403, "forbidden", "GitHub folders work only in your own spaces.")
 	}
 	owner, _, _ := strings.Cut(repo, "/")
-	list, err := s.ownedDB.githubInstallations(ctx, r.owner)
+	list, err := s.ownedDB.githubInstallations(ctx, spaceOwner)
 	if err != nil {
 		return nil, err
 	}

@@ -55,6 +55,19 @@ invitation is still saved and the person can accept by signing in. Members
 browse the space read-only and can connect their own AI apps to it, with write
 access only if the owner allows it.
 
+## Transfer a space
+
+On **Manage sharing**, **Transfer ownership** offers the space to one of its
+active members who has a public username (it needs a sign-in within the last
+10 minutes; confirm it's you in Security first). They get an email and choose
+**Accept ownership** at the top of Your account → Spaces within seven days, or
+decline. Until then nothing changes and the owner can cancel. On acceptance
+the address becomes `their-username/slug`; the old address keeps working for
+links and agents and stays reserved for that space. The previous owner stays
+as a member, and members, invitations and connected apps carry on. GitHub
+folders then use the new owner's GitHub connection. To move your spaces to
+another username, invite your other account, accept, then transfer.
+
 ## Make a space readable on the web
 
 On Your account → Spaces, the globe icon (**Make readable on the web**) lets anyone with

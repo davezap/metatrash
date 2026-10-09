@@ -44,6 +44,8 @@ type accountPage struct {
 	GitHubUnavailable          bool
 	Sharing                    *humanSharingPage
 	Invitations                []humanInvitation
+	TransferOffers             []spaceTransferOffer
+	TransferCSRF               map[string]string
 	Joined                     []joinedHumanSpace
 	MembershipUnavailable      bool
 	MembershipCSRF             map[string]string
@@ -139,7 +141,7 @@ func accountSection(path string) string {
 		return section
 	}
 	switch {
-	case path == "/account/membership/accept":
+	case path == "/account/membership/accept", strings.HasPrefix(path, "/account/transfer/"):
 		return "spaces"
 	case signInRoutes[path]:
 		return "security"
@@ -175,7 +177,17 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		// Memberships load on every page: the navigation counts invitations.
 		var membershipErr error
 		page.Invitations, page.Joined, membershipErr = h.accountMemberships(r.Context(), page.User)
-		page.InvitationCount = len(page.Invitations)
+		if membershipErr == nil {
+			page.TransferOffers, membershipErr = h.service.ownedDB.transferOffers(r.Context(), page.User.ID, time.Now())
+		}
+		page.InvitationCount = len(page.Invitations) + len(page.TransferOffers)
+		page.TransferCSRF = make(map[string]string)
+		for action := range transferActions {
+			page.TransferCSRF[action] = h.transferCSRF(action, cookieToken(r, h.sessionCookieName()))
+		}
+		if page.Sharing != nil {
+			page.Sharing.TransferFresh, _ = h.service.accounts.sessionFresh(cookieToken(r, h.sessionCookieName()), time.Now())
+		}
 		if membershipErr != nil {
 			page.MembershipUnavailable = true
 			if overview && page.Section == "spaces" && page.Filter != "mine" {
@@ -260,13 +272,14 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	appID := strings.TrimPrefix(path, "/account/apps/")
 	appRoute := strings.HasPrefix(path, "/account/apps/") && idPattern.MatchString(appID)
 	githubRoute := path == "/account/github/connect" || path == "/account/github/link" || path == "/account/github/disconnect"
+	transferAction, transferRoute := parseTransferRoute(path)
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
 		suffix := "-" + secretDigest(h.basePath)[:16]
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -428,6 +441,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	if path == "/account/spaces/visibility" {
 		allowed["space"], allowed["visibility"] = true, true
 	}
+	if transferRoute {
+		allowed["space"] = true
+		if transferAction == "offer" {
+			allowed["member"] = true
+		}
+	}
 	if path == "/account/username" {
 		allowed["username"] = true
 	}
@@ -463,7 +482,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || githubRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if membershipRoute || transferRoute || githubRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -471,6 +490,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		csrf = a.mac("logout:" + session)
 		if membershipRoute {
 			csrf = a.mac("membership:" + membershipAction + ":" + session)
+		}
+		if transferRoute {
+			csrf = h.transferCSRF(transferAction, session)
 		}
 		if path == "/account/username" {
 			csrf = a.mac("username:" + session)
@@ -500,6 +522,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if membershipRoute {
 		h.submitHumanMembership(w, r, session, membershipAction)
+		return true
+	}
+	if transferRoute {
+		h.submitSpaceTransfer(w, r, session, transferAction)
 		return true
 	}
 	if signInRoutes[path] {
@@ -588,7 +614,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			if derived && p != nil && p.Code == "conflict" {
 				message = "You already have a space at " + h.basePath + "/spaces/" + user.Username + "/" + slug + ". Choose a different name."
 			}
-			if derived && p != nil && (p.Code == "invalid_request" || p.Code == "conflict") {
+			if derived && p != nil && (p.Code == "invalid_request" || p.Code == "conflict" || p.Code == "reserved") {
 				page.SpaceNameError = message
 			} else {
 				page.Message = message

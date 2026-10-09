@@ -57,10 +57,11 @@ func effectiveAccess(id oauthIdentity, consent, ownerID string, status, memberPe
 // spaces are never reachable with OAuth (D3). Space references select a
 // repository; they never grant authority.
 //
-// An owned space is named owner/slug (as in /spaces/{owner}/{slug}/) or by its
-// ID. Only spaces connected to this grant are matched, so unconnected spaces
-// stay indistinguishable from missing ones. It returns the canonical name
-// (owner/slug, or the configured name) used in results and cursors.
+// An owned space is named owner/slug (as in /spaces/{owner}/{slug}/), by the
+// owner/slug it had before a transfer, or by its ID. Only spaces connected to
+// this grant are matched, so unconnected spaces stay indistinguishable from
+// missing ones. It returns the canonical name (owner/slug, or the configured
+// name) used in results and cursors.
 func (s *Service) agentSpaceAccess(ctx context.Context, id oauthIdentity, space, client string, write bool) (*repository, string, error) {
 	notConnected := problem(404, "not_found", "Space not found or not connected to this app. Call spaces to list the spaces this connection can use.")
 	if sc, configured := s.config.Spaces[space]; configured {
@@ -95,6 +96,18 @@ func (s *Service) agentSpaceAccess(ctx context.Context, id oauthIdentity, space,
 	var spaceID, username, slug, consent, ownerID string
 	var status, permission sql.NullString
 	err := s.ownedDB.db.QueryRowContext(lookup, query, args...).Scan(&spaceID, &username, &slug, &consent, &ownerID, &status, &permission)
+	if owner, oldSlug, full := strings.Cut(space, "/"); err == sql.ErrNoRows && full {
+		// The space's address before a transfer still names it. Results use
+		// the current owner/slug.
+		var aliasID string
+		var found bool
+		if aliasID, found, err = s.ownedDB.spaceByAlias(lookup, owner, oldSlug); err == nil && !found {
+			err = sql.ErrNoRows
+		}
+		if found {
+			err = s.ownedDB.db.QueryRowContext(lookup, base+` AND gs.space_id = ?`, id.UserID, id.GrantID, aliasID).Scan(&spaceID, &username, &slug, &consent, &ownerID, &status, &permission)
+		}
+	}
 	if err == sql.ErrNoRows {
 		return nil, "", notConnected
 	}

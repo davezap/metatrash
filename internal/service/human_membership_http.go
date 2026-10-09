@@ -19,9 +19,15 @@ type humanMember struct {
 	ID, Email, Username, Status, AgentPermission string
 }
 type humanSharingPage struct {
-	ID, Name, URL string
-	Invitations   []humanInvitation
-	Members       []humanMember
+	ID, Name, Slug, URL string
+	Invitations         []humanInvitation
+	Members             []humanMember
+	// Transfer is the pending ownership offer; Candidates are the members it
+	// can go to (active, with a username). TransferFresh: the owner signed
+	// in or confirmed recently enough to offer it.
+	Transfer      *spaceTransferPending
+	Candidates    []humanMember
+	TransferFresh bool
 }
 
 // Query deadlines and row limits bound dashboard work. Lists are deliberately
@@ -85,7 +91,7 @@ func (h *httpAdapter) humanSharing(ctx context.Context, user userAccount, spaceI
 	if err != nil {
 		return nil, err
 	}
-	page := &humanSharingPage{ID: space.ID, Name: space.Name, URL: h.ownedSpaceURL(user.Username, space.Slug)}
+	page := &humanSharingPage{ID: space.ID, Name: space.Name, Slug: space.Slug, URL: h.ownedSpaceURL(user.Username, space.Slug)}
 	rows, err := h.service.ownedDB.db.QueryContext(ctx, `SELECT invitation_id, email, expires_at FROM metatrash_invitations WHERE space_id = ? AND status = 'pending' ORDER BY expires_at, invitation_id LIMIT 200`, space.ID)
 	if err != nil {
 		return nil, err
@@ -122,7 +128,13 @@ func (h *httpAdapter) humanSharing(ctx context.Context, user userAccount, spaceI
 		}
 		page.Members = append(page.Members, item)
 	}
-	return page, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := h.transferSection(ctx, page, user.ID); err != nil {
+		return nil, err
+	}
+	return page, nil
 }
 
 // Called only after the account handler's Host, Origin, method, form and
@@ -202,26 +214,31 @@ func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Reque
 // Notices are fixed keys carried across the post-redirect in a short-lived cookie;
 // account routes take no query parameters.
 var accountNotices = map[string]string{
-	"invite-sent":            "Invitation emailed. They sign in with that address and accept from Your account.",
-	"invite-limited":         "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
-	"invite-failed":          "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
-	"invite-daily":           "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
-	"space-web":              "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
-	"space-private":          "The space is private again: only you and its members can browse it.",
-	"signin-confirmed":       "Confirmed. For the next 10 minutes you can change your email address and sign-in methods.",
-	"passkey-added":          "Passkey added. Next time, choose Sign in with a passkey. We’ve emailed you a notice of this change.",
-	"totp-added":             "Authenticator app added. Next time, choose Use an authenticator app when you sign in. We’ve emailed you a notice of this change.",
-	"totp-removed":           "Authenticator app removed and your other sessions signed out. Also delete Metatrash from the app. We’ve emailed you a notice of this change.",
-	"totp-cancelled":         "Authenticator app setup cancelled.",
-	"recovery-created":       "New recovery codes created. Save them now: they are shown only once. We’ve emailed you a notice of this change.",
-	"email-login-off":        "Email sign-in is off and your other sessions are signed out. Sign in with a passkey, your authenticator app or a recovery code. We’ve emailed you a notice of this change.",
-	"email-login-on":         "Email sign-in is back on. We’ve emailed you a notice of this change.",
-	"email-change-sent":      "Code sent. Check the new address and enter the code under Email address.",
-	"email-changed":          "Email address changed and your other sessions signed out. Sign in with the new address from now on. We’ve emailed a notice to both addresses.",
-	"email-change-cancelled": "Email address change cancelled. Your address is unchanged.",
-	"passkey-renamed":        "Passkey renamed.",
-	"sessions-ended":         "Signed out everywhere else. This browser is still signed in.",
-	"passkey-removed":        "Passkey removed and your other sessions signed out. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
+	"invite-sent":             "Invitation emailed. They sign in with that address and accept from Your account.",
+	"invite-limited":          "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
+	"invite-failed":           "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
+	"invite-daily":            "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
+	"space-web":               "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
+	"space-private":           "The space is private again: only you and its members can browse it.",
+	"transfer-offered":        "Ownership offered. We’ve emailed them; they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",
+	"transfer-offered-unsent": "Ownership offered, but the email could not be sent, so let them know: they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",
+	"transfer-cancelled":      "Ownership offer cancelled. You still own the space.",
+	"transfer-declined":       "Ownership offer declined. Nothing changed.",
+	"transfer-accepted":       "You own the space now. Its address uses your username; old links and agents that use the previous address still reach it. Its GitHub folders, if any, now use your GitHub connection in Services.",
+	"signin-confirmed":        "Confirmed. For the next 10 minutes you can change your email address and sign-in methods.",
+	"passkey-added":           "Passkey added. Next time, choose Sign in with a passkey. We’ve emailed you a notice of this change.",
+	"totp-added":              "Authenticator app added. Next time, choose Use an authenticator app when you sign in. We’ve emailed you a notice of this change.",
+	"totp-removed":            "Authenticator app removed and your other sessions signed out. Also delete Metatrash from the app. We’ve emailed you a notice of this change.",
+	"totp-cancelled":          "Authenticator app setup cancelled.",
+	"recovery-created":        "New recovery codes created. Save them now: they are shown only once. We’ve emailed you a notice of this change.",
+	"email-login-off":         "Email sign-in is off and your other sessions are signed out. Sign in with a passkey, your authenticator app or a recovery code. We’ve emailed you a notice of this change.",
+	"email-login-on":          "Email sign-in is back on. We’ve emailed you a notice of this change.",
+	"email-change-sent":       "Code sent. Check the new address and enter the code under Email address.",
+	"email-changed":           "Email address changed and your other sessions signed out. Sign in with the new address from now on. We’ve emailed a notice to both addresses.",
+	"email-change-cancelled":  "Email address change cancelled. Your address is unchanged.",
+	"passkey-renamed":         "Passkey renamed.",
+	"sessions-ended":          "Signed out everywhere else. This browser is still signed in.",
+	"passkey-removed":         "Passkey removed and your other sessions signed out. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }
 
 // inviteMailsPerOwnerDay caps invitation emails per owner across all their spaces.

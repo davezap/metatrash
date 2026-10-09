@@ -176,6 +176,12 @@ func (db *accountDatabase) manageHumanMember(ctx context.Context, ownerID, space
 		if err != nil {
 			return fmt.Errorf("cannot change membership")
 		}
+		// An ownership offer goes only to an active member.
+		if action != "restore" {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_space_transfers WHERE space_id = ? AND to_user_id = ?", spaceID, userID); err != nil {
+				return fmt.Errorf("cannot change membership")
+			}
+		}
 		return nil
 	})
 }

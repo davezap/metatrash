@@ -106,7 +106,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v8.
+// a notice is sent, its SMTP settings) and checks the schema is v9.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -128,9 +128,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 8 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 9 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v8 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v9 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -466,7 +466,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v8 ready") {
+	if !add("schema", store.ready(ctx), "v9 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -544,6 +544,9 @@ var accountGrants = []string{
 	"metatrash_passkeys UPDATE (sign_count)", "metatrash_passkeys UPDATE (backed_up)", "metatrash_passkeys UPDATE (last_used_at)", "metatrash_passkeys UPDATE (name)",
 	"metatrash_totp SELECT", "metatrash_totp INSERT", "metatrash_totp DELETE", "metatrash_totp UPDATE (enabled_at)", "metatrash_totp UPDATE (last_used_step)",
 	"metatrash_recovery_codes SELECT", "metatrash_recovery_codes INSERT", "metatrash_recovery_codes DELETE",
+	"metatrash_spaces UPDATE (owner_user_id)", "metatrash_oauth_grant_spaces UPDATE (member_user_id)",
+	"metatrash_space_transfers SELECT", "metatrash_space_transfers INSERT", "metatrash_space_transfers DELETE",
+	"metatrash_space_aliases SELECT", "metatrash_space_aliases INSERT", "metatrash_space_aliases DELETE",
 }
 
 // checkPrivileges compares the login's privileges in this database with

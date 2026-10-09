@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v7 (from 0.21.0).
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v9 (from 0.30.0).
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -168,7 +168,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    sudo mariadb metatrash < deploy/account-schema-v1.sql
    sed -n '/^-- v1 /,/^-- v2 /p' deploy/account-grants.sql | sudo mariadb   # v1 grants, needed by the import
    sudo -u metatrash /usr/local/bin/metatrash accounts-migrate -database-config /etc/metatrash/account-database.json -data /var/lib/metatrash -empty
-   for v in 2 3 4 5 6 7 8; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
+   for v in 2 3 4 5 6 7 8 9; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
    sudo mariadb < deploy/account-grants.sql
    ```
 
@@ -182,7 +182,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    ```
 
 Startup refuses to run with a missing configuration, an unreachable database or
-a schema older than v8. Without the accounts setting the service runs public and
+a schema older than v9. Without the accounts setting the service runs public and
 key spaces only, with no database.
 
 ### OAuth
@@ -263,7 +263,9 @@ sudo journalctl -u metatrash --since -7d -o cat | grep 'login ' | cut -d' ' -f3-
 
 Change an allowance with
 `UPDATE metatrash_users SET max_private_spaces = N WHERE user_id = '…'` as
-administrator. Never edit IDs, slugs, ownership or `metatrash_account_meta`.
+administrator. Never edit IDs, slugs, ownership or `metatrash_account_meta`:
+ownership moves only through Transfer ownership on Manage sharing, which also
+moves memberships and app connections and keeps the old address.
 
 ## Upgrades, backups and rollback
 
@@ -272,7 +274,7 @@ administrator. Never edit IDs, slugs, ownership or `metatrash_account_meta`.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v8 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v9 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -347,6 +349,24 @@ sudo mariadb < deploy/account-grants.sql   # safe while 0.27.x is running
 ./upgrade.sh
 mt check
 ```
+
+**0.30.0** needs schema v9 and the grants before the new binary starts.
+`upgrade.sh` restarts the service, so apply them first; 0.29.x keeps running
+on v9 until it restarts:
+
+```sh
+sudo mariadb metatrash < deploy/account-schema-v9.sql
+sudo mariadb < deploy/account-grants.sql
+./upgrade.sh
+mt check
+```
+
+v9 adds `metatrash_space_transfers` (pending ownership offers) and
+`metatrash_space_aliases` (addresses of transferred spaces), and grants
+`UPDATE (owner_user_id)` on `metatrash_spaces` and `UPDATE (member_user_id)`
+on `metatrash_oauth_grant_spaces`. To roll back to 0.29.x, set
+`schema_version` to 8; spaces already transferred keep their new owner, and
+their old addresses stop working until 0.30.0 is back.
 
 **0.27.0** needs no schema, configuration or grant change. Rolling back to
 0.26.x is safe.

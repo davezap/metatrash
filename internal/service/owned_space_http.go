@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -153,7 +154,22 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		viewer = user.ID
 	}
 	var member bool
-	space, err := scanOwnedSpace(h.service.ownedDB.db.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+", (owner_user_id = ? OR EXISTS (SELECT 1 FROM metatrash_memberships m WHERE m.space_id = metatrash_spaces.space_id AND m.user_id = ? AND m.status = 'active')) FROM metatrash_spaces WHERE owner_user_id = (SELECT user_id FROM metatrash_users WHERE username = ?) AND slug = ? AND provisioning_state = 'ready'", viewer, viewer, owner, slug), &member)
+	const columns = "SELECT " + ownedSpaceColumns + ", (owner_user_id = ? OR EXISTS (SELECT 1 FROM metatrash_memberships m WHERE m.space_id = metatrash_spaces.space_id AND m.user_id = ? AND m.status = 'active')) FROM metatrash_spaces WHERE "
+	space, err := scanOwnedSpace(h.service.ownedDB.db.QueryRowContext(ctx, columns+"owner_user_id = (SELECT user_id FROM metatrash_users WHERE username = ?) AND slug = ? AND provisioning_state = 'ready'", viewer, viewer, owner, slug), &member)
+	moved := false
+	if err == sql.ErrNoRows {
+		// The address the space had before a transfer: the docs pages carry
+		// on from it, and website links go to the current address, but only
+		// for someone who may see the space there.
+		id, found, aliasErr := h.service.ownedDB.spaceByAlias(ctx, owner, slug)
+		switch {
+		case aliasErr != nil:
+			err = aliasErr
+		case found:
+			space, err = scanOwnedSpace(h.service.ownedDB.db.QueryRowContext(ctx, columns+"space_id = ? AND provisioning_state = 'ready'", viewer, viewer, id), &member)
+			moved = err == nil
+		}
+	}
 	if err != nil && err != sql.ErrNoRows {
 		sendError(w, problem(503, "unavailable", "Your space is temporarily unavailable."))
 		return
@@ -171,6 +187,23 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	repo := h.service.ownedRepository(space.ID)
 	if repo == nil {
 		sendError(w, missing())
+		return
+	}
+	if moved && !docs {
+		var current string
+		if err := h.service.ownedDB.db.QueryRowContext(ctx, "SELECT username FROM metatrash_users WHERE user_id = ? AND username IS NOT NULL", space.OwnerID).Scan(&current); err != nil {
+			sendError(w, problem(503, "unavailable", "Your space is temporarily unavailable."))
+			return
+		}
+		target := h.ownedSpaceURL(current, space.Slug)
+		if hasPath {
+			target += (&url.URL{Path: path}).EscapedPath()
+		}
+		// Permanent: the old address stays reserved for this space, and
+		// search engines move a web-readable space's pages to the new one.
+		// (Cache-Control: no-store, set above, still applies: the space can
+		// move again, or come back to this address.)
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
 		return
 	}
 	if !hasPath {

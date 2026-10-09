@@ -81,6 +81,28 @@ func emailLoginOffMail(origin string) string {
 		"If you did not ask for a code, there is nothing to do: your account is unchanged.\n"
 }
 
+// transferOfferMail tells a member that a space's owner offered them the
+// space. Names users chose go only in the body, stripped of controls.
+func transferOfferMail(origin, from, name, address, newAddress string, expires time.Time) string {
+	return mailText(from) + " offered you ownership of their Metatrash space \"" + mailText(name) + "\" (" + mailText(address) + "). You are a member of it.\n\n" +
+		"To accept, sign in at " + origin + "/login and choose Accept ownership at the top of Spaces on Your account. The offer expires on " + expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n\n" +
+		"If you accept:\n" +
+		"- The space's address becomes " + mailText(newAddress) + ". Old links and agents that use " + mailText(address) + " still reach it.\n" +
+		"- It counts toward your private-space allowance.\n" +
+		"- " + mailText(from) + " stays as a member. Other members, invitations and connected apps carry on.\n" +
+		"- GitHub folders in it pull and push through your GitHub connection.\n\n" +
+		"If you do not want it, choose Decline, or ignore this email. Nothing changes unless you accept.\n"
+}
+
+// transferAcceptedMail tells the previous owner that the transfer happened.
+func transferAcceptedMail(origin, to, name, address, newAddress string, when time.Time) string {
+	return mailText(to) + " accepted ownership of your Metatrash space \"" + mailText(name) + "\".\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"Its address is now " + mailText(newAddress) + ". Links and agents that use " + mailText(address) + " still reach it, so that address stays reserved for it.\n" +
+		"You are now a member: you can still browse it, and your connected apps can still read and write it unless the new owner changes that.\n\n" +
+		"See your spaces at " + origin + "/account.\n"
+}
+
 // invitationMail is the invitation email. The subject is fixed ASCII; owner
 // and space names go only in the quoted-printable body, stripped of controls.
 type invitationMail struct {

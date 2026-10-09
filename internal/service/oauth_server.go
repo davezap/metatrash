@@ -872,7 +872,7 @@ func (h *httpAdapter) oauthSetupSubmit(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
 			}
 		}
-		if field != nil && p != nil && (p.Code == "invalid_request" || p.Code == "conflict") {
+		if field != nil && p != nil && (p.Code == "invalid_request" || p.Code == "conflict" || p.Code == "reserved") {
 			*field = message
 		} else {
 			page.Message = message

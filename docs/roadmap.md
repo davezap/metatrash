@@ -79,7 +79,7 @@ Agreed with Dave 2026-10-06. Build order:
 5. **Export a space** as a ZIP of HEAD (offered before deleting; also answers
    access requests).
 6. **Delete account.** Refused while the account owns any space (delete or
-   transfer first; transfer is a later item). On confirm (step-up): the
+   transfer first). On confirm (step-up): the
    account is locked at once, sessions and OAuth grants revoked, and a notice
    is sent. **30-day grace period**: signing in during it cancels the
    deletion. Then purge: memberships, invitations, GitHub installations,
@@ -89,7 +89,9 @@ Agreed with Dave 2026-10-06. Build order:
    what sign-in methods store (passkey public keys, sealed authenticator
    secrets, hashed recovery codes), how account deletion and the 30-day grace
    period work, and concrete retention for logs and backups.
-8. Later: transfer space ownership (to an active member who accepts).
+8. **Transfer space ownership** to an active member who accepts. Done in
+   0.30.0 (Manage sharing → Transfer ownership; the old address redirects
+   with 301 and stays reserved for the space).
 
 ## Folders: first version
 
@@ -194,6 +196,16 @@ Also in 0.15.1:
   spaces are connected.
 
 ## Owner checks still to run
+
+From 0.30.0 (2026-10-09), schema v9 first:
+
+- **Transfer:** on a test space, invite a second account, accept, confirm
+  it's you, offer ownership. The second account gets the email and sees
+  Ownership offered to you; accept. Check the address, that the first
+  account is now a member, that its connected app still reads and writes
+  using the old `owner/slug`, and that the old web address redirects. Try
+  creating a space at the old address from the first account (refused).
+  Transfer it back.
 
 From 0.20.0 / 0.21.0 (2026-10-05), not yet tried live:
 
