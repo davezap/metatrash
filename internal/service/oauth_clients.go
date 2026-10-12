@@ -47,6 +47,17 @@ type clientCacheEntry struct {
 	expires time.Time
 }
 
+// syncClientPath is the client_id path of mtsync, the folder sync tool. Its
+// metadata document is served by this site and known without fetching.
+const syncClientPath = "/oauth/clients/sync"
+
+// syncClient describes mtsync for the authorization server at issuer. It is a
+// native app that receives the code on a loopback port (RFC 8252).
+func syncClient(issuer string) oauthClient {
+	u, _ := url.Parse(issuer)
+	return oauthClient{ID: issuer + syncClientPath, Name: "Metatrash Sync", Host: u.Hostname(), RedirectURIs: []string{"http://127.0.0.1/callback"}}
+}
+
 // oauthClients fetches and caches client metadata from allow-listed hosts.
 type oauthClients struct {
 	hosts map[string]bool

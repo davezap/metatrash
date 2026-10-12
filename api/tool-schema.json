@@ -677,7 +677,10 @@
       "query": [
         "prefix",
         "limit",
-        "cursor"
+        "cursor",
+        "blobs",
+        "after",
+        "since"
       ]
     },
     "move": {

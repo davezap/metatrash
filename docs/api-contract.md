@@ -10,7 +10,7 @@ MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Cur
 | --- | --- | --- |
 | `read` | `GET /api/v1/spaces/{space}/file` | query: `path`, optional `revision` |
 | `write` | `PUT /api/v1/spaces/{space}/file` | query: `path`; JSON: `text`, `ifInState`, optional `createOnly` |
-| `list` | `GET /api/v1/spaces/{space}/files` | query: optional `prefix`, `limit`, `cursor` |
+| `list` | `GET /api/v1/spaces/{space}/files` | query: optional `prefix`, `limit`, `cursor`, `blobs`, `after`, `since` |
 | `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState` |
 | `delete` | `DELETE /api/v1/spaces/{space}/file` | query: `path`; JSON: `ifInState` |
 | `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` |
@@ -139,7 +139,7 @@ No broker, subscriptions, receipts, exactly-once delivery, recipient ACLs, or tr
 
 ## Listings and history
 
-Files sort by ASCII path. `prefix` is empty or a canonical folder prefix ending in slash, e.g. `inbox/agent-b/`; it selects descendants without listing internal metadata. `limit` defaults to 50 and is capped at 100. Both list and history return `state` and `nextCursor` (null at the end).
+Files sort by ASCII path. `prefix` is empty or a canonical folder prefix ending in slash, e.g. `inbox/agent-b/`; it selects descendants without listing internal metadata. `limit` defaults to 50 and is capped at 100. Both list and history return `state` and `nextCursor` (null at the end). REST list with `blobs=true` adds each file's `blob`, the Git blob hash of its text (`git hash-object`), so a sync client can find changed files without reading them; MCP results never carry it. REST list with `after=<state>` (not with `cursor`) waits while the space is still at that state, up to 25 seconds, and answers as soon as a write moves it, so a client hears of changes without polling; it then lists as usual, and an unchanged `state` means the wait ran out. It counts as one read. At most 256 lists wait at once service-wide; past that they answer at once. REST list with `since=<state>` (not with `cursor`) returns only what changed under `prefix` between that state and now: `files` holds the files added or changed (new text or a new ID), with `blob`, all in one response, and `removed` the paths deleted or moved away; with no changes both are empty and `state` is unchanged. A `since` that is not an earlier state of the space is `not_found` (list in full instead). `after` and `since` combine: wait for a change, then get it.
 
 First-page requests capture a revision. Opaque validated continuation tokens bind space, operation, filters/ID, limit, revision, and offset; following pages use that snapshot. Tokens grant no access. Mismatched/malformed tokens return 400. Tokens are signed with a process-local secret and expire on service restart; restart listing if rejected. A reset that removes their snapshot returns 404 if the token is otherwise still valid.
 

@@ -24,6 +24,10 @@ routes return 404.
 - **D5** Client ID Metadata Documents (CIMD) only, fetched from allow-listed
   hosts (`claude.ai`, `chatgpt.com`). No Dynamic Client Registration unless a
   client we need requires it.
+  One built-in client: `mtsync`, the folder sync tool, uses
+  `{issuer}/oauth/clients/sync` with the loopback redirect
+  `http://127.0.0.1/callback` (any port). The site serves that document but
+  never fetches it, so it works without adding its own host to the allow list.
 - Public clients only (no secrets), PKCE S256 only, opaque tokens stored as
   SHA-256 digests, no credentials in URLs.
 - One connection covers several spaces (Claude's free plan allows one custom

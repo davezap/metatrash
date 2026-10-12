@@ -25,6 +25,9 @@ type File struct {
 	// Deletable is derived from the path on every snapshot and never stored:
 	// false for README.md and the root .metatrash.json.
 	Deletable bool `json:"deletable"`
+	// Blob is the Git blob hash of the text, sent only by REST list with
+	// blobs=true so sync clients can spot changed files without reading them.
+	Blob string `json:"blob,omitempty"`
 }
 
 type record struct {
@@ -46,6 +49,9 @@ type ListResult struct {
 	State      string  `json:"state"`
 	Files      []File  `json:"files"`
 	NextCursor *string `json:"nextCursor"`
+	// Removed lists paths gone since the state a REST list with since= named;
+	// Files then holds only what was added or changed (see listChanges).
+	Removed []string `json:"removed,omitempty"`
 }
 
 type Mutation struct {
@@ -86,6 +92,9 @@ type Input struct {
 	ID         string  `json:"-"`
 	Cursor     string  `json:"-"`
 	Limit      int     `json:"-"`
+	Blobs      bool    `json:"-"`
+	After      string  `json:"-"`
+	Since      string  `json:"-"`
 	Text       *string `json:"text,omitempty"`
 	IfInState  string  `json:"ifInState,omitempty"`
 	CreateOnly bool    `json:"createOnly,omitempty"`

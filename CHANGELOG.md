@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.37.0 - Change lists: mtsync fetches only what changed (2026-10-12)
+
+No schema, configuration or grant change. No new Go modules.
+
+- **REST list takes `since=<state>`** and answers with only what changed under `prefix` since that state: `files` holds the added or changed files (new text or a new ID) with `blob`, all in one response, and the new `removed` field the paths that went away. Nothing changed: both empty, same `state`. A `since` that is not an earlier state of the space (after a reset) is `not_found`. It combines with `after=` (wait, then the changes). One read. MCP is unchanged.
+- **mtsync** now asks for the changes since its last agreed state instead of listing the whole space: a quiet check and any change both cost one listing request, plus one download per changed file. Full listings happen only on the first sync, after an unfinished pass, after a reset, or against a server before 0.37.0 (which it detects and then lists as before).
+- mtsync skips `.git` folders entirely (a space can never hold them), so a synced folder can be its own local Git repository without a refusal logged per file.
+- Tests: changes since a state (added, changed, removed), none, outside the prefix, combined with a wait, an unknown state and bad parameters; with 122 files, one changed file costs two requests and one removal one; syncing against a server without `since=`.
+
+## 0.36.0 - mtsync can sync one folder of a space (2026-10-12)
+
+No server change. No new Go modules.
+
+- `mtsync add owner/slug/folder/sub FOLDER` (and a one-off `mtsync owner/slug/folder FOLDER`) syncs just that folder of the space: the local folder holds its contents with paths relative to it, new files and renames stay inside it, and the rest of the space is untouched. `public/...` and space IDs work the same way; key spaces take `name/folder`. Inside such a folder README.md and `.metatrash.json` are ordinary files (only the space root's can't be deleted). `add` checks the folder path with the server. Several folders of one space can go to different local folders.
+- Tests: splitting `owner/slug/path`, `public/path`, IDs and key spaces; a subfolder downloads only its files, uploads and moves stay inside it, its README.md can be deleted, and files elsewhere in the space are untouched.
+
+## 0.35.0 - mtsync runs as one background service (2026-10-12)
+
+No server change: this release only changes `mtsync`. No new Go modules.
+
+- **One service syncs every registered folder.** `mtsync add SPACE FOLDER` registers a folder (checking that this computer can reach the space and that it doesn't overlap a registered folder; it creates the folder), `mtsync remove FOLDER|SPACE` unregisters one (its files stay) and `mtsync list` shows each folder with its state: in sync and when last checked, the last error, or service not running. The running service picks up changes to the list within 3 seconds; a folder that stops with an error (signed out, space no longer connected) is retried every minute. Folders on the same site share one sign-in.
+- **`mtsync install`** starts the service at every login and now, as the user (never a system account, no administrator rights): a systemd user unit on Linux, a LaunchAgent on macOS, a Run key entry on Windows started without a window (`conhost.exe --headless`). `mtsync uninstall` stops it and removes the entry. `mtsync run` runs the service in the foreground, `mtsync stop` stops a running one (through a stop file, so it exits cleanly on every system), `mtsync log [N]` shows the service log (`mtsync.log` in the config folder, rotated at 5 MB).
+- **Locks**: one service per user, and one mtsync per folder (the service or a one-off `mtsync SPACE FOLDER`, which still works). Lock files are refreshed every 30 seconds and taken over two minutes after a crash.
+- Files: `sync-folders.json`, `sync-status.json`, `mtsync.log` and `mtsync-service.lock` beside `sync-credentials.json`; `.mtsync/lock` in each folder.
+- Tests: the service syncs folders registered while it runs, downloads an agent's write, writes status that `list` reports, holds each folder's lock, refuses a second service, stops a removed folder and keeps its files, and stops cleanly on `mtsync stop`, releasing its locks; overlap checks and remove; log tail and rotation; the systemd unit, LaunchAgent and Windows command text. Race detector clean. `install` itself is not exercised here (no systemd, launchd or Windows in the test environment).
+
+## 0.34.0 - mtsync hears changes at once (2026-10-12)
+
+No schema, configuration or grant change. No new Go modules.
+
+- **REST list takes `after=<state>`**: while the space is still at that state the request waits, up to 25 seconds, and answers as soon as a write moves the branch (each repository wakes its waiters when it publishes a commit). It then lists as usual; an unchanged `state` means the wait ran out. Not with `cursor`. One read each. At most 256 waiting lists service-wide; past that, lists answer at once. 25 seconds stays under the server's 45-second write timeout and the example Apache `ProxyTimeout 60`. MCP is unchanged.
+- **mtsync downloads agents' changes as they happen.** It keeps one `after=` request waiting and starts a pass when it returns with a new state; an idle folder now costs about two requests a minute instead of twelve. The folder is scanned every `-interval` (5 seconds) with no request unless something changed. Against a server before 0.34.0 it says so once and checks every interval, as before.
+- Tests: a waiting list ends unchanged after the wait, is woken by a write with the new state and blobs, answers at once for an older state, and refuses a bad `after` or one with `cursor`; mtsync with a one-minute interval downloads an agent's write within seconds and makes no requests while idle beyond the waiting one; local saves upload; the fallback against a server that refuses `after=`. Race detector clean. Full suite passes against MariaDB.
+
+## 0.33.0 - Sync a folder with mtsync (2026-10-12)
+
+No schema, configuration or grant change. No new Go modules. The server change is needed before `mtsync` can sign in.
+
+- **New `mtsync` command** (`cmd/mtsync`, standard library only) keeps a folder on Windows, Linux or macOS in sync with a space, so any editor or tool can work on its files. `mtsync login` connects through the browser like any app (choose spaces and read-only or read and write on the consent page); `mtsync spaces` lists them; `mtsync SPACE FOLDER` syncs every 5 seconds until stopped (`-once`, `-interval`). See README → Sync a folder.
+- How it syncs: a three-way comparison of the folder, the space and the last agreed version (kept in `.mtsync/state.json`). Saves upload, agents' changes download, deletions go both ways, a local rename becomes a `move` (keeps the file ID and history), and a file changed on both sides keeps the space version under its name and saves the local one as `name.conflict-<UTC time>.ext`, which is uploaded too. Every write carries `ifInState`; a change in the space mid-pass restarts the pass. A quiet check is one request. Files are hashed like Git blobs so only changed files are read or sent; content a local file already has (a copy or move in the space) is not downloaded again. Files saved within the last second wait for the next pass. Editor and system files (`*.swp`, `*~`, `.DS_Store`, `Thumbs.db`, …) are skipped; files the space refuses are reported once and retried when they change. README.md and the root `.metatrash.json` are restored if deleted locally. Read-only access downloads only. 429 and 503 wait for `Retry-After`.
+- Sign-in: tokens are stored per site in the user's config folder (`metatrash/sync-credentials.json`, mode 0600), refreshed before expiry and on a 401, under a lock file so two `mtsync` processes never spend the same rotating refresh token. Administrator key spaces work with `-key-env VAR`.
+- **Built-in OAuth client for mtsync**: `client_id` `https://metatrash.com/oauth/clients/sync`, loopback redirect `http://127.0.0.1/callback` (any port, RFC 8252). The site serves its metadata document at that URL but never fetches it, so no `clientHosts` change is needed; it is shown as **Metatrash Sync** on the consent page and in Services. Access rules are unchanged: consent, ownership or membership, the owner's per-member app permission and the token scope.
+- REST list takes `blobs=true` and then adds each file's `blob` (Git blob hash). MCP results are unchanged.
+- Tests: the built-in client (document, authorize with a loopback port, other redirects and another site's path refused) and, against MariaDB, the full sign-in, token, REST list with blobs, an unchosen space refused, refresh and the Services entry; list blobs on and off. `mtsync` against a real service: first download, a quiet pass costs one request, uploads, an agent's write and delete, rename as move, local delete, empty folders removed, README restored, a conflict, a refused file reported once, read-only key, resuming in a new process, a folder refused for a second space; login and token refresh against a fake authorization server. Cross-compiled for Windows, Linux and macOS. Full suite passes against MariaDB.
+
 ## 0.32.0 - Signed-in devices (2026-10-09)
 
 **Needs schema v11 before the new binary starts** (`deploy/account-schema-v11.sql`; see deployment.md). No new grants, no configuration change, no new Go modules. Sessions survive the upgrade.

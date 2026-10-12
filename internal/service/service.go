@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -52,6 +53,10 @@ type Service struct {
 	// githubHints holds, per GitHub folder, the earliest time the next
 	// unpushed-changes hint may be given (see unpushedHint).
 	githubHints sync.Map
+	// listWaiters counts list requests waiting with after= (maxListWaiters).
+	listWaiters atomic.Int64
+	// listWait replaces listWaitTime in tests.
+	listWait time.Duration
 	// clock replaces time.Now in tests.
 	clock func() time.Time
 }
@@ -403,6 +408,72 @@ func (s *Service) encodeCursor(c cursor) *string {
 	return &token
 }
 
+// listWaitTime is how long a list with after= waits for the space to move.
+// It stays well under the HTTP server's 45-second write timeout and Apache's
+// proxy timeout. maxListWaiters bounds the requests held open at once; past
+// it, lists answer at once.
+const listWaitTime = 25 * time.Second
+const maxListWaiters = 256
+
+// waitForChange holds a list request while the space is still at state
+// after, until a write moves the branch, the wait ends or the client leaves.
+// Sync clients use it to hear of changes as they happen without polling.
+func (s *Service) waitForChange(ctx context.Context, r *repository, after string) {
+	if s.listWaiters.Add(1) > maxListWaiters {
+		s.listWaiters.Add(-1)
+		return
+	}
+	defer s.listWaiters.Add(-1)
+	changed := r.watch()
+	if head, err := r.head(ctx); err != nil || head != after {
+		return
+	}
+	wait := listWaitTime
+	if s.listWait > 0 {
+		wait = s.listWait
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-changed:
+	case <-timer.C:
+	case <-ctx.Done():
+	case <-s.stop:
+	}
+}
+
+// listChanges answers a list with since=: only the files under the prefix
+// that were added or changed (new text or a new ID) between that state and
+// state, with blobs, and the paths removed. All of them, in one response:
+// a space holds at most 1,000 files. A since that is not an earlier state of
+// this space is not_found; the client then lists in full.
+func listChanges(ctx context.Context, r *repository, space, state string, files map[string]record, in Input) (ListResult, error) {
+	result := ListResult{Space: space, State: state, Files: []File{}}
+	_, old, err := r.snapshot(ctx, in.Since)
+	if err != nil {
+		return result, err
+	}
+	paths := []string{}
+	for p, f := range files {
+		if was, ok := old[p]; strings.HasPrefix(p, in.Prefix) && (!ok || was.Blob != f.Blob || was.ID != f.ID) {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		f := files[p].File
+		f.Blob = files[p].Blob
+		result.Files = append(result.Files, f)
+	}
+	for p := range old {
+		if _, ok := files[p]; !ok && strings.HasPrefix(p, in.Prefix) {
+			result.Removed = append(result.Removed, p)
+		}
+	}
+	sort.Strings(result.Removed)
+	return result, nil
+}
+
 func (s *Service) page(ctx context.Context, r *repository, space, op string, in Input) (any, error) {
 	if in.Limit == 0 {
 		in.Limit = 50
@@ -443,11 +514,17 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		}
 		c = saved
 	}
+	if op == "list" && in.After != "" {
+		s.waitForChange(ctx, r, in.After)
+	}
 	state, files, err := r.snapshot(ctx, c.State)
 	if err != nil {
 		return nil, err
 	}
 	c.State = state
+	if op == "list" && in.Since != "" {
+		return listChanges(ctx, r, space, state, files, in)
+	}
 	if op == "list" {
 		paths := []string{}
 		for p := range files {
@@ -465,7 +542,11 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		}
 		result := ListResult{Space: space, State: state, Files: []File{}}
 		for _, p := range paths[c.Offset:end] {
-			result.Files = append(result.Files, files[p].File)
+			f := files[p].File
+			if in.Blobs {
+				f.Blob = files[p].Blob
+			}
+			result.Files = append(result.Files, f)
 		}
 		if end < len(paths) {
 			c.Offset = end

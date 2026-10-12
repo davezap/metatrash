@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	_ "embed"
@@ -73,6 +74,15 @@ func newOAuthServer(settings oauthSettings, publicURL string) *oauthServer {
 	issuer := strings.TrimSuffix(publicURL, "/")
 	return &oauthServer{settings: settings, issuer: issuer, mcpResource: issuer + "/mcp/account", restResource: issuer + "/api/v1/account",
 		clients: newOAuthClients(settings.clientHosts), pending: map[string]*oauthPending{}, codes: map[string]*oauthCode{}, now: time.Now}
+}
+
+// client returns this site's own sync client without fetching anything, and
+// looks up every other client from its metadata document.
+func (o *oauthServer) client(ctx context.Context, clientID string) (oauthClient, error) {
+	if sync := syncClient(o.issuer); clientID == sync.ID {
+		return sync, nil
+	}
+	return o.clients.lookup(ctx, clientID)
 }
 
 // canonicalResource accepts the resource exactly, or with one trailing slash
@@ -183,7 +193,7 @@ func (h *httpAdapter) serveOAuth(w http.ResponseWriter, r *http.Request, client 
 	}
 	switch path {
 	case "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/mcp/account", "/.well-known/oauth-protected-resource/api/v1/account":
-	case "/oauth/authorize", "/oauth/consent", "/oauth/setup", "/oauth/token", "/oauth/revoke":
+	case "/oauth/authorize", "/oauth/consent", "/oauth/setup", "/oauth/token", "/oauth/revoke", syncClientPath:
 	default:
 		return false
 	}
@@ -209,10 +219,24 @@ func (h *httpAdapter) serveOAuth(w http.ResponseWriter, r *http.Request, client 
 		h.oauthToken(w, r, client)
 	case "/oauth/revoke":
 		h.oauthRevoke(w, r, client)
+	case syncClientPath:
+		h.oauthSyncClientDocument(w, r)
 	default:
 		h.oauthMetadata(w, r)
 	}
 	return true
+}
+
+// oauthSyncClientDocument publishes mtsync's Client ID Metadata Document so
+// its client_id resolves like any other, though lookup never fetches it.
+func (h *httpAdapter) oauthSyncClientDocument(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		sendError(w, problem(405, "invalid_request", "Use GET."))
+		return
+	}
+	c := syncClient(h.oauth.issuer)
+	sendJSON(w, 200, map[string]any{"client_id": c.ID, "client_name": c.Name, "redirect_uris": c.RedirectURIs, "token_endpoint_auth_method": "none", "grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"}})
 }
 
 // Discovery documents are public; CORS lets browser-based MCP clients read them.
@@ -299,7 +323,7 @@ func (h *httpAdapter) oauthAuthorize(w http.ResponseWriter, r *http.Request, cli
 	}
 	// Client and redirect URI are verified before anything is sent to the redirect URI.
 	clientID, redirectURI := query.Get("client_id"), query.Get("redirect_uri")
-	app, err := o.clients.lookup(r.Context(), clientID)
+	app, err := o.client(r.Context(), clientID)
 	if err != nil {
 		h.oauthErrorPage(w, 400, "This app is not recognized", "Metatrash only connects apps it can verify. The app's identity could not be confirmed.")
 		return

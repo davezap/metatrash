@@ -112,6 +112,28 @@ Private spaces use OAuth access tokens on `/api/v1/account/…`; administrator
 key spaces take `Authorization: Bearer <key>`. See the
 [API contract](docs/api-contract.md) and [tool-schema.json](api/tool-schema.json).
 
+## Sync a folder
+
+`mtsync` keeps folders on your computer (Windows, Linux or macOS) in sync with
+spaces, so VS Code, git, grep or any other tool can work on their files while
+agents work in the spaces. One background service syncs every registered
+folder; the same program is the console that configures it.
+
+```sh
+go build -o mtsync ./cmd/mtsync               # mtsync.exe on Windows
+mtsync login                                  # choose spaces and access in the browser
+mtsync install                                # run the service at every login
+mtsync add dave-zap/bartco ~/spaces/bartco    # register folders; the service starts them
+mtsync add dave-zap/notes/2026 ~/notes-2026   # or just one folder of a space
+mtsync list                                   # how each folder is doing
+```
+
+Agents' changes download as soon as they happen; saves upload within 5
+seconds; a rename is a move (the file keeps its history); a file changed on
+both sides keeps both versions. The connection is shown and revoked on Your
+account → **Services**, like any app. Build, deploy and details:
+[cmd/mtsync/README.md](cmd/mtsync/README.md).
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): spaces, accounts, sharing, website, limits.

@@ -453,3 +453,49 @@ func TestOAuthChangeSpacesAgainstDatabase(t *testing.T) {
 	w.tool(memberToken, "list", map[string]any{"space": w.joinName}, "not_found")
 	w.tool(memberToken, "list", map[string]any{"space": "public"}, "")
 }
+
+// mtsync signs in like any app, with its built-in client ID and a loopback
+// redirect, and lists files with blob hashes over REST.
+func TestOAuthSyncClientAgainstDatabase(t *testing.T) {
+	w := newOAuthWorld(t)
+	const syncID, redirect = "https://metatrash.com/oauth/clients/sync", "http://127.0.0.1:49152/callback"
+	verifier, challenge := pkcePair(t)
+	res := oauthCall(w.h, "GET", authorizeURL(map[string]string{"client_id": syncID, "redirect_uri": redirect, "code_challenge": challenge, "resource": "https://metatrash.com/api/v1/account"}), nil)
+	browser := responseCookie(res, oauthCookie)
+	if res.Code != 200 || browser == nil {
+		t.Fatalf("authorize: %d %s", res.Code, res.Body)
+	}
+	session := w.session(w.owner)
+	page := oauthCall(w.h, "GET", "/oauth/consent", nil, browser, session)
+	match := csrfPattern.FindStringSubmatch(page.Body.String())
+	if page.Code != 200 || match == nil || !strings.Contains(page.Body.String(), "Metatrash Sync") {
+		t.Fatalf("consent page: %d %s", page.Code, page.Body)
+	}
+	res = oauthCall(w.h, "POST", "/oauth/consent", url.Values{"csrf": {match[1]}, "decision": {"approve"}, "s-" + w.ownedID: {"read_write"}}, browser, session)
+	loc, _ := url.Parse(res.Header().Get("Location"))
+	if res.Code != 303 || loc == nil || !strings.HasPrefix(loc.String(), redirect+"?") {
+		t.Fatalf("approval: %d %s", res.Code, res.Header().Get("Location"))
+	}
+	status, tokens := w.token(url.Values{"grant_type": {"authorization_code"}, "client_id": {syncID}, "code": {loc.Query().Get("code")}, "redirect_uri": {redirect}, "code_verifier": {verifier}, "resource": {"https://metatrash.com/api/v1/account"}})
+	if status != 200 {
+		t.Fatalf("token: %v", tokens)
+	}
+	access := tokens["access_token"].(string)
+	list := w.rest(access, "GET", "/api/v1/account/spaces/"+w.ownedName+"/files?blobs=true", "")
+	var files ListResult
+	if list.Code != 200 || json.Unmarshal(list.Body.Bytes(), &files) != nil || len(files.Files) == 0 || files.Files[0].Blob == "" {
+		t.Fatalf("list: %d %s", list.Code, list.Body)
+	}
+	// The joined space was not chosen, so this connection cannot reach it.
+	if res := w.rest(access, "GET", "/api/v1/account/spaces/"+w.joinName+"/files", ""); res.Code != 404 {
+		t.Fatalf("unchosen space: %d", res.Code)
+	}
+	status, tokens = w.token(url.Values{"grant_type": {"refresh_token"}, "client_id": {syncID}, "refresh_token": {tokens["refresh_token"].(string)}, "resource": {"https://metatrash.com/api/v1/account"}})
+	if status != 200 || tokens["access_token"] == "" {
+		t.Fatalf("refresh: %v", tokens)
+	}
+	apps, err := w.h.connectedApps(context.Background(), w.owner)
+	if err != nil || len(apps) != 1 || apps[0].Name != "Metatrash Sync" || apps[0].Kind != "REST" {
+		t.Fatalf("connected apps: %+v %v", apps, err)
+	}
+}

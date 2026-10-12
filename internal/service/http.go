@@ -434,7 +434,7 @@ func parseQuery(raw, op string) (Input, error) {
 	case "write", "delete":
 		allowed["path"] = true
 	case "list":
-		allowed["prefix"], allowed["limit"], allowed["cursor"] = true, true, true
+		allowed["prefix"], allowed["limit"], allowed["cursor"], allowed["blobs"], allowed["after"], allowed["since"] = true, true, true, true, true, true
 	case "history":
 		allowed["id"], allowed["limit"], allowed["cursor"] = true, true, true
 	}
@@ -446,6 +446,24 @@ func parseQuery(raw, op string) (Input, error) {
 	in.Path, in.Revision, in.Prefix, in.ID, in.Cursor = q.Get("path"), q.Get("revision"), q.Get("prefix"), q.Get("id"), q.Get("cursor")
 	if _, ok := q["revision"]; ok && !hashPattern.MatchString(in.Revision) {
 		return in, invalid("Invalid revision.")
+	}
+	if value, ok := q["after"]; ok {
+		if !hashPattern.MatchString(value[0]) || q.Get("cursor") != "" {
+			return in, invalid("after must be a state, without cursor.")
+		}
+		in.After = value[0]
+	}
+	if value, ok := q["since"]; ok {
+		if !hashPattern.MatchString(value[0]) || q.Get("cursor") != "" {
+			return in, invalid("since must be a state, without cursor.")
+		}
+		in.Since = value[0]
+	}
+	if value, ok := q["blobs"]; ok {
+		if value[0] != "true" {
+			return in, invalid("blobs must be true.")
+		}
+		in.Blobs = true
 	}
 	if _, ok := q["limit"]; ok {
 		in.Limit, err = strconv.Atoi(q.Get("limit"))

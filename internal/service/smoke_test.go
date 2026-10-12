@@ -124,6 +124,19 @@ func TestSmoke(t *testing.T) {
 	decode(call("GET", "/api/v1/spaces/private/files", "read-secret", nil, 200), &list)
 	call("PUT", "/api/v1/spaces/private/file?path=hello.txt", "read-secret", map[string]any{"text": "private", "ifInState": list.State}, 403)
 	call("PUT", "/api/v1/spaces/private/file?path=hello.txt", "write-secret", map[string]any{"text": "private", "ifInState": list.State}, 201)
+	// blobs=true adds each file's Git blob hash (git hash-object of "private").
+	decode(call("GET", "/api/v1/spaces/private/files?blobs=true", "read-secret", nil, 200), &list)
+	blobs := map[string]string{}
+	for _, f := range list.Files {
+		blobs[f.Path] = f.Blob
+	}
+	if blobs["hello.txt"] != "c8c6761a582d9302073286f71d449f5e510da54d" || blobs["README.md"] == "" {
+		t.Fatalf("list blobs: %v", blobs)
+	}
+	if b := call("GET", "/api/v1/spaces/private/files", "read-secret", nil, 200); bytes.Contains(b, []byte(`"blob"`)) {
+		t.Fatal("blob sent without blobs=true")
+	}
+	call("GET", "/api/v1/spaces/private/files?blobs=1", "read-secret", nil, 400)
 	if validUnicodeJSON([]byte(`{"text":"\ud800"}`)) {
 		t.Fatal("accepted lone surrogate")
 	}

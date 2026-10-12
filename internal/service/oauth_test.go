@@ -347,3 +347,29 @@ func TestOAuthTokenRequestValidation(t *testing.T) {
 		t.Fatal("query parameters accepted on token endpoint")
 	}
 }
+
+func TestOAuthSyncClient(t *testing.T) {
+	h, _ := testOAuthHandler(t)
+	const id = "https://metatrash.com/oauth/clients/sync"
+	w := oauthCall(h, "GET", "/oauth/clients/sync", nil)
+	var doc map[string]any
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &doc) != nil || doc["client_id"] != id || fmt.Sprint(doc["redirect_uris"]) != "[http://127.0.0.1/callback]" {
+		t.Fatalf("sync client document: %d %s", w.Code, w.Body)
+	}
+	// Known without fetching, though metatrash.com is not an allow-listed client host.
+	sync := map[string]string{"client_id": id, "redirect_uri": "http://127.0.0.1:53682/callback", "resource": "https://metatrash.com/api/v1/account"}
+	w = oauthCall(h, "GET", authorizeURL(sync), nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "/oauth/consent") {
+		t.Fatalf("sync client authorize: %d %s", w.Code, w.Body)
+	}
+	for _, redirect := range []string{"http://localhost:53682/callback", "http://127.0.0.1:53682/other", "https://evil.example/callback"} {
+		sync["redirect_uri"] = redirect
+		if w := oauthCall(h, "GET", authorizeURL(sync), nil); w.Code != 400 || w.Header().Get("Location") != "" {
+			t.Errorf("%s: status %d", redirect, w.Code)
+		}
+	}
+	// Another site's sync path is still an unknown client.
+	if w := oauthCall(h, "GET", authorizeURL(map[string]string{"client_id": "https://example.com/oauth/clients/sync"}), nil); w.Code != 400 {
+		t.Fatalf("foreign sync path accepted: %d", w.Code)
+	}
+}

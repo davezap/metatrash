@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,29 @@ type repository struct {
 	// owner is the owning account's user ID (owned spaces only); a GitHub
 	// folder pulls through that account's GitHub connections.
 	owner string
+	// changed is closed and replaced whenever the branch moves, waking list
+	// requests that wait with after= (see Service.waitForChange).
+	watchMu sync.Mutex
+	changed chan struct{}
+}
+
+// watch returns a channel that is closed at the next branch update.
+func (r *repository) watch() <-chan struct{} {
+	r.watchMu.Lock()
+	defer r.watchMu.Unlock()
+	if r.changed == nil {
+		r.changed = make(chan struct{})
+	}
+	return r.changed
+}
+
+func (r *repository) notify() {
+	r.watchMu.Lock()
+	defer r.watchMu.Unlock()
+	if r.changed != nil {
+		close(r.changed)
+		r.changed = nil
+	}
 }
 
 // Git receives arguments directly, never through a shell. Ignore inherited Git overrides.
@@ -331,6 +355,7 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 	if _, err = git(ctx, r.path, "", nil, "update-ref", branch, commit, old); err != nil {
 		return "", err
 	}
+	r.notify()
 	return commit, nil
 }
 
