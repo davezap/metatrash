@@ -595,7 +595,7 @@ func (p *pass) conflict(path, l, r string) error {
 		return nil
 	}
 	copyPath := conflictName(path, p.now())
-	if err := os.Rename(p.full(path), p.full(copyPath)); err != nil {
+	if err := renameRetry(p.full(path), p.full(copyPath)); err != nil {
 		return err
 	}
 	delete(p.cache, path)
@@ -630,10 +630,22 @@ func writeFileAtomic(path string, b []byte, mode os.FileMode) error {
 		err = os.Chmod(tmp, mode)
 	}
 	if err == nil {
-		err = os.Rename(tmp, path)
+		err = renameRetry(tmp, path)
 	}
 	if err != nil {
 		os.Remove(tmp)
+	}
+	return err
+}
+
+// renameRetry renames, trying again for up to two seconds. On Windows a
+// rename onto a file fails with "Access is denied" while another program
+// (OneDrive, an antivirus scanner, an editor) briefly has it open.
+func renameRetry(from, to string) error {
+	err := os.Rename(from, to)
+	for wait := 20 * time.Millisecond; err != nil && !errors.Is(err, os.ErrNotExist) && wait < 2*time.Second; wait *= 2 {
+		time.Sleep(wait)
+		err = os.Rename(from, to)
 	}
 	return err
 }

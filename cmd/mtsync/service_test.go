@@ -143,6 +143,14 @@ func TestRegistryChecks(t *testing.T) {
 	if err := addFolder(context.Background(), defaultServer, "x/z", filepath.Join(root, "a", "inner"), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "overlaps") {
 		t.Fatalf("nested folder: %v", err)
 	}
+	// Adding the same folder and space again is a no-op; another space is refused.
+	var out bytes.Buffer
+	if err := addFolder(context.Background(), defaultServer, "x/y", filepath.Join(root, "a"), &out); err != nil || !strings.Contains(out.String(), "nothing to add") {
+		t.Fatalf("same folder again: %v %q", err, out.String())
+	}
+	if err := addFolder(context.Background(), defaultServer, "x/z", filepath.Join(root, "a"), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "mtsync remove") {
+		t.Fatalf("same folder, other space: %v", err)
+	}
 	if err := removeFolder("x/y", &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +188,7 @@ func TestInstallFiles(t *testing.T) {
 	if plist := launchAgent("/Users/dave/bin/mt&sync"); !strings.Contains(plist, "<string>/Users/dave/bin/mt&amp;sync</string><string>run</string>") {
 		t.Fatal(plist)
 	}
-	if cmd := windowsCommand(`C:\Tools\mtsync.exe`); cmd != `conhost.exe --headless "C:\Tools\mtsync.exe" run` {
+	if cmd := windowsCommand(`C:\Tools\mtsync.exe`); cmd != `"C:\Tools\mtsync.exe" start` {
 		t.Fatal(cmd)
 	}
 }

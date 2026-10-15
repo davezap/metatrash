@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -246,6 +248,10 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "GET" {
 			op = "history"
 		}
+	case "export":
+		if r.Method == "GET" {
+			op = "export"
+		}
 	case "move":
 		allow = "POST"
 		if r.Method == "POST" {
@@ -290,6 +296,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	case "pending":
 		h.servePending(w, r, repo, space)
+		return
+	case "export":
+		h.serveExport(w, r, repo, space)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)
@@ -389,6 +398,38 @@ func (h *httpAdapter) serveGitHubPost(w http.ResponseWriter, r *http.Request, op
 	}
 	sendJSON(w, 200, value)
 }
+
+// serveExport handles GET .../export: the space at its head as a zip, for
+// backups. It costs one read plus the export allowances, since one export
+// reads every file: one client cannot use up a space's exports alone.
+func (h *httpAdapter) serveExport(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
+	if r.URL.RawQuery != "" {
+		sendError(w, invalid("Unknown query parameter."))
+		return
+	}
+	if err := h.service.rates.reserve(allowance{"export:" + space, exportsPerSpace, exportWindow}, allowance{"export:" + space + ":" + h.client(r), exportsPerClient, exportWindow}); err != nil {
+		sendError(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	state, b, err := repo.exportZip(ctx, space)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+exportFileName(space, state, time.Now())+`"`)
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Metatrash-State", state)
+	w.WriteHeader(200)
+	_, _ = w.Write(b)
+}
+
+// Exports per space, and per client of a space, in each ten minutes.
+const exportsPerSpace, exportsPerClient, exportWindow = 60, 10, 600
 
 // servePending handles GET .../pending?folder=site/.
 func (h *httpAdapter) servePending(w http.ResponseWriter, r *http.Request, repo *repository, space string) {

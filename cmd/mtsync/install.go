@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // The service runs as the signed-in user, never as a system account: it
@@ -63,10 +64,10 @@ func launchAgent(exe string) string {
 `
 }
 
-// windowsCommand starts the service without a console window (conhost
-// --headless, Windows 10 1809 and later).
+// windowsCommand is the login entry on Windows. mtsync start launches the
+// service without a console window and returns at once.
 func windowsCommand(exe string) string {
-	return fmt.Sprintf(`conhost.exe --headless "%s" run`, exe)
+	return fmt.Sprintf(`"%s" start`, exe)
 }
 
 func command(out io.Writer, name string, args ...string) error {
@@ -79,7 +80,7 @@ func command(out io.Writer, name string, args ...string) error {
 }
 
 // install starts the service at every login and starts it now.
-func install(out io.Writer) error {
+func install(ctx context.Context, out io.Writer) error {
 	exe, err := executablePath()
 	if err != nil {
 		return err
@@ -117,20 +118,72 @@ func install(out io.Writer) error {
 		}
 		fmt.Fprintf(out, "Installed %s; it starts at every login.\n", plist)
 	case "windows":
-		if err := command(out, "reg", "add", windowsRunKey, "/v", windowsRunValue, "/t", "REG_SZ", "/d", windowsCommand(exe), "/f"); err != nil {
+		if err := command(io.Discard, "reg", "add", windowsRunKey, "/v", windowsRunValue, "/t", "REG_SZ", "/d", windowsCommand(exe), "/f"); err != nil {
 			return err
 		}
-		if !serviceRunning() {
-			if err := exec.Command("conhost.exe", "--headless", exe, "run").Start(); err != nil {
-				return err
-			}
-		}
 		fmt.Fprintln(out, "Installed: it starts at every login (Settings > Apps > Startup lists it as Metatrash Sync).")
+		if err := startService(ctx, io.Discard); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("install is not supported on %s; run mtsync run from your own startup script", runtime.GOOS)
 	}
-	fmt.Fprintln(out, "mtsync list shows the registered folders; the log is mtsync.log beside the folder list (mtsync log).")
+	if err := waitForService(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "The service is running. mtsync list shows the registered folders and mtsync log the service log.")
 	return nil
+}
+
+// startService starts the service in the background if it is not running,
+// through the login service manager where install set one up, and waits
+// until it has started.
+func startService(ctx context.Context, out io.Writer) error {
+	if serviceRunning() {
+		fmt.Fprintln(out, "The service is already running.")
+		return nil
+	}
+	exe, err := executablePath()
+	if err != nil {
+		return err
+	}
+	home, _ := os.UserHomeDir()
+	switch {
+	case runtime.GOOS == "linux" && fileExists(filepath.Join(home, ".config", "systemd", "user", systemdUnitName)):
+		err = command(out, "systemctl", "--user", "start", systemdUnitName)
+	case runtime.GOOS == "darwin" && fileExists(filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")):
+		err = command(out, "launchctl", "start", launchAgentLabel)
+	default:
+		err = startDetached(exe, "run")
+	}
+	if err != nil {
+		return err
+	}
+	if err := waitForService(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "The service is running. mtsync list shows the registered folders.")
+	return nil
+}
+
+// waitForService waits for the service to take its lock, and says where to
+// look when it does not.
+func waitForService(ctx context.Context) error {
+	deadline := time.Now().Add(10 * time.Second)
+	for !serviceRunning() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the service did not start; mtsync log shows why, or run mtsync run to see it in this window")
+		}
+		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // uninstall stops starting the service at login and stops it now. Registered

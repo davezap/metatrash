@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"metatrash.com/metatrash"
 )
 
 // credentials are the tokens for one server, kept in the user's config
@@ -122,22 +124,23 @@ func login(ctx context.Context, server string, out io.Writer) error {
 			return
 		}
 		q := r.URL.Query()
-		page := func(message string) {
+		page := func(ok bool, message string) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprintf(w, "<!doctype html><title>Metatrash Sync</title><p>%s</p>", html.EscapeString(message))
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+			fmt.Fprint(w, callbackPage(ok, server, message))
 		}
 		switch {
 		case q.Get("state") != state:
-			page("This sign-in response does not match. Run mtsync login again.")
+			page(false, "This sign-in response does not match. Run mtsync login again.")
 			finish(result{err: fmt.Errorf("sign-in response did not match the request")})
 		case q.Get("error") != "":
-			page("Sign-in was not completed: " + q.Get("error_description"))
+			page(false, "Sign-in was not completed: "+q.Get("error_description"))
 			finish(result{err: fmt.Errorf("sign-in failed: %s %s", q.Get("error"), q.Get("error_description"))})
 		case q.Get("iss") != "" && q.Get("iss") != server:
-			page("This sign-in came from another server. Run mtsync login again.")
+			page(false, "This sign-in came from another server. Run mtsync login again.")
 			finish(result{err: fmt.Errorf("sign-in came from %s, not %s", q.Get("iss"), server)})
 		default:
-			page("Metatrash Sync is connected. You can close this tab.")
+			page(true, "")
 			finish(result{code: q.Get("code")})
 		}
 	})}
@@ -288,4 +291,67 @@ var openBrowser = func(target string) {
 		cmd = exec.Command("xdg-open", target)
 	}
 	_ = cmd.Start()
+}
+
+// callbackPage is what the browser shows when sign-in comes back to mtsync.
+// It is self-contained (the loopback server serves nothing else) and uses
+// the site's colours.
+func callbackPage(ok bool, server, message string) string {
+	host := server
+	if u, err := url.Parse(server); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	folder := "~/spaces/space"
+	if runtime.GOOS == "windows" {
+		folder = `C:\spaces\space`
+	}
+	body := `<p class="eyebrow">Metatrash Sync</p>
+<div class="mark ok" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
+<h1>This computer is connected.</h1>
+<p class="lede">Agents write to your spaces and the files show up in your folders. You edit the folders and the spaces keep up.</p>
+<ol class="steps">
+<li><span>See the spaces you chose</span><code>mtsync spaces</code></li>
+<li><span>Pick a space and a folder</span><code>mtsync add owner/space ` + folder + `</code></li>
+<li><span>Keep it syncing at every login</span><code>mtsync install</code></li>
+</ol>
+<p class="hint">You can close this tab and go back to the terminal. To change the spaces or revoke access, see <a href="` + html.EscapeString(server) + `/account/services">Services</a> in your account on ` + html.EscapeString(host) + `.</p>`
+	title := "Connected"
+	if !ok {
+		title = "Not connected"
+		body = `<p class="eyebrow">Metatrash Sync</p>
+<div class="mark bad" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M18 18l16 16M34 18L18 34"/></svg></div>
+<h1>That didn't work.</h1>
+<p class="lede">` + html.EscapeString(message) + `</p>
+<p class="hint">Close this tab and run <code>mtsync login</code> again.</p>`
+	}
+	return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>` + title + ` · Metatrash Sync</title>
+<style>
+:root{color-scheme:dark;--bg:#141817;--panel:#1b211f;--line:#343d38;--muted:#a8b4aa;--text:#edf2e9;--accent:#d5f297;--bad:#e5a78e;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:var(--bg)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column}
+header{padding:22px 5%;border-bottom:1px solid var(--line)}.brand{font-size:24px;font-weight:750;letter-spacing:-1.3px}.brand span{color:var(--accent)}
+main{flex:1;width:100%;max-width:620px;margin:auto;padding:56px 24px}
+.eyebrow{font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:2px;color:var(--accent);margin:0 0 22px}
+h1{font-size:clamp(32px,6vw,46px);line-height:1.08;letter-spacing:-1.8px;font-weight:550;margin:18px 0 18px}
+.lede{font-size:18px;line-height:1.6;color:var(--muted);margin:0 0 30px}
+.mark svg{width:56px;height:56px;fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.mark circle{stroke:var(--line)}.ok path{stroke:var(--accent)}.bad path{stroke:var(--bad)}
+.ok circle{stroke:var(--accent);stroke-dasharray:151;stroke-dashoffset:151;animation:draw .6s ease-out forwards}
+.ok path{stroke-dasharray:40;stroke-dashoffset:40;animation:draw .35s .5s ease-out forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.steps{list-style:none;counter-reset:s;margin:0;padding:0;border-top:1px solid var(--line)}
+.steps li{counter-increment:s;display:grid;grid-template-columns:28px 1fr;gap:6px 10px;padding:14px 0;border-bottom:1px solid var(--line)}
+.steps li::before{content:counter(s);grid-row:1/3;color:var(--accent);font:600 13px ui-monospace,Consolas,monospace;padding-top:2px}
+.steps span{font-size:14px;color:var(--muted)}
+code{font:13px ui-monospace,Consolas,monospace;color:var(--text);overflow-wrap:anywhere}
+.steps code{display:block;padding:9px 12px;background:var(--panel);border:1px solid var(--line);border-radius:4px;user-select:all}
+.hint{font-size:13px;line-height:1.7;color:var(--muted);margin-top:26px}a{color:var(--accent)}
+footer{padding:18px 5%;border-top:1px solid var(--line);color:var(--muted);font:11px ui-monospace,Consolas,monospace}
+@media (prefers-reduced-motion:reduce){.ok circle,.ok path{animation:none;stroke-dashoffset:0}}
+</style></head>
+<body><header><span class="brand">metatrash<span>.</span></span></header>
+<main>` + body + `</main>
+<footer>mtsync ` + html.EscapeString(metatrash.Version) + ` · ` + html.EscapeString(host) + `</footer>
+</body></html>`
 }

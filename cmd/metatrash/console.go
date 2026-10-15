@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,7 +34,9 @@ var commandUsage = map[string]string{
 	"users show":        "users show <email|username|id> [-json]",
 	"users email-login": "users email-login <on|off> <email|username|id> [-no-notice]",
 	"users set-limit":   "users set-limit <email|username|id> <spaces>",
+	"users rename":      "users rename <email|username|id> <new-username> [-no-notice]",
 	"spaces list":       "spaces list [-json]",
+	"spaces export":     "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
 }
 
 const usage = `metatrash %s
@@ -55,14 +58,21 @@ Commands:
   users email-login on <who>    turn sign-in by emailed code back on (or off) and email
                                 the account a notice (-no-notice to skip it)
   users set-limit <who> <n>     set how many private spaces the account may own
+  users rename <who> <name>     change the account's username; addresses with the old
+                                name stop working (emails a notice; -no-notice skips it)
   spaces list                   list owned spaces with owner, visibility and members
+  spaces export <space> [FILE]  write the space as it is now to a zip (- for stdout;
+                                default <owner>-<slug>-<date>-<state>.zip here)
+  spaces export -all DIR        export every space into DIR, for backups
 
 <who> is an email address, username or user ID. list and show take -json.
+<space> is owner/slug or a space ID, or a spaces.json name such as public.
 
 Account commands read the same accounts.json and account database as the
 service: -accounts-config, else METATRASH_ACCOUNTS_CONFIG, else
 ` + defaultAccountsConfig + `. check also reads -config (/etc/metatrash/spaces.json),
--keys (/etc/metatrash/keys.json) and -data (/var/lib/metatrash). Run them as
+-keys (/etc/metatrash/keys.json) and -data (/var/lib/metatrash); spaces export
+reads -data. Run them as
 the service user, which the mt shortcut does: mt users list
 `
 
@@ -143,7 +153,7 @@ func parseArgs(flags *flag.FlagSet, args []string) ([]string, error) {
 func usersCommand(args []string) error {
 	if len(args) == 0 {
 		printUsage(os.Stderr)
-		return fmt.Errorf("users needs a subcommand: list, show, email-login or set-limit")
+		return fmt.Errorf("users needs a subcommand: list, show, email-login, set-limit or rename")
 	}
 	name := "users " + args[0]
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -160,6 +170,9 @@ func usersCommand(args []string) error {
 		noNotice = flags.Bool("no-notice", false, "Do not email the account a notice")
 		want = 2
 	case "set-limit":
+		want = 2
+	case "rename":
+		noNotice = flags.Bool("no-notice", false, "Do not email the account a notice")
 		want = 2
 	default:
 		printUsage(os.Stderr)
@@ -248,14 +261,45 @@ func usersCommand(args []string) error {
 			fmt.Println("Spaces it already owns stay; it cannot create more until it is under the limit.")
 		}
 		return nil
+	case "rename":
+		u, err := db.FindUser(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		username, changed, err := db.RenameUser(ctx, u, rest[1])
+		if err != nil {
+			return err
+		}
+		if !changed {
+			fmt.Printf("%s is already %s. Nothing changed.\n", u.Email, username)
+			return nil
+		}
+		fmt.Printf("%s is now %s (was %s).\n", u.Email, username, orDash(u.Username))
+		if u.Username != "" && u.OwnedSpaces > 0 {
+			fmt.Printf("Its owned spaces (%d) moved from /spaces/%s/… to /spaces/%s/…; the old addresses no longer work.\n", u.OwnedSpaces, u.Username, username)
+		}
+		if owner, _, _ := strings.Cut(db.DocsSpace(), "/"); u.Username != "" && owner == u.Username {
+			fmt.Printf("accounts.json docsSpace is %s: change it to %s/… and restart the service.\n", db.DocsSpace(), username)
+		}
+		if *noNotice {
+			return nil
+		}
+		if err := db.RenameNotice(ctx, u, username); err != nil {
+			return fmt.Errorf("the change is made, but the notice was not sent: %v", err)
+		}
+		fmt.Println("The account was emailed a notice.")
+		return nil
 	}
 	return nil
 }
 
 func spacesCommand(args []string) error {
+	if len(args) > 0 && args[0] == "export" {
+		return spacesExport(args[1:])
+	}
 	if len(args) == 0 || args[0] != "list" {
 		printUsage(os.Stderr)
-		return fmt.Errorf("spaces needs a subcommand: spaces list")
+		return fmt.Errorf("spaces needs a subcommand: spaces list or spaces export")
 	}
 	flags := flag.NewFlagSet("spaces list", flag.ContinueOnError)
 	accountsConfig := accountsConfigFlag(flags)
@@ -289,6 +333,143 @@ func spacesCommand(args []string) error {
 	t.Flush()
 	fmt.Println(count(len(spaces), "owned space", "owned spaces") + " (spaces.json spaces are not listed)")
 	return nil
+}
+
+// spacesExport writes one space, or with -all every space, as a zip of its
+// current files. It reads the repositories directly, beside the service.
+func spacesExport(args []string) error {
+	flags := flag.NewFlagSet("spaces export", flag.ContinueOnError)
+	accountsConfig := accountsConfigFlag(flags)
+	data := flags.String("data", "/var/lib/metatrash", "Persistent data directory")
+	all := flags.String("all", "", "Export every space into this directory")
+	rest, err := parseArgs(flags, args)
+	if err != nil {
+		return err
+	}
+	if (*all == "" && (len(rest) < 1 || len(rest) > 2)) || (*all != "" && len(rest) != 0) {
+		return fmt.Errorf("usage: metatrash %s", commandUsage["spaces export"])
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *all != "" {
+		return exportAll(ctx, *accountsConfig, *data, *all)
+	}
+	ref := strings.ToLower(strings.Trim(rest[0], "/"))
+	name, id := ref, ref
+	owned := strings.Contains(ref, "/") || len(ref) == 32 && strings.Trim(ref, "0123456789abcdef") == ""
+	if owned {
+		db, err := service.OpenAdminDB(ctx, *accountsConfig)
+		if err != nil {
+			return err
+		}
+		space, err := db.FindSpace(ctx, ref)
+		db.Close()
+		if err != nil {
+			return err
+		}
+		name, id = space.Owner+"/"+space.Slug, space.ID
+	}
+	gitDir, err := service.SpaceRepositoryPath(*data, owned, id)
+	if err != nil {
+		return err
+	}
+	state, b, err := service.ExportRepository(ctx, gitDir, name)
+	if err != nil {
+		return err
+	}
+	target := service.ExportFileName(name, state)
+	if len(rest) == 2 {
+		target = rest[1]
+	}
+	if target == "-" {
+		_, err = os.Stdout.Write(b)
+		return err
+	}
+	if err := writeExport(target, b); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Exported %s at %s to %s (%s).\n", name, state[:12], target, size(len(b)))
+	return nil
+}
+
+// exportAll exports every ready owned space and every spaces.json space into
+// dir. One failure does not stop the rest; the error counts them.
+func exportAll(ctx context.Context, accountsConfig, data, dir string) error {
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	type job struct{ name, gitDir string }
+	jobs := []job{}
+	names, err := service.ConfiguredSpaces(data)
+	if err != nil {
+		return err
+	}
+	for _, n := range names {
+		gitDir, _ := service.SpaceRepositoryPath(data, false, n)
+		jobs = append(jobs, job{n, gitDir})
+	}
+	db, err := service.OpenAdminDB(ctx, accountsConfig)
+	if err != nil {
+		return err
+	}
+	spaces, err := db.Spaces(ctx)
+	db.Close()
+	if err != nil {
+		return err
+	}
+	for _, s := range spaces {
+		if s.State != "ready" {
+			continue
+		}
+		gitDir, err := service.SpaceRepositoryPath(data, true, s.ID)
+		if err != nil {
+			return err
+		}
+		jobs = append(jobs, job{s.Owner + "/" + s.Slug, gitDir})
+	}
+	failed := 0
+	for _, j := range jobs {
+		state, b, err := service.ExportRepository(ctx, j.gitDir, j.name)
+		if err == nil {
+			target := filepath.Join(dir, service.ExportFileName(j.name, state))
+			if err = writeExport(target, b); err == nil {
+				fmt.Printf("%s\t%s\t%s\n", j.name, state[:12], target)
+				continue
+			}
+		}
+		failed++
+		fmt.Fprintf(os.Stderr, "%s: %v\n", j.name, err)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%s of %d failed", count(failed, "export", "exports"), len(jobs))
+	}
+	fmt.Fprintf(os.Stderr, "Exported %s.\n", count(len(jobs), "space", "spaces"))
+	return nil
+}
+
+// writeExport writes b to path through a temporary file, readable only by
+// the service user: private spaces are in it.
+func writeExport(path string, b []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".export-*.zip")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+func size(n int) string {
+	if n < 1024*1024 {
+		return fmt.Sprintf("%.1f KiB", float64(n)/1024)
+	}
+	return fmt.Sprintf("%.1f MiB", float64(n)/(1024*1024))
 }
 
 func checkCommand(args []string) error {

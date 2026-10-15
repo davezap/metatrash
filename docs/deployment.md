@@ -28,7 +28,8 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
 Command line: `metatrash [-listen 127.0.0.1:8080] [-data DIR] [-config spaces.json]
 [-keys keys.json] [-accounts-config accounts.json] [-trusted-proxies CIDRs]
 [-public-url URL]`, plus the subcommands `help`, `version`, `keygen`,
-`accounts-migrate`, `check`, `users …` and `spaces list`. `metatrash help`
+`accounts-migrate`, `check`, `users …` (list, show, email-login, set-limit,
+rename), `spaces list` and `spaces export`. `metatrash help`
 lists them.
 
 ### Console commands
@@ -42,7 +43,10 @@ mt users list                    # every account, oldest first (-json for JSON)
 mt users show dave               # one account in full (email, username or user ID)
 mt users email-login on name@example.com
 mt users set-limit dave 3        # private spaces the account may own
+mt users rename dave david       # change the username (old addresses break)
 mt spaces list                   # every owned space (-json for JSON)
+mt spaces export dave/notes      # one space as a zip in the current folder
+mt spaces export -all /srv/backup/metatrash   # every space, for backups
 ```
 
 They use the same `accounts.json` and account database as the service, with
@@ -72,9 +76,36 @@ limits from the database on each request).
   if the email fails the change still stands and the command says so.
 - **`users set-limit`** sets `max_private_spaces` (0 to 1000). Spaces already
   owned stay when the limit goes below their number. It needs the 0.28.0 grant.
+- **`users rename <who> <new-username>`** (0.39.0) sets the account's
+  username, whether or not it had one, under the rules on Your account. It is
+  the only name an account has (there is no separate display name). Everything
+  else refers to the account by user ID, so its spaces, memberships, apps and
+  sign-ins follow at once. Addresses with the old name stop working:
+  `/spaces/<old>/<slug>/` links and apps or mtsync folders configured with
+  `<old>/<slug>` (space IDs keep working), and the old name is free for anyone
+  to choose. If `docsSpace` in `accounts.json` names the old username, change
+  it and restart; the command warns. The account is emailed a notice
+  (`-no-notice` skips it); if the email fails the rename still stands.
 - **`spaces list`** shows owned spaces with owner, name, visibility, state,
   active members and invitations waiting. Spaces from `spaces.json` are not in
   the database and are not listed.
+- **`spaces export <space> [FILE]`** writes a space's current files to a zip,
+  with `.metatrash-export.json` naming the state and each file's ID (the same
+  archive as the REST export, see docs/api-contract.md). `<space>` is
+  `owner/slug`, a space ID, or a `spaces.json` name such as `public`. `FILE`
+  defaults to `<owner>-<slug>-<date>-<state>.zip` in the current folder; `-`
+  writes to standard output. It reads the repository under `-data`
+  (`/var/lib/metatrash`) directly, so it works with the service running and
+  is not rate limited. Files are written readable only by the service user.
+- **`spaces export -all DIR`** exports every ready owned space and every
+  `spaces.json` space into `DIR` (which must exist and be writable by the
+  service user), one zip each, and prints one line per space. A space that
+  fails is reported, the rest still run, and the command then exits 1. For a
+  nightly backup, run it from cron as the service user and prune old files
+  yourself, for example
+  `mt spaces export -all /srv/backup/metatrash && find /srv/backup/metatrash -name '*.zip' -mtime +30 -delete`.
+  An export holds current files only, not history, so keep backing up the
+  data directory as well.
 
 ## Build and install
 

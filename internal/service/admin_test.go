@@ -169,6 +169,62 @@ func TestDatabaseAdminFindAndChange(t *testing.T) {
 	}
 }
 
+func TestDatabaseAdminRename(t *testing.T) {
+	db, admin := testAdminDB(t)
+	ctx := context.Background()
+	user, err := db.FindOrCreate(ctx, randomName(t, "rename-")+"@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := db.FindOrCreate(ctx, randomName(t, "rename-")+"@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken := randomName(t, "taken-")
+	if err := db.ChooseUsername(ctx, other.ID, taken); err != nil {
+		t.Fatal(err)
+	}
+	u, err := admin.FindUser(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An account without a username gets one.
+	first := randomName(t, "first-")
+	if name, changed, err := admin.RenameUser(ctx, u, " "+strings.ToUpper(first)); err != nil || !changed || name != first {
+		t.Fatal("first username not set", name, changed, err)
+	}
+	u, _ = admin.FindUser(ctx, first)
+	for _, bad := range []string{"ab", "a--b", "admin", taken, strings.ToUpper(taken)} {
+		if _, _, err := admin.RenameUser(ctx, u, bad); err == nil {
+			t.Fatalf("%q accepted", bad)
+		}
+	}
+	if _, changed, err := admin.RenameUser(ctx, u, first); err != nil || changed {
+		t.Fatal("same name reported as a change", err)
+	}
+	second := randomName(t, "second-")
+	if _, changed, err := admin.RenameUser(ctx, u, second); err != nil || !changed {
+		t.Fatal("rename refused", err)
+	}
+	if _, err := admin.FindUser(ctx, first); err != ErrNoAccount {
+		t.Fatal("old username still finds the account", err)
+	}
+	if stored, ok, err := db.ByID(ctx, user.ID); err != nil || !ok || stored.Username != second {
+		t.Fatal("rename not stored", stored, err)
+	}
+	// The old name is free again.
+	if err := db.ChooseUsername(ctx, other.ID, first); err == nil {
+		t.Fatal("chosen username replaced through the account page")
+	}
+	third, err := db.FindOrCreate(ctx, randomName(t, "rename-")+"@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ChooseUsername(ctx, third.ID, first); err != nil {
+		t.Fatal("old username not free", err)
+	}
+}
+
 func TestDatabaseAdminPrivileges(t *testing.T) {
 	db := testDatabase(t)
 	missing, extra, err := db.checkPrivileges(context.Background())

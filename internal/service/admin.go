@@ -379,6 +379,31 @@ FROM metatrash_spaces s JOIN metatrash_users o ON o.user_id = s.owner_user_id `+
 	return spaces, err
 }
 
+// ErrNoSpace is returned when spaces export finds no owned space.
+var ErrNoSpace = errors.New("no owned space with that owner/slug or ID")
+
+// FindSpace finds an owned space by owner/slug (the owner's username) or
+// space ID.
+func (d *AdminDB) FindSpace(ctx context.Context, ref string) (AdminSpace, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ref = strings.ToLower(strings.Trim(strings.TrimSpace(ref), "/"))
+	where, args := "WHERE s.space_id = ?", []any{ref}
+	if owner, slug, ok := strings.Cut(ref, "/"); ok {
+		where, args = "WHERE o.username = ? AND s.slug = ?", []any{owner, slug}
+	} else if !idPattern.MatchString(ref) {
+		return AdminSpace{}, ErrNoSpace
+	}
+	spaces, err := d.spaces(ctx, where, args...)
+	if err != nil {
+		return AdminSpace{}, fmt.Errorf("account database unavailable")
+	}
+	if len(spaces) != 1 {
+		return AdminSpace{}, ErrNoSpace
+	}
+	return spaces[0], nil
+}
+
 // SetEmailLogin turns sign-in by emailed code on or off for an account.
 // Turning it off needs what Security needs: a passkey or authenticator app
 // and unused recovery codes. changed is false when it was already so.
@@ -440,6 +465,50 @@ func (d *AdminDB) SetSpaceLimit(ctx context.Context, u AdminUser, limit int) err
 	}
 	return nil
 }
+
+// RenameUser sets an account's username, chosen or not, under the same rules
+// as Your account. Everything else refers to the account by user ID, so its
+// spaces, memberships, connections and sessions follow at once; addresses
+// that use the old name (/spaces/old/slug, owner/slug in apps) stop working
+// and the old name is free for anyone to choose. changed is false when it
+// already had the name.
+func (d *AdminDB) RenameUser(ctx context.Context, u AdminUser, value string) (username string, changed bool, err error) {
+	username, err = normalizeUsername(value)
+	var p *Error
+	if errors.As(err, &p) {
+		return "", false, errors.New(p.Message)
+	}
+	if username == u.Username {
+		return username, false, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err = d.store.db.ExecContext(ctx, "UPDATE metatrash_users SET username = ? WHERE user_id = ?", username, u.ID)
+	var e *mysql.MySQLError
+	switch {
+	case errors.As(err, &e) && e.Number == 1062:
+		return "", false, fmt.Errorf("the username %s is taken by another account", username)
+	case err != nil:
+		return "", false, fmt.Errorf("account database unavailable")
+	}
+	return username, true, nil
+}
+
+// RenameNotice emails the account that an administrator changed its username.
+func (d *AdminDB) RenameNotice(ctx context.Context, u AdminUser, username string) error {
+	was := "You had no username before."
+	if u.Username != "" {
+		was = "It was " + u.Username + ". Links and connected apps that use " + d.config.Origin + "/spaces/" + u.Username + "/… or " + u.Username + "/<space> need the new name."
+	}
+	body := "A Metatrash administrator changed your username to " + username + ".\n" +
+		"When: " + time.Now().UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		was + "\nYour spaces are now at " + d.config.Origin + "/spaces/" + username + "/…\n" +
+		"If you did not ask for this, reply to this email.\n"
+	return d.notice(ctx, u.Email, "Your Metatrash username changed", body)
+}
+
+// DocsSpace is accounts.json's docsSpace (owner/slug), or "".
+func (d *AdminDB) DocsSpace() string { return d.config.DocsSpace }
 
 // CheckResult is one line of the check command.
 type CheckResult struct {

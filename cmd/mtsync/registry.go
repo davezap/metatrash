@@ -110,7 +110,14 @@ func addFolder(ctx context.Context, server, space, folder string, out io.Writer)
 		return err
 	}
 	for _, e := range r.Folders {
-		if within(folder, e.Folder) || within(e.Folder, folder) {
+		same := within(folder, e.Folder) && within(e.Folder, folder)
+		switch {
+		case same && e.Space == space && e.Server == server:
+			fmt.Fprintf(out, "%s already syncs %s; nothing to add.\n", folder, space)
+			return nil
+		case same:
+			return fmt.Errorf("%s already syncs %s; run mtsync remove %q first to sync it with %s instead", folder, e.Space, folder, space)
+		case within(folder, e.Folder) || within(e.Folder, folder):
 			return fmt.Errorf("%s overlaps %s, which already syncs %s", folder, e.Folder, e.Space)
 		}
 	}
@@ -136,7 +143,7 @@ func addFolder(ctx context.Context, server, space, folder string, out io.Writer)
 	if serviceRunning() {
 		fmt.Fprintln(out, "The running service starts syncing it within a few seconds.")
 	} else {
-		fmt.Fprintln(out, "The service is not running: start it with mtsync install (at every login) or mtsync run.")
+		fmt.Fprintln(out, "The service is not running: start it with mtsync start, or mtsync install to start it at every login too.")
 	}
 	return nil
 }

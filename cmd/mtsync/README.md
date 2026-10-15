@@ -52,13 +52,16 @@ Linux and macOS.
 Needs Go 1.25 or later. From the repository root:
 
 ```sh
-go build -trimpath -o mtsync ./cmd/mtsync              # this computer
+go build -trimpath -o mtsync ./cmd/mtsync              # this computer (Linux, macOS)
+go build -trimpath -o mtsync.exe ./cmd/mtsync          # this computer (Windows)
 GOOS=windows GOARCH=amd64 go build -trimpath -o mtsync.exe ./cmd/mtsync
 GOOS=linux   GOARCH=amd64 go build -trimpath -o mtsync-linux-amd64 ./cmd/mtsync
 GOOS=darwin  GOARCH=arm64 go build -trimpath -o mtsync-macos ./cmd/mtsync
 ```
 
-On Windows PowerShell, cross-compile with `$env:GOOS="linux"; go build ...`.
+On Windows PowerShell, cross-compile with `$env:GOOS="linux"; go build ...`, then
+`Remove-Item Env:GOOS` before building for Windows again. `go install ./cmd/mtsync`
+puts the binary in `%USERPROFILE%\go\bin` instead.
 
 Tests: `go test ./cmd/mtsync` runs the sync and the service against a real
 metatrash service in memory (no database needed).
@@ -69,7 +72,7 @@ metatrash service in memory (no database needed).
 adds the built-in sign-in client (`/oauth/clients/sync`) and the file hashes in
 REST listings; 0.34.0 adds instant change notices (`after=` on list) and
 0.37.0 change lists (`since=`), which older servers make up for with full
-listings. Deploy
+listings; `mtsync export` needs 0.38.0. Deploy
 as usual (`upgrade.sh`). There is no schema, configuration or grant change,
 and OAuth must already be enabled. The waiting request lasts 25 seconds, under
 the example Apache config's `ProxyTimeout 60`; keep any proxy timeout above
@@ -95,11 +98,13 @@ own), never as a system account, so it needs no administrator rights:
   after logout.
 - macOS: a LaunchAgent, `~/Library/LaunchAgents/com.metatrash.mtsync.plist`.
 - Windows: a **Metatrash Sync** entry in your startup programs (the `HKCU\…\Run`
-  registry key, listed under Settings → Apps → Startup), started without a
-  window through `conhost.exe --headless` (Windows 10 1809 or later).
+  registry key, listed under Settings → Apps → Startup) that runs
+  `mtsync start`, which launches the service without a window.
 
-After replacing the binary, run `mtsync stop` and start it again with
-`mtsync install` (or log out and in). `mtsync uninstall` stops it and removes
+`install` waits for the service to come up and says so if it does not; then
+`mtsync log` (or `mtsync run`, which shows the same in the window) says why.
+
+After replacing the binary, run `mtsync stop` and then `mtsync start`. `mtsync uninstall` stops it and removes
 the login entry; registered folders are kept.
 
 ## Use
@@ -112,6 +117,7 @@ mtsync add dave-zap/bartco/site ~/work/site   # just the site/ folder of a space
 mtsync list                                   # each folder and how it is doing
 mtsync log                                    # the last 40 lines of the service log
 mtsync remove ~/spaces/notes                  # stop syncing it (or: mtsync remove dave-zap/notes)
+mtsync export dave-zap/notes                  # back up the space to a zip here
 ```
 
 To sync one folder of a space instead of all of it, add its path after the
@@ -124,6 +130,12 @@ The running service picks up `add` and `remove` within a few seconds; there is
 nothing to restart. `add` checks that this computer can reach the space and
 refuses a folder inside, or containing, one already registered. It creates the
 folder if needed. `remove` leaves the files where they are.
+
+`mtsync export SPACE [FILE]` saves the whole space as it is now to a zip
+(default `owner-slug-<date>-<state>.zip` in the current folder), whether or
+not it is synced anywhere. The zip also holds `.metatrash-export.json`, which
+records the state and each file's ID. It needs metatrash 0.38.0 on the site and
+read access to the space; it takes a whole space, not a folder of it.
 
 `mtsync list` shows, per folder, "in sync, checked <time>", the last error
 (for example signed out, or the space no longer connected; the service tries
@@ -139,9 +151,11 @@ All commands:
 | `remove FOLDER` or `remove SPACE` | unregister a folder |
 | `list` | registered folders and their state |
 | `install`, `uninstall` | start the service at every login (and now), or stop that |
+| `start` | start the service in the background (no window) |
 | `run` | run the service in this window instead (Ctrl+C stops it) |
 | `stop` | stop the running service |
 | `log [N]` | the last N lines of the service log |
+| `export SPACE [FILE]` | save the space as it is now to a zip, for backups |
 | `version` | the version |
 | `SPACE[/PATH] FOLDER` | sync one folder in this window without registering it; `-once` for one pass |
 
@@ -149,10 +163,10 @@ Flags go before the command:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-server` | `https://metatrash.com` | the metatrash site, for `login`, `logout`, `spaces`, `add` and a one-off sync |
+| `-server` | `https://metatrash.com` | the metatrash site, for `login`, `logout`, `spaces`, `add`, `export` and a one-off sync |
 | `-interval` | `5s` | time between scans of each folder (and between checks of an older server) |
 | `-once` | off | one-off sync: one pass, then exit |
-| `-key-env VAR` | | one-off sync: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
+| `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
 
 One local folder syncs one space (or one folder of it); a local folder already
 synced with something else is refused. Only one mtsync works on a folder at a time (the service, or a

@@ -243,6 +243,12 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinName+"/file?path=README.md", ""); res.Code != 200 || !strings.Contains(res.Body.String(), `"space":"`+w.joinName+`"`) {
 		t.Fatalf("REST read by owner/slug: %d %s", res.Code, res.Body)
 	}
+	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinName+"/export", ""); res.Code != 200 || res.Header().Get("Content-Type") != "application/zip" || !strings.Contains(res.Body.String(), "from-member.md") {
+		t.Fatalf("REST read-only export: %d %s", res.Code, res.Body)
+	}
+	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.ownedID+"/export", ""); res.Code != 404 {
+		t.Fatalf("REST export of a space not consented: %d", res.Code)
+	}
 	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinSlug+"/files", ""); res.Code != 404 {
 		t.Fatalf("REST bare slug: %d %s", res.Code, res.Body)
 	}

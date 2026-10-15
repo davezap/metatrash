@@ -104,8 +104,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// do sends one request, refreshing the token once on 401 and waiting out
-// 429 and 503 responses as Retry-After asks.
+// do sends one JSON request and decodes the JSON answer into out.
 func (c *client) do(ctx context.Context, method, resource string, query url.Values, body, out any) error {
 	var payload []byte
 	if body != nil {
@@ -114,6 +113,17 @@ func (c *client) do(ctx context.Context, method, resource string, query url.Valu
 			return err
 		}
 	}
+	b, _, err := c.send(ctx, method, resource, query, payload, 8<<20)
+	if err != nil || out == nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
+}
+
+// send sends one request and returns the body of a successful answer, read
+// up to limit bytes. It refreshes the token once on 401 and waits out 429
+// and 503 responses as Retry-After asks.
+func (c *client) send(ctx context.Context, method, resource string, query url.Values, payload []byte, limit int64) ([]byte, http.Header, error) {
 	target := c.base
 	if resource != "" {
 		target += "/" + resource
@@ -125,15 +135,15 @@ func (c *client) do(ctx context.Context, method, resource string, query url.Valu
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(payload))
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		if body != nil {
+		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		if c.token != nil {
 			token, err := c.token(ctx, false)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			if token != "" {
 				req.Header.Set("Authorization", "Bearer "+token)
@@ -141,18 +151,18 @@ func (c *client) do(ctx context.Context, method, resource string, query url.Valu
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 		resp.Body.Close()
 		if err != nil {
-			return err
+			return nil, nil, err
+		}
+		if int64(len(b)) > limit {
+			return nil, nil, fmt.Errorf("answer is larger than %d bytes", limit)
 		}
 		if resp.StatusCode < 300 {
-			if out == nil {
-				return nil
-			}
-			return json.Unmarshal(b, out)
+			return b, resp.Header, nil
 		}
 		var wrapped struct {
 			Error apiError `json:"error"`
@@ -166,7 +176,7 @@ func (c *client) do(ctx context.Context, method, resource string, query url.Valu
 		if resp.StatusCode == 401 && c.token != nil && !refreshed {
 			refreshed = true
 			if _, err := c.token(ctx, true); err != nil {
-				return err
+				return nil, nil, err
 			}
 			continue
 		}
@@ -176,12 +186,25 @@ func (c *client) do(ctx context.Context, method, resource string, query url.Valu
 				wait = 1
 			}
 			if err := c.sleep(ctx, time.Duration(wait)*time.Second); err != nil {
-				return err
+				return nil, nil, err
 			}
 			continue
 		}
-		return &e
+		return nil, nil, &e
 	}
+}
+
+// export downloads the whole space at its current state as a zip.
+func (c *client) export(ctx context.Context) (string, []byte, error) {
+	b, header, err := c.send(ctx, "GET", "export", nil, nil, 256<<20)
+	if err != nil {
+		return "", nil, err
+	}
+	state := header.Get("X-Metatrash-State")
+	if len(state) < 12 || len(b) < 4 || string(b[:4]) != "PK\x03\x04" {
+		return "", nil, fmt.Errorf("the server did not send a zip; it may be older than 0.38.0")
+	}
+	return state, b, nil
 }
 
 // head returns the space's current state with a one-file listing.

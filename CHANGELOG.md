@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.39.0 - Rename an account from the console (2026-10-15)
+
+No schema, configuration or grant change (the v2 grant `UPDATE (username)` on `metatrash_users` covers it). No new Go modules.
+
+- **`mt users rename <who> <new-username>`** sets an account's username, whether or not it had one, under the same rules as Your account (3–32 lowercase letters or numbers with single hyphens, reserved names refused, case ignored). A name another account has is refused. Every table refers to accounts by user ID, so the account's spaces, memberships, invitations, connected apps, GitHub installations and sign-ins follow at once, with the service running. Addresses with the old name stop working: `/spaces/<old>/<slug>/` links, and apps or mtsync folders that name a space as `<old>/<slug>` (space IDs keep working); earlier addresses of spaces transferred away follow the new name. The old name is free for anyone to choose. The command says how many owned spaces moved, and warns when `accounts.json` `docsSpace` names the old username. The account is emailed a notice with the old and new names through the service's SMTP settings (`-no-notice` skips it); if the email fails the rename still stands and the command says so. Git history in spaces keeps the name commits were made under.
+- Metatrash has no separate display name: the username is the name shown on the site, in member lists and to passkey managers. A passkey keeps the name it was created with on the device.
+- Tests: against MariaDB, a first username set on an account without one; too short, double hyphen, reserved, taken and taken-in-capitals names refused; the same name reported as no change; a rename stored, the old name no longer finding the account, and the old name free for another account to choose. The full suite passes against MariaDB. Checked by hand: each message, including the moved spaces, the docsSpace warning and a failed notice.
+
+## 0.38.0 - Space export to zip (2026-10-12)
+
+No schema, configuration or grant change. No new Go modules.
+
+- **REST export.** `GET /api/v1/spaces/{space}/export` and `GET /api/v1/account/spaces/{owner}/{slug}/export` return the space at its current state as a zip, for backups: every file at its path, dated with that state's commit time, plus `.metatrash-export.json` with the space, state and each file's path, ID and size. Read access is enough (a read key, or a read-only connection). It counts as one read, plus its own allowance since it reads every file: 60 exports of a space and 10 per client of that space in each ten minutes. The space's files are read with one `git cat-file --batch` process. MCP is unchanged.
+- **`mt spaces export <space> [FILE]`** writes the same zip on the server, straight from the data directory (`-data`, default `/var/lib/metatrash`), with the service running and without rate limits. `<space>` is `owner/slug`, a space ID or a `spaces.json` name; `FILE` defaults to `<owner>-<slug>-<date>-<state>.zip` here, and `-` writes to standard output. **`mt spaces export -all DIR`** exports every ready owned space and every `spaces.json` space into `DIR`, for a nightly cron job. Exports are written readable only by the service user.
+- **`mtsync export SPACE [FILE]`** saves a space to a zip on your computer through the same sign-in as syncing (or `-key-env` for key spaces), whether or not it is synced.
+- docs/api-contract.md (Export), docs/deployment.md (console commands) and cmd/mtsync/README.md describe them.
+
+## 0.37.3 - mtsync retries refused renames (2026-10-12)
+
+No server change. No new Go modules.
+
+- mtsync retries a rename for up to two seconds when it fails. On Windows, replacing `.mtsync/state.json` or a downloaded file failed with "Access is denied" while OneDrive, an antivirus scanner or an editor briefly had the file open, which failed the pass (it was retried 5 seconds later, so nothing was lost).
+
+## 0.37.2 - mtsync start (2026-10-12)
+
+No server change. No new Go modules.
+
+- New `mtsync start` starts the service in the background and waits until it is running. On Windows it launches `mtsync run` with no console window (and outside the terminal's job, so closing the terminal does not stop it); the login entry is now `"mtsync.exe" start` instead of `conhost.exe --headless`, which could exit without starting the service. On Linux and macOS it uses the systemd unit or LaunchAgent when installed.
+- `mtsync install` checks that the service actually started and, if not, says to look at `mtsync log` or run `mtsync run`. A service that cannot start writes the reason to the log.
+- `mtsync add` of a folder already registered for the same space says so and succeeds, instead of reporting that the folder overlaps itself; for another space it says to `mtsync remove` it first.
+
+## 0.37.1 - mtsync sign-in page (2026-10-12)
+
+No server change. No new Go modules.
+
+- The page the browser shows after `mtsync login` now looks like the site: a "This computer is connected." page with the next three commands (`mtsync spaces`, `mtsync add`, `mtsync install`) and a link to Services in the account, or a clear "That didn't work." page with the reason. It is self-contained and served with a strict Content-Security-Policy.
+- cmd/mtsync/README.md: a Windows build line with `-o mtsync.exe`, and a note to clear `GOOS` after cross-compiling.
+
 ## 0.37.0 - Change lists: mtsync fetches only what changed (2026-10-12)
 
 No schema, configuration or grant change. No new Go modules.

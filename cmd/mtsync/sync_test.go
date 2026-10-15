@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -403,5 +404,21 @@ func TestSyncWithoutChangeLists(t *testing.T) {
 	h.sync()
 	if text, _ := h.localText("a.txt"); text != "a\n" || h.remoteText("b.txt") != "b\n" || !h.s.noChanges {
 		t.Fatal("sync against an older server")
+	}
+}
+
+func TestRenameRetry(t *testing.T) {
+	dir := t.TempDir()
+	from, to := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	if err := os.WriteFile(from, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameRetry(from, to); err != nil {
+		t.Fatal(err)
+	}
+	// A missing source fails at once instead of retrying.
+	start := time.Now()
+	if err := renameRetry(from, to); !errors.Is(err, os.ErrNotExist) || time.Since(start) > time.Second {
+		t.Fatalf("missing source: %v after %s", err, time.Since(start))
 	}
 }
