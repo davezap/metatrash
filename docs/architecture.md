@@ -1,13 +1,14 @@
 # Architecture
 
-How Metatrash 0.16.0 works. The wire contract is in [api-contract.md](api-contract.md),
-agent sign-in in [oauth.md](oauth.md), the GitHub App in [github.md](github.md)
-(0.17.0), installation in [deployment.md](deployment.md).
+How Metatrash works. The wire contract is in [api-contract.md](api-contract.md),
+agent sign-in in [oauth.md](oauth.md), the GitHub App in [github.md](github.md),
+installation, builds and releases in [deployment.md](deployment.md), and the
+folder sync client in [cmd/mtsync/README.md](../cmd/mtsync/README.md).
 
 ## Shape
 
 One Go process (`cmd/metatrash`, package `internal/service`) on loopback behind
-Apache HTTPS. Git stores space content and history; MariaDB stores accounts,
+Apache HTTPS; the same binary is the operator console (`mt`). Git stores space content and history; MariaDB stores accounts,
 owned spaces, memberships and OAuth connections. The HTML templates, CSS,
 JavaScript, tool schema and space README template are embedded in the binary.
 
@@ -130,12 +131,14 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
   they stay as long as journald keeps logs.
 - **Users** are keyed by an immutable `user_id`. Email is lowercased and can
   be changed by the user (above). Each user
-  may own `max_private_spaces` spaces (default one, set by the administrator
-  in the database).
-- **Usernames** are chosen once on Your account: 3–32 lowercase ASCII letters or
-  digits with single interior hyphens, not a reserved route name, unique in the
-  database. One is required to create a space, not to sign in or accept an
-  invitation.
+  may own `max_private_spaces` spaces (default one; the administrator changes
+  it with `mt users set-limit`).
+- **Usernames** are chosen once on Your account → Profile: 3–32 lowercase ASCII
+  letters or digits with single interior hyphens, not a reserved route name,
+  unique in the database. One is required to create a space, not to sign in or
+  accept an invitation. Users cannot change it; the administrator can, with
+  `mt users rename` (addresses with the old name stop working). It is the only
+  name an account has.
 
 All account forms check the exact Host and Origin, an action-specific session
 CSRF value, bounded form fields and a per-user attempt limit.
@@ -234,6 +237,19 @@ every request, before quotas are charged or Git is touched.
   errors and redirects are `noindex, nofollow`.
 - `-public-url` lets the site live under a folder; Go adds the prefix to every
   link, redirect, form and cookie name.
+
+## Sync clients and export
+
+- **mtsync** (`cmd/mtsync`) keeps local folders in sync with spaces. It signs
+  in through the built-in OAuth client `{issuer}/oauth/clients/sync` with a
+  loopback redirect, then uses the REST routes under `/api/v1/account/`.
+- REST list serves sync clients: `blobs=true` adds each file's Git blob hash,
+  `after=<state>` waits up to 25 seconds for the next change (one waiting
+  request instead of polling; at most 256 at once), and `since=<state>`
+  returns only the files changed or removed since that state.
+- **Export**: REST `GET …/export` returns a space's current files as a zip
+  (read access; its own rate allowance), and the console's
+  `mt spaces export` writes the same zip from the data directory for backups.
 
 ## Limits
 

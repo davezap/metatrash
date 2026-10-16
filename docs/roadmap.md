@@ -1,13 +1,6 @@
 # Roadmap
 
-Open work after 0.40.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
-
-## Priority: public guides for 0.40.0
-
-Per-file write checks, `edit`, `search` and line-range reads shipped in
-0.40.0. Once it is deployed, update `guides/working-with-agents.md` and
-`guides/rest-api.md` in `dave-zap/metatrash-com` (search before reading, edit
-instead of write, ifInState is per file, REST's `strict` default).
+Open work after 0.40.1. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change: later
 
@@ -29,21 +22,10 @@ alternative, both opt-in. Email codes are demoted to a backup and may later be
 turned off per account, or site-wide. Recovery must exist before anyone can turn
 email off. The OAuth server for agents is unchanged.
 
-1. Schema v8, Sign-in methods on Your account, confirm it's you (step-up) —
-   done in 0.22.0.
-2. Passkeys: add, sign in (button and autofill), rename, remove — done in
-   0.22.0. Standard library only.
-3. Authenticator app: enrol with a QR code (generated server-side as SVG) and a
-   text secret, confirm a code to enable, sign in with a code — done in
-   0.24.0. Secrets sealed with the `totpKeyFile` key. Sign-in takes the email
-   and the code in one form and answers the same whatever methods an address
-   has. Also confirms it's you.
-4. Recovery codes (10, single use, shown once, regenerate) and the
-   per-account email sign-in switch (off only with a passkey or authenticator
-   app plus recovery codes) — done in 0.25.0, with notices for every change.
-   Someone locked out emails Dave, who turns email sign-in back on by hand
-   (deployment.md, Recovery).
-5. Later: whether to remove email codes site-wide (needs an answer for sign-up).
+Passkeys, the authenticator app, recovery codes and the per-account email
+switch are done (0.22.0–0.25.0). Someone locked out emails Dave, who turns
+email sign-in back on with `mt users email-login` (deployment.md, Recovery).
+Open: whether to remove email codes site-wide (needs an answer for sign-up).
 
 Possible extras: when a passkey that is not registered tries to sign in, tell
 the browser to forget it (`PublicKeyCredential.signalUnknownCredential`, Chrome
@@ -51,40 +33,29 @@ the browser to forget it (`PublicKeyCredential.signalUnknownCredential`, Chrome
 
 ## Account lifecycle
 
-Agreed with Dave 2026-10-06. Build order:
+Agreed with Dave 2026-10-06. Done: change email address (0.26.0), sign out
+everywhere (0.27.0), transfer space ownership (0.30.0), export a space
+(0.38.0: REST, `mt spaces export`, `mtsync export`). Lost-everything recovery
+was dropped 2026-10-08 (Dave turns email sign-in back on by hand). Still to
+build, in this order:
 
-1. **Change email address.** Confirm a code sent to the new address (step-up
-   first); notice to the old address. Recovery depends on it. Done in 0.26.0
-   (Security → Email address; notices to both addresses; a taken address
-   gets a notice instead of a code).
-2. **Sign out everywhere.** "Sign out other sessions" on Your account, and done
-   automatically after recovery and after removing a sign-in method. Done in
-   0.27.0 (Security → Signed-in browsers; also after an email change and a
-   recovery code sign-in). Sessions survive restarts since 0.31.0.
-3. ~~Lost-everything recovery~~ dropped 2026-10-08 with Dave: someone with
-   no passkey, authenticator or recovery code and email sign-in off emails
-   Dave, who checks it's them and turns email sign-in back on by hand
-   (deployment.md, Recovery).
-4. **Delete a space** (owner, step-up, type the name). Members and connected
+1. **Delete a space** (owner, step-up, type the name). Members and connected
    apps lose access; GitHub folders are unlinked, the repo is untouched.
-5. **Export a space** as a ZIP of HEAD (offered before deleting; also answers
-   access requests).
-6. **Delete account.** Refused while the account owns any space (delete or
+2. **Download a space** from Your account (the zip REST and the console
+   already make), offered before deleting; also answers access requests.
+3. **Delete account.** Refused while the account owns any space (delete or
    transfer first). On confirm (step-up): the
    account is locked at once, sessions and OAuth grants revoked, and a notice
    is sent. **30-day grace period**: signing in during it cancels the
    deletion. Then purge: memberships, invitations, GitHub installations,
    passkeys, TOTP, recovery codes and the user row. Final notice email.
-7. **Update the privacy policy** (`legal/privacy.md` in the
+4. **Update the privacy policy** (`legal/privacy.md` in the
    `dave-zap/metatrash-com` space, live since 0.21.1) once deletion exists
    (sign-in sessions, device label and IP with 24-hour retention, added
    2026-10-09):
    what sign-in methods store (passkey public keys, sealed authenticator
    secrets, hashed recovery codes), how account deletion and the 30-day grace
    period work, and concrete retention for logs and backups.
-8. **Transfer space ownership** to an active member who accepts. Done in
-   0.30.0 (Manage sharing → Transfer ownership; the old address redirects
-   with 301 and stays reserved for the space).
 
 ## Folders: first version
 
@@ -92,53 +63,13 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
 `notes/design-session-2026-10-03.md`). The folder is the unit; a folder's
 `.metatrash.json` lists its services and actions.
 
-1. **Repo folder, boundary only.** Done in 0.16.0 and 0.16.1: `.metatrash.json`,
-   GitHub designation, nesting rules, root file in every space, `delete`,
-   `deletable`, history of deleted files. Checked live by Dave 2026-10-03.
-2. **One-way sync, space → GitHub.** Agreed 2026-10-03:
-   - Credentials through a **Metatrash GitHub App** (installed on the repo,
-     short-lived tokens, webhooks reused by step 3). Owned by Dave's account
-     for now, possibly a dedicated Metatrash GitHub account later (apps can be
-     transferred).
-   - Agent commands: `pending` (files changed in a GitHub folder since the
-     last push, with the last-pushed and current revisions) and `push`
-     (space, folder, message; all or nothing, never a partial push). An agent
-     that objects to a change restores the file from history, moves it out of
-     the folder, deletes it or adds it to `.gitignore`.
-   - Push modes in `.metatrash.json`: `agent` (default; only `push` sends),
-     `auto` (quiet-period batch; `push` still works) and `review` (parked; no
-     push until the review UI exists).
-   - Dotfiles allowed only inside GitHub folders (`.git` never); push follows
-     the folder's `.gitignore` (common patterns).
-   - Never force-push: if GitHub moved ahead, `push` stops and says so.
-   - Chunks, in this order (reordered 2026-10-05 with Dave: push needs a
-     baseline, because nearly every repo already has commits and push never
-     forces):
-     - 2a connect GitHub — done in 0.17.0, see [github.md](github.md). Checked
-       live 2026-10-04: app `metatrash-github` (App ID 5184697) on Dave's
-       account; connect and signed webhook delivery work.
-     - 2b dot names and `.gitignore` — done in 0.18.0, with Link an existing
-       installation (for apps installed from GitHub's page first).
-     - 2c baseline — done in 0.19.0: the `pull` tool fills a GitHub folder
-       from the repo and records the commit it came from in
-       `.metatrash/github.json` (installation token from the app JWT, GitHub
-       API and one tarball, no clone). Later pulls fast-forward an unchanged
-       folder. Files Metatrash cannot hold are skipped and will be carried
-       through by push.
-     - 2d `pending` and `push` — done in 0.20.0: Git Data API push on the
-       baseline tree with a tree-hash check, never forced; GitHub moved past
-       the baseline → stop. Pull merges by file (no file changed on both
-       sides) and converts UTF-16/UTF-32 to UTF-8. Push author is the
-       app (Verified) with the user as `Co-authored-by` (GitHub account when
-       linked). Hint in write/move/delete results after 30 minutes unpushed.
-     - 2e `auto` mode.
-     - Step 3 (ongoing pull) reuses the baseline fetch, triggered by push
-       webhooks.
-   - Repos never nest (decided 2026-10-03, kept for simplicity and so agents
-     have one rule to learn): no GitHub folder inside or around another.
-     Related repos sit side by side, e.g. under `dependencies/`. The refusal
-     names the clashing folder and suggests that.
-   - After 2d: binary files (images and PDFs by content allow-list, base64 in
+1. **Repo folder, boundary only.** Done (0.16.0).
+2. **One-way sync, space → GitHub.** Connect, dot names, `pull`, `pending`
+   and `push` are done (0.17.0–0.20.0, see [github.md](github.md)): the
+   Metatrash GitHub App (`metatrash-github`, App ID 5184697, on Dave's
+   account), never force-push, repos never nest. Still open:
+   - `auto` push mode (quiet-period batches; `push` still works).
+   - Binary files (images and PDFs by content allow-list, base64 in
      the API, image content on MCP reads). Until then pull skips them and push
      carries them through.
    - Later: consider letting push send `.github/workflows/` changes (needs
@@ -149,44 +80,9 @@ From the design session of 2026-10-03 (notes in the `dave-zap/metatrash` space,
      service on the space root (the whole space as one repo, so no other
      GitHub folders in it).
 3. **One-way sync, GitHub → space.** Repo changes appear in the folder (`pull`
-   auto).
+   auto), triggered by the push webhooks the app already receives.
 4. **One folder action.** A write into an action folder triggers one process;
    the result lands as a file. Enables the reserved `actions` key.
-
-## Done in 0.15.1: Change spaces
-
-Found in live use:
-
-- The only way to add a space to an existing connection is Revoke (Your
-  account → Connected apps) and reconnect. Deleting and re-adding the connector
-  in Claude does not restart OAuth: Claude reuses its cached tokens and
-  Metatrash is never told the connector was removed. (Checked 2026-10-03:
-  **Disconnect** then Connect on the connector in Claude does restart OAuth,
-  shows the consent page with the previous choices, and refreshes Claude's
-  copy of the tool schema.)
-- Approving consent replaces the connection's space list instead of adding to
-  it (after a reconnect, bartco dropped off because only metatrash was ticked).
-
-Proposal: a **Change spaces** action on each Connected apps entry, reusing the
-consent page's space chooser pre-filled with the current choices, editing the
-live connection in place with the same checks as consent and applying to the
-app's next operation. Add a hint that new spaces are added there.
-
-Done (see CHANGELOG). Consent still replaces the list it shows, which is
-correct for a pre-filled form; the bartco loss came from Revoke clearing the
-previous choices, and Change spaces removes the need to revoke.
-
-Checked live 2026-10-03 with Claude: removing metatrash and adding bartco
-read-only through Change spaces applied to Claude's next calls without a
-reconnect (`spaces` updated, metatrash `not_found`, bartco listed), and a write
-to bartco was refused with `insufficient_scope`. Adding metatrash back worked
-the same way.
-
-Also in 0.15.1:
-
-- **Agents don't need the 32-hex ID.** `owner/slug` names, IDs still
-  accepted. Bare slugs were dropped on purpose: their meaning changes as
-  spaces are connected.
 
 ## Owner checks still to run
 
@@ -294,29 +190,18 @@ Earlier checks:
 - ChatGPT end to end. If it cannot use CIMD it will need Dynamic Client
   Registration, which [oauth.md](oauth.md) allows adding only if needed.
 
-## Sessions
+## mtsync
 
-Agreed with Dave 2026-10-08, to build after the sections above.
-
-1. **Stay signed in across restarts.** Today sessions live in memory, so
-   every deploy or restart signs everyone out. Keep them in the account
-   database instead (a new schema version): a keyed digest of the token,
-   never the token, plus user, created, expires, last used and the step-up
-   time. Sign out, Sign out everywhere else and the automatic sign-outs delete
-   rows; expired rows are swept. Pending codes and other short-lived state can
-   stay in memory. Done in 0.31.0 (checked live 2026-10-09) (schema v10, `metatrash_sessions`). The
-   digest is SHA-256 of the 256-bit random token, as for OAuth tokens; a key
-   would need a secret that also survives restarts and adds nothing against a
-   token that size.
-2. **Signed-in devices table** at the bottom of Security, replacing the
-   Signed-in browsers card near the top. One row per session: device and
-   browser (from the User-Agent, e.g. "Chrome on Windows"), "this device" on
-   the current one, signed in, last used, and roughly where from if known (IP
-   or country). An ✕ on each other row signs that one out; Sign out
-   everywhere else stays above the table. Needs step 1, since the table reads
-   the stored sessions. Done in 0.32.0 (schema v11: `device` and `ip`
-   columns; checked live 2026-10-09). Location is the sign-in IP address; a country would need a
-   GeoIP database. Times are relative ("3 hours ago"), so no time zones.
+- **Desktop editor support.** Gaps G2–G9 in `developers/mtsync-editor-integration.md`
+  in the `dave-zap/metatrash-com` space: `--json` on `spaces` and `list`,
+  `whoami`, `resolve URL`, `files`, `status`, `history` and `show`. G1
+  (downloads) is met by GitHub releases with `SHA256SUMS` and `mtsync.json`,
+  except code signing.
+- **Code signing** for the release binaries (Windows Authenticode, macOS
+  Developer ID and notarization); needs certificates in the repository's
+  Actions secrets. See deployment.md, Automated builds and releases.
+- Deferred with Dave 2026-10-12: bulk first download, on-demand files like
+  OneDrive, automatic three-way merge of conflicts.
 
 ## Maintenance
 

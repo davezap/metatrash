@@ -1,9 +1,10 @@
 # GitHub connection
 
 Metatrash mirrors GitHub folders (a `.metatrash.json` `github` service) to
-repositories through the **Metatrash GitHub App**. Step 2a (0.17.0) connects
-accounts to the app, 2b (0.18.0) allows dot names, 2c (0.19.0) pulls a
-repository into its folder; pushing arrives in 2d. See [roadmap.md](roadmap.md).
+repositories through the **Metatrash GitHub App**: accounts connect to the
+app, agents `pull` a repository into its folder, edit it, check `pending` and
+`push` the changes back. Automatic pushing and pulling are on the
+[roadmap](roadmap.md).
 
 ## Registering the app
 
@@ -26,7 +27,7 @@ the account that will own it (Dave's for now; apps can be transferred later).
 
 Installation events (installed, deleted, suspended) always reach the webhook;
 they need no subscription. Pull mirrors `.github/workflows/` files with
-Contents read; push (0.20.0) refuses to change them whatever the Workflows
+Contents read; push refuses to change them whatever the Workflows
 permission says (see Push below), so that permission is not needed for now.
 
 After creating it: note the **App ID** and **Client ID**, generate a **client
@@ -108,11 +109,12 @@ uninstalled there; each connection links to its installation's settings page.
 matches the webhook secret (HMAC-SHA256 of the raw body, up to 8 MiB);
 anything else gets 401. `installation` events for this app update links:
 `deleted` removes the link, `suspend` and `unsuspend` set its status. Other
-events, including `push`, are acknowledged with 204 and ignored until step 3.
+events, including `push`, are acknowledged with 204 and ignored (automatic
+pulls on push events are on the roadmap).
 A database failure answers 503, and the delivery can be redelivered from the
 app's Advanced settings page on GitHub.
 
-## Dot names and .gitignore (0.18.0)
+## Dot names and .gitignore
 
 Repos need names starting with a dot (`.gitignore`, `.github/workflows/`). They
 are allowed only inside GitHub folders: writes and moves elsewhere are refused
@@ -122,14 +124,14 @@ nor its `.metatrash.json` deleted, while it still holds dot names; move or
 delete them first. Underscore names (`__init__.py`, `_config.yml`) are allowed
 in every folder.
 
-Push (coming next) sends a GitHub folder's files minus what its `.gitignore`
+Push sends a GitHub folder's files minus what its `.gitignore`
 files exclude, as git would: comments, negation, directory-only and anchored
 patterns, `*`, `?`, `**`, classes, escapes, `.gitignore` files in subfolders,
 and no re-including files inside an excluded folder. A test checks the matcher
 against `git check-ignore`. `.metatrash.json` files are Metatrash's and are
 never pushed.
 
-## Pull (0.19.0)
+## Pull
 
 An agent calls `pull` with a space and a GitHub folder (MCP on `/mcp/account`,
 or `POST /api/v1/account/spaces/{space}/pull`). The rules agents see are in
@@ -188,7 +190,7 @@ push checks against `tree`. Every commit carries the file forward; deleting a
 folder's `.metatrash.json` leaves its baseline in place, and a baseline for
 another repo or branch is ignored.
 
-## Push (0.20.0)
+## Push
 
 `pending` compares the folder with its baseline; `push` sends the result.
 Agent-facing rules are in
@@ -232,16 +234,16 @@ Agent-facing rules are in
    GitHub and the result carries a `warning`; the next pull catches up, since
    the same change on both sides is no conflict.
 
-**Hints.** After a write, move or delete in a GitHub folder, the service
+**Hints.** After a write, edit, move or delete in a GitHub folder, the service
 checks (outside the write queue) how old the folder's oldest pending change
 is: the earliest commit after the change's baseline revision whose message
 names a pending path. Over 30 minutes → `hint` in the result; the next check
 for that folder waits 30 minutes (or until the oldest change turns 30
 minutes), kept in memory, so a restart may give one extra hint.
 
-Push modes: `agent` (default) and `auto` push only through the tool (2e will
-add quiet-period pushing for `auto`); `review` refuses until a review screen
-exists.
+Push modes: `agent` (default) and `auto` push only through the tool
+(quiet-period pushing for `auto` is on the roadmap); `review` refuses until a
+review screen exists.
 
 ## Storage (schema v6)
 
@@ -250,4 +252,4 @@ account, the GitHub user who linked it, where the app is installed (login and
 `User`/`Organization`), status (`active` or `suspended`) and times. No tokens.
 Calls made as the app use a short-lived JWT signed with the private key to get
 installation tokens on demand. Pull baselines are in each space's Git, not in
-the database (no schema change in 0.19.0 or 0.20.0).
+the database.

@@ -47,11 +47,13 @@ Linux and macOS.
   within the last second waits for the next pass. Rate limits (`429`) are
   waited out.
 
-## Build
+## Download or build
 
-Each release on GitHub has mtsync for Windows, Linux and macOS (amd64 and
-arm64), with `SHA256SUMS` and `mtsync.json` (version, URL and SHA-256 per
-platform); see "Automated builds and releases" in
+Each [release](https://github.com/davezap/metatrash/releases) has mtsync for
+Windows, Linux and macOS (amd64 and arm64), with `SHA256SUMS` and
+`mtsync.json` (version, URL and SHA-256 per platform). Install steps for each
+system are in [Install mtsync](../../README.md#install-mtsync); how releases
+are made is in "Automated builds and releases" in
 [docs/deployment.md](../../docs/deployment.md).
 
 To build it yourself you need Go 1.25 or later. From the repository root:
@@ -83,12 +85,10 @@ and OAuth must already be enabled. The waiting request lasts 25 seconds, under
 the example Apache config's `ProxyTimeout 60`; keep any proxy timeout above
 30 seconds.
 
-**Client.** Copy the binary somewhere on your `PATH`:
-
-- Windows: `mtsync.exe` into a folder such as `C:\Tools` that is on `PATH`.
-- Linux/macOS: `install -m 0755 mtsync ~/.local/bin/mtsync`.
-
-Then, once per computer:
+**Client.** Put the binary somewhere on your `PATH` where it can stay
+([Install mtsync](../../README.md#install-mtsync): Windows
+`%LOCALAPPDATA%\Programs\mtsync`, Linux and macOS `~/.local/bin`). Then, once
+per computer:
 
 ```sh
 mtsync login       # choose spaces and access in the browser

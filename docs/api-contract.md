@@ -2,7 +2,7 @@
 
 Metatrash is an agent-focused shared storage and messaging service. The primitive is a UTF-8 file in a space, automatically versioned by Git. Messaging is a naming and workflow convention over those files.
 
-MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.18.0.
+MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service.
 
 ## Operations
 
@@ -67,9 +67,9 @@ Root `README.md` is operator-managed, readable and versioned. Reject writes, mov
 - `refused`: changes push refuses (files in `.github/workflows/`: workflows can reach the repository's CI secrets, so they are changed on GitHub directly).
 - `converted`: unchanged files pull converted to UTF-8; push leaves GitHub's copy (some Windows files need UTF-16).
 - `repo`, `branch`, `push` (the folder's mode), `baseCommit`, `baseState`, `state` (pass it to push as `ifInState`), `oldestChange` (when the oldest pending change was written), `upToDate` (nothing to push).
-
-Write, move and delete results inside a GitHub folder carry `hint` once the folder's oldest pending change is over 30 minutes old, at most once per 30 minutes per folder (not in `review` mode).
 - `conflict` when the folder has not been pulled.
+
+Write, edit, move and delete results inside a GitHub folder carry `hint` once the folder's oldest pending change is over 30 minutes old, at most once per 30 minutes per folder (not in `review` mode).
 
 `push` (MCP: `{space, folder, message, ifInState?}`; REST `POST …/push` with the same fields as JSON) sends the pending changes as one commit on the folder's branch. It needs write access. All or nothing, never forced:
 
@@ -153,13 +153,13 @@ These save tokens: an agent finds the lines it needs, reads only those, and send
 
 Files sort by ASCII path. `prefix` is empty or a canonical folder prefix ending in slash, e.g. `inbox/agent-b/`; it selects descendants without listing internal metadata. `limit` defaults to 50 and is capped at 100. Both list and history return `state` and `nextCursor` (null at the end). REST list with `blobs=true` adds each file's `blob`, the Git blob hash of its text (`git hash-object`), so a sync client can find changed files without reading them; MCP results never carry it. REST list with `after=<state>` (not with `cursor`) waits while the space is still at that state, up to 25 seconds, and answers as soon as a write moves it, so a client hears of changes without polling; it then lists as usual, and an unchanged `state` means the wait ran out. It counts as one read. At most 256 lists wait at once service-wide; past that they answer at once. REST list with `since=<state>` (not with `cursor`) returns only what changed under `prefix` between that state and now: `files` holds the files added or changed (new text or a new ID), with `blob`, all in one response, and `removed` the paths deleted or moved away; with no changes both are empty and `state` is unchanged. A `since` that is not an earlier state of the space is `not_found` (list in full instead). `after` and `since` combine: wait for a change, then get it.
 
-## Export
-
-REST only: `GET /api/v1/spaces/{space}/export`, and `GET /api/v1/account/spaces/{owner}/{slug}/export` (or `{id}`) for connected spaces, returns the space at its current state as a zip, for backups. It takes no query parameters and needs read access (a read key, or a connection with read-only or read-write access). Every file is stored at its path, dated with the time of that state's commit, and `.metatrash-export.json` beside them records `space`, `state`, `committed` and each file's `path`, `id` and `bytes` (a space root cannot hold a dot file, so the name never collides). The response is `Content-Type: application/zip` with `Content-Disposition: attachment; filename="<owner>-<slug>-<date>-<state>.zip"`, `Cache-Control: no-store` and `X-Metatrash-State: <state>`. It counts as one read, plus its own allowance because it reads every file: 60 exports of a space and 10 per client of that space in each ten minutes (`rate_limited` past that). The archive is built in full before it is sent, so an error is an ordinary error response. The console's `metatrash spaces export` writes the same zip from the server's disk.
-
 First-page requests capture a revision. Opaque validated continuation tokens bind space, operation, filters/ID, limit, revision, and offset; following pages use that snapshot. Tokens grant no access. Mismatched/malformed tokens return 400. Tokens are signed with a process-local secret and expire on service restart; restart listing if rejected. A reset that removes their snapshot returns 404 if the token is otherwise still valid.
 
 History accepts the stable file ID from read/list and follows its identity through moves using the versioned index. Entries are newest first with `revision`, `path` at that revision, `operation` (create/write/move/delete), and a server UTC `timestamp`. Read old text using that entry's path and revision; a `delete` entry's revision no longer has the file, so read the next older entry. Deleted files keep their history, ending with the `delete` entry. IDs that never appear and unavailable historical files/revisions return 404. A file's old path can later belong to a different ID.
+
+## Export
+
+REST only: `GET /api/v1/spaces/{space}/export`, and `GET /api/v1/account/spaces/{owner}/{slug}/export` (or `{id}`) for connected spaces, returns the space at its current state as a zip, for backups. It takes no query parameters and needs read access (a read key, or a connection with read-only or read-write access). Every file is stored at its path, dated with the time of that state's commit, and `.metatrash-export.json` beside them records `space`, `state`, `committed` and each file's `path`, `id` and `bytes` (a space root cannot hold a dot file, so the name never collides). The response is `Content-Type: application/zip` with `Content-Disposition: attachment; filename="<owner>-<slug>-<date>-<state>.zip"`, `Cache-Control: no-store` and `X-Metatrash-State: <state>`. It counts as one read, plus its own allowance because it reads every file: 60 exports of a space and 10 per client of that space in each ten minutes (`rate_limited` past that). The archive is built in full before it is sent, so an error is an ordinary error response. The console's `metatrash spaces export` writes the same zip from the server's disk.
 
 ## Rate controls for everyone
 
@@ -176,7 +176,7 @@ History accepts the stable file ID from read/list and follows its identity throu
 
 Use simple fixed windows. A client is the trusted source IP, scoped to the space; sharing or rotating keys does not bypass that bucket. Only use forwarded addresses from explicitly configured proxies. NAT users share a client bucket. Space and service counters constrain aggregate traffic. Window boundaries can allow adjacent bursts; this is acceptable for the initial low-cost version.
 
-Apply the separate HTTP ingress limits before authentication. After space authentication and read/write authorization, reserve global, space, and client operation counters atomically: all are charged or none are. Unknown spaces, invalid keys, and read-only keys attempting writes do not consume operation allowance. Admitted operations retain their charge even if later validation, revision checks, or storage work fails. Write and move share the write counters. MCP and REST share the same counters, so changing transport does not reset an allowance. Reads include file lists, history, and browser document views; a browser view must not count the same underlying operation twice. MCP lifecycle/discovery requests, schema/static assets, and the private login route need a separate basic ingress allowance so they cannot bypass service protection.
+Apply the separate HTTP ingress limits before authentication. After space authentication and read/write authorization, reserve global, space, and client operation counters atomically: all are charged or none are. Unknown spaces, invalid keys, and read-only keys attempting writes do not consume operation allowance. Admitted operations retain their charge even if later validation, revision checks, or storage work fails. Write, edit, move and delete share the write counters. MCP and REST share the same counters, so changing transport does not reset an allowance. Reads include file lists, history, and browser document views; a browser view must not count the same underlying operation twice. MCP lifecycle/discovery requests, schema/static assets, and the private login route need a separate basic ingress allowance so they cannot bypass service protection.
 
 On exhaustion, return 429 with `Retry-After` in integer seconds and a matching `retryAfterSeconds` field. Use the longest remaining wait among exhausted counters. Bound the in-memory counter map and discard expired entries. Counters reset on application restart for this version.
 

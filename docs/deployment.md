@@ -4,7 +4,7 @@ Target: Amazon Linux 2023 with Apache HTTPS in front of one Go service on
 `127.0.0.1:8080`. Build with Go 1.25+ (modules are pinned in `go.sum`); the
 service needs Git at runtime and MariaDB only when accounts are enabled.
 
-## Live server (as of 0.15.0)
+## Live server
 
 - Amazon Linux 2023, aarch64. Checkout at `/home/ec2-user/metatrash`, cloned from
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
@@ -253,7 +253,7 @@ Gmail SMTP on port 587 with STARTTLS, using an app password. Copy
    sudo mariadb metatrash < deploy/account-schema-v1.sql
    sed -n '/^-- v1 /,/^-- v2 /p' deploy/account-grants.sql | sudo mariadb   # v1 grants, needed by the import
    sudo -u metatrash /usr/local/bin/metatrash accounts-migrate -database-config /etc/metatrash/account-database.json -data /var/lib/metatrash -empty
-   for v in 2 3 4 5 6 7 8 9; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
+   for v in 2 3 4 5 6 7 8 9 10 11; do sudo mariadb metatrash < deploy/account-schema-v$v.sql; done
    sudo mariadb < deploy/account-grants.sql
    ```
 
@@ -346,9 +346,8 @@ sudo journalctl -u metatrash --since -7d -o cat | grep 'login ' | cut -d' ' -f3-
 
 ### Administration
 
-Change an allowance with
-`UPDATE metatrash_users SET max_private_spaces = N WHERE user_id = '…'` as
-administrator. Never edit IDs, slugs, ownership or `metatrash_account_meta`:
+Use the console commands above (`mt users set-limit`, `mt users rename`,
+`mt users email-login`) rather than SQL. Never edit IDs, slugs, ownership or `metatrash_account_meta`:
 ownership moves only through Transfer ownership on Manage sharing, which also
 moves memberships and app connections and keeps the old address.
 
@@ -424,6 +423,9 @@ sudo mariadb < deploy/account-grants.sql   # safe while 0.25.x is running
 
 Rolling back to 0.25.x is safe; addresses already changed stay changed.
 
+**0.27.0** needs no schema, configuration or grant change. Rolling back to
+0.26.x is safe.
+
 **0.28.0** adds console commands and the `mt` shortcut; no schema or
 configuration change. Run `deploy/account-grants.sql` again for the one new
 grant, `UPDATE (max_private_spaces)` on `metatrash_users`, which only
@@ -435,22 +437,23 @@ sudo mariadb < deploy/account-grants.sql   # safe while 0.27.x is running
 mt check
 ```
 
-**0.32.0** needs schema v11 before the new binary starts. No new grants (the
-v10 table grants cover the new columns), but running `account-grants.sql`
-again is harmless:
+**0.30.0** needs schema v9 and the grants before the new binary starts.
+`upgrade.sh` restarts the service, so apply them first; 0.29.x keeps running
+on v9 until it restarts:
 
 ```sh
-sudo mariadb metatrash < deploy/account-schema-v11.sql
+sudo mariadb metatrash < deploy/account-schema-v9.sql
+sudo mariadb < deploy/account-grants.sql
 ./upgrade.sh
 mt check
 ```
 
-v11 adds `device` (a label such as "Chrome on Windows", made from the
-User-Agent at sign-in; the header is not kept) and `ip` (the sign-in address,
-from `X-Forwarded-For` through the trusted proxy) to `metatrash_sessions`.
-Both go when the session does: sign-out or 24 hours. Sessions are kept across
-this upgrade; ones from 0.31.0 show "Unknown browser". To roll back to
-0.31.x, set `schema_version` to 10; the columns are ignored.
+v9 adds `metatrash_space_transfers` (pending ownership offers) and
+`metatrash_space_aliases` (addresses of transferred spaces), and grants
+`UPDATE (owner_user_id)` on `metatrash_spaces` and `UPDATE (member_user_id)`
+on `metatrash_oauth_grant_spaces`. To roll back to 0.29.x, set
+`schema_version` to 8; spaces already transferred keep their new owner, and
+their old addresses stop working until 0.30.0 is back.
 
 **0.31.0** needs schema v10 and the grants before the new binary starts.
 `upgrade.sh` restarts the service, so apply them first; 0.30.x keeps running
@@ -474,26 +477,26 @@ out since it was taken (each lasts at most 24 hours). To roll back to 0.30.x,
 set `schema_version` to 9; the table is ignored and everyone is signed out on
 that restart.
 
-**0.30.0** needs schema v9 and the grants before the new binary starts.
-`upgrade.sh` restarts the service, so apply them first; 0.29.x keeps running
-on v9 until it restarts:
+**0.32.0** needs schema v11 before the new binary starts. No new grants (the
+v10 table grants cover the new columns), but running `account-grants.sql`
+again is harmless:
 
 ```sh
-sudo mariadb metatrash < deploy/account-schema-v9.sql
-sudo mariadb < deploy/account-grants.sql
+sudo mariadb metatrash < deploy/account-schema-v11.sql
 ./upgrade.sh
 mt check
 ```
 
-v9 adds `metatrash_space_transfers` (pending ownership offers) and
-`metatrash_space_aliases` (addresses of transferred spaces), and grants
-`UPDATE (owner_user_id)` on `metatrash_spaces` and `UPDATE (member_user_id)`
-on `metatrash_oauth_grant_spaces`. To roll back to 0.29.x, set
-`schema_version` to 8; spaces already transferred keep their new owner, and
-their old addresses stop working until 0.30.0 is back.
+v11 adds `device` (a label such as "Chrome on Windows", made from the
+User-Agent at sign-in; the header is not kept) and `ip` (the sign-in address,
+from `X-Forwarded-For` through the trusted proxy) to `metatrash_sessions`.
+Both go when the session does: sign-out or 24 hours. Sessions are kept across
+this upgrade; ones from 0.31.0 show "Unknown browser". To roll back to
+0.31.x, set `schema_version` to 10; the columns are ignored.
 
-**0.27.0** needs no schema, configuration or grant change. Rolling back to
-0.26.x is safe.
+**0.33.0 to 0.40.1** need no schema, configuration or grant change. mtsync
+(0.33.0) needs OAuth enabled; its waiting list requests last 25 seconds, so
+keep any proxy timeout above 30 seconds.
 
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again
@@ -544,9 +547,6 @@ addresses are only in the notice emails.
   schema v11 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - CI runs both on every push (see Automated builds and releases).
-- There is no Go toolchain on the Windows development PC. A cloud workspace
-  needed Go 1.25 built from the golang/go source on GitHub and golang.org/x
-  modules resolved from GitHub mirrors through a private `-modfile`.
 
 Quick live checks:
 

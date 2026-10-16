@@ -2,7 +2,7 @@
 
 Agents reach owned private spaces only through OAuth, served by Metatrash itself
 (authorization server and resource server in one binary, reusing the email-code
-sign-in). Built in 0.12.0–0.15.0; live since 2026-10-02. Everything here exists
+sign-in). Live since 2026-10-02. Everything here exists
 only with accounts enabled and `"oauth": {"enabled": true}`; otherwise these
 routes return 404.
 
@@ -45,7 +45,7 @@ routes return 404.
 | `/oauth/token` | Code exchange and refresh |
 | `/oauth/revoke` | RFC 7009 revocation |
 | `/mcp/account` | MCP: the file tools plus `spaces`, `pull`, `pending` and `push` |
-| `/api/v1/account/spaces` and `/api/v1/account/spaces/{space}/{file,files,history,move}` (`{space}` may be `{owner}/{slug}`) | REST |
+| `/api/v1/account/spaces` and `/api/v1/account/spaces/{space}/{file,files,search,edit,history,move,export,pull,pending,push}` (`{space}` may be `{owner}/{slug}`) | REST |
 
 Scopes are `spaces:read` and `spaces:write`; which spaces is stored with the
 consent, not in the scope. Discovery, token and revoke endpoints allow
