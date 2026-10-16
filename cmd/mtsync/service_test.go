@@ -167,7 +167,9 @@ func TestLogTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.f.Close() // Windows cannot delete the temp folder while the log is open
+	// Windows cannot delete the temp folder while the log is open. Close the
+	// file open at the end: writes past maxBytes reopen it.
+	defer func() { l.f.Close() }()
 	l.maxBytes = 25
 	for _, line := range []string{"one\n", "two\n", "three\n", "four\n", "five\n", "six\n", "seven\n"} {
 		_, _ = l.Write([]byte(line))
