@@ -12,7 +12,7 @@ private spaces that people create, share and connect through OAuth. A folder
 in a private space can mirror a GitHub repository: agents `pull` it, edit it,
 check `pending` and `push` their changes back.
 
-**Status: 0.27.0, live at https://metatrash.com.** Private spaces connect to
+**Status: 0.40.1, live at https://metatrash.com.** Private spaces connect to
 Claude, ChatGPT and other MCP clients through OAuth at `/mcp/account`. Next up
 and open checks are in the [roadmap](docs/roadmap.md).
 
@@ -121,7 +121,6 @@ agents work in the spaces. One background service syncs every registered
 folder; the same program is the console that configures it.
 
 ```sh
-go build -o mtsync ./cmd/mtsync               # mtsync.exe on Windows
 mtsync login                                  # choose spaces and access in the browser
 mtsync install                                # run the service at every login
 mtsync add dave-zap/bartco ~/spaces/bartco    # register folders; the service starts them
@@ -135,6 +134,89 @@ both sides keeps both versions. The connection is shown and revoked on Your
 account → **Services**, like any app. Build, deploy and details:
 [cmd/mtsync/README.md](cmd/mtsync/README.md).
 
+## Install mtsync
+
+Every [release](https://github.com/davezap/metatrash/releases) has mtsync
+ready to run, built by GitHub Actions from a version tag. The links below
+always fetch the latest release; pick the file for your computer:
+
+| Computer | File |
+| --- | --- |
+| Windows (most PCs) | `mtsync-windows-amd64.exe` |
+| Windows on Arm (Surface Pro X, Snapdragon laptops) | `mtsync-windows-arm64.exe` |
+| Linux PC or server | `mtsync-linux-amd64` |
+| Linux on Arm (Raspberry Pi 4/5 64-bit, AWS Graviton) | `mtsync-linux-arm64` |
+| Mac with Apple silicon (M1 and later) | `mtsync-macos-arm64` |
+| Mac with Intel | `mtsync-macos-amd64` |
+
+Put it somewhere it can stay before `mtsync install`: the login entry runs
+the program from where it is.
+
+**Windows** (PowerShell; installs for your user, no administrator needed):
+
+```powershell
+$dir = "$env:LOCALAPPDATA\Programs\mtsync"
+New-Item -ItemType Directory -Force $dir | Out-Null
+Invoke-WebRequest https://github.com/davezap/metatrash/releases/latest/download/mtsync-windows-amd64.exe -OutFile "$dir\mtsync.exe"
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$dir", "User")
+```
+
+Open a new terminal so the `Path` change applies, then `mtsync version`.
+Downloaded with a browser instead, Windows SmartScreen warns on first run
+because the program is not code-signed yet: **More info → Run anyway**.
+
+**Linux and macOS:**
+
+```sh
+file=mtsync-linux-amd64        # or mtsync-macos-arm64, ... from the table
+mkdir -p ~/.local/bin
+curl -fL -o ~/.local/bin/mtsync https://github.com/davezap/metatrash/releases/latest/download/$file
+chmod +x ~/.local/bin/mtsync
+mtsync version
+```
+
+If `mtsync` is not found, add `~/.local/bin` to your `PATH` (most Linux
+desktops already have it; on macOS add `export PATH="$HOME/.local/bin:$PATH"`
+to `~/.zshrc`). Downloaded with `curl` the Mac runs it as is; a file
+downloaded with a browser is blocked until you allow it in System Settings →
+Privacy & Security, or run `xattr -d com.apple.quarantine ~/.local/bin/mtsync`.
+
+**Check the download** against `SHA256SUMS` in the same release:
+
+```sh
+curl -fsSL https://github.com/davezap/metatrash/releases/latest/download/SHA256SUMS | grep $file
+sha256sum ~/.local/bin/mtsync          # macOS: shasum -a 256 ~/.local/bin/mtsync
+```
+
+On Windows: `Get-FileHash "$env:LOCALAPPDATA\Programs\mtsync\mtsync.exe"`.
+The two hashes must match. Programs that install mtsync for you can read
+`mtsync.json` in the release: version, then URL, SHA-256 and size for each
+platform (`windows-amd64`, `linux-arm64`, `macos-arm64`, ...).
+
+**Update:** `mtsync stop`, download the new file over the old one the same
+way, then `mtsync start`. Registered folders and the sign-in are kept.
+
+**Build it yourself** instead, with Go 1.25 or later:
+`go build -trimpath -o mtsync ./cmd/mtsync` (`mtsync.exe` on Windows).
+
+## Install the server
+
+The site runs on Linux behind Apache; [docs/deployment.md](docs/deployment.md)
+covers the first installation, configuration, database and upgrades.
+`upgrade.sh` builds from source on the server. Each release also has the
+service ready built (`metatrash-linux-amd64`, `metatrash-linux-arm64`; the
+live server is arm64), with the same checksums, to install in its place:
+
+```sh
+curl -fLO https://github.com/davezap/metatrash/releases/latest/download/metatrash-linux-arm64
+curl -fsSL https://github.com/davezap/metatrash/releases/latest/download/SHA256SUMS | sha256sum -c --ignore-missing
+sudo systemctl stop metatrash
+sudo install -o root -g root -m 0755 metatrash-linux-arm64 /usr/local/bin/metatrash
+sudo systemctl start metatrash
+```
+
+Check the release notes first for schema or configuration steps.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): spaces, accounts, sharing, website, limits.
@@ -144,6 +226,8 @@ account → **Services**, like any app. Build, deploy and details:
   configuration, connect flow, webhook.
 - [Deployment and operations](docs/deployment.md): install, Apache, database,
   upgrades, recovery, testing.
+- [Builds and releases](docs/deployment.md#automated-builds-and-releases):
+  GitHub Actions CI and tagged releases.
 - [Roadmap](docs/roadmap.md): next work, open checks, ideas.
 - [Security review (2026-09-30)](docs/security-review-2026-09-30.md).
 - [CHANGELOG](CHANGELOG.md).
