@@ -1,0 +1,89 @@
+# Tests on every push and pull request; release.yml runs it again before a release.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Linux, MariaDB)
+    runs-on: ubuntu-latest
+    services:
+      # Disposable database for the integration tests (db_integration_test.go).
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci-root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Not gofmt-formatted:"; echo "$unformatted"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # Schema v1-v11 and the runtime grants, as in docs/deployment.md. The
+      # login is '%' instead of 'localhost' because the tests reach the
+      # container over TCP from the runner.
+      - name: Prepare test database
+        env:
+          DB: ${{ job.services.mariadb.id }}
+        run: |
+          sql() { docker exec -i "$DB" mariadb -uroot -pci-root "$@"; }
+          sql -e "CREATE DATABASE metatrash CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+                  CREATE USER 'metatrash_accounts'@'%' IDENTIFIED BY 'ci-only-password';"
+          for v in $(seq 1 11); do sql metatrash < deploy/account-schema-v$v.sql; done
+          sed "s/'metatrash_accounts'@'localhost'/'metatrash_accounts'@'%'/g" deploy/account-grants.sql | sql > /dev/null
+          sql metatrash -e "UPDATE metatrash_account_meta SET schema_version = 11, migration_source = 'empty'"
+          echo ci-only-password > "$RUNNER_TEMP/database-password"
+          jq -n --arg pw "$RUNNER_TEMP/database-password" \
+            '{network: "tcp", address: "127.0.0.1:3306", database: "metatrash", username: "metatrash_accounts", passwordFile: $pw}' \
+            > "$RUNNER_TEMP/account-database.json"
+
+      - name: go test
+        env:
+          METATRASH_TEST_DB_CONFIG: ${{ runner.temp }}/account-database.json
+        run: go test -count=1 ./...
+
+      - name: Cross-compile
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64; do
+            for program in mtsync metatrash; do
+              echo "$program $target"
+              GOOS=${target%/*} GOARCH=${target#*/} go build -trimpath -o /dev/null ./cmd/$program
+            done
+          done
+
+  mtsync:
+    name: Test mtsync (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 ./cmd/mtsync

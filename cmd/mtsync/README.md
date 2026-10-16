@@ -49,7 +49,12 @@ Linux and macOS.
 
 ## Build
 
-Needs Go 1.25 or later. From the repository root:
+Each release on GitHub has mtsync for Windows, Linux and macOS (amd64 and
+arm64), with `SHA256SUMS` and `mtsync.json` (version, URL and SHA-256 per
+platform); see "Automated builds and releases" in
+[docs/deployment.md](../../docs/deployment.md).
+
+To build it yourself you need Go 1.25 or later. From the repository root:
 
 ```sh
 go build -trimpath -o mtsync ./cmd/mtsync              # this computer (Linux, macOS)

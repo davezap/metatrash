@@ -133,6 +133,59 @@ sudo install -o root -g root -m 0644 deploy/metatrash.service /etc/systemd/syste
 sudo systemctl daemon-reload && sudo systemctl enable --now metatrash
 ```
 
+## Automated builds and releases
+
+GitHub Actions (`.github/workflows/`) tests and builds on GitHub's machines, so
+no Go toolchain is needed locally:
+
+- **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
+  `go test ./...` on Linux with the MariaDB integration tests against a
+  disposable MariaDB 11.4 container (schema v1–v11 and `account-grants.sql`,
+  as below), a cross-compile check of both programs for every release
+  platform, and `go test ./cmd/mtsync` on Windows and macOS.
+- **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
+  match `Version` in `assets.go` and `CHANGELOG.md` must have a `## X.Y.Z `
+  section. It runs CI, builds with `CGO_ENABLED=0 go build -trimpath`, and
+  publishes a GitHub Release with that changelog section as its notes:
+
+  | File | Contents |
+  | --- | --- |
+  | `mtsync-windows-amd64.exe`, `mtsync-windows-arm64.exe` | mtsync for Windows |
+  | `mtsync-linux-amd64`, `mtsync-linux-arm64` | mtsync for Linux |
+  | `mtsync-macos-amd64`, `mtsync-macos-arm64` | mtsync for macOS (Intel, Apple silicon) |
+  | `metatrash-linux-amd64`, `metatrash-linux-arm64` | the service and console (`mt`); the live server is arm64 |
+  | `SHA256SUMS` | `sha256sum -c` format, every file above |
+  | `mtsync.json` | `{version, tag, files: {"windows-amd64": {name, url, sha256, size}, ...}}` for installers and the editor |
+
+  A tag with a suffix (`v0.41.0-rc.1`) is published as a pre-release; its
+  `Version` must carry the same suffix.
+
+To release: bump `Version`, add the changelog section, commit, then
+`git tag v0.41.0 && git push origin v0.41.0`. A failed run publishes nothing;
+fix, move the tag (`git tag -f`, `git push -f origin v0.41.0`) and it runs again.
+
+Binaries are not code-signed. Windows SmartScreen warns on first run of a
+downloaded `.exe`, and macOS refuses a browser-downloaded binary until it is
+allowed in System Settings → Privacy & Security (`curl` downloads are not
+quarantined). Signing needs a certificate (Windows: Azure Trusted Signing or an
+OV/EV code-signing certificate; macOS: an Apple Developer ID and notarization)
+added to the repository's Actions secrets, then a signing step in `release.yml`.
+
+If the repository is private, release downloads need a GitHub sign-in or token,
+so public downloads of mtsync need either a public repository or a copy on the
+site (for example `/downloads/mtsync.json`).
+
+`upgrade.sh` still builds the service from source on the server. It could
+install the release binary instead, with a fine-grained token (Contents: read)
+on the server for `gh` (the read-only deploy key covers git only):
+
+```sh
+gh release download "v$VERSION" -R davezap/metatrash -D bin --clobber \
+  -p metatrash-linux-arm64 -p SHA256SUMS
+(cd bin && sha256sum -c --ignore-missing SHA256SUMS)
+install -m 0755 bin/metatrash-linux-arm64 bin/metatrash
+```
+
 ## Apache
 
 Put `deploy/apache-metatrash.conf.example` inside the existing HTTPS
@@ -490,6 +543,7 @@ addresses are only in the notice emails.
   database config file for a **freshly recreated, disposable** database at
   schema v11 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
+- CI runs both on every push (see Automated builds and releases).
 - There is no Go toolchain on the Windows development PC. A cloud workspace
   needed Go 1.25 built from the golang/go source on GitHub and golang.org/x
   modules resolved from GitHub mirrors through a private `-modfile`.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.40.1 - Automated builds and releases (2026-10-16)
+
+No server or mtsync change. No schema, configuration or grant change. No new Go modules.
+
+- **CI** (`.github/workflows/ci.yml`) on every push and pull request: `gofmt`, `go vet`, `go test ./...` on Linux including the MariaDB integration tests (a disposable MariaDB 11.4 container with schema v1–v11 and `account-grants.sql`), a cross-compile of mtsync and metatrash for Windows, Linux and macOS on amd64 and arm64, and the mtsync tests on Windows and macOS.
+- **Releases** (`.github/workflows/release.yml`): pushing a tag `vX.Y.Z` that matches `Version` checks the changelog has that section, runs CI, and publishes a GitHub Release with mtsync for Windows, Linux and macOS (amd64, arm64), the metatrash service for Linux (amd64, arm64), `SHA256SUMS`, and `mtsync.json` (version, URL, SHA-256 and size per platform, for the editor's installer). The changelog section is the release notes. Binaries are not code-signed yet.
+- `upgrade.sh` is unchanged (it still builds on the server); docs/deployment.md shows how it could install the release binary instead.
+- docs/deployment.md ("Automated builds and releases", Testing) and cmd/mtsync/README.md (Build).
+
 ## 0.40.0 - Edit, search, line ranges and per-file write checks (2026-10-16)
 
 No schema, configuration or grant change. No new Go modules. Agents spend fewer tokens per change: they find text with `search`, read only the lines they need, and send back only what changes with `edit`. mtsync is unchanged and keeps working as before.

@@ -1,0 +1,98 @@
+# Push a tag vX.Y.Z (matching Version in assets.go) to test, build and publish
+# a GitHub Release with mtsync for Windows, Linux and macOS, the metatrash
+# server for Linux, SHA256SUMS and mtsync.json.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        run: |
+          version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' assets.go)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Version $version in assets.go"; exit 1
+          fi
+          if ! grep -q "^## $version " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version ' section"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: check
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build and publish
+    needs: [check, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false  # release builds start clean
+
+      - name: Build
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir dist
+          build() { # program goos goarch name
+            echo "$4"
+            GOOS=$2 GOARCH=$3 go build -trimpath -o "dist/$4" "./cmd/$1"
+          }
+          for arch in amd64 arm64; do
+            build mtsync windows $arch mtsync-windows-$arch.exe
+            build mtsync linux   $arch mtsync-linux-$arch
+            build mtsync darwin  $arch mtsync-macos-$arch
+            build metatrash linux $arch metatrash-linux-$arch
+          done
+          ./dist/metatrash-linux-amd64 version
+
+      - name: Checksums and mtsync.json
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          for f in mtsync-*; do
+            platform=${f#mtsync-}; platform=${platform%.exe}
+            jq -n --arg p "$platform" --arg name "$f" --arg url "$base/$f" \
+              --arg sha "$(sha256sum "$f" | cut -d' ' -f1)" --argjson size "$(stat -c %s "$f")" \
+              '{($p): {name: $name, url: $url, sha256: $sha, size: $size}}'
+          done | jq -s --arg v "$VERSION" --arg tag "$GITHUB_REF_NAME" \
+              '{version: $v, tag: $tag, files: add}' > mtsync.json
+          cat SHA256SUMS mtsync.json
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="$VERSION" '
+            index($0, "## " v " ") == 1 { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title=$(sed -n "s/^## $VERSION - //p" CHANGELOG.md | head -n1)
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag $prerelease \
+            --title "$VERSION - $title" --notes-file "$RUNNER_TEMP/notes.md"
