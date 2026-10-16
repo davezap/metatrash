@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.7.0",
+  "schemaVersion": "0.8.0",
   "status": "implemented",
   "description": "Git-backed text storage; messaging via file conventions. Each folder may describe itself in .metatrash.json; read the space root one first.",
   "mcp": {
@@ -10,14 +10,14 @@
   },
   "authentication": {
     "public": "No key required.",
-    "private": "Space-scoped bearer key: read permits read/list/history; write permits all. Transport credentials only.",
+    "private": "Space-scoped bearer key: read permits read/search/list/history; write permits all. Transport credentials only.",
     "rateControls": "Shared limits across clients/transports; admin overrides per space.",
     "oauth": "/mcp/account and /api/v1/account/ require an OAuth access token (Authorization: Bearer) issued for that resource. Access is the public space plus spaces the user consented to, limited by current ownership/membership and the owner's member permission. Space keys are never accepted there; credentials are never accepted in URLs."
   },
   "tools": [
     {
       "name": "read",
-      "description": "Read text at HEAD or revision; returns snapshot state. Start with path .metatrash.json: it describes the space and its folders.",
+      "description": "Read text at HEAD or revision; returns snapshot state. Start with path .metatrash.json: it describes the space and its folders. For a long file, read only the lines you need with startLine and lineCount (search gives line numbers); lines then reports the range and the file's total lines.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -40,6 +40,17 @@
           "revision": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$"
+          },
+          "startLine": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "First line to return (1-based). With startLine or lineCount, text holds only those lines, each with its line ending."
+          },
+          "lineCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000,
+            "description": "How many lines to return from startLine (default: to the end)."
           }
         },
         "required": [
@@ -98,6 +109,32 @@
               "text"
             ],
             "additionalProperties": false
+          },
+          "lines": {
+            "type": "object",
+            "description": "Present when startLine or lineCount was given.",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Last line returned; start-1 when none."
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Lines in the whole file."
+              }
+            },
+            "required": [
+              "start",
+              "end",
+              "total"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -109,8 +146,142 @@
       }
     },
     {
+      "name": "search",
+      "description": "Find lines in a space's files, like grep: returns each matching line with its path, file ID and line number, and optionally lines of context. Use it to locate text before an edit, or to choose which lines to read, instead of reading whole files. Plain text by default; regex uses RE2 syntax. Results are in path and line order, up to limit.",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Text (or regular expression) to find within one line."
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 241,
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}$",
+            "default": "",
+            "description": "Folder prefix ending in /; empty selects all."
+          },
+          "regex": {
+            "type": "boolean",
+            "default": false,
+            "description": "Treat query as an RE2 regular expression."
+          },
+          "ignoreCase": {
+            "type": "boolean",
+            "default": false
+          },
+          "context": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 0,
+            "description": "Lines of context before and after each match."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50,
+            "description": "Most matching lines to return."
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          }
+        },
+        "required": [
+          "space",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Snapshot commit hash."
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240,
+                  "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+                  "description": "Case-sensitive relative path."
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "text": {
+                  "type": "string",
+                  "description": "The matching line without its line ending, cut to 400 bytes."
+                },
+                "before": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "after": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "path",
+                "id",
+                "line",
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More lines matched than limit; narrow the query or prefix."
+          }
+        },
+        "required": [
+          "space",
+          "state",
+          "matches",
+          "truncated"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "write",
-      "description": "Create/replace text. Root README.md is immutable (case-insensitive). A .metatrash.json describes its folder and is checked on write: a JSON object with optional purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"agent\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed. Editing a github folder: pull first (at the start of each session), edit with write, move and delete, call pending to see what will be sent, then push with a message; nothing reaches GitHub until push (push \"agent\", the default). If push reports GitHub moved ahead, pull (it keeps your changes when no file changed on both sides), then push again. Results in a github folder carry a hint once changes have waited unpushed for 30 minutes.",
+      "description": "Create a file or replace its whole text. To change part of an existing file, use edit instead: it sends only the changed text. Root README.md is immutable (case-insensitive). A .metatrash.json describes its folder and is checked on write: a JSON object with optional purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"agent\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed. Editing a github folder: pull first (at the start of each session), edit with write, move and delete, call pending to see what will be sent, then push with a message; nothing reaches GitHub until push (push \"agent\", the default). If push reports GitHub moved ahead, pull (it keeps your changes when no file changed on both sides), then push again. Results in a github folder carry a hint once changes have waited unpushed for 30 minutes.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -139,12 +310,17 @@
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "State from read/list; must equal HEAD. On state_mismatch, re-read before retrying."
+            "description": "State from read, list or search. Refused with state_mismatch only if a file this change touches changed since (or anything, with strict); on state_mismatch, re-read before retrying."
           },
           "createOnly": {
             "type": "boolean",
             "default": false,
             "description": "Fail if path exists."
+          },
+          "strict": {
+            "type": "boolean",
+            "default": false,
+            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
           }
         },
         "required": [
@@ -214,6 +390,158 @@
           "hint": {
             "type": "string",
             "description": "Present when this change lies in a GitHub folder whose oldest unpushed change is over 30 minutes old (at most once per 30 minutes per folder): check pending and push when the work is ready."
+          },
+          "rebased": {
+            "type": "boolean",
+            "description": "Present (true) when ifInState was older than the space's state: the change was applied on top of newer changes to other files."
+          }
+        },
+        "required": [
+          "space",
+          "oldState",
+          "newState",
+          "file",
+          "created",
+          "changed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "edit",
+      "description": "Change part of an existing file without sending its whole text: each edit replaces oldText, which must match the current text exactly once (include enough surrounding text to make it unique, or set replaceAll), with newText. Edits apply in order; all or none are saved, as one change in the file's history. No ifInState is needed: an oldText that no longer matches is refused with conflict, so read or search again and retry. Pass ifInState to also refuse when this file changed since that state (other files may have changed). Files written with CRLF line endings match LF oldText. Same rules as write otherwise: README.md is immutable, .metatrash.json is validated, the file limit applies. To create a file or replace all of it, use write.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "description": "Existing case-sensitive relative path."
+          },
+          "edits": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Replacements, applied in order.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oldText": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Exact current text to replace, including spaces and line breaks."
+                },
+                "newText": {
+                  "type": "string",
+                  "description": "Replacement text; empty deletes oldText."
+                },
+                "replaceAll": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Replace every match instead of requiring exactly one."
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "ifInState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Optional state from read, list or search: refuse with state_mismatch if this file changed since then (or anything, with strict)."
+          },
+          "strict": {
+            "type": "boolean",
+            "default": false,
+            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
+          }
+        },
+        "required": [
+          "space",
+          "path",
+          "edits"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
+          },
+          "oldState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "newState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Stable across edits/moves."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "protected": {
+                "type": "boolean"
+              },
+              "deletable": {
+                "type": "boolean",
+                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "bytes",
+              "protected",
+              "deletable"
+            ],
+            "additionalProperties": false
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "hint": {
+            "type": "string",
+            "description": "Present when this change lies in a GitHub folder whose oldest unpushed change is over 30 minutes old (at most once per 30 minutes per folder): check pending and push when the work is ready."
+          },
+          "rebased": {
+            "type": "boolean",
+            "description": "Present (true) when ifInState was older than the space's state: the change was applied on top of newer changes to other files."
           }
         },
         "required": [
@@ -365,7 +693,12 @@
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "State from read/list; must equal HEAD. On state_mismatch, re-read before retrying."
+            "description": "State from read, list or search. Refused with state_mismatch only if a file this change touches changed since (or anything, with strict); on state_mismatch, re-read before retrying."
+          },
+          "strict": {
+            "type": "boolean",
+            "default": false,
+            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
           }
         },
         "required": [
@@ -429,6 +762,10 @@
           "hint": {
             "type": "string",
             "description": "Present when this change lies in a GitHub folder whose oldest unpushed change is over 30 minutes old (at most once per 30 minutes per folder): check pending and push when the work is ready."
+          },
+          "rebased": {
+            "type": "boolean",
+            "description": "Present (true) when ifInState was older than the space's state: the change was applied on top of newer changes to other files."
           }
         },
         "required": [
@@ -467,7 +804,12 @@
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "State from read/list; must equal HEAD. On state_mismatch, re-read before retrying."
+            "description": "State from read, list or search. Refused with state_mismatch only if a file this change touches changed since (or anything, with strict); on state_mismatch, re-read before retrying."
+          },
+          "strict": {
+            "type": "boolean",
+            "default": false,
+            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
           }
         },
         "required": [
@@ -530,6 +872,10 @@
           "hint": {
             "type": "string",
             "description": "Present when this change lies in a GitHub folder whose oldest unpushed change is over 30 minutes old (at most once per 30 minutes per folder): check pending and push when the work is ready."
+          },
+          "rebased": {
+            "type": "boolean",
+            "description": "Present (true) when ifInState was older than the space's state: the change was applied on top of newer changes to other files."
           }
         },
         "required": [
@@ -656,6 +1002,21 @@
       "path": "/api/v1/spaces/{space}/file",
       "query": [
         "path",
+        "revision",
+        "startLine",
+        "lineCount"
+      ]
+    },
+    "search": {
+      "method": "GET",
+      "path": "/api/v1/spaces/{space}/search",
+      "query": [
+        "query",
+        "prefix",
+        "regex",
+        "ignoreCase",
+        "context",
+        "limit",
         "revision"
       ]
     },
@@ -668,7 +1029,19 @@
       "body": [
         "text",
         "ifInState",
-        "createOnly"
+        "createOnly",
+        "strict"
+      ],
+      "note": "REST write, move and delete default to strict: true (the whole-space check sync clients rely on); send strict: false for the per-file check MCP uses by default. Edit defaults to the per-file check everywhere."
+    },
+    "edit": {
+      "method": "POST",
+      "path": "/api/v1/spaces/{space}/edit",
+      "body": [
+        "path",
+        "edits",
+        "ifInState",
+        "strict"
       ]
     },
     "list": {
@@ -689,7 +1062,8 @@
       "body": [
         "from",
         "to",
-        "ifInState"
+        "ifInState",
+        "strict"
       ]
     },
     "delete": {
@@ -699,7 +1073,8 @@
         "path"
       ],
       "body": [
-        "ifInState"
+        "ifInState",
+        "strict"
       ]
     },
     "history": {
@@ -792,7 +1167,7 @@
     ],
     "additionalProperties": false
   },
-  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema. conflict and github_unavailable come from pull and push.",
+  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema. conflict comes from edit (an oldText that no longer matches once) and from pull and push; github_unavailable from pull and push.",
   "accountTools": [
     {
       "name": "spaces",

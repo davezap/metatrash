@@ -248,6 +248,15 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "GET" {
 			op = "history"
 		}
+	case "search":
+		if r.Method == "GET" {
+			op = "search"
+		}
+	case "edit":
+		allow = "POST"
+		if r.Method == "POST" {
+			op = "edit"
+		}
 	case "export":
 		if r.Method == "GET" {
 			op = "export"
@@ -279,7 +288,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "move" || op == "delete" || op == "pull" || op == "push"
+	write := op == "write" || op == "edit" || op == "move" || op == "delete" || op == "pull" || op == "push"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -471,7 +480,11 @@ func parseQuery(raw, op string) (Input, error) {
 	allowed := map[string]bool{}
 	switch op {
 	case "read":
-		allowed["path"], allowed["revision"] = true, true
+		allowed["path"], allowed["revision"], allowed["startLine"], allowed["lineCount"] = true, true, true, true
+	case "search":
+		for _, k := range []string{"query", "prefix", "regex", "ignoreCase", "context", "limit", "revision"} {
+			allowed[k] = true
+		}
 	case "write", "delete":
 		allowed["path"] = true
 	case "list":
@@ -500,6 +513,24 @@ func parseQuery(raw, op string) (Input, error) {
 		}
 		in.Since = value[0]
 	}
+	in.Query = q.Get("query")
+	for name, target := range map[string]*bool{"regex": &in.Regex, "ignoreCase": &in.IgnoreCase} {
+		if value, ok := q[name]; ok {
+			if value[0] != "true" && value[0] != "false" {
+				return in, invalid(name + " must be true or false.")
+			}
+			*target = value[0] == "true"
+		}
+	}
+	for name, target := range map[string]*int{"startLine": &in.StartLine, "lineCount": &in.LineCount, "context": &in.Context} {
+		if value, ok := q[name]; ok {
+			n, err := strconv.Atoi(value[0])
+			if err != nil || n < 0 || (name != "context" && n < 1) {
+				return in, invalid(name + " must be a whole number (startLine and lineCount at least 1).")
+			}
+			*target = n
+		}
+	}
 	if value, ok := q["blobs"]; ok {
 		if value[0] != "true" {
 			return in, invalid("blobs must be true.")
@@ -508,8 +539,12 @@ func parseQuery(raw, op string) (Input, error) {
 	}
 	if _, ok := q["limit"]; ok {
 		in.Limit, err = strconv.Atoi(q.Get("limit"))
-		if err != nil || in.Limit < 1 || in.Limit > 100 {
-			return in, invalid("limit must be 1..100.")
+		top := 100
+		if op == "search" {
+			top = maxSearchLimit
+		}
+		if err != nil || in.Limit < 1 || in.Limit > top {
+			return in, invalid(fmt.Sprintf("limit must be 1..%d.", top))
 		}
 	}
 	return in, nil
@@ -519,8 +554,14 @@ func parseBody(b []byte, op string, in *Input) error {
 	if !validUnicodeJSON(b) {
 		return invalid("Body must contain valid UTF-8/Unicode.")
 	}
-	allowed := map[string]bool{"ifInState": true}
-	if op == "write" {
+	allowed := map[string]bool{"ifInState": true, "strict": true}
+	// REST write, move and delete keep the whole-space check unless the body
+	// says strict: false: sync clients up to mtsync 0.39.0 take a write's
+	// newState as a state they agree with entirely.
+	in.Strict = op != "edit"
+	if op == "edit" {
+		allowed["path"], allowed["edits"] = true, true
+	} else if op == "write" {
 		allowed["text"], allowed["createOnly"] = true, true
 	} else if op == "move" {
 		allowed["from"], allowed["to"] = true, true
@@ -548,6 +589,19 @@ func parseBody(b []byte, op string, in *Input) error {
 	}
 	if _, err := d.Token(); err != nil {
 		return invalid("Invalid JSON.")
+	}
+	if op == "edit" {
+		var body struct {
+			Path      string `json:"path"`
+			Edits     []Edit `json:"edits"`
+			IfInState string `json:"ifInState"`
+			Strict    bool   `json:"strict"`
+		}
+		if err := strictJSON(b, &body); err != nil {
+			return invalid(`Send {"path", "edits": [{"oldText", "newText", "replaceAll"?}], "ifInState"?, "strict"?}.`)
+		}
+		in.Path, in.Edits, in.IfInState, in.Strict = body.Path, body.Edits, body.IfInState, body.Strict
+		return nil
 	}
 	if err := strictJSON(b, in); err != nil {
 		return invalid("Invalid body fields.")

@@ -42,6 +42,9 @@ type ReadResult struct {
 		File
 		Text string `json:"text"`
 	} `json:"file"`
+	// Lines is set when the read asked for startLine or lineCount; Text then
+	// holds only those lines.
+	Lines *LineRange `json:"lines,omitempty"`
 }
 
 type ListResult struct {
@@ -62,6 +65,10 @@ type Mutation struct {
 	// Hint reminds the agent of changes in a GitHub folder that have waited
 	// unpushed for a while (see unpushedHint).
 	Hint string `json:"hint,omitempty"`
+	// Rebased is set when ifInState was older than the space's head and the
+	// change was applied on top of the head, because the files it touches
+	// had not changed (see unchangedSince). Other files may have.
+	Rebased bool `json:"rebased,omitempty"`
 }
 
 type WriteResult struct {
@@ -98,8 +105,18 @@ type Input struct {
 	Text       *string `json:"text,omitempty"`
 	IfInState  string  `json:"ifInState,omitempty"`
 	CreateOnly bool    `json:"createOnly,omitempty"`
-	From       string  `json:"from,omitempty"`
-	To         string  `json:"to,omitempty"`
+	// Strict refuses a stale ifInState even when the touched files are
+	// unchanged. REST write, move and delete default to it (see parseBody).
+	Strict     bool   `json:"strict,omitempty"`
+	From       string `json:"from,omitempty"`
+	To         string `json:"to,omitempty"`
+	StartLine  int    `json:"-"`
+	LineCount  int    `json:"-"`
+	Edits      []Edit `json:"-"`
+	Query      string `json:"-"`
+	Regex      bool   `json:"-"`
+	IgnoreCase bool   `json:"-"`
+	Context    int    `json:"-"`
 }
 
 // storedRecord is the index entry format in .metatrash/files.json.

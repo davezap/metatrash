@@ -224,9 +224,32 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		}
 		result := ReadResult{Space: space, State: state}
 		result.File.File, result.File.Text = f.File, string(b)
+		if in.StartLine != 0 || in.LineCount != 0 {
+			if in.StartLine < 0 || in.LineCount < 0 || in.LineCount > maxReadLines {
+				return nil, invalid(fmt.Sprintf("startLine must be 1 or more and lineCount 1..%d.", maxReadLines))
+			}
+			text, lines, err := lineRange(string(b), in.StartLine, in.LineCount)
+			if err != nil {
+				return nil, err
+			}
+			result.File.Text, result.Lines = text, &lines
+		}
 		return result, nil
 	case "list", "history":
 		return s.page(ctx, r, space, op, in)
+	case "search":
+		return s.search(ctx, r, space, in)
+	case "edit":
+		if err := checkEditInput(in); err != nil {
+			return nil, err
+		}
+		value, err := s.queued(ctx, func() (any, error) { return s.edit(ctx, r, space, in) })
+		if err != nil {
+			return nil, err
+		}
+		v := value.(WriteResult)
+		v.Hint = s.unpushedHint(ctx, r, v.NewState, in.Path)
+		return v, nil
 	case "write", "move", "delete":
 		if !hashPattern.MatchString(in.IfInState) {
 			return nil, invalid("ifInState must be a commit hash from read/list.")
@@ -288,8 +311,20 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	if err != nil {
 		return nil, err
 	}
+	rebased := false
 	if head != in.IfInState {
-		return nil, &Error{Status: 409, Code: "state_mismatch", Message: "Space changed; re-read before retrying.", CurrentState: head}
+		touched := []string{in.Path}
+		if op == "move" {
+			touched = []string{in.From, in.To}
+		}
+		if in.Strict || !r.unchangedSince(ctx, in.IfInState, files, touched...) {
+			message := "Space changed; re-read before retrying."
+			if !in.Strict {
+				message = "The file changed since that state; re-read it before retrying."
+			}
+			return nil, &Error{Status: 409, Code: "state_mismatch", Message: message, CurrentState: head}
+		}
+		rebased = true
 	}
 	if op == "delete" {
 		f, ok := files[in.Path]
@@ -306,7 +341,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if err != nil {
 			return nil, err
 		}
-		return Mutation{Space: space, OldState: head, NewState: state, File: f.File}, nil
+		return Mutation{Space: space, OldState: head, NewState: state, File: f.File, Rebased: rebased}, nil
 	}
 	if op == "write" && isFolderConfig(in.Path) {
 		if err := r.checkFolderConfig(ctx, files, in.Path, *in.Text); err != nil {
@@ -353,7 +388,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 				return nil, err
 			}
 			if string(b) == *in.Text {
-				return WriteResult{Mutation: Mutation{Space: space, OldState: head, NewState: head, File: f.File}}, nil
+				return WriteResult{Mutation: Mutation{Space: space, OldState: head, NewState: head, File: f.File, Rebased: rebased}}, nil
 			}
 		} else {
 			id, err := randomHex(16)
@@ -384,11 +419,30 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	if err != nil {
 		return nil, err
 	}
-	m := Mutation{Space: space, OldState: head, NewState: state, File: f.File}
+	m := Mutation{Space: space, OldState: head, NewState: state, File: f.File, Rebased: rebased}
 	if op == "move" {
 		return m, nil
 	}
 	return WriteResult{Mutation: m, Created: created, Changed: true}, nil
+}
+
+// unchangedSince reports whether every path has the same file (ID and text,
+// or absence) at state as in files, the head. state must be an earlier state
+// of this space. It lets a write from an older ifInState go ahead when only
+// other files changed since.
+func (r *repository) unchangedSince(ctx context.Context, state string, files map[string]record, paths ...string) bool {
+	_, old, err := r.snapshot(ctx, state)
+	if err != nil {
+		return false
+	}
+	for _, p := range paths {
+		was, had := old[p]
+		now, has := files[p]
+		if had != has || had && (was.ID != now.ID || was.Blob != now.Blob) {
+			return false
+		}
+	}
+	return true
 }
 
 type cursor struct {

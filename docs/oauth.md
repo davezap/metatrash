@@ -44,7 +44,7 @@ routes return 404.
 | `/oauth/consent` | Sign-in continuation and consent (GET, POST) |
 | `/oauth/token` | Code exchange and refresh |
 | `/oauth/revoke` | RFC 7009 revocation |
-| `/mcp/account` | MCP: the five tools plus `spaces` |
+| `/mcp/account` | MCP: the file tools plus `spaces`, `pull`, `pending` and `push` |
 | `/api/v1/account/spaces` and `/api/v1/account/spaces/{space}/{file,files,history,move}` (`{space}` may be `{owner}/{slug}`) | REST |
 
 Scopes are `spaces:read` and `spaces:write`; which spaces is stored with the

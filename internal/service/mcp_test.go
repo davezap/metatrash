@@ -83,7 +83,7 @@ func TestMCPSmoke(t *testing.T) {
 	}
 	rpc("notifications/initialized", "", map[string]any{}, 202)
 	list := rpc("tools/list", "", map[string]any{}, 200)
-	if len(list["tools"].([]any)) != 6 {
+	if len(list["tools"].([]any)) != 8 {
 		t.Fatal(list)
 	}
 	call := func(name, key string, args map[string]any, code string) map[string]any {
@@ -107,6 +107,10 @@ func TestMCPSmoke(t *testing.T) {
 	created := call("write", "", map[string]any{"space": "public", "path": "smoke.txt", "text": "hello\n", "ifInState": state, "createOnly": true}, "")
 	id := created["file"].(map[string]any)["id"]
 	call("write", "", map[string]any{"space": "public", "path": "smoke.txt", "text": "stale", "ifInState": state}, "state_mismatch")
+	if other := call("write", "", map[string]any{"space": "public", "path": "other.txt", "text": "x", "ifInState": state}, ""); other["rebased"] != true {
+		t.Fatal(other)
+	}
+	call("write", "", map[string]any{"space": "public", "path": "third.txt", "text": "x", "ifInState": state, "strict": true}, "state_mismatch")
 	moved := call("move", "", map[string]any{"space": "public", "from": "smoke.txt", "to": "moved.txt", "ifInState": created["newState"]}, "")
 	if moved["file"].(map[string]any)["id"] != id {
 		t.Fatal("move changed identity")
@@ -116,6 +120,20 @@ func TestMCPSmoke(t *testing.T) {
 		t.Fatal(read)
 	}
 	call("history", "", map[string]any{"space": "public", "id": id}, "")
+	found := call("search", "", map[string]any{"space": "public", "query": "hello", "context": 1}, "")
+	if m := found["matches"].([]any); len(m) != 1 || m[0].(map[string]any)["path"] != "moved.txt" {
+		t.Fatal(found)
+	}
+	edited := call("edit", "", map[string]any{"space": "public", "path": "moved.txt", "edits": []any{map[string]any{"oldText": "hello", "newText": "hi"}}}, "")
+	if edited["changed"] != true {
+		t.Fatal(edited)
+	}
+	call("edit", "", map[string]any{"space": "public", "path": "moved.txt", "edits": []any{map[string]any{"oldText": "hello", "newText": "hi"}}}, "conflict")
+	call("edit", "", map[string]any{"space": "public", "path": "moved.txt", "edits": []any{}}, "invalid_request")
+	ranged := call("read", "", map[string]any{"space": "public", "path": "moved.txt", "startLine": 1, "lineCount": 1}, "")
+	if ranged["file"].(map[string]any)["text"] != "hi\n" || ranged["lines"].(map[string]any)["total"] != 1.0 {
+		t.Fatal(ranged)
+	}
 	call("read", "", map[string]any{"space": "public", "path": "moved.txt", "text": "extra"}, "invalid_request")
 	// Credentials must be rechecked on every request, never retained from a session.
 	privateState := call("list", "reader", map[string]any{"space": "private"}, "")["state"]

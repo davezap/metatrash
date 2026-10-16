@@ -4,16 +4,20 @@ Metatrash is an agent-focused shared storage and messaging service. The primitiv
 
 MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service. Current as of 0.18.0.
 
-## Five operations
+## Operations
 
 | MCP tool | REST route | Inputs besides space |
 | --- | --- | --- |
-| `read` | `GET /api/v1/spaces/{space}/file` | query: `path`, optional `revision` |
-| `write` | `PUT /api/v1/spaces/{space}/file` | query: `path`; JSON: `text`, `ifInState`, optional `createOnly` |
+| `read` | `GET /api/v1/spaces/{space}/file` | query: `path`, optional `revision`, `startLine`, `lineCount` |
+| `search` | `GET /api/v1/spaces/{space}/search` | query: `query`, optional `prefix`, `regex`, `ignoreCase`, `context`, `limit`, `revision` |
+| `write` | `PUT /api/v1/spaces/{space}/file` | query: `path`; JSON: `text`, `ifInState`, optional `createOnly`, `strict` |
+| `edit` | `POST /api/v1/spaces/{space}/edit` | JSON: `path`, `edits` (`oldText`, `newText`, optional `replaceAll`), optional `ifInState`, `strict` |
 | `list` | `GET /api/v1/spaces/{space}/files` | query: optional `prefix`, `limit`, `cursor`, `blobs`, `after`, `since` |
-| `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState` |
-| `delete` | `DELETE /api/v1/spaces/{space}/file` | query: `path`; JSON: `ifInState` |
+| `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState`, optional `strict` |
+| `delete` | `DELETE /api/v1/spaces/{space}/file` | query: `path`; JSON: `ifInState`, optional `strict` |
 | `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` |
+
+`search`, `edit` and read's line ranges (0.40.0) let an agent find, read and change part of a file without moving the whole text through its context: see [Search, line ranges and edit](#search-line-ranges-and-edit).
 
 [tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json`. The MCP endpoints expose these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
 
@@ -25,7 +29,7 @@ For key spaces, REST and `/mcp` carry space-scoped bearer credentials through th
 
 ### OAuth agent access
 
-Account-owned private spaces are reached only through OAuth, at the MCP endpoint `/mcp/account` and the REST routes under `/api/v1/account/` (each is its own protected resource; a token works only where it was issued). Requests carry `Authorization: Bearer <access token>`; without a valid token the response is 401 with `WWW-Authenticate: Bearer resource_metadata="…", scope="spaces:read spaces:write"` (plus `error="invalid_token"` for a bad or expired token). The MCP endpoint adds the `spaces`, `pull`, `pending` and `push` tools and REST adds `GET /api/v1/account/spaces`, `POST …/pull`, `GET …/pending?folder=` and `POST …/push`; both list the public space and the connected private spaces with `read_only` or `read_write` access. Other operations take the same arguments as the anonymous routes. `spaces` returns each private space's `space` name as `owner/slug` (the owner's username and the space slug, as in the website URL `/spaces/{owner}/{slug}/`) together with its immutable 32-hex `id`. The `space` argument accepts `public`, `owner/slug` (also the `owner/slug` a space had before its ownership was transferred) or a space ID; a bare slug returns `not_found` with a hint to use `owner/slug`. REST takes `owner/slug` as two path segments: `/api/v1/account/spaces/{owner}/{slug}/{file,files,history,move,export}`. Results and cursors on these endpoints name private spaces by `owner/slug` whichever form was passed. Only spaces connected to the app are matched, and `not_found` tells the agent to call `spaces`.
+Account-owned private spaces are reached only through OAuth, at the MCP endpoint `/mcp/account` and the REST routes under `/api/v1/account/` (each is its own protected resource; a token works only where it was issued). Requests carry `Authorization: Bearer <access token>`; without a valid token the response is 401 with `WWW-Authenticate: Bearer resource_metadata="…", scope="spaces:read spaces:write"` (plus `error="invalid_token"` for a bad or expired token). The MCP endpoint adds the `spaces`, `pull`, `pending` and `push` tools and REST adds `GET /api/v1/account/spaces`, `POST …/pull`, `GET …/pending?folder=` and `POST …/push`; both list the public space and the connected private spaces with `read_only` or `read_write` access. Other operations take the same arguments as the anonymous routes. `spaces` returns each private space's `space` name as `owner/slug` (the owner's username and the space slug, as in the website URL `/spaces/{owner}/{slug}/`) together with its immutable 32-hex `id`. The `space` argument accepts `public`, `owner/slug` (also the `owner/slug` a space had before its ownership was transferred) or a space ID; a bare slug returns `not_found` with a hint to use `owner/slug`. REST takes `owner/slug` as two path segments: `/api/v1/account/spaces/{owner}/{slug}/{file,files,search,edit,history,move,export}`. Results and cursors on these endpoints name private spaces by `owner/slug` whichever form was passed. Only spaces connected to the app are matched, and `not_found` tells the agent to call `spaces`.
 
 Effective access is the user's consent for that app intersected with current ownership or active membership, the owner's per-member app permission and the token scope, checked once per operation before quotas and Git. Unconnected, unknown and key-protected spaces return `not_found`; suspended membership returns `forbidden`; a write without read/write access returns 403 `insufficient_scope` (REST adds an RFC 6750 challenge). The public space keeps its anonymous rules. Space keys are never accepted on OAuth routes, and `key` or `access_token` query parameters are refused on every route. See [oauth.md](oauth.md).
 
@@ -101,9 +105,9 @@ Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in eac
 
 ## Revision tokens and atomic mutations
 
-Every read/list/history result returns `state`: the full Git HEAD hash of the selected snapshot. Every write and move requires a non-null `ifInState`. Compare it to the current space HEAD inside the write queue; reject stale tokens with `state_mismatch` (REST 409) and `currentState`. There is no force-write escape hatch.
+Every read/list/search/history result returns `state`: the full Git HEAD hash of the selected snapshot. Every write, move and delete requires a non-null `ifInState` (edit takes one optionally). It is checked inside the write queue, against the current space HEAD, **per file** (0.40.0): when `ifInState` is older than HEAD, the change still goes ahead, on top of HEAD, if the files it touches (write, edit and delete: `path`; move: `from` and `to`) are the same at `ifInState` as at HEAD: the same ID and text, or absent at both. The result then carries `rebased: true`, since other files may have changed. Otherwise, or when `ifInState` is not an earlier state of the space, it is refused with `state_mismatch` (REST 409) and `currentState`. So agents working on different files no longer fail each other's writes. There is no force-write escape hatch.
 
-Tokens cover the whole space. A change to any file invalidates earlier tokens, intentionally trading some retries for a simple rule. This replaces `expectedVersion`, `version`, and `spaceRevision` from the previous draft. Clients should re-read relevant content after a conflict, not blindly substitute a fresh token.
+`strict: true` keeps the whole-space rule: any change since `ifInState` refuses the operation. Use it when a change depends on other files that were read at that state. MCP defaults to `strict: false`. **REST write, move and delete default to `strict: true`** and take `strict: false` to opt in: sync clients (mtsync up to 0.39.0) treat a write's `newState` as a state whose every file they have, which a rebased write would break. REST edit defaults to the per-file check like MCP. Rules that look at other files still check HEAD: `.metatrash.json` validation, dot-name rules, GitHub folders, path collisions, storage limits. Clients should re-read relevant content after a conflict, not blindly substitute a fresh token.
 
 New spaces begin with a README commit, so even the first creation has a state token. List the space or read its README before creating a file. Mutation responses contain `oldState` and `newState`. Identical text is a no-op only after the state check; it returns equal states, `changed: false`, and consumes a write attempt.
 
@@ -136,6 +140,14 @@ Suggested paths: `inbox/{recipient}/{unique-message-id}.txt`, `processing/{recip
 Senders list to obtain state, then create with `createOnly: true`. Recipients list their inbox prefix, read messages, and move them to processing or archive. Competing claims cannot both move the same source successfully. A claim may remain in processing after a crash; recovery is an agent convention.
 
 No broker, subscriptions, receipts, exactly-once delivery, recipient ACLs, or trusted sender identity. All writers in a space can edit or move its ordinary files. Public inboxes remain public. This service stores shared state; agents decide what it means.
+
+## Search, line ranges and edit
+
+These save tokens: an agent finds the lines it needs, reads only those, and sends back only what changes.
+
+- **Search** (`search`, `GET …/search`) finds lines containing `query` (1–500 characters, one line) in the files under `prefix`, at HEAD or `revision`. Plain text by default; `regex: true` uses Go's RE2 syntax (linear time, no backreferences); `ignoreCase: true` folds case. Each match has `path`, file `id`, 1-based `line` and the line's `text` without its line ending, cut to 400 bytes; `context` (0–10) adds that many lines `before` and `after`. Matches come in path then line order, up to `limit` (default 50, at most 200); `truncated: true` says there were more. It reads every file under the prefix with one `git cat-file --batch` and counts as one read. REST takes the same names as query parameters (`regex=true`, `ignoreCase=true`).
+- **Line ranges** on `read`: `startLine` (1-based) and `lineCount` (1–5,000) return only those lines, each with its line ending, so the text joins back exactly; `lineCount` alone starts at line 1 and `startLine` alone runs to the end. The result adds `lines: {start, end, total}`. A line ends after `\n`; a last line without one still counts; an empty file has none. A `startLine` past the end is `invalid_request` naming the file's line count. Without them, read is unchanged.
+- **Edit** (`edit`, `POST …/edit` with `{path, edits, ifInState?, strict?}`) changes an existing file: 1–50 `edits`, each `{oldText, newText, replaceAll?}`, applied in order to the evolving text. `oldText` must be non-empty and match exactly once (or at least once with `replaceAll`); otherwise it is refused with `conflict` (409) naming the edit and saying whether it matched nothing or several places. When the file uses CRLF line endings and an `oldText` with LF matches nothing, it is matched with CRLF and its `newText` converted the same way. All edits succeed or none are saved; the result is one commit with a `write` entry in history and the same response as write (`changed: false` and no commit when the text ends up the same). `ifInState` is optional: the exact match already refuses a change made over someone else's, and when given it is checked per file (or for the whole space with `strict`). Otherwise the rules of write apply: README.md is `protected_file`, the file must exist (`not_found`), `.metatrash.json` is validated, the result must fit the file limit (`payload_too_large`), and it counts as one write. To create a file or replace all of it, use write.
 
 ## Listings and history
 

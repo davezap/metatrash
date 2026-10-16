@@ -35,11 +35,19 @@ type mcpInput struct {
 	Text       *string `json:"text"`
 	IfInState  string  `json:"ifInState"`
 	CreateOnly bool    `json:"createOnly"`
+	Strict     bool    `json:"strict"`
 	From       string  `json:"from"`
 	To         string  `json:"to"`
+	StartLine  int     `json:"startLine"`
+	LineCount  int     `json:"lineCount"`
+	Edits      []Edit  `json:"edits"`
+	Query      string  `json:"query"`
+	Regex      bool    `json:"regex"`
+	IgnoreCase bool    `json:"ignoreCase"`
+	Context    int     `json:"context"`
 }
 
-const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value (owner/slug, or public) as the space argument of read, list, history, write, move and delete. Start in a space by reading its root .metatrash.json, which describes the space and its folders; a folder may have its own .metatrash.json, and when it has none, list it. Writes need ifInState from a read or list of the same space. A folder whose .metatrash.json has a github service mirrors a GitHub repository: call pull at the start of each session to fill or update it from GitHub, edit its files with write, move and delete, check pending, then push them back with a message."
+const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access. Pass a returned space value (owner/slug, or public) as the space argument of read, search, list, history, edit, write, move and delete. Start in a space by reading its root .metatrash.json, which describes the space and its folders; a folder may have its own .metatrash.json, and when it has none, list it. To save tokens, find text with search, read long files by line range (startLine, lineCount), and change part of a file with edit (exact oldText to newText) instead of rewriting it with write. Write, move and delete need ifInState from a read, list or search of the same space; it goes stale only when the files the change touches have changed since (strict: true checks the whole space). Edit needs none. A folder whose .metatrash.json has a github service mirrors a GitHub repository: call pull at the start of each session to fill or update it from GitHub, edit its files with write, move and delete, check pending, then push them back with a message."
 
 // mcpHandler builds the anonymous /mcp server, or with account set the OAuth
 // /mcp/account server, which adds the spaces tool and checks every operation
@@ -102,7 +110,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 	for _, tool := range catalog.Tools {
 		op := tool.Name
 		switch op {
-		case "read", "write", "list", "move", "delete", "history":
+		case "read", "write", "edit", "search", "list", "move", "delete", "history":
 		default:
 			return nil, fmt.Errorf("unknown MCP tool %q", op)
 		}
@@ -128,7 +136,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			if err := decodeMCPInput(raw, &args); err != nil {
 				return mcpFailure(err), nil
 			}
-			write := op == "write" || op == "move" || op == "delete"
+			write := op == "write" || op == "edit" || op == "move" || op == "delete"
 			var repo *repository
 			var err error
 			space := args.Space
@@ -155,7 +163,8 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 				return mcpFailure(invalid("Arguments do not match the tool input schema.")), nil
 			}
 			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
-				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, From: args.From, To: args.To}
+				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, Strict: args.Strict, From: args.From, To: args.To,
+				StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context}
 			value, err := h.service.dispatchRepository(ctx, repo, space, op, in)
 			if err != nil {
 				return mcpFailure(err), nil

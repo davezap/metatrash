@@ -1,33 +1,25 @@
 # Roadmap
 
-Open work after 0.27.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work after 0.40.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
-## Priority: per-file write checks
+## Priority: public guides for 0.40.0
 
-Agreed with Dave 2026-10-08, ahead of the sections below. Today `ifInState`
-must equal the space HEAD (`mutate` in `service.go`), so any write anywhere in
-a space makes every other agent's token stale. Agents working in separate
-subfolders, with no files in common, keep failing each other's writes with
-`state_mismatch` and burn reads and writes (and rate limit) on retries.
+Per-file write checks, `edit`, `search` and line-range reads shipped in
+0.40.0. Once it is deployed, update `guides/working-with-agents.md` and
+`guides/rest-api.md` in `dave-zap/metatrash-com` (search before reading, edit
+instead of write, ifInState is per file, REST's `strict` default).
 
-- Keep `ifInState` and the API as they are. On a mismatch, compare the index
-  entries (`.metatrash/files.json`) at `ifInState` and at HEAD for the paths
-  the operation touches (write: `path`; move: `from` and `to`; delete:
-  `path`). If none changed, apply the operation on top of HEAD instead of
-  refusing. `ifInState` must still be a commit reachable from HEAD.
-- Rules that read other files still check against HEAD: `.metatrash.json`
-  validation and dot-name rules, GitHub folder services, storage limits.
-  Writes to a `.metatrash.json` may need the strict check.
-- An optional strict mode (for example `"strict": true`) keeps today's
-  whole-space check for agents that write one file based on another.
-- Results return `newState` as today; say in the result when the write was
-  rebased onto a newer state, so agents know other files may have moved.
-- Update api-contract.md ("Revision tokens"), tool-schema.json descriptions,
-  the MCP server instructions and the public guide
-  `guides/working-with-agents.md` in `dave-zap/metatrash-com`.
-- Tests: two agents writing different files from the same state both succeed;
-  same file still conflicts; move into a path created since `ifInState`
-  conflicts; unreachable or unknown `ifInState` is refused.
+## Fewer tokens per change: later
+
+Agreed with Dave 2026-10-16 as possible follow-ups to 0.40.0.
+
+- **`append` tool.** Add text to the end of a file (creating it if absent)
+  without reading it: logs, notes, agent-to-agent messages. No `ifInState`
+  needed; same limits and rules as write.
+- **Unchanged reads.** `read` takes the blob hash (or state) the agent already
+  has and answers `unchanged: true` without the text when the file is the
+  same. Needs read results to carry the file's blob, which MCP results do not
+  today.
 
 ## Sign-in methods
 
