@@ -74,6 +74,56 @@ jobs:
             done
           done
 
+  installers:
+    name: Installers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: shellcheck install.sh
+        run: shellcheck deploy/installers/install.sh
+      - name: Windows setup
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q nsis
+          mkdir dist
+          for arch in amd64 arm64; do
+            GOOS=windows GOARCH=$arch go build -trimpath -o dist/mtsync-windows-$arch.exe ./cmd/mtsync
+          done
+          version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' assets.go)
+          makensis -V2 -DVERSION="$version" -DDIST="$PWD/dist" deploy/installers/mtsync-setup.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mtsync-windows-setup
+          path: dist/mtsync-windows-setup.exe
+          retention-days: 7
+
+  # Runs the setup silently on Windows: installs, checks the program and Path,
+  # then uninstalls.
+  windows-setup:
+    name: Try the Windows setup
+    needs: installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mtsync-windows-setup
+      - shell: pwsh
+        run: |
+          Start-Process .\mtsync-windows-setup.exe -ArgumentList '/S' -Wait
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\mtsync'
+          & "$dir\mtsync.exe" version
+          if ($LASTEXITCODE) { throw 'mtsync.exe did not run' }
+          $path = (Get-ItemProperty 'HKCU:\Environment').Path
+          if (($path -split ';') -notcontains $dir) { throw "Path does not contain $dir" }
+          Start-Process "$dir\uninstall.exe" -ArgumentList '/S', "_?=$dir" -Wait
+          if (Test-Path "$dir\mtsync.exe") { throw 'uninstall left mtsync.exe' }
+          $path = (Get-ItemProperty 'HKCU:\Environment').Path
+          if (($path -split ';') -contains $dir) { throw "uninstall left $dir in Path" }
+
   mtsync:
     name: Test mtsync (${{ matrix.os }})
     strategy:

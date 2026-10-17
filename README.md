@@ -137,8 +137,41 @@ account → **Services**, like any app. Build, deploy and details:
 ## Install mtsync
 
 Every [release](https://github.com/davezap/metatrash/releases) has mtsync
-ready to run, built by GitHub Actions from a version tag. The links below
-always fetch the latest release; pick the file for your computer:
+installers, built by GitHub Actions from a version tag. Both install for your
+user only (no administrator), start the sync service at every login
+(`mtsync install`), and update an earlier install in place, keeping the
+sign-in and registered folders.
+
+**Windows:** download and run
+[mtsync-windows-setup.exe](https://github.com/davezap/metatrash/releases/latest/download/mtsync-windows-setup.exe).
+It installs to `%LOCALAPPDATA%\Programs\mtsync`, picks the build for your PC
+(Intel/AMD or Arm), adds it to your `Path`, and offers to connect the computer
+(`mtsync login`) at the end. It is listed in Settings → Apps with Uninstall,
+which stops the service and removes the program but keeps the sign-in, the
+registered folders and the synced files. The setup is not code-signed yet, so
+SmartScreen warns on first run: **More info → Run anyway**. `/S` installs
+silently.
+
+**macOS and Linux** (Terminal):
+
+```sh
+curl -fsSL https://github.com/davezap/metatrash/releases/latest/download/install.sh | sh
+```
+
+The script picks the build for your computer, checks it against the
+release's `SHA256SUMS`, puts it in `~/.local/bin` and sets up the service
+(systemd user unit on Linux, LaunchAgent on macOS). Run it again to update.
+`MTSYNC_VERSION=0.41.1` installs a given release, `MTSYNC_DIR=...` another
+folder, and `MTSYNC_NO_SERVICE=1` the program only. It tells you if the folder
+is not on your `PATH` yet. Downloaded with `curl` the Mac runs mtsync as is,
+so it needs no Gatekeeper exception.
+
+Then connect the computer and choose its spaces with `mtsync login`, and open
+a space in Slate Viewer or register a folder with `mtsync add SPACE FOLDER`.
+
+**Just the program:** the release also has each build on its own, to put
+wherever you like before `mtsync install` (the login entry runs the program
+from where it is):
 
 | Computer | File |
 | --- | --- |
@@ -149,55 +182,18 @@ always fetch the latest release; pick the file for your computer:
 | Mac with Apple silicon (M1 and later) | `mtsync-macos-arm64` |
 | Mac with Intel | `mtsync-macos-amd64` |
 
-Put it somewhere it can stay before `mtsync install`: the login entry runs
-the program from where it is.
-
-**Windows** (PowerShell; installs for your user, no administrator needed):
-
-```powershell
-$dir = "$env:LOCALAPPDATA\Programs\mtsync"
-New-Item -ItemType Directory -Force $dir | Out-Null
-Invoke-WebRequest https://github.com/davezap/metatrash/releases/latest/download/mtsync-windows-amd64.exe -OutFile "$dir\mtsync.exe"
-[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$dir", "User")
-```
-
-Open a new terminal so the `Path` change applies, then `mtsync version`.
-Downloaded with a browser instead, Windows SmartScreen warns on first run
-because the program is not code-signed yet: **More info → Run anyway**.
-
-**Linux and macOS:**
-
-```sh
-file=mtsync-linux-amd64        # or mtsync-macos-arm64, ... from the table
-mkdir -p ~/.local/bin
-curl -fL -o ~/.local/bin/mtsync https://github.com/davezap/metatrash/releases/latest/download/$file
-chmod +x ~/.local/bin/mtsync
-mtsync version
-```
-
-If `mtsync` is not found, add `~/.local/bin` to your `PATH` (most Linux
-desktops already have it; on macOS add `export PATH="$HOME/.local/bin:$PATH"`
-to `~/.zshrc`). Downloaded with `curl` the Mac runs it as is; a file
-downloaded with a browser is blocked until you allow it in System Settings →
-Privacy & Security, or run `xattr -d com.apple.quarantine ~/.local/bin/mtsync`.
-
-**Check the download** against `SHA256SUMS` in the same release:
-
-```sh
-curl -fsSL https://github.com/davezap/metatrash/releases/latest/download/SHA256SUMS | grep $file
-sha256sum ~/.local/bin/mtsync          # macOS: shasum -a 256 ~/.local/bin/mtsync
-```
-
-On Windows: `Get-FileHash "$env:LOCALAPPDATA\Programs\mtsync\mtsync.exe"`.
-The two hashes must match. Programs that install mtsync for you can read
-`mtsync.json` in the release: version, then URL, SHA-256 and size for each
-platform (`windows-amd64`, `linux-arm64`, `macos-arm64`, ...).
-
-**Update:** `mtsync stop`, download the new file over the old one the same
-way, then `mtsync start`. Registered folders and the sign-in are kept.
+Check a download against `SHA256SUMS` in the same release
+(`sha256sum FILE`, on macOS `shasum -a 256 FILE`, on Windows
+`Get-FileHash FILE`). A Mac blocks a file downloaded with a browser until you
+allow it in System Settings → Privacy & Security, or run
+`xattr -d com.apple.quarantine FILE`. To update by hand: `mtsync stop`, put
+the new file over the old one, `mtsync start`. Programs that install mtsync
+for you can read `mtsync.json` in the release: version, then URL, SHA-256 and
+size for each platform (`windows-amd64`, `linux-arm64`, `macos-arm64`, ...).
 
 **Build it yourself** instead, with Go 1.25 or later:
-`go build -trimpath -o mtsync ./cmd/mtsync` (`mtsync.exe` on Windows).
+`go build -trimpath -o mtsync ./cmd/mtsync` (`mtsync.exe` on Windows). The
+installers are in `deploy/installers/`.
 
 ## Install the server
 

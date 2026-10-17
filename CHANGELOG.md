@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.41.1 - mtsync installers (2026-10-17)
+
+No server or mtsync change. No schema, configuration or grant change. No new Go modules.
+
+- **Windows setup** (`mtsync-windows-setup.exe`, from `deploy/installers/mtsync-setup.nsi`, built with NSIS): installs for the current user without administrator rights in `%LOCALAPPDATA%\Programs\mtsync`, choosing the amd64 or arm64 build, adds the folder to the user's `Path` (kept as REG_EXPAND_SZ), runs `mtsync install`, registers in Settings → Apps, and offers `mtsync login` on the last page. Updating stops the running service first. Uninstalling runs `mtsync uninstall`, removes the program and the `Path` entry, and keeps the sign-in, registered folders and synced files. `/S` installs silently. Not code-signed yet.
+- **macOS and Linux script** (`install.sh`, used as `curl -fsSL …/releases/latest/download/install.sh | sh`): picks the build, verifies it against `SHA256SUMS`, installs to `~/.local/bin`, runs `mtsync install` (or `mtsync start` on an update), and says when the folder is not on `PATH`. `MTSYNC_VERSION`, `MTSYNC_DIR` and `MTSYNC_NO_SERVICE` change what it does. A `curl` download is not quarantined, so macOS runs mtsync without a Gatekeeper exception.
+- **Release** adds both to the GitHub Release (and to `SHA256SUMS`; `mtsync.json` still lists the programs only). **CI** builds the setup and runs shellcheck on every push, then runs the setup silently on Windows, checks the program and `Path`, and uninstalls.
+- README "Install mtsync" leads with the installers.
+
 ## 0.41.0 - File history in mtsync (2026-10-17)
 
 No schema, configuration or grant change. No new Go modules. Gap G9 of the editor integration: a desktop editor can show a note's history through mtsync, without holding tokens.

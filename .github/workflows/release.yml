@@ -1,6 +1,7 @@
 # Push a tag vX.Y.Z (matching Version in assets.go) to test, build and publish
-# a GitHub Release with mtsync for Windows, Linux and macOS, the metatrash
-# server for Linux, SHA256SUMS and mtsync.json.
+# a GitHub Release with mtsync for Windows, Linux and macOS, its installers
+# (mtsync-windows-setup.exe and install.sh), the metatrash server for Linux,
+# SHA256SUMS and mtsync.json.
 name: Release
 
 on:
@@ -65,12 +66,19 @@ jobs:
           done
           ./dist/metatrash-linux-amd64 version
 
+      - name: Installers
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q nsis
+          makensis -V2 -DVERSION="$VERSION" -DDIST="$PWD/dist" deploy/installers/mtsync-setup.nsi
+          cp deploy/installers/install.sh dist/
+
       - name: Checksums and mtsync.json
         working-directory: dist
         run: |
           sha256sum * > SHA256SUMS
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
           for f in mtsync-*; do
+            [ "$f" = mtsync-windows-setup.exe ] && continue  # mtsync.json lists programs only
             platform=${f#mtsync-}; platform=${platform%.exe}
             jq -n --arg p "$platform" --arg name "$f" --arg url "$base/$f" \
               --arg sha "$(sha256sum "$f" | cut -d' ' -f1)" --argjson size "$(stat -c %s "$f")" \
