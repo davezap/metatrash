@@ -1,6 +1,10 @@
 {
-  "schemaVersion": "0.8.0",
+  "schemaVersion": "0.9.0",
   "status": "implemented",
+  "clients": {
+    "mtsync": {"minVersion": "0.37.2"},
+    "slateViewer": {"minVersion": "0.2.0"}
+  },
   "description": "Git-backed text storage; messaging via file conventions. Each folder may describe itself in .metatrash.json; read the space root one first.",
   "mcp": {
     "endpoint": "/mcp",

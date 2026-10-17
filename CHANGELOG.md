@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.42.0 - Client versions in the tool schema (2026-10-17)
+
+No schema, configuration or grant change. No new Go modules. mtsync is unchanged.
+
+- **`clients` in `/api/v1/tool-schema.json`** (`schemaVersion` 0.9.0) names the oldest mtsync and Slate Viewer this server works with: `{"mtsync": {"minVersion": "0.37.2"}, "slateViewer": {"minVersion": "0.2.0"}}`. Slate Viewer reads it in its update check (at launch and twice a day): a too-old mtsync is updated at once from the latest release's `mtsync.json`, and a too-old Slate Viewer asks to update. Raise these when a server change needs newer clients, and bump `schemaVersion` whenever the schema changes.
+- docs/api-contract.md (Client versions).
+
+## 0.41.2 - Installers replace an older running mtsync (2026-10-17)
+
+No server or mtsync change. No schema, configuration or grant change. No new Go modules.
+
+- **Windows setup:** an update now also stops an mtsync service run from another folder (a hand-built copy or an old download), so `mtsync install` starts the new one instead of finding the old one still running. Before, only a copy in `%LOCALAPPDATA%\Programs\mtsync` was stopped. The install folder now goes at the front of the user's `Path` rather than the end, and the setup warns, listing them, when other `mtsync.exe` copies are on the `Path` (machine or user), since terminals and Slate Viewer may still run those.
+- **install.sh:** the downloaded program stops whichever service is running before it is replaced. An update whose systemd unit or LaunchAgent runs another copy is set up again with `mtsync install` (a LaunchAgent is unloaded first) instead of restarting the old one. It also lists other `mtsync` copies on `PATH`.
+
 ## 0.41.1 - mtsync installers (2026-10-17)
 
 No server or mtsync change. No schema, configuration or grant change. No new Go modules.

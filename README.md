@@ -142,6 +142,13 @@ user only (no administrator), start the sync service at every login
 (`mtsync install`), and update an earlier install in place, keeping the
 sign-in and registered folders.
 
+**Download** (always the latest release):
+
+| Computer | Installer |
+| --- | --- |
+| Windows 10/11 (Intel/AMD or Arm) | [mtsync-windows-setup.exe](https://github.com/davezap/metatrash/releases/latest/download/mtsync-windows-setup.exe) |
+| macOS or Linux | [install.sh](https://github.com/davezap/metatrash/releases/latest/download/install.sh), run with the Terminal line below |
+
 **Windows:** download and run
 [mtsync-windows-setup.exe](https://github.com/davezap/metatrash/releases/latest/download/mtsync-windows-setup.exe).
 It installs to `%LOCALAPPDATA%\Programs\mtsync`, picks the build for your PC
@@ -175,14 +182,14 @@ from where it is):
 
 | Computer | File |
 | --- | --- |
-| Windows (most PCs) | `mtsync-windows-amd64.exe` |
-| Windows on Arm (Surface Pro X, Snapdragon laptops) | `mtsync-windows-arm64.exe` |
-| Linux PC or server | `mtsync-linux-amd64` |
-| Linux on Arm (Raspberry Pi 4/5 64-bit, AWS Graviton) | `mtsync-linux-arm64` |
-| Mac with Apple silicon (M1 and later) | `mtsync-macos-arm64` |
-| Mac with Intel | `mtsync-macos-amd64` |
+| Windows (most PCs) | [mtsync-windows-amd64.exe](https://github.com/davezap/metatrash/releases/latest/download/mtsync-windows-amd64.exe) |
+| Windows on Arm (Surface Pro X, Snapdragon laptops) | [mtsync-windows-arm64.exe](https://github.com/davezap/metatrash/releases/latest/download/mtsync-windows-arm64.exe) |
+| Linux PC or server | [mtsync-linux-amd64](https://github.com/davezap/metatrash/releases/latest/download/mtsync-linux-amd64) |
+| Linux on Arm (Raspberry Pi 4/5 64-bit, AWS Graviton) | [mtsync-linux-arm64](https://github.com/davezap/metatrash/releases/latest/download/mtsync-linux-arm64) |
+| Mac with Apple silicon (M1 and later) | [mtsync-macos-arm64](https://github.com/davezap/metatrash/releases/latest/download/mtsync-macos-arm64) |
+| Mac with Intel | [mtsync-macos-amd64](https://github.com/davezap/metatrash/releases/latest/download/mtsync-macos-amd64) |
 
-Check a download against `SHA256SUMS` in the same release
+Check a download against [SHA256SUMS](https://github.com/davezap/metatrash/releases/latest/download/SHA256SUMS) in the same release
 (`sha256sum FILE`, on macOS `shasum -a 256 FILE`, on Windows
 `Get-FileHash FILE`). A Mac blocks a file downloaded with a browser until you
 allow it in System Settings → Privacy & Security, or run

@@ -19,7 +19,7 @@ MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service.
 
 `search`, `edit` and read's line ranges (0.40.0) let an agent find, read and change part of a file without moving the whole text through its context: see [Search, line ranges and edit](#search-line-ranges-and-edit).
 
-[tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json`. The MCP endpoints expose these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
+[tool-schema.json](../api/tool-schema.json) defines inputs and outputs and is served at `/api/v1/tool-schema.json` (public, no sign-in). Its `schemaVersion` changes with the schema, and `clients` names the oldest client versions the server works with (`mtsync.minVersion`, `slateViewer.minVersion`); desktop clients read it to update themselves before a server change breaks them. The MCP endpoints expose these tools through the official Go SDK v1.8.0 using stateless Streamable HTTP, supporting protocol versions 2025-11-25 and 2025-06-18. Successful results use `structuredContent` with a serialized JSON text fallback. Domain errors use `isError: true` and the error JSON in text content. REST returns the same domain objects and errors with HTTP statuses.
 
 ## Spaces and access
 

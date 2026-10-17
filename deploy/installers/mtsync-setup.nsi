@@ -2,7 +2,7 @@
 ; in %LOCALAPPDATA%\Programs\mtsync, adds it to the user's Path and starts the
 ; service at every login (mtsync install). One setup carries both builds and
 ; picks the one for this PC. Built by the release workflow:
-;   makensis -DVERSION=0.41.1 -DDIST="$PWD/dist" deploy/installers/mtsync-setup.nsi
+;   makensis -DVERSION=0.41.2 -DDIST="$PWD/dist" deploy/installers/mtsync-setup.nsi
 ; DIST (absolute: makensis works from this folder) holds
 ; mtsync-windows-amd64.exe and mtsync-windows-arm64.exe; the setup is written
 ; there as mtsync-windows-setup.exe.
@@ -56,13 +56,14 @@ VIAddVersionKey "LegalCopyright" "metatrash.com"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
-; Adds or removes the install folder in the user's Path. PowerShell, because
+; Adds the install folder at the front of the user's Path (so it wins over an
+; older copy elsewhere in it), or removes it. PowerShell, because
 ; NSIS strings stop at 1024 characters and a long Path would be cut; the
 ; Path stays REG_EXPAND_SZ, so entries like %USERPROFILE%\... keep working. The
 ; folder comes from LOCALAPPDATA (the setup has no folder page), so a quote
 ; in the user name can't break the command.
 !macro UserPath ACTION
-  nsExec::ExecToLog `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$d = Join-Path $$env:LOCALAPPDATA 'Programs\mtsync'; $$k = Get-Item 'HKCU:\Environment'; $$p = $$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); $$parts = @($$p -split ';' | Where-Object { $$_ -and $$_.TrimEnd('\') -ne $$d }); if ('${ACTION}' -eq 'add') { $$parts += $$d }; Set-ItemProperty 'HKCU:\Environment' -Name Path -Type ExpandString -Value ($$parts -join ';')"`
+  nsExec::ExecToLog `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$d = Join-Path $$env:LOCALAPPDATA 'Programs\mtsync'; $$k = Get-Item 'HKCU:\Environment'; $$p = $$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); $$parts = @($$p -split ';' | Where-Object { $$_ -and $$_.TrimEnd('\') -ne $$d }); if ('${ACTION}' -eq 'add') { $$parts = @($$d) + $$parts }; Set-ItemProperty 'HKCU:\Environment' -Name Path -Type ExpandString -Value ($$parts -join ';')"`
   Pop $0
   ; Tell Explorer, so new terminals see the change.
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
@@ -87,11 +88,29 @@ Section "mtsync"
   DetailPrint "Adding $INSTDIR to your Path"
   !insertmacro UserPath add
 
+  ; The service may be an older mtsync run from another folder, which the
+  ; stop above didn't reach. mtsync stop asks whichever one is running to stop,
+  ; so install below starts this one rather than finding one already running.
+  DetailPrint "Stopping any other running mtsync service"
+  nsExec::ExecToLog '"$INSTDIR\mtsync.exe" stop'
+  Pop $0
+
   DetailPrint "Starting the service at every login (mtsync install)"
   nsExec::ExecToLog '"$INSTDIR\mtsync.exe" install'
   Pop $0
   ${If} $0 != 0
     MessageBox MB_ICONEXCLAMATION|MB_OK "mtsync is installed, but its service did not start. Run mtsync log in a terminal to see why." /SD IDOK
+  ${EndIf}
+
+  ; Other copies on the Path (a hand-built mtsync, an old download) would still
+  ; answer in terminals, and in Slate Viewer, which looks on the Path first.
+  nsExec::ExecToStack `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$d = (Join-Path $$env:LOCALAPPDATA 'Programs\mtsync').TrimEnd('\'); $$p = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User'); $$p -split ';' | Where-Object { $$_ } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($$_).TrimEnd('\') } | Where-Object { $$_ -ne $$d -and (Test-Path -LiteralPath (Join-Path $$_ 'mtsync.exe')) } | ForEach-Object { Join-Path $$_ 'mtsync.exe' } | Select-Object -Unique"`
+  Pop $0
+  Pop $1
+  ${If} $0 == 0
+  ${AndIf} $1 != ""
+    DetailPrint "Other copies of mtsync on the Path: $1"
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Other copies of mtsync are on your Path, and terminals or Slate Viewer may run them instead of this one:$\r$\n$\r$\n$1$\r$\nDelete them (or remove their folders from Path), then open a new terminal." /SD IDOK
   ${EndIf}
 
   ; Settings > Apps lists it, with Uninstall.

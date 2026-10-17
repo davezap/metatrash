@@ -9,7 +9,7 @@
 # No administrator rights are needed.
 #
 # Environment:
-#   MTSYNC_VERSION     a release such as 0.41.1 (default: the latest)
+#   MTSYNC_VERSION     a release such as 0.41.2 (default: the latest)
 #   MTSYNC_DIR         where to put mtsync (default: ~/.local/bin)
 #   MTSYNC_NO_SERVICE  set to 1 to install the program only
 set -eu
@@ -63,13 +63,15 @@ if [ -z "$want" ] || [ "$want" != "$got" ]; then
 fi
 chmod +x "$tmp/$file"
 
-# An update: stop the running service before replacing the program.
+# An update: stop the running service before replacing the program. The new
+# program asks whichever mtsync service is running to stop, including an
+# older one run from another folder.
 target="$dir/mtsync"
 updating=false
 if [ -x "$target" ]; then
   updating=true
-  "$target" stop >/dev/null 2>&1 || true
 fi
+"$tmp/$file" stop >/dev/null 2>&1 || true
 mkdir -p "$dir"
 mv -f "$tmp/$file" "$target"
 echo "Installed $("$target" version) in $dir"
@@ -80,14 +82,40 @@ if [ "${MTSYNC_NO_SERVICE:-}" != 1 ]; then
   else
     unit="$HOME/Library/LaunchAgents/com.metatrash.mtsync.plist"
   fi
-  # install sets up the login service once; after that, start is enough.
-  if $updating && [ -f "$unit" ]; then
+  # install sets up the login service; on an update whose login service
+  # already runs this program, start is enough. One that runs another copy is
+  # set up again for this one.
+  if $updating && [ -f "$unit" ] && grep -qF "$target" "$unit"; then
     "$target" start || echo "The service did not start; mtsync log shows why." >&2
-  elif ! "$target" install; then
-    echo "The service is not set up to start at login (above says why). Run mtsync run in a terminal to sync, or mtsync install to try again." >&2
+  else
+    if [ "$os" = macos ] && [ -f "$unit" ]; then
+      launchctl unload "$unit" >/dev/null 2>&1 || true
+    fi
+    if ! "$target" install; then
+      echo "The service is not set up to start at login (above says why). Run mtsync run in a terminal to sync, or mtsync install to try again." >&2
+    fi
   fi
 fi
 
+# Other copies on the PATH (a hand-built mtsync, an old download) would still
+# answer in terminals.
+others=""
+old_ifs=$IFS
+IFS=:
+for d in $PATH; do
+  d=${d%/}
+  if [ -n "$d" ] && [ "$d" != "${dir%/}" ] && [ -x "$d/mtsync" ]; then
+    others="$others  $d/mtsync
+"
+  fi
+done
+IFS=$old_ifs
+if [ -n "$others" ]; then
+  echo
+  echo "Other copies of mtsync are on your PATH and may run instead of this one:"
+  printf '%s' "$others"
+  echo "Delete them, or remove their folders from PATH."
+fi
 case ":$PATH:" in
   *":$dir:"*) ;;
   *) echo
