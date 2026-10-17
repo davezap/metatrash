@@ -107,19 +107,22 @@ jobs:
     name: Try the Windows setup
     needs: installers
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: mtsync-windows-setup
       - shell: pwsh
         run: |
-          Start-Process .\mtsync-windows-setup.exe -ArgumentList '/S' -Wait
+          # Not Start-Process -Wait: that also waits for the mtsync service
+          # the setup leaves running, which never exits.
+          (Start-Process .\mtsync-windows-setup.exe -ArgumentList '/S' -PassThru).WaitForExit()
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\mtsync'
           & "$dir\mtsync.exe" version
           if ($LASTEXITCODE) { throw 'mtsync.exe did not run' }
           $path = (Get-ItemProperty 'HKCU:\Environment').Path
           if (($path -split ';') -notcontains $dir) { throw "Path does not contain $dir" }
-          Start-Process "$dir\uninstall.exe" -ArgumentList '/S', "_?=$dir" -Wait
+          (Start-Process "$dir\uninstall.exe" -ArgumentList '/S', "_?=$dir" -PassThru).WaitForExit()
           if (Test-Path "$dir\mtsync.exe") { throw 'uninstall left mtsync.exe' }
           $path = (Get-ItemProperty 'HKCU:\Environment').Path
           if (($path -split ';') -contains $dir) { throw "uninstall left $dir in Path" }
