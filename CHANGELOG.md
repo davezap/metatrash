@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.41.0 - File history in mtsync (2026-10-17)
+
+No schema, configuration or grant change. No new Go modules. Gap G9 of the editor integration: a desktop editor can show a note's history through mtsync, without holding tokens.
+
+- **`mtsync history FILE`** lists the changes to a file in a registered folder, newest first (time, revision, operation, path then), following it through renames. It shows 10; `-limit N` (1–100) and `-offset N` page back, and `-json` answers for editors with `space`, `folder`, `id`, `entries` (`revision`, `path`, `operation`, `timestamp`, and `file`, the local path of that revision's path) and `nextOffset` (null at the end). The file's ID comes from the folder's `.mtsync/state.json`, so it must have synced once.
+- **`mtsync show FILE REVISION`** prints the file's text at a revision, exactly as stored. For a revision from before a rename, pass the entry's `file`.
+- **REST history takes `offset`** (0–10000, not with `cursor`), skipping that many of the newest entries; past the end the page is empty. mtsync sends it only for `-offset` above 0, so plain `mtsync history` works with older servers. MCP history is unchanged.
+- cmd/mtsync/README.md (Use, commands and flags), docs/api-contract.md (history), docs/roadmap.md (G9 done; the Slate Viewer History panel is next; Open Recent with spaces is done in Slate Viewer).
+- Tests: history paging with limit and offset, past the end, JSON fields, show of each revision, history and show across a rename, plain listing with the next page, and refusals (file not yet synced, outside registered folders, bad limit, short revision, path not there at a revision); REST offset, offset past the end, negative offset, offset with cursor, offset on list. The full suite passes (without MariaDB; no database code changed).
+
 ## 0.40.1 - Automated builds and releases (2026-10-16)
 
 No server or mtsync change. No schema, configuration or grant change. No new Go modules.

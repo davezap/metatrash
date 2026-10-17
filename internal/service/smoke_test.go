@@ -97,6 +97,24 @@ func TestSmoke(t *testing.T) {
 	if len(history.Entries) != 2 || history.Entries[0].Operation != "move" {
 		t.Fatal("history did not follow the move")
 	}
+	// offset pages without a cursor; past the end is an empty page.
+	var older HistoryResult
+	decode(call("GET", "/api/v1/spaces/public/history?limit=1&offset=1&id="+write.File.ID, "", nil, 200), &older)
+	if len(older.Entries) != 1 || older.Entries[0].Operation != "create" || older.NextCursor != nil {
+		t.Fatalf("history offset 1: %+v", older)
+	}
+	var newest HistoryResult
+	decode(call("GET", "/api/v1/spaces/public/history?limit=1&offset=0&id="+write.File.ID, "", nil, 200), &newest)
+	if len(newest.Entries) != 1 || newest.Entries[0].Operation != "move" || newest.NextCursor == nil {
+		t.Fatalf("history offset 0: %+v", newest)
+	}
+	decode(call("GET", "/api/v1/spaces/public/history?offset=5&id="+write.File.ID, "", nil, 200), &older)
+	if len(older.Entries) != 0 {
+		t.Fatalf("history past the end: %+v", older)
+	}
+	call("GET", "/api/v1/spaces/public/history?offset=-1&id="+write.File.ID, "", nil, 400)
+	call("GET", "/api/v1/spaces/public/history?offset=1&cursor="+*newest.NextCursor+"&id="+write.File.ID, "", nil, 400)
+	call("GET", "/api/v1/spaces/public/files?offset=1", "", nil, 400)
 	// Search engines: the public space's top folder only.
 	for page, index := range map[string]bool{"/spaces/public/README.md": true, "/spaces/public/archive/a.txt": false} {
 		r := httptest.NewRequest("GET", page, nil)

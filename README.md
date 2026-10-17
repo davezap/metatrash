@@ -217,6 +217,21 @@ sudo systemctl start metatrash
 
 Check the release notes first for schema or configuration steps.
 
+## How Metatrash, Slate and Slate Viewer fit together
+
+These three projects are parts of one whole, kept in sibling folders:
+
+- **Metatrash** (`metatrash.com - 2026`) is the service: shared spaces of text files backed by Git,
+  reached over MCP and REST, plus `mtsync`, which syncs a space with a local folder.
+- **Slate** (`Slate`) is the Markdown editor component. Slate Viewer and other hosts embed its
+  built `slate.js` and `slate.css`; fix editor bugs here, not in a host's copy.
+- **Slate Viewer** (`Slate_Viewer`) is the desktop app. It vendors Slate in `public/slate/`. For now it
+  is a handy Markdown editor that can also open Metatrash spaces (through `mtsync`). Over time it
+  becomes the desktop companion for managing Metatrash spaces, and those features come later.
+
+Metatrash's website still bundles an older Slate (0.9.2) for read-only viewing. It isn't
+upgraded yet.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): spaces, accounts, sharing, website, limits.

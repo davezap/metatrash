@@ -316,3 +316,32 @@ func (c *client) move(ctx context.Context, from, to, state string) (mutation, er
 	out.File.Path = strings.TrimPrefix(out.File.Path, c.prefix)
 	return out, err
 }
+
+// historyEntry is one change to a file, newest first. Path is the file's
+// path in the space at that revision.
+type historyEntry struct {
+	Revision  string `json:"revision"`
+	Path      string `json:"path"`
+	Operation string `json:"operation"`
+	Timestamp string `json:"timestamp"`
+}
+
+// history lists up to limit changes to the file with this ID, skipping the
+// offset newest. more reports that older entries remain.
+func (c *client) history(ctx context.Context, id string, limit, offset int) (entries []historyEntry, more bool, err error) {
+	var out struct {
+		Entries    []historyEntry `json:"entries"`
+		NextCursor *string        `json:"nextCursor"`
+	}
+	query := url.Values{"id": {id}, "limit": {strconv.Itoa(limit)}}
+	if offset > 0 {
+		query.Set("offset", strconv.Itoa(offset))
+	}
+	if err := c.do(ctx, "GET", "history", query, nil, &out); err != nil {
+		if offset > 0 && errorCode(err) == "invalid_request" {
+			return nil, false, fmt.Errorf("%w; paging with -offset needs metatrash 0.41.0 or later on the server", err)
+		}
+		return nil, false, err
+	}
+	return out.Entries, out.NextCursor != nil, nil
+}

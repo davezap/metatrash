@@ -192,9 +192,10 @@ Earlier checks:
 
 ## mtsync
 
-- **Desktop editor support.** Gaps G2–G9 in `developers/mtsync-editor-integration.md`
+- **Desktop editor support.** Gaps G2–G8 in `developers/mtsync-editor-integration.md`
   in the `dave-zap/metatrash-com` space: `--json` on `spaces` and `list`,
-  `whoami`, `resolve URL`, `files`, `status`, `history` and `show`. G1
+  `whoami`, `resolve URL`, `files` and `status`. G9 (`history`, `show`) is
+  done in 0.41.0; Slate Viewer's History panel uses it next. G1
   (downloads) is met by GitHub releases with `SHA256SUMS` and `mtsync.json`,
   except code signing.
 - **Code signing** for the release binaries (Windows Authenticode, macOS
@@ -202,6 +203,18 @@ Earlier checks:
   Actions secrets. See deployment.md, Automated builds and releases.
 - Deferred with Dave 2026-10-12: bulk first download, on-demand files like
   OneDrive, automatic three-way merge of conflicts.
+
+## Desktop editor
+
+- **History panel** for the open note: `mtsync history -json` newest first,
+  10 at a time, and a click opens that version in Slate's Compare view
+  (agreed with Dave 2026-10-17).
+- **Editing core** (discussed 2026-10-16): keep Slate's toolbar, outline,
+  embeds, wiki links and attachments, and replace its per-line live blocks
+  and Source textarea with CodeMirror 6 for undo history, reloading files
+  mtsync changed without moving the cursor, and its merge view for
+  Compare/Resolve of conflict copies. Chart blocks (Mermaid first) as
+  CodeMirror widgets and preview renderers.
 
 ## Maintenance
 

@@ -99,6 +99,7 @@ type Input struct {
 	ID         string  `json:"-"`
 	Cursor     string  `json:"-"`
 	Limit      int     `json:"-"`
+	Offset     int     `json:"-"`
 	Blobs      bool    `json:"-"`
 	After      string  `json:"-"`
 	Since      string  `json:"-"`

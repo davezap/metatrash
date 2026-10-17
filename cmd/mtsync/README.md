@@ -79,7 +79,7 @@ metatrash service in memory (no database needed).
 adds the built-in sign-in client (`/oauth/clients/sync`) and the file hashes in
 REST listings; 0.34.0 adds instant change notices (`after=` on list) and
 0.37.0 change lists (`since=`), which older servers make up for with full
-listings; `mtsync export` needs 0.38.0. Deploy
+listings; `mtsync export` needs 0.38.0, and `mtsync history -offset` 0.41.0. Deploy
 as usual (`upgrade.sh`). There is no schema, configuration or grant change,
 and OAuth must already be enabled. The waiting request lasts 25 seconds, under
 the example Apache config's `ProxyTimeout 60`; keep any proxy timeout above
@@ -123,6 +123,8 @@ mtsync list                                   # each folder and how it is doing
 mtsync log                                    # the last 40 lines of the service log
 mtsync remove ~/spaces/notes                  # stop syncing it (or: mtsync remove dave-zap/notes)
 mtsync export dave-zap/notes                  # back up the space to a zip here
+mtsync history ~/spaces/notes/plan.md         # the last 10 changes to a file
+mtsync show ~/spaces/notes/plan.md 3f9c…      # the file as it was at that revision
 ```
 
 To sync one folder of a space instead of all of it, add its path after the
@@ -141,6 +143,21 @@ folder if needed. `remove` leaves the files where they are.
 not it is synced anywhere. The zip also holds `.metatrash-export.json`, which
 records the state and each file's ID. It needs metatrash 0.38.0 on the site and
 read access to the space; it takes a whole space, not a folder of it.
+
+`mtsync history FILE` lists the changes to a file in a registered folder,
+newest first: when, the revision, the operation (`create`, `write`, `move`,
+`delete`) and the path it had then. It follows the file through renames. It
+shows 10 changes; `-limit N` (up to 100) shows more and `-offset N` skips the N
+newest, to page back (the listing names the next page). `-json` answers for
+editors: `space`, `folder`, the file's `id`, `entries` (each with `revision`,
+`path` in the space, `operation`, UTC `timestamp`, and `file`, the local path
+that revision's path maps to) and `nextOffset` (null at the end). The file has
+to have synced once, since its ID comes from the folder's `.mtsync/state.json`.
+
+`mtsync show FILE REVISION` prints the file's text at a revision from
+`history`, exactly as stored. For a revision from before a rename, give the
+path it had then (the entry's `file`). A `delete` entry has no text; show the
+one before it.
 
 `mtsync list` shows, per folder, "in sync, checked <time>", the last error
 (for example signed out, or the space no longer connected; the service tries
@@ -161,6 +178,8 @@ All commands:
 | `stop` | stop the running service |
 | `log [N]` | the last N lines of the service log |
 | `export SPACE [FILE]` | save the space as it is now to a zip, for backups |
+| `history FILE` | a synced file's changes, newest first (`-limit`, `-offset`, `-json`) |
+| `show FILE REVISION` | print a synced file's text at a revision |
 | `version` | the version |
 | `SPACE[/PATH] FOLDER` | sync one folder in this window without registering it; `-once` for one pass |
 
@@ -171,6 +190,9 @@ Flags go before the command:
 | `-server` | `https://metatrash.com` | the metatrash site, for `login`, `logout`, `spaces`, `add`, `export` and a one-off sync |
 | `-interval` | `5s` | time between scans of each folder (and between checks of an older server) |
 | `-once` | off | one-off sync: one pass, then exit |
+| `-limit N` | `10` | `history`: how many changes to list (1–100) |
+| `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
+| `-json` | off | `history`: answer in JSON |
 | `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
 
 One local folder syncs one space (or one folder of it); a local folder already

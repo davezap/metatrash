@@ -15,7 +15,7 @@ MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service.
 | `list` | `GET /api/v1/spaces/{space}/files` | query: optional `prefix`, `limit`, `cursor`, `blobs`, `after`, `since` |
 | `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState`, optional `strict` |
 | `delete` | `DELETE /api/v1/spaces/{space}/file` | query: `path`; JSON: `ifInState`, optional `strict` |
-| `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` |
+| `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` or `offset` (REST) |
 
 `search`, `edit` and read's line ranges (0.40.0) let an agent find, read and change part of a file without moving the whole text through its context: see [Search, line ranges and edit](#search-line-ranges-and-edit).
 
@@ -155,7 +155,7 @@ Files sort by ASCII path. `prefix` is empty or a canonical folder prefix ending 
 
 First-page requests capture a revision. Opaque validated continuation tokens bind space, operation, filters/ID, limit, revision, and offset; following pages use that snapshot. Tokens grant no access. Mismatched/malformed tokens return 400. Tokens are signed with a process-local secret and expire on service restart; restart listing if rejected. A reset that removes their snapshot returns 404 if the token is otherwise still valid.
 
-History accepts the stable file ID from read/list and follows its identity through moves using the versioned index. Entries are newest first with `revision`, `path` at that revision, `operation` (create/write/move/delete), and a server UTC `timestamp`. Read old text using that entry's path and revision; a `delete` entry's revision no longer has the file, so read the next older entry. Deleted files keep their history, ending with the `delete` entry. IDs that never appear and unavailable historical files/revisions return 404. A file's old path can later belong to a different ID.
+History accepts the stable file ID from read/list and follows its identity through moves using the versioned index. Entries are newest first with `revision`, `path` at that revision, `operation` (create/write/move/delete), and a server UTC `timestamp`. Read old text using that entry's path and revision; a `delete` entry's revision no longer has the file, so read the next older entry. Deleted files keep their history, ending with the `delete` entry. IDs that never appear and unavailable historical files/revisions return 404. A file's old path can later belong to a different ID. REST history also takes `offset` (0–10000, not with `cursor`): it skips that many of the newest entries, so a client can page by number without keeping a cursor; past the end the page is empty. Entries shift when the file changes between pages, and `nextCursor` still pins a snapshot.
 
 ## Export
 

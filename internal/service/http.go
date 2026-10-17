@@ -490,7 +490,7 @@ func parseQuery(raw, op string) (Input, error) {
 	case "list":
 		allowed["prefix"], allowed["limit"], allowed["cursor"], allowed["blobs"], allowed["after"], allowed["since"] = true, true, true, true, true, true
 	case "history":
-		allowed["id"], allowed["limit"], allowed["cursor"] = true, true, true
+		allowed["id"], allowed["limit"], allowed["cursor"], allowed["offset"] = true, true, true, true
 	}
 	for k, values := range q {
 		if !allowed[k] || len(values) != 1 {
@@ -536,6 +536,15 @@ func parseQuery(raw, op string) (Input, error) {
 			return in, invalid("blobs must be true.")
 		}
 		in.Blobs = true
+	}
+	// offset starts history that many entries back (newest first), for
+	// clients that page without keeping a cursor.
+	if value, ok := q["offset"]; ok {
+		n, err := strconv.Atoi(value[0])
+		if err != nil || n < 0 || n > maxHistoryOffset || q.Get("cursor") != "" {
+			return in, invalid(fmt.Sprintf("offset must be 0..%d, without cursor.", maxHistoryOffset))
+		}
+		in.Offset = n
 	}
 	if _, ok := q["limit"]; ok {
 		in.Limit, err = strconv.Atoi(q.Get("limit"))

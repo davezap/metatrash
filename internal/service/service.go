@@ -454,6 +454,9 @@ type cursor struct {
 	Offset    int    `json:"p"`
 }
 
+// maxHistoryOffset bounds REST history's offset, which git log skips through.
+const maxHistoryOffset = 10000
+
 func (s *Service) encodeCursor(c cursor) *string {
 	b, _ := json.Marshal(c)
 	h := hmac.New(sha256.New, s.cursorKey)
@@ -546,7 +549,7 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 			return nil, invalid("Invalid folder prefix.")
 		}
 	}
-	c := cursor{Space: space, Operation: op, Filter: filter, Limit: in.Limit}
+	c := cursor{Space: space, Operation: op, Filter: filter, Limit: in.Limit, Offset: in.Offset}
 	if in.Cursor != "" {
 		parts := strings.Split(in.Cursor, ".")
 		if len(parts) != 2 || len(in.Cursor) > 2048 {
