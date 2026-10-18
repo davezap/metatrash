@@ -29,7 +29,7 @@ Command line: `metatrash [-listen 127.0.0.1:8080] [-data DIR] [-config spaces.js
 [-keys keys.json] [-accounts-config accounts.json] [-trusted-proxies CIDRs]
 [-public-url URL]`, plus the subcommands `help`, `version`, `keygen`,
 `accounts-migrate`, `check`, `users …` (list, show, email-login, set-limit,
-rename), `spaces list` and `spaces export`. `metatrash help`
+rename), `spaces list`, `spaces export` and `spaces readme`. `metatrash help`
 lists them.
 
 ### Console commands
@@ -47,6 +47,7 @@ mt users rename dave david       # change the username (old addresses break)
 mt spaces list                   # every owned space (-json for JSON)
 mt spaces export dave/notes      # one space as a zip in the current folder
 mt spaces export -all /srv/backup/metatrash   # every space, for backups
+mt spaces readme public          # replace a space's README.md with the current template
 ```
 
 They use the same `accounts.json` and account database as the service, with
@@ -106,6 +107,14 @@ limits from the database on each request).
   `mt spaces export -all /srv/backup/metatrash && find /srv/backup/metatrash -name '*.zip' -mtime +30 -delete`.
   An export holds current files only, not history, so keep backing up the
   data directory as well.
+- **`spaces readme <space>`** (0.43.0) replaces the space's root `README.md`
+  with the template built into the binary (`docs/space-README.template.md`),
+  keeping its file ID and history, and says `updated` or `already current`.
+  `-all` does every `spaces.json` space and every ready owned space. Agents
+  cannot change README.md, so run it after a release that changes the
+  template. It writes the repository under `-data` directly, beside the
+  service; if an agent's write lands at the same moment, one of the two fails
+  and can simply be retried.
 
 ## Build and install
 
@@ -363,140 +372,28 @@ implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
 
-**0.17.0** needs schema v6 (`deploy/account-schema-v6.sql`, then
-`account-grants.sql`) before the new binary starts; it adds only the GitHub
-connections table. GitHub itself stays off until configured.
+Releases that changed the schema or grants (the live server has all of them):
 
-**0.21.0** needs schema v7 before the new binary starts:
+| Release | Before the new binary starts | To roll back, set `schema_version` to |
+| --- | --- | --- |
+| 0.17.0 | schema v6 (GitHub connections) | 5 |
+| 0.21.0 | schema v7 (`web` visibility) | 6, after `UPDATE metatrash_spaces SET visibility = 'private'` |
+| 0.22.0 | schema v8 (passkeys, TOTP, recovery codes, `email_login`) | 7 |
+| 0.26.0 | grants (`UPDATE (email)`) | (grants only) |
+| 0.28.0 | grants (`UPDATE (max_private_spaces)`, for `mt users set-limit`) | (grants only) |
+| 0.30.0 | schema v9 (transfers and aliases) | 8; transferred spaces keep their new owner and lose their old address |
+| 0.31.0 | schema v10 (`metatrash_sessions`; that upgrade signed everyone out once) | 9; everyone is signed out |
+| 0.32.0 | schema v11 (session `device` and `ip`) | 10 |
 
-```sh
-sudo systemctl stop metatrash
-sudo mariadb metatrash < deploy/account-schema-v7.sql
-sudo mariadb < deploy/account-grants.sql
-# install the new binary (upgrade.sh), then
-sudo systemctl start metatrash
-```
-
-v7 lets a space's `visibility` be `web` (readable in the website explorer)
-and grants the service `UPDATE (visibility)`. Every space stays `private`
-until its owner changes it. To roll back to 0.20.x, set every space back to
-`private` first (`UPDATE metatrash_spaces SET visibility = 'private'`), then
-`schema_version` to 6.
-
-**0.22.0** needs schema v8 before the new binary starts:
-
-```sh
-sudo systemctl stop metatrash
-sudo mariadb metatrash < deploy/account-schema-v8.sql
-sudo mariadb < deploy/account-grants.sql
-# install the new binary (upgrade.sh), then
-sudo systemctl start metatrash
-```
-
-v8 adds the sign-in method tables (`metatrash_passkeys`, `metatrash_totp`,
-`metatrash_recovery_codes`) and an `email_login` column on `metatrash_users`
-(default 1), and grants the service access to them. 0.22.0 uses only the
-passkeys table. Passkeys are bound to the host name of `origin` in
-`accounts.json` (`metatrash.com`): changing that host makes every passkey
-unusable. To roll back to 0.21.x, set `schema_version` to 7; the new tables
-can stay.
-
-**0.24.0** needs no schema change (it uses the v8 `metatrash_totp` table).
-Add `totpKeyFile` to `accounts.json` (see [Authenticator app](#authenticator-app))
-to offer it; without it the release behaves like 0.23.0. To roll back to 0.23.x,
-install the older binary: authenticator apps already set up stay in the table,
-unused, and work again after upgrading.
-
-**0.25.0** needs no schema or configuration change (it uses the v8
-`metatrash_recovery_codes` table and `email_login` column). Rolling back to
-0.24.x is safe but weakens accounts that turned email sign-in off: the older
-binary ignores the switch, so emailed codes sign them in again.
-
-**0.26.0** needs no schema or configuration change, but run
-`deploy/account-grants.sql` again before starting it: changing an email
-address needs `UPDATE (email)` on `metatrash_users`.
-
-```sh
-sudo mariadb < deploy/account-grants.sql   # safe while 0.25.x is running
-./upgrade.sh
-```
-
-Rolling back to 0.25.x is safe; addresses already changed stay changed.
-
-**0.27.0** needs no schema, configuration or grant change. Rolling back to
-0.26.x is safe.
-
-**0.28.0** adds console commands and the `mt` shortcut; no schema or
-configuration change. Run `deploy/account-grants.sql` again for the one new
-grant, `UPDATE (max_private_spaces)` on `metatrash_users`, which only
-`mt users set-limit` uses (everything else works without it):
-
-```sh
-sudo mariadb < deploy/account-grants.sql   # safe while 0.27.x is running
-./upgrade.sh
-mt check
-```
-
-**0.30.0** needs schema v9 and the grants before the new binary starts.
-`upgrade.sh` restarts the service, so apply them first; 0.29.x keeps running
-on v9 until it restarts:
-
-```sh
-sudo mariadb metatrash < deploy/account-schema-v9.sql
-sudo mariadb < deploy/account-grants.sql
-./upgrade.sh
-mt check
-```
-
-v9 adds `metatrash_space_transfers` (pending ownership offers) and
-`metatrash_space_aliases` (addresses of transferred spaces), and grants
-`UPDATE (owner_user_id)` on `metatrash_spaces` and `UPDATE (member_user_id)`
-on `metatrash_oauth_grant_spaces`. To roll back to 0.29.x, set
-`schema_version` to 8; spaces already transferred keep their new owner, and
-their old addresses stop working until 0.30.0 is back.
-
-**0.31.0** needs schema v10 and the grants before the new binary starts.
-`upgrade.sh` restarts the service, so apply them first; 0.30.x keeps running
-on v10 until it restarts:
-
-```sh
-sudo mariadb metatrash < deploy/account-schema-v10.sql
-sudo mariadb < deploy/account-grants.sql
-./upgrade.sh
-mt check
-```
-
-v10 adds `metatrash_sessions` (one row per signed-in browser: the SHA-256 of
-the cookie's token, never the token, with user, created, expires, last
-confirmed and last used) and grants `SELECT, INSERT, DELETE` and
-`UPDATE (auth_at, last_used_at)` on it. From then on a restart or deploy keeps
-everyone signed in. This upgrade itself still signs everyone out once (0.30.x
-kept sessions in memory). The journal shows `account sessions-loaded count=N`
-at startup. Restoring a database backup brings back sessions that were signed
-out since it was taken (each lasts at most 24 hours). To roll back to 0.30.x,
-set `schema_version` to 9; the table is ignored and everyone is signed out on
-that restart.
-
-**0.32.0** needs schema v11 before the new binary starts. No new grants (the
-v10 table grants cover the new columns), but running `account-grants.sql`
-again is harmless:
-
-```sh
-sudo mariadb metatrash < deploy/account-schema-v11.sql
-./upgrade.sh
-mt check
-```
-
-v11 adds `device` (a label such as "Chrome on Windows", made from the
-User-Agent at sign-in; the header is not kept) and `ip` (the sign-in address,
-from `X-Forwarded-For` through the trusted proxy) to `metatrash_sessions`.
-Both go when the session does: sign-out or 24 hours. Sessions are kept across
-this upgrade; ones from 0.31.0 show "Unknown browser". To roll back to
-0.31.x, set `schema_version` to 10; the columns are ignored.
-
-**0.33.0 to 0.40.1** need no schema, configuration or grant change. mtsync
-(0.33.0) needs OAuth enabled; its waiting list requests last 25 seconds, so
-keep any proxy timeout above 30 seconds.
+Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
+which restarts the service; the running binary keeps working on the newer
+schema until then. Releases since 0.32.0 (to 0.43.0) need no schema,
+configuration or grant change. mtsync needs OAuth enabled; its waiting list
+requests last 25 seconds, so keep any proxy timeout above 30 seconds.
+Passkeys are bound to the host name of `origin` in `accounts.json`
+(`metatrash.com`): changing that host makes every passkey unusable. Rolling
+back past 0.25.0 lets emailed codes sign in accounts that turned email
+sign-in off.
 
 Prefer fixing forward. To run an older binary, leave the new tables in place and
 set `schema_version` back to what that binary expects; set it forward again
@@ -517,8 +414,9 @@ accounts, spaces or memberships created since that backup.
 - **Public reset**: stop, move `repos/public.git` to a private backup, start; a
   fresh public space is provisioned.
 - Git history is not a backup. Do not run Git maintenance or external writers
-  against live repositories. Existing space READMEs are not changed by
-  rebuilding; only new spaces get the current template.
+  against live repositories (the console's own commands are safe). Existing space READMEs are not changed by
+  rebuilding; new spaces get the current template, and `mt spaces readme`
+  brings existing ones up to date.
 
 ### An account locked out with email sign-in off
 
@@ -530,8 +428,7 @@ example, a reply from that address):
 mt users email-login on name@example.com
 ```
 
-The account is emailed a notice. Without the 0.28.0 binary, the same change in
-SQL is `UPDATE metatrash_users SET email_login = 1 WHERE email = '…'`.
+The account is emailed a notice.
 
 They can then sign in with an emailed code and create new recovery codes.
 

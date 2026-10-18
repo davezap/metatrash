@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.43.0 - Reset a space's README from the console (2026-10-18)
+
+No schema, configuration or grant change. No new Go modules. mtsync is unchanged.
+
+- **`mt spaces readme <space>`** replaces a space's root `README.md` with the template built into this version (`docs/space-README.template.md`), keeping the file's ID and history: one commit with a `write` entry, as an agent's write would make. `<space>` is `owner/slug`, a space ID or a `spaces.json` name such as `public`; `-all` does every `spaces.json` space and every ready owned space, one line each (`updated` or `already current`). Agents still cannot change README.md, so this is how an existing space gets the current text; new spaces get the template when they are created, as before. It writes the repository under `-data` directly and can run beside the service (the branch only moves if nothing else committed meanwhile; a write that loses that race fails and can be retried). Space limits are not applied to the new text.
+- After deploying, `mt spaces readme public` fixes the live public README, which still says the MCP endpoint is pending.
+- The roadmap and docs drop stale items: per-version upgrade steps in docs/deployment.md are now one table, the README status is current, and the roadmap gains owner-set read-only files and a folder configurator in Slate Viewer.
+- Tests: refresh keeps the README's ID and protection, writes one `write` commit, is a no-op when the text is already current, and refuses a missing repository.
+
 ## 0.42.0 - Client versions in the tool schema (2026-10-17)
 
 No schema, configuration or grant change. No new Go modules. mtsync is unchanged.

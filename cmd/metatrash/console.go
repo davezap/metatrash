@@ -37,6 +37,7 @@ var commandUsage = map[string]string{
 	"users rename":      "users rename <email|username|id> <new-username> [-no-notice]",
 	"spaces list":       "spaces list [-json]",
 	"spaces export":     "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
+	"spaces readme":     "spaces readme <owner/slug|id|name> [-data DIR] | spaces readme -all [-data DIR]",
 }
 
 const usage = `metatrash %s
@@ -64,6 +65,8 @@ Commands:
   spaces export <space> [FILE]  write the space as it is now to a zip (- for stdout;
                                 default <owner>-<slug>-<date>-<state>.zip here)
   spaces export -all DIR        export every space into DIR, for backups
+  spaces readme <space>         replace the space's README.md with this version's
+                                template (keeps its ID and history); -all for every space
 
 <who> is an email address, username or user ID. list and show take -json.
 <space> is owner/slug or a space ID, or a spaces.json name such as public.
@@ -72,7 +75,7 @@ Account commands read the same accounts.json and account database as the
 service: -accounts-config, else METATRASH_ACCOUNTS_CONFIG, else
 ` + defaultAccountsConfig + `. check also reads -config (/etc/metatrash/spaces.json),
 -keys (/etc/metatrash/keys.json) and -data (/var/lib/metatrash); spaces export
-reads -data. Run them as
+and spaces readme read -data. Run them as
 the service user, which the mt shortcut does: mt users list
 `
 
@@ -297,9 +300,12 @@ func spacesCommand(args []string) error {
 	if len(args) > 0 && args[0] == "export" {
 		return spacesExport(args[1:])
 	}
+	if len(args) > 0 && args[0] == "readme" {
+		return spacesReadme(args[1:])
+	}
 	if len(args) == 0 || args[0] != "list" {
 		printUsage(os.Stderr)
-		return fmt.Errorf("spaces needs a subcommand: spaces list or spaces export")
+		return fmt.Errorf("spaces needs a subcommand: spaces list, spaces export or spaces readme")
 	}
 	flags := flag.NewFlagSet("spaces list", flag.ContinueOnError)
 	accountsConfig := accountsConfigFlag(flags)
@@ -354,22 +360,7 @@ func spacesExport(args []string) error {
 	if *all != "" {
 		return exportAll(ctx, *accountsConfig, *data, *all)
 	}
-	ref := strings.ToLower(strings.Trim(rest[0], "/"))
-	name, id := ref, ref
-	owned := strings.Contains(ref, "/") || len(ref) == 32 && strings.Trim(ref, "0123456789abcdef") == ""
-	if owned {
-		db, err := service.OpenAdminDB(ctx, *accountsConfig)
-		if err != nil {
-			return err
-		}
-		space, err := db.FindSpace(ctx, ref)
-		db.Close()
-		if err != nil {
-			return err
-		}
-		name, id = space.Owner+"/"+space.Slug, space.ID
-	}
-	gitDir, err := service.SpaceRepositoryPath(*data, owned, id)
+	name, gitDir, err := findSpaceRepository(ctx, *accountsConfig, *data, rest[0])
 	if err != nil {
 		return err
 	}
@@ -392,30 +383,50 @@ func spacesExport(args []string) error {
 	return nil
 }
 
-// exportAll exports every ready owned space and every spaces.json space into
-// dir. One failure does not stop the rest; the error counts them.
-func exportAll(ctx context.Context, accountsConfig, data, dir string) error {
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", dir)
+// findSpaceRepository resolves owner/slug, a space ID or a spaces.json name
+// to the space's name and its repository under data.
+func findSpaceRepository(ctx context.Context, accountsConfig, data, ref string) (string, string, error) {
+	ref = strings.ToLower(strings.Trim(ref, "/"))
+	name, id := ref, ref
+	owned := strings.Contains(ref, "/") || len(ref) == 32 && strings.Trim(ref, "0123456789abcdef") == ""
+	if owned {
+		db, err := service.OpenAdminDB(ctx, accountsConfig)
+		if err != nil {
+			return "", "", err
+		}
+		space, err := db.FindSpace(ctx, ref)
+		db.Close()
+		if err != nil {
+			return "", "", err
+		}
+		name, id = space.Owner+"/"+space.Slug, space.ID
 	}
-	type job struct{ name, gitDir string }
-	jobs := []job{}
+	gitDir, err := service.SpaceRepositoryPath(data, owned, id)
+	return name, gitDir, err
+}
+
+type spaceRepository struct{ name, gitDir string }
+
+// allSpaceRepositories lists every spaces.json space and every ready owned
+// space with its repository under data.
+func allSpaceRepositories(ctx context.Context, accountsConfig, data string) ([]spaceRepository, error) {
+	jobs := []spaceRepository{}
 	names, err := service.ConfiguredSpaces(data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, n := range names {
 		gitDir, _ := service.SpaceRepositoryPath(data, false, n)
-		jobs = append(jobs, job{n, gitDir})
+		jobs = append(jobs, spaceRepository{n, gitDir})
 	}
 	db, err := service.OpenAdminDB(ctx, accountsConfig)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	spaces, err := db.Spaces(ctx)
 	db.Close()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, s := range spaces {
 		if s.State != "ready" {
@@ -423,9 +434,22 @@ func exportAll(ctx context.Context, accountsConfig, data, dir string) error {
 		}
 		gitDir, err := service.SpaceRepositoryPath(data, true, s.ID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		jobs = append(jobs, job{s.Owner + "/" + s.Slug, gitDir})
+		jobs = append(jobs, spaceRepository{s.Owner + "/" + s.Slug, gitDir})
+	}
+	return jobs, nil
+}
+
+// exportAll exports every ready owned space and every spaces.json space into
+// dir. One failure does not stop the rest; the error counts them.
+func exportAll(ctx context.Context, accountsConfig, data, dir string) error {
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	jobs, err := allSpaceRepositories(ctx, accountsConfig, data)
+	if err != nil {
+		return err
 	}
 	failed := 0
 	for _, j := range jobs {
@@ -444,6 +468,57 @@ func exportAll(ctx context.Context, accountsConfig, data, dir string) error {
 		return fmt.Errorf("%s of %d failed", count(failed, "export", "exports"), len(jobs))
 	}
 	fmt.Fprintf(os.Stderr, "Exported %s.\n", count(len(jobs), "space", "spaces"))
+	return nil
+}
+
+// spacesReadme replaces README.md in one space, or with -all every space,
+// with the built-in template. It writes the repositories directly, beside
+// the service.
+func spacesReadme(args []string) error {
+	flags := flag.NewFlagSet("spaces readme", flag.ContinueOnError)
+	accountsConfig := accountsConfigFlag(flags)
+	data := flags.String("data", "/var/lib/metatrash", "Persistent data directory")
+	all := flags.Bool("all", false, "Every space")
+	rest, err := parseArgs(flags, args)
+	if err != nil {
+		return err
+	}
+	if *all == (len(rest) == 1) || len(rest) > 1 {
+		return fmt.Errorf("usage: metatrash %s", commandUsage["spaces readme"])
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var jobs []spaceRepository
+	if *all {
+		if jobs, err = allSpaceRepositories(ctx, *accountsConfig, *data); err != nil {
+			return err
+		}
+	} else {
+		name, gitDir, err := findSpaceRepository(ctx, *accountsConfig, *data, rest[0])
+		if err != nil {
+			return err
+		}
+		jobs = []spaceRepository{{name, gitDir}}
+	}
+	failed, updated := 0, 0
+	for _, j := range jobs {
+		state, changed, err := service.RefreshREADME(ctx, j.gitDir, metatrash.SpaceREADME)
+		if err != nil {
+			failed++
+			fmt.Fprintf(os.Stderr, "%s: %v\n", j.name, err)
+			continue
+		}
+		result := "already current"
+		if changed {
+			updated++
+			result = "updated"
+		}
+		fmt.Printf("%s\t%s\t%s\n", j.name, state[:12], result)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%s of %d failed", count(failed, "space", "spaces"), len(jobs))
+	}
+	fmt.Fprintf(os.Stderr, "Updated README.md in %s of %d.\n", count(updated, "space", "spaces"), len(jobs))
 	return nil
 }
 

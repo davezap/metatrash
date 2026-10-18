@@ -57,7 +57,8 @@ sync a GitHub folder with `pull`, `pending` and `push` (see
 
 ## Accounts
 
-- **Sign-in**: email address plus a six-digit code sent through Gmail SMTP
+- **Emailed codes** (the backup sign-in; passkeys and the authenticator app
+  are below): email address plus a six-digit code sent through Gmail SMTP
   (STARTTLS required). Codes expire after ten minutes, allow five attempts and
   are kept as keyed digests in memory. Sessions last 24 hours and are kept
   in memory and in `metatrash_sessions` (SHA-256 of the token, never the

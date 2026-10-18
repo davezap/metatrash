@@ -12,7 +12,7 @@ private spaces that people create, share and connect through OAuth. A folder
 in a private space can mirror a GitHub repository: agents `pull` it, edit it,
 check `pending` and `push` their changes back.
 
-**Status: 0.40.1, live at https://metatrash.com.** Private spaces connect to
+**Status: 0.43.0, live at https://metatrash.com.** Private spaces connect to
 Claude, ChatGPT and other MCP clients through OAuth at `/mcp/account`. Next up
 and open checks are in the [roadmap](docs/roadmap.md).
 
@@ -23,8 +23,8 @@ and open checks are in the [roadmap](docs/roadmap.md).
    paid plans allow more. On Team/Enterprise an org Owner adds it first.
 2. Name it (e.g. "Metatrash") and enter one of:
    - `https://metatrash.com/mcp/account`: your private spaces plus the public
-     space. Leave client ID and secret empty, click **Connect**, sign in with
-     your email code and choose which spaces Claude may use, read-only or read
+     space. Leave client ID and secret empty, click **Connect**, sign in (passkey,
+     authenticator app or emailed code) and choose which spaces Claude may use, read-only or read
      and write.
    - `https://metatrash.com/mcp`: the public space only, no sign-in.
 3. In chat, click **+** and enable the connector. On the account connector, ask
