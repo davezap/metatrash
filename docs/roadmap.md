@@ -107,10 +107,9 @@ the `review` push mode, which needs a review screen.
 - **Editor gaps G2–G8** (`developers/mtsync-editor-integration.md` in the
   `dave-zap/metatrash-com` space): `--json` on `spaces` and `list`, `whoami`,
   `resolve URL`, `files` and `status`.
-- **Code signing** for the release binaries and installers (Windows
-  Authenticode, macOS Developer ID and notarization); needs certificates in
-  the repository's Actions secrets. See deployment.md, Automated builds and
-  releases.
+- **macOS code signing** (Developer ID and notarization) for mtsync and
+  Slate Viewer; needs an Apple Developer account. Windows files are signed
+  with Azure Artifact Signing since 0.43.2 (deployment.md, Code signing).
 - **Slate**: chart blocks (Mermaid first) as CodeMirror widgets and preview
   renderers; a read-only Compare, so Slate Viewer's History panel works on
   documents it cannot edit.

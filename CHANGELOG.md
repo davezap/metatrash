@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.43.2 - Signed Windows downloads (2026-10-18)
+
+No server or mtsync change. No schema, configuration or grant change. No new Go modules.
+
+- **Release** signs `mtsync-windows-amd64.exe`, `mtsync-windows-arm64.exe`, the setup's uninstaller and `mtsync-windows-setup.exe` with Azure Artifact Signing (formerly Trusted Signing; account `zaptronicssigning`, East US), timestamped by Microsoft's timestamp server, before `SHA256SUMS` and `mtsync.json` are made. Signing runs on Linux with Jsign 7.5 (checked against its SHA-256). The job signs in to Azure with GitHub's OIDC token (`azure/login`, no client secret) from the repository's `release` environment, and fails before publishing if `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` or `AZURE_SIGNING_PROFILE` is not set there. The macOS and Linux files are unchanged (Artifact Signing is Windows only).
+- `deploy/installers/mtsync-setup.nsi` takes `-DSIGN=COMMAND` and signs the uninstaller and the setup with it (NSIS 3.08 or later). CI still builds it unsigned.
+- docs/deployment.md (Code signing: the Azure and GitHub setup), README (the setup is signed), roadmap (macOS signing and notarization remain).
+
 ## 0.43.1 - Desktop tools link on the account page (2026-10-18)
 
 No schema, configuration or grant change. No new Go modules. mtsync is unchanged.

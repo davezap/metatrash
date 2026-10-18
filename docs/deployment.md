@@ -173,12 +173,44 @@ To release: bump `Version`, add the changelog section, commit, then
 `git tag v0.41.0 && git push origin v0.41.0`. A failed run publishes nothing;
 fix, move the tag (`git tag -f`, `git push -f origin v0.41.0`) and it runs again.
 
-Binaries are not code-signed. Windows SmartScreen warns on first run of a
-downloaded `.exe`, and macOS refuses a browser-downloaded binary until it is
-allowed in System Settings → Privacy & Security (`curl` downloads are not
-quarantined). Signing needs a certificate (Windows: Azure Trusted Signing or an
-OV/EV code-signing certificate; macOS: an Apple Developer ID and notarization)
-added to the repository's Actions secrets, then a signing step in `release.yml`.
+### Code signing
+
+The release signs the Windows files (`mtsync-windows-*.exe`, the setup and the
+uninstaller inside it) with Azure Artifact Signing (formerly Trusted Signing),
+account `zaptronicssigning` at `https://eus.codesigning.azure.net/`. Jsign
+does it on the Linux runner; the NSIS setup signs its uninstaller and itself
+through `-DSIGN`. The release job runs in the GitHub environment `release` and
+signs in to Azure with GitHub's OIDC token, so no Azure secret is stored in
+GitHub. Slate Viewer's release signs the same way, with the same identity.
+
+One-time setup:
+
+1. **Azure: an identity for GitHub.** Microsoft Entra ID → App registrations →
+   New registration (for example `github-release-signing`). Note its
+   Application (client) ID and Directory (tenant) ID. Under Certificates &
+   secrets → Federated credentials, add one per repository: scenario *GitHub
+   Actions deploying Azure resources*, organization `davezap`, repository
+   `metatrash` (and `slate.viewer`), entity type *Environment*, environment
+   `release`. The subject is then `repo:davezap/metatrash:environment:release`.
+2. **Azure: permission to sign.** On the certificate profile (or the whole
+   `zaptronicssigning` account) → Access control (IAM) → Add role assignment:
+   *Artifact Signing Certificate Profile Signer* (shown as *Trusted Signing
+   Certificate Profile Signer* in older portals) for that app registration.
+   No subscription role is needed.
+3. **GitHub, in each repository:** Settings → Environments → New environment
+   `release` (optionally limit it to tags `v*`). In it add three variables
+   (not secrets; none of them is sensitive): `AZURE_CLIENT_ID`,
+   `AZURE_TENANT_ID` and `AZURE_SIGNING_PROFILE` (the certificate profile's
+   name in the signing account).
+
+A missing variable stops the release before anything is published. To check a
+download on Windows: Properties → Digital Signatures, or
+`Get-AuthenticodeSignature mtsync-windows-setup.exe` (Status `Valid`). A new
+certificate's reputation builds with downloads, so SmartScreen may still warn
+at first. The macOS and Linux files are not signed: macOS refuses a
+browser-downloaded binary until it is allowed in System Settings → Privacy &
+Security (`curl` downloads are not quarantined), and signing there needs an
+Apple Developer ID and notarization.
 
 If the repository is private, release downloads need a GitHub sign-in or token,
 so public downloads of mtsync need either a public repository or a copy on the

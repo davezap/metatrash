@@ -155,9 +155,10 @@ It installs to `%LOCALAPPDATA%\Programs\mtsync`, picks the build for your PC
 (Intel/AMD or Arm), adds it to your `Path`, and offers to connect the computer
 (`mtsync login`) at the end. It is listed in Settings → Apps with Uninstall,
 which stops the service and removes the program but keeps the sign-in, the
-registered folders and the synced files. The setup is not code-signed yet, so
-SmartScreen warns on first run: **More info → Run anyway**. `/S` installs
-silently.
+registered folders and the synced files. The setup and the programs are
+code-signed (from 0.43.2); until the signature has built up reputation,
+SmartScreen may still warn on first run: **More info → Run anyway**. `/S`
+installs silently.
 
 **macOS and Linux** (Terminal):
 

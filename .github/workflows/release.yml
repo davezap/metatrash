@@ -2,6 +2,8 @@
 # a GitHub Release with mtsync for Windows, Linux and macOS, its installers
 # (mtsync-windows-setup.exe and install.sh), the metatrash server for Linux,
 # SHA256SUMS and mtsync.json.
+# The Windows programs and the setup are signed with Azure Artifact Signing
+# (formerly Trusted Signing); see docs/deployment.md, Code signing.
 name: Release
 
 on:
@@ -38,10 +40,19 @@ jobs:
     name: Build and publish
     needs: [check, test]
     runs-on: ubuntu-latest
+    # Azure trusts this repository's "release" environment (federated
+    # credential subject repo:OWNER/REPO:environment:release).
+    environment: release
     permissions:
       contents: write
+      id-token: write  # sign in to Azure with GitHub's OIDC token, no client secret
     env:
       VERSION: ${{ needs.check.outputs.version }}
+      SIGNING_ENDPOINT: https://eus.codesigning.azure.net/
+      SIGNING_ACCOUNT: zaptronicssigning
+      SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+      JSIGN_VERSION: '7.5'
+      JSIGN_SHA256: 602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -66,10 +77,56 @@ jobs:
           done
           ./dist/metatrash-linux-amd64 version
 
+      - name: Check signing settings
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SIGNING_PROFILE; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Variable $v is not set (Settings > Environments > release)"; exit 1
+            fi
+          done
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true  # the identity only has a role on the signing account
+      # A token now, while the OIDC sign-in is fresh; it lasts an hour or more.
+      - name: Signing token
+        run: |
+          token=$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)
+          echo "::add-mask::$token"
+          echo "SIGNING_TOKEN=$token" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      # Jsign signs Windows files on Linux; $RUNNER_TEMP/sign FILE... signs in place.
+      - name: Jsign
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/jsign.jar" \
+            "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign-$JSIGN_VERSION.jar"
+          echo "$JSIGN_SHA256  $RUNNER_TEMP/jsign.jar" | sha256sum -c -
+          cat > "$RUNNER_TEMP/sign" <<'EOF'
+          #!/bin/sh
+          exec java -jar "$RUNNER_TEMP/jsign.jar" --storetype TRUSTEDSIGNING \
+            --keystore "$SIGNING_ENDPOINT" --storepass env:SIGNING_TOKEN \
+            --alias "$SIGNING_ACCOUNT/$SIGNING_PROFILE" \
+            --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/sign"
+      - name: Sign mtsync for Windows
+        run: |
+          "$RUNNER_TEMP/sign" --name "Metatrash Sync" dist/mtsync-windows-amd64.exe dist/mtsync-windows-arm64.exe
+
+      # The setup carries the signed programs; makensis signs its uninstaller
+      # and then the setup itself with SIGN.
       - name: Installers
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q nsis
-          makensis -V2 -DVERSION="$VERSION" -DDIST="$PWD/dist" deploy/installers/mtsync-setup.nsi
+          makensis -V2 -DVERSION="$VERSION" -DDIST="$PWD/dist" -DSIGN="$RUNNER_TEMP/sign" deploy/installers/mtsync-setup.nsi
           cp deploy/installers/install.sh dist/
 
       - name: Checksums and mtsync.json

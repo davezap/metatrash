@@ -5,7 +5,10 @@
 ;   makensis -DVERSION=0.41.2 -DDIST="$PWD/dist" deploy/installers/mtsync-setup.nsi
 ; DIST (absolute: makensis works from this folder) holds
 ; mtsync-windows-amd64.exe and mtsync-windows-arm64.exe; the setup is written
-; there as mtsync-windows-setup.exe.
+; there as mtsync-windows-setup.exe. The release also passes
+; -DSIGN=/path/to/sign, a command run as `sign [--name NAME] FILE` that signs
+; FILE in place: it signs the uninstaller before it goes into the setup, then
+; the setup (needs NSIS 3.08 or later). CI builds it unsigned.
 
 Unicode true
 !include MUI2.nsh
@@ -27,6 +30,10 @@ Unicode true
 
 Name "Metatrash Sync (mtsync) ${VERSION}"
 OutFile "${OUT}"
+!ifdef SIGN
+  !uninstfinalize '"${SIGN}" --name "mtsync uninstaller" "%1"' = 0
+  !finalize '"${SIGN}" --name "mtsync setup" "%1"' = 0
+!endif
 RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Programs\mtsync"
 SetCompressor /SOLID lzma
