@@ -11,7 +11,7 @@
 </head>
 <body data-base-path="{{.BasePath}}">
 <a class="skip" href="#main">Skip to content</a>
-<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation">{{if .AccountsEnabled}}<a href="{{.BasePath}}/account">Your account</a>{{end}}<a href="{{.BasePath}}/spaces/public/">Public space ↗</a></nav></header>
+<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation">{{if .AccountsEnabled}}<a href="{{.BasePath}}/account">Your account</a>{{end}}{{if or (not .Private) .Web}}<a href="{{.BasePath}}/spaces/public/">Public space ↗</a>{{end}}</nav></header>
 {{if .Home}}
 <main id="main" class="home">
 <section class="hero" aria-labelledby="intro-title">

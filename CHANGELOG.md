@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.43.1 - Desktop tools link on the account page (2026-10-18)
+
+No schema, configuration or grant change. No new Go modules. mtsync is unchanged.
+
+- **Private spaces** no longer show the "Public space ↗" link in the header (a space readable on the web, such as the docs, keeps it).
+- **Your account** replaces "Public space ↗" with **Manage & Edit spaces from the desktop**, which opens `/docs/tools/slate-viewer.md`.
+- The docs space (`dave-zap/metatrash-com`) gains `tools/slate-viewer.md` (what Slate Viewer does, downloads, install and first space) and `tools/mtsync.md` (mtsync on its own, noting it comes with Slate Viewer), linked from introduction.md. These are space content, already live; they need no deploy.
+
 ## 0.43.0 - Reset a space's README from the console (2026-10-18)
 
 No schema, configuration or grant change. No new Go modules. mtsync is unchanged.
