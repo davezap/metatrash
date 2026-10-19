@@ -110,11 +110,9 @@ the `review` push mode, which needs a review screen.
 - **macOS code signing** (Developer ID and notarization) for mtsync and
   Slate Viewer; needs an Apple Developer account. Windows files are signed
   with Azure Artifact Signing since 0.43.2 (deployment.md, Code signing).
-- **Slate**: chart blocks (Mermaid first) as CodeMirror widgets and preview
-  renderers; a read-only Compare, so Slate Viewer's History panel works on
-  documents it cannot edit.
-- **Website viewer**: the site still bundles Slate 0.9.2 for read-only
-  viewing; upgrading it was deferred with Dave (2026-10-17).
+- **Slate**: a read-only Compare, so Slate Viewer's History panel works on
+  documents it cannot edit. (Mermaid diagrams shipped in Slate 0.14, and the
+  website uses Slate 0.14.1 since Metatrash 0.44.0.)
 - **Slate Viewer as the space manager**: the desktop companion for managing
   Metatrash spaces (agreed direction 2026-10-17, not yet planned in detail).
 - Deferred with Dave 2026-10-12: bulk first download, on-demand files like

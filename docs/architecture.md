@@ -225,7 +225,9 @@ every request, before quotas are charged or Git is touched.
   swaps only the document, with the address bar and history updated, so the
   tree keeps its open folders (`web/document.js`; whole pages without
   JavaScript or when a fetch fails). Markdown renders with the embedded Slate
-  0.9.2 viewer in read-only mode, mounted once per page; other files show as
+  (0.14.1) in read-only Preview, mounted once per page; ```mermaid blocks
+  load the embedded Mermaid from `/assets/mermaid/` only when a document has
+  one; other files show as
   escaped text, which is also the fallback without JavaScript.
 - Legacy `?path=` links redirect (308) to clean document URLs.
 - Assets come only from an explicit embedded allowlist, never from space

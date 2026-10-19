@@ -3,7 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -40,6 +40,12 @@ var slateJS []byte
 //go:embed web/slate.css
 var slateCSS []byte
 
+// Mermaid, which Slate loads on its own the first time a document has a
+// ```mermaid block: an entry file and the chunks it imports.
+//
+//go:embed web/mermaid
+var mermaidFiles embed.FS
+
 //go:embed web/document.js
 var documentJS []byte
 
@@ -73,8 +79,21 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	case "/assets/account.js":
 		data, kind = accountJS, "text/javascript; charset=utf-8"
 	default:
-		sendError(w, missing())
-		return true
+		name, ok := strings.CutPrefix(r.URL.Path, "/assets/mermaid/")
+		if !ok || !strings.HasSuffix(name, ".js") || strings.Contains(name, "..") {
+			sendError(w, missing())
+			return true
+		}
+		file, err := mermaidFiles.ReadFile("web/mermaid/" + name)
+		if err != nil {
+			sendError(w, missing())
+			return true
+		}
+		data, kind = file, "text/javascript; charset=utf-8"
+		// Chunk names carry a hash of their content, so they never change.
+		if strings.HasPrefix(name, "chunks/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")

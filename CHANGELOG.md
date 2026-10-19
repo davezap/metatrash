@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.44.0 - Website documents use Slate 0.14.1, with diagrams (2026-10-19)
+
+No schema, configuration or grant change. No new Go modules. mtsync is unchanged.
+
+- **Document pages** render Markdown with Slate 0.14.1 (CodeMirror-based) in place of the old Slate 0.9.2, the same editor Slate Viewer uses, still read-only and still in `internal/service/web/slate.js` and `slate.css`.
+- **Diagrams**: ` ```mermaid ` blocks draw as diagrams in public, docs and private space pages, following Mermaid's strict security level (no scripts, links or CSS from the diagram text). Mermaid is embedded from `internal/service/web/mermaid/` (`mermaid.js` plus a chunk per diagram type, about 5 MB in the binary) and served at `/assets/mermaid/…`; the browser fetches it only for a document that has a diagram (about 2.3 MB for a flowchart). The chunks carry a hash of their content in their names and are served with a one-year immutable `Cache-Control`; other assets keep `no-store`.
+- Web addresses written bare (`https://…`) are links now, with a small ↗ after links to other sites.
+- The pages' Content-Security-Policy is unchanged: Slate 0.14.1 applies Mermaid's styles through constructed stylesheets rather than `<style>` elements. CodeMirror's own `<style>` element is still refused by the policy, which shows as one console message per page; the read-only view doesn't use CodeMirror's styles.
+- Tests: Slate and every Mermaid file it imports are served; other paths under `/assets/mermaid/` are 404.
+- To update Slate later: copy `slate.js`, `slate.css` and the whole `mermaid/` folder from the Slate repository into `internal/service/web/` (chunk names change between Mermaid versions, so delete the old `mermaid/` first).
+
 ## 0.43.2 - Signed Windows downloads (2026-10-18)
 
 No server or mtsync change. No schema, configuration or grant change. No new Go modules.

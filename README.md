@@ -233,8 +233,9 @@ These three projects are parts of one whole, kept in sibling folders:
   is a handy Markdown editor that can also open Metatrash spaces (through `mtsync`). Over time it
   becomes the desktop companion for managing Metatrash spaces, and those features come later.
 
-Metatrash's website still bundles an older Slate (0.9.2) for read-only viewing. It isn't
-upgraded yet.
+Metatrash's website embeds Slate too, read-only, in `internal/service/web/` (`slate.js`,
+`slate.css` and the `mermaid/` folder Slate loads for diagrams); copy all three from the Slate
+repository to update it.
 
 ## Documentation
 
