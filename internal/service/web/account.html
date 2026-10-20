@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>{{if .SignedIn}}Your account{{else}}Sign in{{end}} — Metatrash</title>{{if .ContinueURL}}<meta http-equiv="refresh" content="0;url={{.ContinueURL}}">{{end}}<link rel="stylesheet" href="{{.BasePath}}/assets/style.css">{{if .Pow}}<script src="{{.BasePath}}/assets/login.js" defer></script>{{end}}{{if or .LoginPasskey .SignIn}}<script src="{{.BasePath}}/assets/passkey.js" defer></script>{{end}}{{if .OAuthEnabled}}<script src="{{.BasePath}}/assets/copy.js" defer></script>{{end}}{{if .SignedIn}}<script src="{{.BasePath}}/assets/account.js" defer></script>{{end}}</head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/docs/tools/slate-viewer.md">Manage &amp; Edit spaces from the desktop</a></nav></header>
+<header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation"><a href="{{.BasePath}}/docs/tools/slate-viewer/README.md">Manage &amp; Edit spaces from the desktop</a></nav></header>
 {{if .SignedIn}}
 <div class="space-bar"><span>ACCOUNT / {{if .User.Username}}{{.User.Username}}{{else}}no username yet{{end}}</span><span class="account-email">{{.User.Email}}</span></div>
 <div class="workspace acct">

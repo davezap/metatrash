@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.44.1 - Account page links to the moved Slate Viewer page (2026-10-20)
+
+No schema, configuration or grant change. mtsync is unchanged.
+
+- The account page's **Manage & Edit spaces from the desktop** link points to `/docs/tools/slate-viewer/README.md`. The Slate Viewer page moved there in the docs space, next to its change notes in `tools/slate-viewer/change-logs/`.
+
 ## 0.44.0 - Website documents use Slate 0.14.1, with diagrams (2026-10-19)
 
 No schema, configuration or grant change. No new Go modules. mtsync is unchanged.
