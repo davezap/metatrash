@@ -211,6 +211,7 @@ func (h *httpAdapter) serveMCP(w http.ResponseWriter, r *http.Request) {
 		key = auth[1]
 	}
 	ctx := context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{key: key, client: h.client(r)})
+	ctx = withAuthor(ctx, keyAuthor(key))
 	h.mcp.ServeHTTP(w, r.WithContext(ctx))
 }
 

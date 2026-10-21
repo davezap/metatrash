@@ -317,6 +317,9 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 	for _, c := range changes {
 		message.WriteString(c.id + " " + c.operation + " " + c.path + "\n")
 	}
+	if author, ok := authorOf(ctx); ok {
+		message.WriteString(author.trailers())
+	}
 	b, err = git(ctx, r.path, stage, []byte(message.String()), args...)
 	if err != nil {
 		return "", err

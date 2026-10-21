@@ -151,11 +151,13 @@ read access to the space; it takes a whole space, not a folder of it.
 
 `mtsync history FILE` lists the changes to a file in a registered folder,
 newest first: when, the revision, the operation (`create`, `write`, `move`,
-`delete`) and the path it had then. It follows the file through renames. It
+`delete`), the path it had then and who made the change (`by dave (Metatrash
+Sync, person)`, from servers 0.47.0 on). It follows the file through renames. It
 shows 10 changes; `-limit N` (up to 100) shows more and `-offset N` skips the N
 newest, to page back (the listing names the next page). `-json` answers for
 editors: `space`, `folder`, the file's `id`, `entries` (each with `revision`,
-`path` in the space, `operation`, UTC `timestamp`, and `file`, the local path
+`path` in the space, `operation`, UTC `timestamp`, `by` (`name`, `app`,
+`kind`) when the server recorded it, and `file`, the local path
 that revision's path maps to) and `nextOffset` (null at the end). The file has
 to have synced once, since its ID comes from the folder's `.mtsync/state.json`.
 

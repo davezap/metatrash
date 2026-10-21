@@ -131,7 +131,11 @@ func showHistory(ctx context.Context, file string, limit, offset int, asJSON boo
 		if t, err := time.Parse(time.RFC3339, h.Timestamp); err == nil {
 			when = t.Local().Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(out, "%s  %s  %-6s  %s\n", when, h.Revision[:min(12, len(h.Revision))], h.Operation, h.Path)
+		line := fmt.Sprintf("%s  %s  %-6s  %s", when, h.Revision[:min(12, len(h.Revision))], h.Operation, h.Path)
+		if h.By != nil {
+			line += "  by " + h.By.String()
+		}
+		fmt.Fprintln(out, line)
 	}
 	if more {
 		fmt.Fprintf(out, "Older changes: mtsync -offset %d history %q\n", offset+len(entries), file)

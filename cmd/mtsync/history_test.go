@@ -46,6 +46,9 @@ func TestHistoryAndShow(t *testing.T) {
 	if len(first.Entries) != 2 || first.NextOffset == nil || *first.NextOffset != 2 || first.Space != "private" || first.ID == "" {
 		t.Fatalf("first page: %+v", first)
 	}
+	if by := first.Entries[0].By; by == nil || by.String() != "(space key, agent)" {
+		t.Fatalf("newest entry by %+v", by)
+	}
 	if first.Entries[0].Operation != "write" || first.Entries[0].File != file {
 		t.Fatalf("newest entry: %+v", first.Entries[0])
 	}

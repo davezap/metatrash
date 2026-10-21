@@ -697,7 +697,7 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, HistoryEntry{Revision: parts[0], Path: message[2], Operation: message[1], Timestamp: stamp.UTC().Format(time.RFC3339)})
+		entries = append(entries, HistoryEntry{Revision: parts[0], Path: message[2], Operation: message[1], Timestamp: stamp.UTC().Format(time.RFC3339), By: parseAuthor(body)})
 	}
 	// Deleted files keep their history, ending with the delete entry; an ID
 	// that never appears in this snapshot's log is unknown.

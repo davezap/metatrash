@@ -215,6 +215,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(auth) == 2 && strings.EqualFold(auth[0], "Bearer") {
 		key = auth[1]
 	}
+	r = r.WithContext(withAuthor(r.Context(), keyAuthor(key)))
 	h.serveRESTOperation(w, r, parts[4], "", func(write bool) (*repository, string, error) {
 		if err := h.service.Access(space, key, client, write); err != nil {
 			return nil, "", err

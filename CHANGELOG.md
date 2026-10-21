@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.47.0 - History says who made each change (2026-10-21)
+
+No database schema, configuration or grant change. No new Go modules. Tool schema 0.12.0. mtsync minimum stays 0.45.0.
+
+- **Who made a change.** Every commit from a request now ends with `Metatrash-By` (the account's username, or its email address before the @ when it has none), `Metatrash-App` (the app: `Metatrash Sync` for mtsync and Slate Viewer, the approved app name such as Claude for an agent, `space key` or `anonymous`) and `Metatrash-Kind` (`person` or `agent`) trailers. History entries return them as `by: {name, app, kind}`. Usernames are public, so this shows in every space's history, the public space's included. Older commits and the service's own have none. The account is looked up once per request, and only when it commits.
+- **mtsync**: `history` prints `by name (app, kind)` and `history -json` passes `by` through.
+
 ## 0.46.0 - Locks with levels, and read-only files (2026-10-21)
 
 No database schema, configuration or grant change. No new Go modules. Tool schema 0.11.0. mtsync minimum stays 0.45.0; mtsync 0.46.0 handles files locked for everyone (older versions report the refusal and keep the local change).

@@ -92,6 +92,9 @@ type HistoryEntry struct {
 	Path      string `json:"path"`
 	Operation string `json:"operation"`
 	Timestamp string `json:"timestamp"`
+	// By is who made the change (see authors.go); absent on older commits
+	// and the service's own.
+	By *changeAuthor `json:"by,omitempty"`
 }
 
 type HistoryResult struct {

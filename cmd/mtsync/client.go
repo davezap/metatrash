@@ -324,6 +324,32 @@ type historyEntry struct {
 	Path      string `json:"path"`
 	Operation string `json:"operation"`
 	Timestamp string `json:"timestamp"`
+	// By is who made the change (servers from 0.47.0; not on older changes).
+	By *changeAuthor `json:"by,omitempty"`
+}
+
+// changeAuthor names who made a change: an account name, the app (Metatrash
+// Sync, an agent such as Claude, a space key) and whether it was a person or
+// an agent.
+type changeAuthor struct {
+	Name string `json:"name,omitempty"`
+	App  string `json:"app,omitempty"`
+	Kind string `json:"kind"`
+}
+
+// String is the author as history prints it: "dave (Claude, agent)".
+func (a *changeAuthor) String() string {
+	if a == nil {
+		return ""
+	}
+	detail := a.Kind
+	if a.App != "" {
+		detail = a.App + ", " + a.Kind
+	}
+	if a.Name == "" {
+		return "(" + detail + ")"
+	}
+	return a.Name + " (" + detail + ")"
 }
 
 // history lists up to limit changes to the file with this ID, skipping the

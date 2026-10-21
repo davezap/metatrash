@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.11.0",
+  "schemaVersion": "0.12.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.45.0"},
@@ -927,7 +927,7 @@
     },
     {
       "name": "history",
-      "description": "File history across moves and deletes, newest first. Read old content using entry path+revision; for a delete entry, use the next older entry. Deleted files keep their history.",
+      "description": "File history across moves and deletes, newest first, each change with who made it (by). Read old content using entry path+revision; for a delete entry, use the next older entry. Deleted files keep their history.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -1005,6 +1005,17 @@
                 "timestamp": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "by": {
+                  "type": "object",
+                  "description": "Who made the change: name (the account's username, or its email address before the @), app (the app it was made through: Metatrash Sync for a person, the connected app such as Claude for an agent, or space key) and kind (person or agent). Absent on changes before 0.47.0 and on the service's own.",
+                  "properties": {
+                    "name": {"type": "string"},
+                    "app": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["person", "agent"]}
+                  },
+                  "required": ["kind"],
+                  "additionalProperties": false
                 }
               },
               "required": [

@@ -86,7 +86,8 @@ func (h *httpAdapter) serveMCPAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	clean := r.Clone(context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: h.client(r), oauth: &id}))
+	ctx := context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: h.client(r), oauth: &id})
+	clean := r.Clone(withAuthor(ctx, func() changeAuthor { return h.service.oauthAuthor(ctx, id, false) }))
 	clean.Header.Del("Authorization")
 	h.mcpAccount.ServeHTTP(w, clean)
 }
@@ -151,9 +152,12 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 	}
 	// The identity rides along for push, which signs commits with it.
 	ctx := context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: client, oauth: &id})
-	if id.ClientID == syncClient(h.oauth.issuer).ID {
+	person := id.ClientID == syncClient(h.oauth.issuer).ID
+	if person {
 		ctx = context.WithValue(ctx, personWriteKey{}, true)
 	}
+	authorCtx := ctx
+	ctx = withAuthor(ctx, func() changeAuthor { return h.service.oauthAuthor(authorCtx, id, person) })
 	r = r.WithContext(ctx)
 	h.serveRESTOperation(w, r, resource, metadataPath, func(write bool) (*repository, string, error) {
 		return h.service.agentSpaceAccess(r.Context(), id, space, client, write)
