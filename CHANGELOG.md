@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.45.0 - AGENTS.md and .metatrash.json in every folder; README.md is ordinary (2026-10-21)
+
+No database schema, configuration or grant change. No new Go modules. Tool schema 0.10.0. **mtsync 0.45.0 is required** (`clients.mtsync.minVersion`): older versions miss the folder files a write adds. Release this version (so `mtsync.json` offers 0.45.0) before or with deploying the server.
+
+- **Every folder has an `AGENTS.md` and a `.metatrash.json`**, the space root included. `AGENTS.md` holds instructions for agents working in that folder; `.metatrash.json` holds its settings. The service adds both, in the same commit, when a write or move puts the first file in a folder, and removes them when the folder's last other file is deleted or moved away (emptied parent folders go too; the root keeps its own). Delete and move refuse them (`protected_file`); agents with write access rewrite them freely. A folder can be started by writing its `AGENTS.md`; an `agents.md` in another case counts. New root `AGENTS.md` files start from `docs/space-AGENTS.template.md` (replaces `docs/space-README.template.md`); other folders get one sentence; new root settings are `{}`, other folders' `{"inherit": true}`.
+- **GitHub folders** get no folder files inside them: everything there belongs to the repository, and `AGENTS.md` there is an ordinary repository file. The GitHub folder's own `.metatrash.json` is protected. A first pull accepts an untouched starter `AGENTS.md` in the folder and replaces it with the repository's copy or removes it.
+- **Existing spaces** get the folder files they lack when the service starts (owned spaces when first opened): one commit per space, logged; a space at its storage limit is skipped with a log line. Folder files count toward the 1,000-file limit.
+- **README.md is an ordinary file**: no longer created, no longer immutable or undeletable (old spaces keep theirs, now deletable). `mt spaces readme` is removed. The `protected` field now marks folder files and is derived, not stored.
+- **`inherit`** in `.metatrash.json`: `true` takes every setting from the parent folder's (itself inherited when that folder inherits) except `services`; the folder's own keys override. Refused on the root. Reading a `.metatrash.json` that inherits also returns `effective`, the settings with inherited ones filled in.
+- **`locked`** in `.metatrash.json`: keys (`purpose`, `children`, `services`, `inherit`, `locked`) agents may not add, change or remove. The service compares the file before and after each write or edit and refuses a change to a locked key's effective value with `locked_setting` (403), inherited locks included. `locked` is always locked for agents, and `inherit` too while any lock applies. Writes through Metatrash Sync (mtsync and Slate Viewer, the built-in OAuth client) count as a person's and may change anything.
+- **Website**: a space's address without a file shows `README.md`, else its first top-level Markdown file, else the root `AGENTS.md` (it was a 404 without a README).
+- **Agent guidance**: the MCP server instructions and tool descriptions say to start with the root `AGENTS.md` and read each folder's own; the public home page prompt says AGENTS.md.
+- **mtsync 0.45.0** resumes each pass from the state the last pass started at, so it hears of folder files its own writes added or removed; it treats `AGENTS.md` and `.metatrash.json` as undeletable (a local delete restores them; they go when the folder's other files are deleted).
+- Tests: folder files on write, move, delete and in GitHub folders; backfill of an old space; `inherit`, `effective` and `locked` for agents and a person; first pull over a starter `AGENTS.md`. docs/api-contract.md (Folder files, Folder settings), architecture, deployment, roadmap, README, cmd/mtsync/README.md.
+
 ## 0.44.1 - Account page links to the moved Slate Viewer page (2026-10-20)
 
 No schema, configuration or grant change. mtsync is unchanged.

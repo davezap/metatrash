@@ -51,10 +51,6 @@ func TestParseFolderConfig(t *testing.T) {
 	if _, err := parseFolderConfig(`{"purpose":"` + strings.Repeat("ā", maxFolderPurpose+1) + `"}`); err == nil {
 		t.Error("accepted an over-long purpose")
 	}
-	starter := folderConfigStarter(`Ōtautahi "notes"`)
-	if c, err := parseFolderConfig(starter); err != nil || c.Purpose == nil || !strings.Contains(*c.Purpose, "Ōtautahi") {
-		t.Errorf("starter does not validate: %v\n%s", err, starter)
-	}
 	for path, want := range map[string]bool{".metatrash.json": true, "a/b/.metatrash.json": true, "a.metatrash.json": false, ".metatrash.json/x": false, ".metatrash/files.json": false, "a/.git": false, ".gitignore": false} {
 		if validPath(path) && isFolderConfig(path) != want || !validPath(path) && want {
 			t.Errorf("%s: valid=%v config=%v, want config %v", path, validPath(path), isFolderConfig(path), want)
@@ -94,13 +90,13 @@ func TestFolderConfigRules(t *testing.T) {
 	if err = os.WriteFile(keyPath, []byte(`{}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	ctx := context.Background()
-	owned, err := provision(ctx, filepath.Join(dir, "owned.git"), s.config.Defaults.Storage, []byte(ownedSpaceREADME), "Bart & Co", true)
+	owned, err := provision(ctx, filepath.Join(dir, "owned.git"), s.config.Defaults.Storage, []byte("# Agents\n"), "Bart & Co", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,9 +125,9 @@ func TestFolderConfigRules(t *testing.T) {
 	text := func(s string) *string { return &s }
 	github := func(repo string) *string { return text(`{"services":[{"type":"github","repo":"` + repo + `"}]}`) }
 
-	// New spaces start with a valid root config naming the space.
+	// New spaces start with an empty root config, which is kept.
 	read := do(owned, "read", Input{Path: ".metatrash.json"}, "").(ReadResult)
-	if !strings.Contains(read.File.Text, "Bart & Co") || read.File.Protected || read.File.Deletable {
+	if read.File.Text != "{}\n" || !read.File.Protected || read.File.Deletable {
 		t.Fatalf("root starter: %+v", read.File)
 	}
 	if _, err := parseFolderConfig(read.File.Text); err != nil {
@@ -163,10 +159,14 @@ func TestFolderConfigRules(t *testing.T) {
 	do(owned, "move", Input{From: "notes/a.md", To: "notes/.metatrash.json"}, "protected_file")
 	do(owned, "move", Input{From: "notes/a.md", To: "site/a.md"}, "")
 
-	// Delete: ordinary files, folder configs, not README or the root config.
+	// Delete: ordinary files, not folder files; AGENTS.md in a GitHub folder
+	// belongs to the repository. notes/ lost its last file, and its folder files.
 	listed := do(owned, "list", Input{}, "").(ListResult)
 	for _, f := range listed.Files {
-		if f.Deletable != (f.Path != "README.md" && f.Path != ".metatrash.json") {
+		inRepo := strings.HasPrefix(f.Path, "site/") || strings.HasPrefix(f.Path, "work/x/")
+		repoSettings := f.Path == "site/.metatrash.json" || f.Path == "work/x/.metatrash.json"
+		kept := (isFolderConfig(f.Path) || isAgentsFile(f.Path)) && (!inRepo || repoSettings)
+		if f.Deletable == kept || strings.HasPrefix(f.Path, "notes/") {
 			t.Fatalf("deletable wrong for %s", f.Path)
 		}
 	}
@@ -183,9 +183,10 @@ func TestFolderConfigRules(t *testing.T) {
 	do(owned, "read", Input{Path: "site/a.md"}, "not_found")
 	do(owned, "read", Input{Path: "site/a.md", Revision: deleted.OldState}, "")
 	do(owned, "delete", Input{Path: "site/a.md"}, "not_found")
-	do(owned, "delete", Input{Path: "README.md"}, "protected_file")
+	do(owned, "delete", Input{Path: "AGENTS.md"}, "protected_file")
 	do(owned, "delete", Input{Path: ".metatrash.json"}, "protected_file")
-	do(owned, "delete", Input{Path: "work/x/.metatrash.json"}, "")
+	do(owned, "delete", Input{Path: "work/x/.metatrash.json"}, "protected_file")
+	do(owned, "write", Input{Path: "work/x/.metatrash.json", Text: text("{}\n")}, "")
 	do(owned, "write", Input{Path: "work/.metatrash.json", Text: github("dave-zap/work")}, "")
 	if _, err := s.dispatchRepository(ctx, owned, "test", "delete", Input{Path: "work/.metatrash.json", IfInState: deleted.OldState}); err == nil || err.(*Error).Code != "state_mismatch" {
 		t.Fatalf("stale delete: %v", err)
@@ -217,7 +218,7 @@ func TestFolderConfigRules(t *testing.T) {
 	do(public, "read", Input{Path: ".metatrash.json"}, "")
 	do(public, "write", Input{Path: "code/.metatrash.json", Text: github("dave-zap/site")}, "invalid_request")
 	do(public, "write", Input{Path: "code/.metatrash.json", Text: text(`{"purpose":"shared snippets"}`)}, "")
-	do(public, "delete", Input{Path: "code/.metatrash.json"}, "")
+	do(public, "delete", Input{Path: "code/.metatrash.json"}, "protected_file")
 
 	// The history of a deleted file stays in the log as a delete entry.
 	logText, err := gitLog(ctx, owned)

@@ -40,7 +40,7 @@ func TestExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := filepath.Join(dir, "data")
-	s, err := Open(context.Background(), configPath, keyPath, data, metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, keyPath, data, metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +95,8 @@ func TestExport(t *testing.T) {
 			t.Fatalf("%s: got %q, want %q", p, got[p], text)
 		}
 	}
-	if !strings.Contains(got["README.md"], "metatrash") {
-		t.Fatalf("README.md missing from export: %v", got)
+	if !strings.Contains(got["AGENTS.md"], "Agent instructions") {
+		t.Fatalf("AGENTS.md missing from export: %v", got)
 	}
 	var manifest ExportManifest
 	if err := json.Unmarshal([]byte(got[exportManifestName]), &manifest); err != nil {
@@ -187,7 +187,7 @@ func TestConsoleExportOwnedSpaceAgainstDatabase(t *testing.T) {
 	}
 	files := unzip(t, b)
 	var manifest ExportManifest
-	if err := json.Unmarshal([]byte(files[exportManifestName]), &manifest); err != nil || manifest.Space != w.ownedName || manifest.State != state || files["README.md"] == "" {
+	if err := json.Unmarshal([]byte(files[exportManifestName]), &manifest); err != nil || manifest.Space != w.ownedName || manifest.State != state || files["AGENTS.md"] == "" {
 		t.Fatalf("owned export: %v %+v %v", err, manifest, files)
 	}
 	if _, err := SpaceRepositoryPath(integrationDataDir, true, "../x"); err == nil {

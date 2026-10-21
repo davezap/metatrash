@@ -67,7 +67,7 @@ func TestSyncSubfolder(t *testing.T) {
 		}
 	}
 	sync()
-	if got := strings.Join(localPaths(t, dir), " "); got != "a.txt deep/b.txt" {
+	if got := strings.Join(localPaths(t, dir), " "); got != ".metatrash.json AGENTS.md a.txt deep/.metatrash.json deep/AGENTS.md deep/b.txt" {
 		t.Fatalf("subfolder download: %s", got)
 	}
 
@@ -115,7 +115,7 @@ func TestSyncSubfolder(t *testing.T) {
 	if text, err := agent.read(ctx, "other/c.txt", ""); err != nil || text != "elsewhere\n" {
 		t.Fatal("file outside the subfolder changed")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "README.md")); err == nil {
-		t.Fatal("space README downloaded into the subfolder")
+	if text, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md")); strings.Contains(string(text), "working in this space") {
+		t.Fatal("space root AGENTS.md downloaded into the subfolder")
 	}
 }

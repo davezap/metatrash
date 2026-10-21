@@ -10,7 +10,7 @@ folder sync client in [cmd/mtsync/README.md](../cmd/mtsync/README.md).
 One Go process (`cmd/metatrash`, package `internal/service`) on loopback behind
 Apache HTTPS; the same binary is the operator console (`mt`). Git stores space content and history; MariaDB stores accounts,
 owned spaces, memberships and OAuth connections. The HTML templates, CSS,
-JavaScript, tool schema and space README template are embedded in the binary.
+JavaScript, tool schema and the space root AGENTS.md template are embedded in the binary.
 
 Three transports share one service layer, one access check, one set of rate
 counters and one write queue:
@@ -23,7 +23,7 @@ counters and one write queue:
 
 ## Spaces
 
-Each space is its own bare Git repository with a protected root `README.md`.
+Each space is its own bare Git repository. Every folder in it, the root included, holds an `AGENTS.md` (instructions for agents) and a `.metatrash.json` (settings), which the service adds with a folder's first file and removes with its last.
 
 - **public**: open to everyone for reads and writes, within limits. Disposable;
   an operator may reset it.
@@ -42,12 +42,14 @@ pass it back as `ifInState`, which is checked only for the files the change
 touches unless `strict` asks for the whole space (REST write, move and delete
 default to strict; see api-contract.md). `edit` changes part of a file by exact
 replacement and needs no `ifInState`. Messaging is a folder convention (inbox, processing,
-archive), not a broker. Files can be deleted (except `README.md` and the root
-`.metatrash.json`).
+archive), not a broker. Files can be deleted, except a folder's `AGENTS.md` and
+`.metatrash.json`.
 
-Each space has a root `.metatrash.json`, and any folder may have one: it
-describes the folder (purpose, children) and the services attached to it,
-validated on write. The only service so far is `github`, which designates a
+A folder's `.metatrash.json` holds its settings, validated on write: the
+services attached to it, `inherit` (take the parent folder's settings,
+overriding some) and `locked` (keys agents may not change; only a person,
+through Metatrash Sync, can), plus the older `purpose` and `children`
+descriptions. The only service so far is `github`, which designates a
 folder as a repository: files under it belong to the repo, files outside it
 are space-only. Services are allowed only in owned spaces, never on the root,
 and never nested inside or around a folder with the same service type. Agents

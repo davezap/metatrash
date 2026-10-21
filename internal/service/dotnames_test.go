@@ -20,13 +20,13 @@ func TestDotNamesInGitHubFolders(t *testing.T) {
 	configPath, keyPath := filepath.Join(dir, "spaces.json"), filepath.Join(dir, "keys.json")
 	_ = os.WriteFile(configPath, b, 0600)
 	_ = os.WriteFile(keyPath, []byte(`{}`), 0600)
-	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	ctx := context.Background()
-	owned, err := provision(ctx, filepath.Join(dir, "owned.git"), s.config.Defaults.Storage, []byte(ownedSpaceREADME), "Dots", true)
+	owned, err := provision(ctx, filepath.Join(dir, "owned.git"), s.config.Defaults.Storage, []byte("# Agents\n"), "Dots", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +89,13 @@ func TestDotNamesInGitHubFolders(t *testing.T) {
 
 	// The github service cannot be removed, nor its config deleted, while dot names remain.
 	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"purpose":"no longer a repo"}`)}, "invalid_request")
-	do(owned, "delete", Input{Path: "site/.metatrash.json"}, "invalid_request")
+	do(owned, "delete", Input{Path: "site/.metatrash.json"}, "protected_file")
 	// Changing other settings keeps the service and is fine.
 	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"purpose":"site","services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)}, "")
 	for _, path := range []string{"site/.gitignore", "site/.github/workflows/ci.yml", "site/.github/.metatrash.json", "site/.env.example"} {
 		do(owned, "delete", Input{Path: path}, "")
 	}
-	do(owned, "delete", Input{Path: "site/.metatrash.json"}, "")
+	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text("{}\n")}, "")
 	// Plain files stay; the folder is ordinary again and refuses dot names.
 	do(owned, "read", Input{Path: "site/pkg/__init__.py"}, "")
 	do(owned, "write", Input{Path: "site/.gitignore", Text: text("x")}, "invalid_request")

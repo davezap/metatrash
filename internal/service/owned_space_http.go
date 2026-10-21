@@ -210,7 +210,8 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		http.Redirect(w, r, root, http.StatusTemporaryRedirect)
 		return
 	}
-	if path == "" {
+	defaulted := path == ""
+	if defaulted {
 		path = "README.md"
 	}
 	if !validPath(path) {
@@ -225,6 +226,9 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	if err != nil {
 		sendError(w, err)
 		return
+	}
+	if defaulted {
+		path = defaultPage(files)
 	}
 	file, exists := files[path]
 	if !exists {

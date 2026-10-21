@@ -1,6 +1,9 @@
 package service
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type Error struct {
 	Code              string `json:"code"`
@@ -22,8 +25,9 @@ type File struct {
 	Path      string `json:"path"`
 	Bytes     int64  `json:"bytes"`
 	Protected bool   `json:"protected"`
-	// Deletable is derived from the path on every snapshot and never stored:
-	// false for README.md and the root .metatrash.json.
+	// Protected and Deletable are derived on every snapshot and never stored:
+	// a folder's AGENTS.md and .metatrash.json are protected (see
+	// folder_files.go), which delete and move refuse.
 	Deletable bool `json:"deletable"`
 	// Blob is the Git blob hash of the text, sent only by REST list with
 	// blobs=true so sync clients can spot changed files without reading them.
@@ -45,6 +49,9 @@ type ReadResult struct {
 	// Lines is set when the read asked for startLine or lineCount; Text then
 	// holds only those lines.
 	Lines *LineRange `json:"lines,omitempty"`
+	// Effective is set when the file is a .metatrash.json that inherits: the
+	// folder's settings with the inherited ones filled in.
+	Effective json.RawMessage `json:"effective,omitempty"`
 }
 
 type ListResult struct {
@@ -127,11 +134,6 @@ type storedRecord struct {
 	Bytes     int64  `json:"bytes"`
 	Protected bool   `json:"protected"`
 	Blob      string `json:"blob"`
-}
-
-// deletable reports whether delete accepts a file at path.
-func deletable(path string, protected bool) bool {
-	return !protected && !strings.EqualFold(path, "README.md") && path != folderConfigName
 }
 
 // validPath checks path syntax only. ".", "..", ".git" (any case, trailing

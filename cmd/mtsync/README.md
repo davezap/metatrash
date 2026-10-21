@@ -39,9 +39,10 @@ Linux and macOS.
 - **What stays local.** Files a space can't hold (not UTF-8 text, over 64 KiB,
   names with spaces or a leading dot outside a GitHub folder) and editor or
   system files (`*.swp`, `*~`, `*.tmp`, `.DS_Store`, `Thumbs.db`, …). A `.git` folder is skipped entirely, so you can `git init` a synced folder for your own local history. Refusals
-  are reported once and retried when the file changes. README.md and the root
-  `.metatrash.json` can't be deleted in a space, so deleting them locally
-  brings them back.
+  are reported once and retried when the file changes. A folder's `AGENTS.md`
+  and `.metatrash.json` can't be deleted in a space, so deleting them locally
+  brings them back; delete the folder's other files and the space removes
+  them too.
 - **Safety.** Every write carries the space's state token, so an agent's
   change mid-pass is never overwritten: the pass starts again. A file saved
   within the last second waits for the next pass. Rate limits (`429`) are

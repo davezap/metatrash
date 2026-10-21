@@ -14,7 +14,7 @@ import (
 // Slate and the Mermaid files it loads for diagrams come from the embedded web/ folder.
 func TestSlateAndMermaidAssets(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Open(context.Background(), "../../config/spaces.example.json", "", filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), "../../config/spaces.example.json", "", filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}

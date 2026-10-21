@@ -150,7 +150,11 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	// The identity rides along for push, which signs commits with it.
-	r = r.WithContext(context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: client, oauth: &id}))
+	ctx := context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: client, oauth: &id})
+	if id.ClientID == syncClient(h.oauth.issuer).ID {
+		ctx = context.WithValue(ctx, personWriteKey{}, true)
+	}
+	r = r.WithContext(ctx)
 	h.serveRESTOperation(w, r, resource, metadataPath, func(write bool) (*repository, string, error) {
 		return h.service.agentSpaceAccess(r.Context(), id, space, client, write)
 	})

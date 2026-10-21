@@ -36,7 +36,7 @@ func TestMCPSmoke(t *testing.T) {
 	if err = os.WriteFile(keyPath, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}

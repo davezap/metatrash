@@ -350,12 +350,14 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	if h.oauth != nil {
 		page.AccountMCPURL = h.oauth.mcpResource
 	}
+	defaulted := false
 	if !page.Home {
 		page.Path = strings.TrimPrefix(path, "/spaces/public/")
 		if page.Path == "" {
 			page.Path = q.Get("path")
 		}
-		if page.Path == "" {
+		defaulted = page.Path == ""
+		if defaulted {
 			page.Path = "README.md"
 		}
 		if !validPath(page.Path) {
@@ -384,6 +386,9 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		page.Recent, err = repo.recent(ctx, state, files)
 		page.Recent = h.publicRecent(page.Recent)
 	} else {
+		if defaulted {
+			page.Path = defaultPage(files)
+		}
 		file, exists := files[page.Path]
 		if !exists {
 			sendError(w, missing())
@@ -427,4 +432,23 @@ func (h *httpAdapter) publicTree(nodes []*browserNode) {
 		}
 		h.publicTree(node.Children)
 	}
+}
+
+// defaultPage is the file a space's address shows when it names none: its
+// README.md, else its first top-level Markdown file, else the root AGENTS.md.
+func defaultPage(files map[string]record) string {
+	if _, ok := files["README.md"]; ok {
+		return "README.md"
+	}
+	first := ""
+	for p := range files {
+		lower := strings.ToLower(p)
+		if !strings.Contains(p, "/") && !isFolderFile(p) && (strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown")) && (first == "" || p < first) {
+			first = p
+		}
+	}
+	if first != "" {
+		return first
+	}
+	return agentsFileName
 }

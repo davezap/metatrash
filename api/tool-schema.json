@@ -1,11 +1,11 @@
 {
-  "schemaVersion": "0.9.0",
+  "schemaVersion": "0.10.0",
   "status": "implemented",
   "clients": {
-    "mtsync": {"minVersion": "0.37.2"},
+    "mtsync": {"minVersion": "0.45.0"},
     "slateViewer": {"minVersion": "0.2.0"}
   },
-  "description": "Git-backed text storage; messaging via file conventions. Each folder may describe itself in .metatrash.json; read the space root one first.",
+  "description": "Git-backed text storage; messaging via file conventions. Every folder has an AGENTS.md (instructions for agents) and a .metatrash.json (settings); read the space root AGENTS.md first.",
   "mcp": {
     "endpoint": "/mcp",
     "tools": "tools/list exposes tools only; tools/call uses the shared service.",
@@ -21,7 +21,7 @@
   "tools": [
     {
       "name": "read",
-      "description": "Read text at HEAD or revision; returns snapshot state. Start with path .metatrash.json: it describes the space and its folders. For a long file, read only the lines you need with startLine and lineCount (search gives line numbers); lines then reports the range and the file's total lines.",
+      "description": "Read text at HEAD or revision; returns snapshot state. Start with path AGENTS.md: instructions for agents in this space; each folder has its own. A .metatrash.json that inherits also returns effective: its settings with the parent folder's filled in. For a long file, read only the lines you need with startLine and lineCount (search gives line numbers); lines then reports the range and the file's total lines.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -98,7 +98,7 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
               },
               "text": {
                 "type": "string"
@@ -113,6 +113,10 @@
               "text"
             ],
             "additionalProperties": false
+          },
+          "effective": {
+            "type": "object",
+            "description": "Present when the file is a .metatrash.json that inherits: the folder's settings with the inherited ones filled in."
           },
           "lines": {
             "type": "object",
@@ -285,7 +289,7 @@
     },
     {
       "name": "write",
-      "description": "Create a file or replace its whole text. To change part of an existing file, use edit instead: it sends only the changed text. Root README.md is immutable (case-insensitive). A .metatrash.json describes its folder and is checked on write: a JSON object with optional purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"agent\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed. Editing a github folder: pull first (at the start of each session), edit with write, move and delete, call pending to see what will be sent, then push with a message; nothing reaches GitHub until push (push \"agent\", the default). If push reports GitHub moved ahead, pull (it keeps your changes when no file changed on both sides), then push again. Results in a github folder carry a hint once changes have waited unpushed for 30 minutes.",
+      "description": "Create a file or replace its whole text. To change part of an existing file, use edit instead: it sends only the changed text. Every folder has an AGENTS.md (what the folder holds and how to work in it; rewrite it freely) and a .metatrash.json (its settings), added with the folder's first file and removed with its last other file; neither can be deleted or moved. A .metatrash.json is checked on write: a JSON object with optional inherit (true: take every setting but services from the parent folder, own keys override; new folders start with it), locked (keys agents may not add, change or remove: refused with locked_setting; only a person can change them, and locked itself), purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"agent\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed. Editing a github folder: pull first (at the start of each session), edit with write, move and delete, call pending to see what will be sent, then push with a message; nothing reaches GitHub until push (push \"agent\", the default). If push reports GitHub moved ahead, pull (it keeps your changes when no file changed on both sides), then push again. Results in a github folder carry a hint once changes have waited unpushed for 30 minutes.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -373,7 +377,7 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
               }
             },
             "required": [
@@ -413,7 +417,7 @@
     },
     {
       "name": "edit",
-      "description": "Change part of an existing file without sending its whole text: each edit replaces oldText, which must match the current text exactly once (include enough surrounding text to make it unique, or set replaceAll), with newText. Edits apply in order; all or none are saved, as one change in the file's history. No ifInState is needed: an oldText that no longer matches is refused with conflict, so read or search again and retry. Pass ifInState to also refuse when this file changed since that state (other files may have changed). Files written with CRLF line endings match LF oldText. Same rules as write otherwise: README.md is immutable, .metatrash.json is validated, the file limit applies. To create a file or replace all of it, use write.",
+      "description": "Change part of an existing file without sending its whole text: each edit replaces oldText, which must match the current text exactly once (include enough surrounding text to make it unique, or set replaceAll), with newText. Edits apply in order; all or none are saved, as one change in the file's history. No ifInState is needed: an oldText that no longer matches is refused with conflict, so read or search again and retry. Pass ifInState to also refuse when this file changed since that state (other files may have changed). Files written with CRLF line endings match LF oldText. Same rules as write otherwise: .metatrash.json is validated and its locked keys enforced, the file limit applies. To create a file or replace all of it, use write.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -521,7 +525,7 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
               }
             },
             "required": [
@@ -634,7 +638,7 @@
                 },
                 "deletable": {
                   "type": "boolean",
-                  "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+                  "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
                 }
               },
               "required": [
@@ -665,7 +669,7 @@
     },
     {
       "name": "move",
-      "description": "Atomic same-space file move; preserves ID/text. Destination must be absent. No directory moves. Root README.md is immutable (case-insensitive).",
+      "description": "Atomic same-space file move; preserves ID/text. Destination must be absent. No directory moves. AGENTS.md and .metatrash.json files never move.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -751,7 +755,7 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
               }
             },
             "required": [
@@ -783,7 +787,7 @@
     },
     {
       "name": "delete",
-      "description": "Delete a file. Earlier revisions stay readable with read and a revision. README.md and the root .metatrash.json cannot be deleted; deleting a folder's .metatrash.json removes its description and services.",
+      "description": "Delete a file. Earlier revisions stay readable with read and a revision. A folder's AGENTS.md and .metatrash.json cannot be deleted; they go with the folder's last other file. Rewrite .metatrash.json to remove settings.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -861,7 +865,7 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for README.md and the space root .metatrash.json; delete refuses them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
               }
             },
             "required": [
@@ -1135,6 +1139,7 @@
               "unauthorized",
               "forbidden",
               "protected_file",
+              "locked_setting",
               "not_found",
               "state_mismatch",
               "destination_exists",

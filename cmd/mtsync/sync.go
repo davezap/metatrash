@@ -124,6 +124,15 @@ func (s *syncer) save() error {
 	return writeFileAtomic(s.statePath, b, 0600)
 }
 
+// folderFile reports whether path is a folder's AGENTS.md or .metatrash.json,
+// which the space keeps while the folder holds other files (Metatrash 0.45.0).
+// The space says so itself in a full listing; this covers files known from
+// the last agreed state.
+func folderFile(path string) bool {
+	name := path[strings.LastIndex(path, "/")+1:]
+	return name == ".metatrash.json" || strings.EqualFold(name, "AGENTS.md")
+}
+
 // ignored names are editor and system files that never belong in a space.
 func ignored(name string) bool {
 	lower := strings.ToLower(name)
@@ -262,7 +271,10 @@ func (s *syncer) cycle(ctx context.Context) error {
 		return err
 	}
 	if !p.deferred {
-		s.st.State = p.current
+		// The state the pass started from, not the one after its own writes:
+		// a write can also add or remove a folder's AGENTS.md and
+		// .metatrash.json, which the next pass then hears of as changes.
+		s.st.State = p.snapshot
 	}
 	return s.save()
 }
@@ -275,7 +287,7 @@ func (p *pass) remoteFromChanges() (bool, error) {
 	base := p.st.Files
 	fromBase := func() {
 		for path, f := range base {
-			p.remote[path] = remoteFile{ID: f.ID, Path: path, Blob: f.Blob, Deletable: p.c.prefix != "" || !strings.EqualFold(path, "README.md") && path != ".metatrash.json"}
+			p.remote[path] = remoteFile{ID: f.ID, Path: path, Blob: f.Blob, Deletable: !folderFile(path)}
 		}
 	}
 	if p.noChanges {
@@ -505,7 +517,9 @@ func (p *pass) push(path, l string) error {
 	}
 	if l == "" {
 		if f, ok := p.remote[path]; ok && !f.Deletable {
-			// README.md and the root .metatrash.json cannot be deleted: restore them.
+			// A folder's AGENTS.md and .metatrash.json cannot be deleted:
+			// restore them. When the folder's other files went too, the
+			// space removes them and the next pass deletes them here.
 			return p.pullChange(path, "", f.Blob)
 		}
 		m, err := p.c.remove(p.ctx, path, p.current)

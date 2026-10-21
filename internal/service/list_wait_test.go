@@ -26,7 +26,7 @@ func TestListWaitsForChange(t *testing.T) {
 	if err = os.WriteFile(configPath, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(context.Background(), configPath, "", filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, "", filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}

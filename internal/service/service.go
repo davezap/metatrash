@@ -57,12 +57,14 @@ type Service struct {
 	listWaiters atomic.Int64
 	// listWait replaces listWaitTime in tests.
 	listWait time.Duration
+	// rootAgents is the AGENTS.md text a new space root starts with.
+	rootAgents []byte
 	// clock replaces time.Now in tests.
 	clock func() time.Time
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
-func Open(ctx context.Context, configPath, keysPath, dataDir string, readme []byte) (*Service, error) {
+func Open(ctx context.Context, configPath, keysPath, dataDir string, rootAgents []byte) (*Service, error) {
 	c, keys, err := loadConfig(configPath, keysPath)
 	if err != nil {
 		return nil, err
@@ -91,12 +93,12 @@ func Open(ctx context.Context, configPath, keysPath, dataDir string, readme []by
 	if err = os.MkdirAll(reposPath, 0700); err != nil {
 		return nil, err
 	}
-	s := &Service{ownedRepos: map[string]*repository{}, ownedRoot: filepath.Join(dataDir, "owned-repos"), config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), queue: make(chan job, c.Global.MaxQueuedWrites), stop: make(chan struct{}), done: make(chan struct{}), lockPath: lock}
+	s := &Service{ownedRepos: map[string]*repository{}, ownedRoot: filepath.Join(dataDir, "owned-repos"), config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), queue: make(chan job, c.Global.MaxQueuedWrites), stop: make(chan struct{}), done: make(chan struct{}), lockPath: lock, rootAgents: rootAgents}
 	if _, err = rand.Read(s.cursorKey); err != nil {
 		return nil, err
 	}
 	for name, sc := range c.Spaces {
-		r, err := provision(ctx, filepath.Join(reposPath, name+".git"), sc.Limits.Storage, readme, name, false)
+		r, err := provision(ctx, filepath.Join(reposPath, name+".git"), sc.Limits.Storage, rootAgents, name, false)
 		if err != nil {
 			return nil, fmt.Errorf("provision %s: %w", name, err)
 		}
@@ -224,6 +226,16 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		}
 		result := ReadResult{Space: space, State: state}
 		result.File.File, result.File.Text = f.File, string(b)
+		if isFolderConfig(in.Path) {
+			text := string(b)
+			if inherits := configKeys(text)["inherit"] == "true"; inherits && in.Path != folderConfigName {
+				settings, err := r.effectiveSettings(ctx, files, configFolder(in.Path), &text)
+				if err != nil {
+					return nil, err
+				}
+				result.Effective = settingsJSON(settings)
+			}
+		}
 		if in.StartLine != 0 || in.LineCount != 0 {
 			if in.StartLine < 0 || in.LineCount < 0 || in.LineCount > maxReadLines {
 				return nil, invalid(fmt.Sprintf("startLine must be 1 or more and lineCount 1..%d.", maxReadLines))
@@ -264,25 +276,13 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 			if int64(len(*in.Text)) > r.limits.MaxFileBytes {
 				return nil, problem(413, "payload_too_large", "Text exceeds the file limit.")
 			}
-			if strings.EqualFold(in.Path, "README.md") {
-				return nil, problem(403, "protected_file", "README.md is immutable.")
-			}
 		} else if op == "delete" {
 			if !validPath(in.Path) {
 				return nil, invalid("Valid path is required.")
 			}
-			if strings.EqualFold(in.Path, "README.md") {
-				return nil, problem(403, "protected_file", "README.md is immutable.")
-			}
-			if in.Path == folderConfigName {
-				return nil, problem(403, "protected_file", "The space root "+folderConfigName+" cannot be deleted; rewrite it instead.")
-			}
 		} else {
 			if !validPath(in.From) || !validPath(in.To) || in.From == in.To {
 				return nil, invalid("Distinct valid source and destination paths are required.")
-			}
-			if strings.EqualFold(in.From, "README.md") || strings.EqualFold(in.To, "README.md") {
-				return nil, problem(403, "protected_file", "README.md is immutable.")
 			}
 			if isFolderConfig(in.From) || isFolderConfig(in.To) {
 				return nil, problem(403, "protected_file", folderConfigName+" files cannot be moved; write the new one and delete the old one.")
@@ -326,10 +326,22 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		}
 		rebased = true
 	}
+	written := map[string]string{}
+	if op == "write" && isFolderConfig(in.Path) {
+		written[in.Path] = *in.Text
+	}
+	github, err := r.githubFolders(ctx, files, written)
+	if err != nil {
+		return nil, err
+	}
+	texts := map[string]string{}
 	if op == "delete" {
 		f, ok := files[in.Path]
 		if !ok {
 			return nil, missing()
+		}
+		if f.Protected {
+			return nil, folderFileKept(in.Path)
 		}
 		if isFolderConfig(in.Path) {
 			if err := r.dotNameRule(ctx, files, "", in.Path, nil); err != nil {
@@ -337,7 +349,8 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 			}
 		}
 		delete(files, in.Path)
-		state, err := r.commit(ctx, head, files, in.Path, f.ID, nil, "delete")
+		changes := append([]commitChange{{f.ID, "delete", in.Path}}, removeEmptyFolderFiles(files, github, in.Path)...)
+		state, err := r.commitFiles(ctx, head, files, nil, nil, changes, "")
 		if err != nil {
 			return nil, err
 		}
@@ -346,6 +359,11 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	if op == "write" && isFolderConfig(in.Path) {
 		if err := r.checkFolderConfig(ctx, files, in.Path, *in.Text); err != nil {
 			return nil, err
+		}
+		if !personWrite(ctx) {
+			if err := r.checkLocks(ctx, files, in.Path, *in.Text); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if op == "write" {
@@ -370,6 +388,9 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		f, ok = files[in.From]
 		if !ok {
 			return nil, missing()
+		}
+		if f.Protected {
+			return nil, folderFileKept(in.From)
 		}
 		if _, exists := files[dest]; exists {
 			return nil, problem(409, "destination_exists", "Destination exists.")
@@ -405,17 +426,25 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 			return nil, invalid("File/directory path collision.")
 		}
 	}
-	f.Deletable = deletable(dest, f.Protected)
+	f.Protected = protectedFolderFile(github, dest)
+	f.Deletable = !f.Protected
 	files[dest] = f
 	operation := op
 	if created {
 		operation = "create"
 	}
-	var text *string
 	if op == "write" {
-		text = in.Text
+		texts[dest] = *in.Text
 	}
-	state, err := r.commit(ctx, head, files, dest, f.ID, text, operation)
+	changes := []commitChange{{f.ID, operation, dest}}
+	if op == "move" {
+		changes = append(changes, removeEmptyFolderFiles(files, github, in.From)...)
+	}
+	added, err := addFolderFiles(files, texts, github, r.rootAgents, dest)
+	if err != nil {
+		return nil, err
+	}
+	state, err := r.commitFiles(ctx, head, files, texts, nil, append(changes, added...), "")
 	if err != nil {
 		return nil, err
 	}
@@ -424,6 +453,11 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		return m, nil
 	}
 	return WriteResult{Mutation: m, Created: created, Changed: true}, nil
+}
+
+// folderFileKept is the refusal to delete or move a folder's own file.
+func folderFileKept(path string) *Error {
+	return problem(403, "protected_file", path+" belongs to its folder and cannot be deleted or moved; rewrite it instead. Every folder keeps its "+agentsFileName+" and "+folderConfigName+" until its last other file is deleted or moved away.")
 }
 
 // unchangedSince reports whether every path has the same file (ID and text,

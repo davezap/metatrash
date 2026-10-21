@@ -24,7 +24,7 @@ func openPublicTestService(t *testing.T) *Service {
 	if err = os.WriteFile(configPath, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(context.Background(), configPath, "", filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, "", filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestEditSearchAndLineRanges(t *testing.T) {
 	}
 
 	// Refusals.
-	do("edit", Input{Path: "README.md", Edits: []Edit{{OldText: "a", NewText: "b"}}}, "protected_file")
+	do("edit", Input{Path: "AGENTS.md", Edits: []Edit{{OldText: "# Agent instructions", NewText: "# Agents"}}}, "")
 	do("edit", Input{Path: "missing.md", Edits: []Edit{{OldText: "a", NewText: "b"}}}, "not_found")
 	do("edit", Input{Path: "win.txt", Edits: []Edit{{OldText: "", NewText: "b"}}}, "invalid_request")
 	do("edit", Input{Path: "win.txt"}, "invalid_request")

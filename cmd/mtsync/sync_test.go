@@ -47,7 +47,7 @@ func testSpaceServer(t *testing.T, oldServer bool) (string, *atomic.Int64) {
 	if err := os.WriteFile(keyPath, keys, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := service.Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := service.Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,11 +179,11 @@ func TestSyncBothWays(t *testing.T) {
 
 	// First pass downloads the space.
 	h.sync()
-	if got := strings.Join(localPaths(t, h.dir), " "); got != ".metatrash.json README.md" {
+	if got := strings.Join(localPaths(t, h.dir), " "); got != ".metatrash.json AGENTS.md" {
 		t.Fatalf("initial files: %s", got)
 	}
-	if text, _ := h.localText("README.md"); text != h.remoteText("README.md") {
-		t.Fatal("README differs")
+	if text, _ := h.localText("AGENTS.md"); text != h.remoteText("AGENTS.md") {
+		t.Fatal("AGENTS.md differs")
 	}
 
 	// A quiet pass costs one request.
@@ -242,11 +242,11 @@ func TestSyncBothWays(t *testing.T) {
 		t.Fatal("empty folder left behind")
 	}
 
-	// README.md cannot be deleted in the space, so a local delete restores it.
-	os.Remove(filepath.Join(h.dir, "README.md"))
+	// AGENTS.md cannot be deleted in the space, so a local delete restores it.
+	os.Remove(filepath.Join(h.dir, "AGENTS.md"))
 	h.sync()
-	if _, ok := h.localText("README.md"); !ok {
-		t.Fatal("README not restored")
+	if _, ok := h.localText("AGENTS.md"); !ok {
+		t.Fatal("AGENTS.md not restored")
 	}
 
 	// Both sides edit: the space version wins the path, ours becomes a
@@ -366,7 +366,7 @@ func TestSyncFetchesOnlyChanges(t *testing.T) {
 		h.agentWrite(fmt.Sprintf("notes/n%03d.txt", i), fmt.Sprintf("note %d\n", i))
 	}
 	h.sync()
-	if len(localPaths(t, h.dir)) != 122 {
+	if len(localPaths(t, h.dir)) != 124 {
 		t.Fatalf("first pass: %d files", len(localPaths(t, h.dir)))
 	}
 	h.agentWrite("notes/n042.txt", "changed\n")

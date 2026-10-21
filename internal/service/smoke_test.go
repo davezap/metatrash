@@ -38,7 +38,7 @@ func TestSmoke(t *testing.T) {
 	if err = os.WriteFile(keyPath, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +78,8 @@ func TestSmoke(t *testing.T) {
 	var write WriteResult
 	decode(call("PUT", "/api/v1/spaces/public/file?path=inbox/a.txt", "", map[string]any{"text": "hello\n", "ifInState": initial, "createOnly": true}, 201), &write)
 	call("PUT", "/api/v1/spaces/public/file?path=inbox/a.txt", "", map[string]any{"text": "stale", "ifInState": initial}, 409)
-	call("PUT", "/api/v1/spaces/public/file?path=readme.MD", "", map[string]any{"text": "overwrite", "ifInState": write.NewState}, 403)
-	call("POST", "/api/v1/spaces/public/move", "", map[string]any{"from": "README.md", "to": "elsewhere.txt", "ifInState": write.NewState}, 403)
+	call("DELETE", "/api/v1/spaces/public/file?path=inbox/AGENTS.md", "", map[string]any{"ifInState": write.NewState}, 403)
+	call("POST", "/api/v1/spaces/public/move", "", map[string]any{"from": "AGENTS.md", "to": "elsewhere.txt", "ifInState": write.NewState}, 403)
 	var moved Mutation
 	decode(call("POST", "/api/v1/spaces/public/move", "", map[string]any{"from": "inbox/a.txt", "to": "archive/a.txt", "ifInState": write.NewState}, 200), &moved)
 	if moved.File.ID != write.File.ID {
@@ -116,7 +116,7 @@ func TestSmoke(t *testing.T) {
 	call("GET", "/api/v1/spaces/public/history?offset=1&cursor="+*newest.NextCursor+"&id="+write.File.ID, "", nil, 400)
 	call("GET", "/api/v1/spaces/public/files?offset=1", "", nil, 400)
 	// Search engines: the public space's top folder only.
-	for page, index := range map[string]bool{"/spaces/public/README.md": true, "/spaces/public/archive/a.txt": false} {
+	for page, index := range map[string]bool{"/spaces/public/AGENTS.md": true, "/spaces/public/archive/a.txt": false} {
 		r := httptest.NewRequest("GET", page, nil)
 		r.RemoteAddr = "127.0.0.1:12345"
 		res := httptest.NewRecorder()
@@ -127,7 +127,7 @@ func TestSmoke(t *testing.T) {
 			t.Fatalf("%s: %d header %q", page, res.Code, res.Header().Get("X-Robots-Tag"))
 		}
 	}
-	call("DELETE", "/api/v1/spaces/public/file?path=README.md", "", map[string]any{"ifInState": moved.NewState}, 403)
+	call("DELETE", "/api/v1/spaces/public/file?path=AGENTS.md", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=.metatrash.json", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=archive/a.txt", "", map[string]any{"ifInState": moved.NewState, "text": "x"}, 400)
 	var deleted Mutation
@@ -148,7 +148,7 @@ func TestSmoke(t *testing.T) {
 	for _, f := range list.Files {
 		blobs[f.Path] = f.Blob
 	}
-	if blobs["hello.txt"] != "c8c6761a582d9302073286f71d449f5e510da54d" || blobs["README.md"] == "" {
+	if blobs["hello.txt"] != "c8c6761a582d9302073286f71d449f5e510da54d" || blobs["AGENTS.md"] == "" {
 		t.Fatalf("list blobs: %v", blobs)
 	}
 	if b := call("GET", "/api/v1/spaces/private/files", "read-secret", nil, 200); bytes.Contains(b, []byte(`"blob"`)) {

@@ -455,10 +455,15 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			skippedPaths[sk.Path] = true
 		}
 		var clashes []string
+		starter := blobHash([]byte(folderAgentsStarter))
 		for rel, f := range local {
 			e, ok := keep[rel]
 			switch {
 			case ok && e.SHA == f.Blob:
+			case isAgentsFile(rel) && f.Blob == starter:
+				// The untouched AGENTS.md the folder got before it was a
+				// GitHub folder: the repository's copy replaces it, or the
+				// pull removes it.
 			case ok:
 				clashes = append(clashes, folder+rel+" (differs from the repository)")
 			case skippedPaths[rel]:
@@ -468,7 +473,7 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			}
 		}
 		if len(clashes) > 0 {
-			return nil, githubConflict(fmt.Sprintf("%s already holds files that do not match %s@%s: %s. A first pull needs the folder empty apart from %s files, or holding identical copies. Move or delete those files, then pull again.", folder, svc.Repo, svc.Branch, listSome(clashes), folderConfigName))
+			return nil, githubConflict(fmt.Sprintf("%s already holds files that do not match %s@%s: %s. A first pull needs the folder empty apart from %s files and untouched AGENTS.md files, or holding identical copies. Move or delete those files, then pull again.", folder, svc.Repo, svc.Branch, listSome(clashes), folderConfigName))
 		}
 	}
 	// Rough bound before downloading: binaries are only found once fetched.
@@ -680,7 +685,7 @@ func (s *Service) applyPull(ctx context.Context, r *repository, plan pullPlan) (
 			result.Updated++
 		}
 		f.Bytes = int64(len(b))
-		f.Deletable = deletable(p, f.Protected)
+		f.Protected, f.Deletable = false, true
 		files[p] = f
 		texts[p] = string(b)
 		changes = append(changes, commitChange{f.ID, operation, p})

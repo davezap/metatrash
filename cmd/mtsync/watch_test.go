@@ -53,7 +53,7 @@ func TestLoopHearsChangesAtOnce(t *testing.T) {
 	server, requests := testSpace(t)
 	dir := t.TempDir()
 	h, _ := runLoop(t, server, dir, time.Minute)
-	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("README.md"); return ok })
+	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("AGENTS.md"); return ok })
 	h.agentWrite("news.txt", "fresh\n")
 	eventually(t, 3*time.Second, "agent write downloaded", func() bool { text, _ := h.localText("news.txt"); return text == "fresh\n" })
 	// Idle: only the waiting request is open, no polling.
@@ -70,7 +70,7 @@ func TestLoopUploadsLocalSaves(t *testing.T) {
 	server, _ := testSpace(t)
 	dir := t.TempDir()
 	h, _ := runLoop(t, server, dir, 100*time.Millisecond)
-	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("README.md"); return ok })
+	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("AGENTS.md"); return ok })
 	if err := os.WriteFile(filepath.Join(dir, "mine.txt"), []byte("saved here\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestLoopFallsBackToPolling(t *testing.T) {
 	server, _ := testSpaceServer(t, true)
 	dir := t.TempDir()
 	h, logs := runLoop(t, server, dir, 100*time.Millisecond)
-	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("README.md"); return ok })
+	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("AGENTS.md"); return ok })
 	h.agentWrite("news.txt", "polled\n")
 	eventually(t, 5*time.Second, "agent write downloaded", func() bool { text, _ := h.localText("news.txt"); return text == "polled\n" })
 	found := false

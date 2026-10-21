@@ -44,7 +44,7 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	s, err := service.Open(ctx, *config, *keys, *data, metatrash.SpaceREADME)
+	s, err := service.Open(ctx, *config, *keys, *data, metatrash.SpaceAGENTS)
 	if err != nil {
 		return err
 	}

@@ -61,19 +61,16 @@ Open:
 
 Agreed with Dave 2026-10-18.
 
-- **Owner-set read-only files** (private spaces). The owner marks files or
-  folders read-only: agents can read them but not write, edit, move or delete
-  them. The owner still edits them through their own copy, with mtsync and
-  Slate Viewer, so the rule applies to connected agent apps and not to the
-  owner's sync client (mtsync signs in through the built-in client
-  `{issuer}/oauth/clients/sync`, which the service can tell apart). README.md
-  becomes one of these: read-only by default, editable if the owner chooses.
-  Open: where the setting lives (likely the folder's `.metatrash.json`, which
-  then itself needs protecting from agents), whether members' sync clients
-  count as the owner's, and `mt spaces readme -all` skipping READMEs an owner
-  has taken over. The public space and key spaces keep a locked README, reset
-  with `mt spaces readme`: anyone can write there, and agents read the README
-  first, so an editable one would let anyone plant instructions for them.
+- **Owner-set read-only files** (private spaces). Partly done in 0.45.0:
+  `locked` in a folder's `.metatrash.json` keeps settings out of agents'
+  reach, and only Metatrash Sync (the built-in client
+  `{issuer}/oauth/clients/sync`) can change them. Still open: locking files
+  themselves (an `AGENTS.md`, a folder), and whether members' sync clients
+  count as the owner's (today any Metatrash Sync write counts as a person's).
+- **Public space AGENTS.md.** Since 0.45.0 anyone can rewrite the public
+  space's root `AGENTS.md`, and agents read it first, so anyone can plant
+  instructions there. Lock it (read-only to agents in configured spaces) once
+  file locks exist.
 - **Folder configurator in Slate Viewer.** A `…` button beside the selected
   file or folder opens its settings, written to the folder's
   `.metatrash.json`: read-only (owner only), purpose and child descriptions,
@@ -120,10 +117,8 @@ the `review` push mode, which needs a review screen.
 
 ## Maintenance
 
-- **Public space README**: after deploying 0.43.0, run
-  `mt spaces readme public` (it still says "MCP endpoint `/mcp` is pending",
-  checked 2026-10-18), and consider `mt spaces readme -all` for owned spaces
-  made with older templates.
+- **Old READMEs**: spaces made before 0.45.0 still hold the old agent
+  README.md as an ordinary file; delete or rewrite them as needed.
 - [Security review](security-review-2026-09-30.md) F3: cache recent activity
   by head hash, cap history scanned per request and bound concurrent Git
   readers. Hardening from the same review: systemd resource limits, an

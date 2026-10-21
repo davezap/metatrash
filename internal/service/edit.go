@@ -88,9 +88,6 @@ func checkEditInput(in Input) error {
 	if !validPath(in.Path) {
 		return invalid("Valid path is required.")
 	}
-	if strings.EqualFold(in.Path, "README.md") {
-		return problem(403, "protected_file", "README.md is immutable.")
-	}
 	if in.IfInState != "" && !hashPattern.MatchString(in.IfInState) {
 		return invalid("ifInState must be a commit hash from read, list or search.")
 	}

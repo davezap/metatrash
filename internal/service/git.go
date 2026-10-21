@@ -33,6 +33,11 @@ type repository struct {
 	// requests that wait with after= (see Service.waitForChange).
 	watchMu sync.Mutex
 	changed chan struct{}
+	// rootAgents is the AGENTS.md text a space root starts with.
+	rootAgents string
+	// githubBlobs caches, by blob hash, whether a .metatrash.json text
+	// attaches a GitHub service (see githubFolders).
+	githubBlobs sync.Map
 }
 
 // watch returns a channel that is closed at the next branch update.
@@ -118,10 +123,11 @@ func (r *repository) snapshot(ctx context.Context, revision string) (string, map
 	if err = json.Unmarshal(b, &files); err != nil {
 		return "", nil, err
 	}
-	for p, f := range files {
-		f.Deletable = deletable(p, f.Protected)
-		files[p] = f
+	github, err := r.githubFolders(ctx, files, nil)
+	if err != nil {
+		return "", nil, err
 	}
+	markFolderFiles(files, github)
 	return revision, files, nil
 }
 
@@ -247,7 +253,7 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 	}
 	index := make(map[string]storedRecord, len(files))
 	for p, f := range files {
-		index[p] = storedRecord{ID: f.ID, Path: f.Path, Bytes: f.Bytes, Protected: f.Protected, Blob: f.Blob}
+		index[p] = storedRecord{ID: f.ID, Path: f.Path, Bytes: f.Bytes, Blob: f.Blob}
 	}
 	metadata, err := json.Marshal(index)
 	if err != nil {
@@ -397,27 +403,29 @@ func (r *repository) serviceFile(ctx context.Context, revision, path string) ([]
 	return r.blob(ctx, blob)
 }
 
-// provision opens a space repository, creating it with the protected README
-// and a starter root .metatrash.json if it is missing. An existing repository
-// without a root .metatrash.json gets the starter added as its own commit.
-// Callers serialize it with other writes (startup, or the write queue).
-func provision(ctx context.Context, path string, limits Storage, readme []byte, name string, owned bool) (*repository, error) {
-	r := &repository{path: path, limits: limits, owned: owned}
+// provision opens a space repository, creating it with its root AGENTS.md
+// (rootAgents) and .metatrash.json when missing. An existing space gets the
+// folder files it lacks (see addMissingFolderFiles).
+func provision(ctx context.Context, path string, limits Storage, rootAgents []byte, name string, owned bool) (*repository, error) {
+	r := &repository{path: path, limits: limits, owned: owned, rootAgents: string(rootAgents)}
 	if info, err := os.Lstat(path); err == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("invalid repository directory")
 		}
-		if err := r.addRootFolderConfig(ctx, name); err != nil {
+		if err := r.addMissingFolderFiles(ctx, r.rootAgents); err != nil {
 			var p *Error
 			if !errors.As(err, &p) {
 				return nil, err
 			}
-			// A full space keeps working without the starter file.
-			log.Printf("space %s: root %s not added: %s", filepath.Base(path), folderConfigName, p.Message)
+			// A full space keeps working without them.
+			log.Printf("space %s (%s): folder files not added: %s", name, filepath.Base(path), p.Message)
 		}
 		return r, nil
 	} else if !os.IsNotExist(err) {
 		return nil, err
+	}
+	if int64(len(rootAgents)) > limits.MaxFileBytes {
+		return nil, fmt.Errorf("%s template exceeds file limit", agentsFileName)
 	}
 	temp, err := os.MkdirTemp(filepath.Dir(path), ".provision-")
 	if err != nil {
@@ -427,49 +435,17 @@ func provision(ctx context.Context, path string, limits Storage, readme []byte, 
 	if _, err = git(ctx, "", "", nil, "init", "--bare", "--object-format=sha1", "--initial-branch=main", temp); err != nil {
 		return nil, err
 	}
-	id, err := randomHex(16)
+	files, texts := map[string]record{}, map[string]string{}
+	changes, err := addFolderFiles(files, texts, nil, r.rootAgents, folderConfigName)
 	if err != nil {
 		return nil, err
 	}
-	text := string(readme)
-	if int64(len(readme)) > limits.MaxFileBytes {
-		return nil, fmt.Errorf("README exceeds file limit")
-	}
-	files := map[string]record{"README.md": {File: File{ID: id, Path: "README.md", Bytes: int64(len(readme)), Protected: true}}}
 	staged := &repository{path: temp, limits: limits, owned: owned}
-	if _, err = staged.commit(ctx, "", files, "README.md", id, &text, "create"); err != nil {
-		return nil, err
-	}
-	if err = staged.addRootFolderConfig(ctx, name); err != nil {
+	if _, err = staged.commitFiles(ctx, "", files, texts, nil, changes, ""); err != nil {
 		return nil, err
 	}
 	if err = os.Rename(temp, path); err != nil {
 		return nil, err
 	}
 	return r, nil
-}
-
-// addRootFolderConfig commits the starter root .metatrash.json when the space
-// has none. It leaves an existing one alone.
-func (r *repository) addRootFolderConfig(ctx context.Context, name string) error {
-	head, files, err := r.snapshot(ctx, "")
-	if err != nil {
-		return err
-	}
-	if _, exists := files[folderConfigName]; exists {
-		return nil
-	}
-	for p := range files {
-		if strings.HasPrefix(p, folderConfigName+"/") {
-			return fmt.Errorf("cannot add %s: a folder of that name exists", folderConfigName)
-		}
-	}
-	id, err := randomHex(16)
-	if err != nil {
-		return err
-	}
-	text := folderConfigStarter(name)
-	files[folderConfigName] = record{File: File{ID: id, Path: folderConfigName, Bytes: int64(len(text))}}
-	_, err = r.commit(ctx, head, files, folderConfigName, id, &text, "create")
-	return err
 }

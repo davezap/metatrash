@@ -70,7 +70,7 @@ func TestServiceSyncsRegisteredFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, 5*time.Second, "both folders downloaded", func() bool {
-		return exists(filepath.Join(a, "README.md")) && exists(filepath.Join(b, "README.md"))
+		return exists(filepath.Join(a, "AGENTS.md")) && exists(filepath.Join(b, "AGENTS.md"))
 	})
 	write(agent, "hello.txt", "hi\n")
 	eventually(t, 5*time.Second, "agent write downloaded", func() bool { return exists(filepath.Join(a, "hello.txt")) })

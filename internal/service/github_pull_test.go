@@ -335,7 +335,7 @@ func newPullWorld(t *testing.T, storage *Storage) *pullWorld {
 	configPath, keyPath := filepath.Join(dir, "spaces.json"), filepath.Join(dir, "keys.json")
 	_ = os.WriteFile(configPath, b, 0600)
 	_ = os.WriteFile(keyPath, []byte(`{}`), 0600)
-	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceREADME)
+	s, err := Open(context.Background(), configPath, keyPath, filepath.Join(dir, "data"), metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func newPullWorld(t *testing.T, storage *Storage) *pullWorld {
 		limits = *storage
 	}
 	ctx := context.Background()
-	repo, err := provision(ctx, filepath.Join(dir, "owned.git"), limits, []byte(ownedSpaceREADME), "Pulls", true)
+	repo, err := provision(ctx, filepath.Join(dir, "owned.git"), limits, []byte("# Agents\n"), "Pulls", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,6 +508,7 @@ func TestGitHubPull(t *testing.T) {
 	w.write("site/index.html", "<h1>Hi</h1>\n") // differs
 	w.write("site/todo.md", "mine\n")           // not in the repo
 	w.write("site/sub/.metatrash.json", `{"purpose":"settings stay"}`)
+	w.write("site/sub/AGENTS.md", folderAgentsStarter) // untouched starter: replaced by the pull
 	msg := w.pullMessage("site/")
 	for _, want := range []string{"site/index.html (differs from the repository)", "site/todo.md (not in the repository)", "first pull"} {
 		if !strings.Contains(msg, want) {
@@ -526,7 +527,7 @@ func TestGitHubPull(t *testing.T) {
 	kept := []string{"README.md", "index.html", "docs/guide.md", ".gitignore", ".github/workflows/ci.yml", "run.sh", "export/ignored.txt", "version.txt"}
 	// utf16.md is held converted to UTF-8 (with a UTF-8 byte order mark).
 	const utf16Converted = "\xef\xbb\xbf# x\r\n"
-	if got.Commit != first || got.UpToDate || got.Created != len(kept) || got.Unchanged != 1 || got.Updated != 0 || got.Deleted != 0 || got.NewState == got.OldState || got.Folder != "site/" || got.Repo != "dave-zap/site" || got.Branch != "main" {
+	if got.Commit != first || got.UpToDate || got.Created != len(kept) || got.Unchanged != 1 || got.Updated != 0 || got.Deleted != 1 || got.NewState == got.OldState || got.Folder != "site/" || got.Repo != "dave-zap/site" || got.Branch != "main" {
 		t.Fatalf("first pull: %+v", got)
 	}
 	reasons := skippedReasons(got)
@@ -556,6 +557,9 @@ func TestGitHubPull(t *testing.T) {
 		t.Fatalf("converted list: %+v", got.Converted)
 	}
 	files := w.files("site/")
+	if _, ok := files["site/sub/AGENTS.md"]; ok {
+		t.Fatal("starter AGENTS.md kept by the first pull")
+	}
 	if files["site/README.md"].ID != readmeID {
 		t.Fatal("identical file lost its ID")
 	}

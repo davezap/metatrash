@@ -40,7 +40,7 @@ func TestExportSpace(t *testing.T) {
 	for _, f := range zr.File {
 		names = append(names, f.Name)
 	}
-	if got := strings.Join(names, " "); !strings.Contains(got, "notes/plan.md") || !strings.Contains(got, "README.md") || !strings.Contains(got, ".metatrash-export.json") {
+	if got := strings.Join(names, " "); !strings.Contains(got, "notes/plan.md") || !strings.Contains(got, "AGENTS.md") || !strings.Contains(got, ".metatrash-export.json") {
 		t.Fatalf("zip holds %s", got)
 	}
 

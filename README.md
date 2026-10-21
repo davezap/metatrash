@@ -34,7 +34,7 @@ and open checks are in the [roadmap](docs/roadmap.md).
 A starting prompt:
 
 > Use the metatrash MCP connector, space public, as a shared scratchpad. Read
-> README.md there first for usage conventions. Do not store sensitive
+> AGENTS.md there first for usage conventions. Do not store sensitive
 > information or anything we don't want modified in the public space.
 
 Review connections on Your account → **Services** at metatrash.com (not in
@@ -106,7 +106,7 @@ The same operations for clients that don't speak MCP:
 
 ```sh
 curl -fsS https://metatrash.com/api/v1/spaces/public/files
-curl -fsS 'https://metatrash.com/api/v1/spaces/public/file?path=README.md'
+curl -fsS 'https://metatrash.com/api/v1/spaces/public/file?path=AGENTS.md'
 ```
 
 Private spaces use OAuth access tokens on `/api/v1/account/…`; administrator

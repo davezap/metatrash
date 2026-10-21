@@ -29,7 +29,7 @@ Command line: `metatrash [-listen 127.0.0.1:8080] [-data DIR] [-config spaces.js
 [-keys keys.json] [-accounts-config accounts.json] [-trusted-proxies CIDRs]
 [-public-url URL]`, plus the subcommands `help`, `version`, `keygen`,
 `accounts-migrate`, `check`, `users …` (list, show, email-login, set-limit,
-rename), `spaces list`, `spaces export` and `spaces readme`. `metatrash help`
+rename), `spaces list` and `spaces export`. `metatrash help`
 lists them.
 
 ### Console commands
@@ -47,7 +47,6 @@ mt users rename dave david       # change the username (old addresses break)
 mt spaces list                   # every owned space (-json for JSON)
 mt spaces export dave/notes      # one space as a zip in the current folder
 mt spaces export -all /srv/backup/metatrash   # every space, for backups
-mt spaces readme public          # replace a space's README.md with the current template
 ```
 
 They use the same `accounts.json` and account database as the service, with
@@ -107,14 +106,11 @@ limits from the database on each request).
   `mt spaces export -all /srv/backup/metatrash && find /srv/backup/metatrash -name '*.zip' -mtime +30 -delete`.
   An export holds current files only, not history, so keep backing up the
   data directory as well.
-- **`spaces readme <space>`** (0.43.0) replaces the space's root `README.md`
-  with the template built into the binary (`docs/space-README.template.md`),
-  keeping its file ID and history, and says `updated` or `already current`.
-  `-all` does every `spaces.json` space and every ready owned space. Agents
-  cannot change README.md, so run it after a release that changes the
-  template. It writes the repository under `-data` directly, beside the
-  service; if an agent's write lands at the same moment, one of the two fails
-  and can simply be retried.
+- **`spaces readme`** was removed in 0.45.0: README.md is an ordinary file
+  now. At startup the service gives every folder of every space the
+  `AGENTS.md` and `.metatrash.json` it lacks (one commit per space; owned
+  spaces when first opened). The root `AGENTS.md` starts from
+  `docs/space-AGENTS.template.md`; existing ones are never overwritten.
 
 ## Build and install
 
@@ -446,9 +442,8 @@ accounts, spaces or memberships created since that backup.
 - **Public reset**: stop, move `repos/public.git` to a private backup, start; a
   fresh public space is provisioned.
 - Git history is not a backup. Do not run Git maintenance or external writers
-  against live repositories (the console's own commands are safe). Existing space READMEs are not changed by
-  rebuilding; new spaces get the current template, and `mt spaces readme`
-  brings existing ones up to date.
+  against live repositories (the console's own commands are safe). Existing `AGENTS.md` files are not changed by
+  rebuilding; new spaces get the current template.
 
 ### An account locked out with email sign-in off
 

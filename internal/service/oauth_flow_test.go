@@ -73,7 +73,7 @@ func newOAuthWorld(t *testing.T) *oauthWorld {
 	// Owned repositories must outlive each test's temporary directory, because
 	// every world loads all ready spaces from the shared database.
 	integrationDataOnce.Do(func() { integrationDataDir, _ = os.MkdirTemp("", "metatrash-oauth-test-") })
-	s, err := Open(ctx, configPath, keyPath, integrationDataDir, metatrash.SpaceREADME)
+	s, err := Open(ctx, configPath, keyPath, integrationDataDir, metatrash.SpaceAGENTS)
 	if err != nil {
 		t.Fatal(err)
 	}

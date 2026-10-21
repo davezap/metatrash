@@ -11,10 +11,11 @@ import (
 	"unicode/utf8"
 )
 
-// A folder describes itself in a .metatrash.json file inside it: its purpose,
-// its children and the services attached to it. The space root always has one;
-// other folders may. It is an ordinary file that agents read and write, checked
-// by the service on every write so a mistake is reported instead of stored.
+// A folder's settings are in a .metatrash.json file inside it: the services
+// attached to it and, from older spaces, a purpose and children (descriptions
+// now belong in the folder's AGENTS.md). Every folder has one (see
+// folder_files.go). Agents read and write it; the service checks every write
+// so a mistake is reported instead of stored.
 const folderConfigName = ".metatrash.json"
 
 const (
@@ -38,6 +39,12 @@ type folderConfig struct {
 	Purpose  *string           `json:"purpose,omitempty"`
 	Children map[string]string `json:"children,omitempty"`
 	Services []folderService   `json:"services,omitempty"`
+	// Inherit takes every setting but services from the parent folder's
+	// settings; the folder's own keys override them.
+	Inherit *bool `json:"inherit,omitempty"`
+	// Locked names the keys agents may not add, change or remove (see
+	// checkLocks). Only a person, through Metatrash Sync, changes it.
+	Locked []string `json:"locked,omitempty"`
 	// Reserved for folder actions; refused until they are implemented.
 	Actions json.RawMessage `json:"actions,omitempty"`
 }
@@ -94,6 +101,11 @@ func parseFolderConfig(text string) (folderConfig, error) {
 		}
 		if utf8.RuneCountInString(text) > maxFolderChildText {
 			return c, folderConfigError(fmt.Sprintf("children text is limited to %d characters.", maxFolderChildText))
+		}
+	}
+	for _, key := range c.Locked {
+		if !lockableKeys[key] {
+			return c, folderConfigError(fmt.Sprintf("locked lists keys of this file: purpose, children, services, inherit or locked, not %q.", key))
 		}
 	}
 	if len(c.Services) > maxFolderServices {
@@ -163,10 +175,13 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 	if err != nil {
 		return err
 	}
+	folder := configFolder(path)
+	if folder == "" && c.Inherit != nil && *c.Inherit {
+		return folderConfigError("the space root has no parent folder to inherit from.")
+	}
 	if len(c.Services) == 0 {
 		return nil
 	}
-	folder := configFolder(path)
 	if folder == "" {
 		return folderConfigError("services cannot be attached to the space root; use a folder.")
 	}
@@ -268,20 +283,6 @@ func (r *repository) dotNameRule(ctx context.Context, files map[string]record, d
 	return nil
 }
 
-// folderConfigStarter is the root configuration a new space starts with.
-func folderConfigStarter(name string) string {
-	purpose := fmt.Sprintf("Space %q. No purpose written yet: agents may rewrite this file to describe what the space is for and, under children, its top-level folders.", name)
-	var b bytes.Buffer
-	e := json.NewEncoder(&b)
-	e.SetEscapeHTML(false)
-	e.SetIndent("", "  ")
-	_ = e.Encode(struct {
-		Purpose  string            `json:"purpose"`
-		Children map[string]string `json:"children"`
-	}{purpose, map[string]string{}})
-	return b.String()
-}
-
 // noDuplicateKeys rejects repeated object keys at any depth, which
 // encoding/json would otherwise resolve silently to the last value.
 func noDuplicateKeys(b []byte) error {
@@ -375,4 +376,130 @@ func markServiceFolders(nodes []*browserNode, prefix string, configs map[string]
 		}
 		markServiceFolders(node.Children, folder, configs)
 	}
+}
+
+// lockableKeys are the keys locked may name.
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "locked": true}
+
+// folderConfigInherit is the .metatrash.json a new folder below the root
+// starts with: the parent folder's settings.
+const folderConfigInherit = "{\"inherit\": true}\n"
+
+// personWriteKey marks a request context whose writes come from a person:
+// the built-in Metatrash Sync client (mtsync and Slate Viewer). Agents, space
+// keys and every other app are held to locked settings.
+type personWriteKey struct{}
+
+func personWrite(ctx context.Context) bool {
+	v, _ := ctx.Value(personWriteKey{}).(bool)
+	return v
+}
+
+// configKeys splits a configuration text into its top-level keys, each value
+// re-encoded so equal values compare equal however they were written. Text
+// that is not a JSON object has no keys.
+func configKeys(text string) map[string]string {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		return map[string]string{}
+	}
+	keys := make(map[string]string, len(raw))
+	for k, v := range raw {
+		b, _ := json.Marshal(v)
+		keys[k] = string(b)
+	}
+	return keys
+}
+
+// configText returns the text of folder's .metatrash.json in files, or the
+// text a missing one would start with.
+func (r *repository) configText(ctx context.Context, files map[string]record, folder string) (string, error) {
+	f, ok := files[folder+folderConfigName]
+	if !ok {
+		if folder == "" {
+			return folderConfigEmpty, nil
+		}
+		return folderConfigInherit, nil
+	}
+	b, err := r.blob(ctx, f.Blob)
+	return string(b), err
+}
+
+// parentFolder returns the folder that holds folder ("" holds the top level).
+func parentFolder(folder string) string {
+	return fileFolder(strings.TrimSuffix(folder, "/"))
+}
+
+// effectiveSettings returns folder's settings with inherited ones filled in,
+// as top-level keys like configKeys. text, when set, stands for the folder's
+// own file. Services and inherit itself are never inherited.
+func (r *repository) effectiveSettings(ctx context.Context, files map[string]record, folder string, text *string) (map[string]string, error) {
+	own := ""
+	if text != nil {
+		own = *text
+	} else {
+		var err error
+		if own, err = r.configText(ctx, files, folder); err != nil {
+			return nil, err
+		}
+	}
+	keys := configKeys(own)
+	if folder == "" || keys["inherit"] != "true" {
+		return keys, nil
+	}
+	parent, err := r.effectiveSettings(ctx, files, parentFolder(folder), nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range parent {
+		if _, set := keys[k]; !set && k != "services" && k != "inherit" {
+			keys[k] = v
+		}
+	}
+	return keys, nil
+}
+
+// checkLocks refuses an agent's write of a .metatrash.json that adds,
+// changes or removes a locked key. The locks are those the folder has before
+// the write (a new file counts as the one the folder would start with),
+// inherited ones included, and they guard the values the folder ends up with,
+// so overriding an inherited value is refused too. locked itself is always
+// locked, and so is inherit while any lock applies, so leaving the parent
+// cannot shed its locks.
+func (r *repository) checkLocks(ctx context.Context, files map[string]record, path, text string) error {
+	folder := configFolder(path)
+	old, err := r.configText(ctx, files, folder)
+	if err != nil {
+		return err
+	}
+	before, err := r.effectiveSettings(ctx, files, folder, &old)
+	if err != nil {
+		return err
+	}
+	after, err := r.effectiveSettings(ctx, files, folder, &text)
+	if err != nil {
+		return err
+	}
+	var locked []string
+	_ = json.Unmarshal([]byte(before["locked"]), &locked)
+	locked = append(locked, "locked")
+	if len(locked) > 1 {
+		locked = append(locked, "inherit")
+	}
+	for _, key := range locked {
+		if before[key] != after[key] {
+			return problem(403, "locked_setting", fmt.Sprintf("%s: %q is locked; agents cannot add, change or remove it. Only a person can, by editing the file through Metatrash Sync or Slate Viewer.", path, key))
+		}
+	}
+	return nil
+}
+
+// settingsJSON encodes settings from effectiveSettings as one JSON object.
+func settingsJSON(settings map[string]string) json.RawMessage {
+	raw := make(map[string]json.RawMessage, len(settings))
+	for k, v := range settings {
+		raw[k] = json.RawMessage(v)
+	}
+	b, _ := json.Marshal(raw)
+	return b
 }
