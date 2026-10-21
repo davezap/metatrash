@@ -14,6 +14,7 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	stranger := w.user("stranger")
 	ownerSession, strangerSession := w.session(w.owner), w.session(stranger)
 	page := "/spaces/" + w.ownedName + "/README.md"
+	writePrivateReadme(w)
 
 	// Private: signed out → sign-in page; a signed-in stranger → not found.
 	if res := oauthCall(w.h, "GET", page, nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
@@ -97,6 +98,14 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	}
 }
 
+// writePrivateReadme gives the owner's space a README.md: since 0.45.0 a new
+// space starts with only its AGENTS.md and .metatrash.json.
+func writePrivateReadme(w *oauthWorld) {
+	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
+	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
+	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "README.md", "text": "# Private space\n", "ifInState": state}, "")
+}
+
 func TestFileTreeOpensSelectedFolders(t *testing.T) {
 	files := map[string]record{"a/b/c.md": {}, "a/d.md": {}, "e/f.md": {}, "top.md": {}}
 	tree := fileTree(files, "a/b/c.md")
@@ -132,7 +141,7 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 		t.Fatalf("built-in about page: %d", res.Code)
 	}
 	w.s.accounts.config.DocsSpace = w.ownedName
-	for _, page := range []string{"/", "/login", "/spaces/public/README.md"} {
+	for _, page := range []string{"/", "/login", "/spaces/public/"} {
 		body := oauthCall(w.h, "GET", page, nil).Body.String()
 		if !strings.Contains(body, `href="/docs/legal/privacy.md"`) || !strings.Contains(body, `href="/docs/legal/terms.md"`) || !strings.Contains(body, `href="/docs/about.md"`) || strings.Contains(body, `href="/about"`) {
 			t.Fatalf("%s lacks the docs footer links", page)
@@ -149,6 +158,7 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 		}
 	}
 
+	writePrivateReadme(w)
 	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
 	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "legal/terms.md", "text": "# Terms\n", "ifInState": state}, "")

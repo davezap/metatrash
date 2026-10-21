@@ -265,7 +265,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	if got := names(bobToken); got[newName] != "read_write" {
 		t.Fatalf("bob's app: %v", got)
 	}
-	read := w.tool(aliceToken, "read", map[string]any{"space": oldName, "path": "README.md"}, "")
+	read := w.tool(aliceToken, "read", map[string]any{"space": oldName, "path": "AGENTS.md"}, "")
 	if read["space"] != newName {
 		t.Fatalf("result names the old address: %v", read["space"])
 	}

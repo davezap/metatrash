@@ -146,17 +146,17 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	w.tool(token, "spaces", map[string]any{"x": 1}, "invalid_request")
 
 	// Owned space: read, list, write, move, history.
-	readme := w.tool(token, "read", map[string]any{"space": w.ownedID, "path": "README.md"}, "")
+	readme := w.tool(token, "read", map[string]any{"space": w.ownedID, "path": "AGENTS.md"}, "")
 	state := readme["state"]
 	written := w.tool(token, "write", map[string]any{"space": w.ownedID, "path": "notes/a.md", "text": "hello", "ifInState": state, "createOnly": true}, "")
 	w.tool(token, "move", map[string]any{"space": w.ownedID, "from": "notes/a.md", "to": "notes/b.md", "ifInState": written["newState"]}, "")
-	if list := w.tool(token, "list", map[string]any{"space": w.ownedID, "prefix": "notes/"}, ""); len(list["files"].([]any)) != 1 {
+	if list := w.tool(token, "list", map[string]any{"space": w.ownedID, "prefix": "notes/"}, ""); len(list["files"].([]any)) != 3 { // b.md and the folder's AGENTS.md and .metatrash.json
 		t.Fatal("owned list")
 	}
 	w.tool(token, "history", map[string]any{"space": w.ownedID, "id": written["file"].(map[string]any)["id"]}, "")
 	// The root .metatrash.json exists; a GitHub folder can be designated and a file deleted.
 	root := w.tool(token, "read", map[string]any{"space": w.ownedName, "path": ".metatrash.json"}, "")
-	if !strings.Contains(root["file"].(map[string]any)["text"].(string), "purpose") {
+	if root["file"].(map[string]any)["text"].(string) != folderConfigEmpty {
 		t.Fatalf("root config: %v", root)
 	}
 	designated := w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "site/.metatrash.json", "text": `{"purpose":"site","services":[{"type":"github","repo":"dave-zap/site"}]}`, "ifInState": root["state"]}, "")
@@ -178,14 +178,14 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 
 	// Space names: owner/slug and the ID reach the same space; results and
 	// cursors use the owner/slug name. A bare slug is refused with a hint.
-	byName := w.tool(token, "read", map[string]any{"space": w.joinName, "path": "README.md"}, "")
+	byName := w.tool(token, "read", map[string]any{"space": w.joinName, "path": "AGENTS.md"}, "")
 	if byName["space"] != w.joinName {
 		t.Fatalf("read by name: %v", byName["space"])
 	}
-	if byID := w.tool(token, "read", map[string]any{"space": w.joinID, "path": "README.md"}, ""); byID["space"] != w.joinName || byID["state"] != byName["state"] {
+	if byID := w.tool(token, "read", map[string]any{"space": w.joinID, "path": "AGENTS.md"}, ""); byID["space"] != w.joinName || byID["state"] != byName["state"] {
 		t.Fatalf("read by ID: %v", byID)
 	}
-	if e := w.tool(token, "read", map[string]any{"space": w.joinSlug, "path": "README.md"}, "not_found")["error"].(map[string]any); !strings.Contains(e["message"].(string), "owner/"+w.joinSlug) {
+	if e := w.tool(token, "read", map[string]any{"space": w.joinSlug, "path": "AGENTS.md"}, "not_found")["error"].(map[string]any); !strings.Contains(e["message"].(string), "owner/"+w.joinSlug) {
 		t.Fatalf("bare slug hint: %v", e)
 	}
 	page := w.tool(token, "list", map[string]any{"space": w.ownedID, "limit": 1}, "")
@@ -237,10 +237,10 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	if res := w.rest(restToken, "GET", "/api/v1/account/spaces", ""); res.Code != 200 || !strings.Contains(res.Body.String(), w.joinID) {
 		t.Fatalf("REST spaces: %d %s", res.Code, res.Body)
 	}
-	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinID+"/file?path=README.md", ""); res.Code != 200 {
+	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinID+"/file?path=AGENTS.md", ""); res.Code != 200 {
 		t.Fatalf("REST read: %d %s", res.Code, res.Body)
 	}
-	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinName+"/file?path=README.md", ""); res.Code != 200 || !strings.Contains(res.Body.String(), `"space":"`+w.joinName+`"`) {
+	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinName+"/file?path=AGENTS.md", ""); res.Code != 200 || !strings.Contains(res.Body.String(), `"space":"`+w.joinName+`"`) {
 		t.Fatalf("REST read by owner/slug: %d %s", res.Code, res.Body)
 	}
 	if res := w.rest(restToken, "GET", "/api/v1/account/spaces/"+w.joinName+"/export", ""); res.Code != 200 || res.Header().Get("Content-Type") != "application/zip" || !strings.Contains(res.Body.String(), "from-member.md") {
