@@ -422,3 +422,43 @@ func TestRenameRetry(t *testing.T) {
 		t.Fatalf("missing source: %v after %s", err, time.Since(start))
 	}
 }
+
+func TestSyncRestoresLockedFiles(t *testing.T) {
+	server, _ := testSpace(t)
+	h := newHarness(t, server, "writer", t.TempDir())
+	h.agentWrite("docs/a.md", "kept\n")
+	h.agentWrite("docs/.metatrash.json", `{"inherit":true,"readOnly":{"a.md":"everyone"}}`)
+	h.sync()
+
+	// A change is refused: it becomes a conflict copy and the space's version returns.
+	h.put("docs/a.md", "changed\n")
+	h.sync()
+	if text, _ := h.localText("docs/a.md"); text != "kept\n" {
+		t.Fatalf("locked file not restored: %q %v", text, h.logs)
+	}
+	copies := 0
+	for _, p := range localPaths(t, h.dir) {
+		if strings.HasPrefix(p, "docs/a.conflict-") {
+			if text, _ := h.localText(p); text != "changed\n" {
+				t.Fatalf("conflict copy %s: %q", p, text)
+			}
+			copies++
+		}
+	}
+	if copies != 1 {
+		t.Fatalf("conflict copies: %d %v", copies, localPaths(t, h.dir))
+	}
+
+	// A deletion is refused: the file comes back.
+	if err := os.Remove(filepath.Join(h.dir, "docs", "a.md")); err != nil {
+		t.Fatal(err)
+	}
+	h.sync()
+	h.sync()
+	if text, _ := h.localText("docs/a.md"); text != "kept\n" {
+		t.Fatalf("deleted locked file not restored: %v", h.logs)
+	}
+	if h.remoteText("docs/a.md") != "kept\n" {
+		t.Fatal("locked file changed in the space")
+	}
+}

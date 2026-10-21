@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -243,4 +244,81 @@ func TestInheritAndLocked(t *testing.T) {
 	// The person can unlock.
 	do(person, "write", Input{Path: ".metatrash.json", Text: text(`{"purpose":"Space"}`)}, "")
 	do(agent, "write", Input{Path: "notes/.metatrash.json", Text: text(`{"purpose":"Mine"}`)}, "")
+}
+
+func TestReadOnlyFiles(t *testing.T) {
+	_, _, do := folderFilesHarness(t)
+	agent := context.Background()
+	person := context.WithValue(agent, personWriteKey{}, true)
+	text := func(s string) *string { return &s }
+	locks := func() map[string]string {
+		t.Helper()
+		got := map[string]string{}
+		for _, f := range do(agent, "list", Input{}, "").(ListResult).Files {
+			if f.ReadOnly != "" {
+				got[f.Path] = f.ReadOnly
+			}
+		}
+		return got
+	}
+
+	do(agent, "write", Input{Path: "docs/spec.md", Text: text("spec\n")}, "")
+	do(agent, "write", Input{Path: "docs/notes.md", Text: text("notes\n")}, "")
+	do(agent, "write", Input{Path: "docs/old/a.md", Text: text("a\n")}, "")
+	do(agent, "write", Input{Path: "docs/scan.pdf", Text: text("pdf\n")}, "")
+	for _, bad := range []string{`{"readOnly":{"a/b.md":"agents"}}`, `{"readOnly":{"[x":"agents"}}`, `{"readOnly":{"":"agents"}}`, `{"readOnly":{"x.md":"me"}}`, `{"readOnly":"x.md"}`, `{"locked":{"locked":"everyone"}}`} {
+		do(agent, "write", Input{Path: "docs/.metatrash.json", Text: text(bad)}, "invalid_request")
+	}
+	// Agents may set readOnly while it isn't locked; a list locks for agents.
+	res := do(agent, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"readOnly":["spec.md","old/"]}`)}, "").(WriteResult)
+	if res.File.ReadOnly != "" {
+		t.Fatal(".metatrash.json marked read-only")
+	}
+	do(agent, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"readOnly":{"spec.md":"agents","*.pdf":"everyone","old/":"agents","AGENTS.md":"agents","*.json":"everyone"}}`)}, "")
+	want := map[string]string{"docs/spec.md": "agents", "docs/scan.pdf": "everyone", "docs/old/a.md": "agents", "docs/old/AGENTS.md": "agents", "docs/old/.metatrash.json": "agents", "docs/AGENTS.md": "agents", "docs/.metatrash.json": "agents"}
+	if got := locks(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("locked files %v, want %v", got, want)
+	}
+
+	// Agents can't change, rename, move or delete them, or create one.
+	do(agent, "write", Input{Path: "docs/spec.md", Text: text("changed\n")}, "read_only_file")
+	do(agent, "edit", Input{Path: "docs/spec.md", Edits: []Edit{{OldText: "spec", NewText: "x"}}}, "read_only_file")
+	do(agent, "delete", Input{Path: "docs/spec.md"}, "read_only_file")
+	do(agent, "move", Input{From: "docs/spec.md", To: "docs/spec2.md"}, "read_only_file")
+	do(agent, "move", Input{From: "docs/notes.md", To: "docs/old/notes.md"}, "read_only_file")
+	do(agent, "write", Input{Path: "docs/new.pdf", Text: text("x\n")}, "read_only_file")
+	do(agent, "write", Input{Path: "docs/old/deeper/b.md", Text: text("b\n")}, "read_only_file")
+	do(agent, "write", Input{Path: "docs/AGENTS.md", Text: text("# Mine\n")}, "read_only_file")
+	do(agent, "write", Input{Path: "docs/.metatrash.json", Text: text(`{}`)}, "read_only_file")
+	do(agent, "delete", Input{Path: "docs/missing.md"}, "not_found")
+	// Other files are free, and entries are not inherited.
+	do(agent, "write", Input{Path: "docs/notes.md", Text: text("more\n")}, "")
+	do(agent, "move", Input{From: "docs/notes.md", To: "docs/notes2.md"}, "")
+	do(agent, "write", Input{Path: "docs/sub/spec.md", Text: text("free\n")}, "")
+
+	// A person can change what is locked for agents, not what is locked for everyone.
+	do(person, "write", Input{Path: "docs/spec.md", Text: text("changed\n")}, "")
+	do(person, "move", Input{From: "docs/spec.md", To: "docs/spec2.md"}, "")
+	do(person, "move", Input{From: "docs/spec2.md", To: "docs/spec.md"}, "")
+	do(person, "write", Input{Path: "docs/scan.pdf", Text: text("changed\n")}, "read_only_file")
+	do(person, "delete", Input{Path: "docs/scan.pdf"}, "read_only_file")
+	do(person, "write", Input{Path: "docs/other.pdf", Text: text("x\n")}, "read_only_file")
+	// The lock on .metatrash.json stops at agents, so the person lifts it.
+	do(person, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"readOnly":{"spec.md":"agents"},"locked":{"readOnly":"agents"}}`)}, "")
+	do(agent, "write", Input{Path: "docs/scan.pdf", Text: text("now free\n")}, "")
+	// Locked, readOnly is the person's too.
+	do(agent, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"locked":{"readOnly":"agents"}}`)}, "locked_setting")
+
+	// A key locked for everyone stops the person until the lock is lifted.
+	do(person, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"purpose":"Docs","readOnly":{"spec.md":"agents"},"locked":{"purpose":"everyone"}}`)}, "")
+	do(person, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"purpose":"Other","readOnly":{"spec.md":"agents"},"locked":{"purpose":"everyone"}}`)}, "locked_setting")
+	do(person, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"purpose":"Docs","readOnly":{"spec.md":"agents"}}`)}, "")
+	do(person, "write", Input{Path: "docs/.metatrash.json", Text: text(`{"inherit":true,"purpose":"Other","readOnly":{"spec.md":"agents"}}`)}, "")
+
+	// A change never removes a folder file locked against its writer.
+	do(agent, "write", Input{Path: "docs/sub/.metatrash.json", Text: text(`{"inherit":true,"readOnly":{"AGENTS.md":"agents"}}`)}, "")
+	do(agent, "delete", Input{Path: "docs/sub/spec.md"}, "")
+	if locks()["docs/sub/AGENTS.md"] == "" {
+		t.Fatal("agent's delete removed a locked AGENTS.md")
+	}
 }

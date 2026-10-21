@@ -29,6 +29,9 @@ type File struct {
 	// a folder's AGENTS.md and .metatrash.json are protected (see
 	// folder_files.go), which delete and move refuse.
 	Deletable bool `json:"deletable"`
+	// ReadOnly, also derived, is the lock a readOnly entry in its folder's
+	// settings puts on the file: "agents" or "everyone" (see locks.go).
+	ReadOnly string `json:"readOnly,omitempty"`
 	// Blob is the Git blob hash of the text, sent only by REST list with
 	// blobs=true so sync clients can spot changed files without reading them.
 	Blob string `json:"blob,omitempty"`

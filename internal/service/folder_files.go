@@ -53,9 +53,27 @@ func folderChain(path string) []string {
 	return folders
 }
 
+// cachedConfig returns the parsed .metatrash.json stored as blob; a text
+// that no longer validates counts as no settings.
+func (r *repository) cachedConfig(ctx context.Context, blob string) (folderConfig, error) {
+	if c, ok := r.configBlobs.Load(blob); ok {
+		return c.(folderConfig), nil
+	}
+	b, err := r.blob(ctx, blob)
+	if err != nil {
+		return folderConfig{}, err
+	}
+	c, err := parseFolderConfig(string(b))
+	if err != nil {
+		c = folderConfig{}
+	}
+	r.configBlobs.Store(blob, c)
+	return c, nil
+}
+
 // githubFolders returns the folders whose .metatrash.json attaches a GitHub
 // service. written, when set, holds configuration texts about to be written,
-// which decide for their own folders. Parsed results are cached by blob.
+// which decide for their own folders.
 func (r *repository) githubFolders(ctx context.Context, files map[string]record, written map[string]string) (map[string]bool, error) {
 	folders := map[string]bool{}
 	for p, f := range files {
@@ -65,17 +83,11 @@ func (r *repository) githubFolders(ctx context.Context, files map[string]record,
 		if _, ok := written[p]; ok {
 			continue
 		}
-		has, cached := r.githubBlobs.Load(f.Blob)
-		if !cached {
-			b, err := r.blob(ctx, f.Blob)
-			if err != nil {
-				return nil, err
-			}
-			c, err := parseFolderConfig(string(b))
-			has = err == nil && c.has("github")
-			r.githubBlobs.Store(f.Blob, has)
+		c, err := r.cachedConfig(ctx, f.Blob)
+		if err != nil {
+			return nil, err
 		}
-		if has.(bool) {
+		if c.has("github") {
 			folders[configFolder(p)] = true
 		}
 	}
@@ -112,11 +124,12 @@ func protectedFolderFile(github map[string]bool, path string) bool {
 	return false
 }
 
-// markFolderFiles sets Protected and Deletable on every record from the path.
-func markFolderFiles(files map[string]record, github map[string]bool) {
+// markFolderFiles sets Protected, Deletable and ReadOnly on every record.
+func markFolderFiles(files map[string]record, github map[string]bool, readOnly map[string]lockMap) {
 	for p, f := range files {
 		f.Protected = protectedFolderFile(github, p)
 		f.Deletable = !f.Protected
+		f.ReadOnly = fileLock(readOnly, p)
 		files[p] = f
 	}
 }
@@ -187,8 +200,9 @@ func addFolderFiles(files map[string]record, texts map[string]string, github map
 // removeEmptyFolderFiles removes the folder files of each folder that held
 // one of paths (just deleted or moved away) and now holds nothing else, the
 // deepest first so a parent left empty goes too. The root keeps its files,
-// and GitHub folders are left alone.
-func removeEmptyFolderFiles(files map[string]record, github map[string]bool, paths ...string) []commitChange {
+// and GitHub folders are left alone. A folder file keep reports true for
+// counts as another file, so its folder stays.
+func removeEmptyFolderFiles(files map[string]record, github map[string]bool, keep func(string) bool, paths ...string) []commitChange {
 	var changes []commitChange
 	var folders []string
 	seen := map[string]bool{}
@@ -220,7 +234,7 @@ func removeEmptyFolderFiles(files map[string]record, github map[string]bool, pat
 			if !strings.HasPrefix(p, folder) {
 				continue
 			}
-			if !isFolderFile(p) {
+			if !isFolderFile(p) || keep != nil && keep(p) {
 				empty = false
 				continue
 			}

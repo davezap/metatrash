@@ -584,9 +584,35 @@ func (p *pass) refused(path, blob string, err error) error {
 		return nil
 	case "rate_limited", "queue_full", "internal_error", "http_error", "unauthorized":
 		return err
+	case "read_only_file":
+		// Locked for everyone in the space's settings: put the space's
+		// version back, keeping a local change as a conflict copy.
+		if r, ok := p.remote[path]; ok {
+			return p.restoreLocked(path, blob, r.Blob)
+		}
 	}
 	p.warn(path, blob, "%s was not uploaded: %s", path, e.Message)
 	return nil
+}
+
+// restoreLocked puts back the space's version r of a read-only file that was
+// changed (local version l) or deleted (l is "") here.
+func (p *pass) restoreLocked(path, l, r string) error {
+	if l == "" {
+		p.logf("%s is read-only in the space, so it was put back", path)
+		return p.pullChange(path, "", r)
+	}
+	if now, err := p.currentBlob(path); err != nil || now != l {
+		p.deferred = true
+		return nil
+	}
+	copyPath := conflictName(path, p.now())
+	if err := renameRetry(p.full(path), p.full(copyPath)); err != nil {
+		return err
+	}
+	delete(p.cache, path)
+	p.logf("%s is read-only in the space; your version is now %s", path, copyPath)
+	return p.pullChange(path, "", r)
 }
 
 func (s *syncer) wasWarned(path, blob string) bool {

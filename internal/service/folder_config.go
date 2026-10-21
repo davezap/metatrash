@@ -42,9 +42,10 @@ type folderConfig struct {
 	// Inherit takes every setting but services from the parent folder's
 	// settings; the folder's own keys override them.
 	Inherit *bool `json:"inherit,omitempty"`
-	// Locked names the keys agents may not add, change or remove (see
-	// checkLocks). Only a person, through Metatrash Sync, changes it.
-	Locked []string `json:"locked,omitempty"`
+	// Locked locks keys of this file and ReadOnly files of this folder (see
+	// locks.go).
+	Locked   lockMap `json:"locked,omitempty"`
+	ReadOnly lockMap `json:"readOnly,omitempty"`
 	// Reserved for folder actions; refused until they are implemented.
 	Actions json.RawMessage `json:"actions,omitempty"`
 }
@@ -103,9 +104,23 @@ func parseFolderConfig(text string) (folderConfig, error) {
 			return c, folderConfigError(fmt.Sprintf("children text is limited to %d characters.", maxFolderChildText))
 		}
 	}
-	for _, key := range c.Locked {
+	if err := checkLockLevels("locked", c.Locked); err != nil {
+		return c, err
+	}
+	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked lists keys of this file: purpose, children, services, inherit or locked, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly or locked, not %q.", key))
+		}
+	}
+	if c.Locked["locked"] == lockEveryone {
+		return c, folderConfigError(`locked itself can be locked only for "agents": a person must always be able to lift a lock.`)
+	}
+	if err := checkLockLevels("readOnly", c.ReadOnly); err != nil {
+		return c, err
+	}
+	for entry := range c.ReadOnly {
+		if err := checkReadOnlyEntry(entry); err != nil {
+			return c, err
 		}
 	}
 	if len(c.Services) > maxFolderServices {
@@ -379,7 +394,7 @@ func markServiceFolders(nodes []*browserNode, prefix string, configs map[string]
 }
 
 // lockableKeys are the keys locked may name.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "locked": true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "locked": true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.
@@ -432,7 +447,7 @@ func parentFolder(folder string) string {
 
 // effectiveSettings returns folder's settings with inherited ones filled in,
 // as top-level keys like configKeys. text, when set, stands for the folder's
-// own file. Services and inherit itself are never inherited.
+// own file. Services, readOnly and inherit itself are never inherited.
 func (r *repository) effectiveSettings(ctx context.Context, files map[string]record, folder string, text *string) (map[string]string, error) {
 	own := ""
 	if text != nil {
@@ -452,46 +467,11 @@ func (r *repository) effectiveSettings(ctx context.Context, files map[string]rec
 		return nil, err
 	}
 	for k, v := range parent {
-		if _, set := keys[k]; !set && k != "services" && k != "inherit" {
+		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "inherit" {
 			keys[k] = v
 		}
 	}
 	return keys, nil
-}
-
-// checkLocks refuses an agent's write of a .metatrash.json that adds,
-// changes or removes a locked key. The locks are those the folder has before
-// the write (a new file counts as the one the folder would start with),
-// inherited ones included, and they guard the values the folder ends up with,
-// so overriding an inherited value is refused too. locked itself is always
-// locked, and so is inherit while any lock applies, so leaving the parent
-// cannot shed its locks.
-func (r *repository) checkLocks(ctx context.Context, files map[string]record, path, text string) error {
-	folder := configFolder(path)
-	old, err := r.configText(ctx, files, folder)
-	if err != nil {
-		return err
-	}
-	before, err := r.effectiveSettings(ctx, files, folder, &old)
-	if err != nil {
-		return err
-	}
-	after, err := r.effectiveSettings(ctx, files, folder, &text)
-	if err != nil {
-		return err
-	}
-	var locked []string
-	_ = json.Unmarshal([]byte(before["locked"]), &locked)
-	locked = append(locked, "locked")
-	if len(locked) > 1 {
-		locked = append(locked, "inherit")
-	}
-	for _, key := range locked {
-		if before[key] != after[key] {
-			return problem(403, "locked_setting", fmt.Sprintf("%s: %q is locked; agents cannot add, change or remove it. Only a person can, by editing the file through Metatrash Sync or Slate Viewer.", path, key))
-		}
-	}
-	return nil
 }
 
 // settingsJSON encodes settings from effectiveSettings as one JSON object.

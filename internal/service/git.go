@@ -35,9 +35,9 @@ type repository struct {
 	changed chan struct{}
 	// rootAgents is the AGENTS.md text a space root starts with.
 	rootAgents string
-	// githubBlobs caches, by blob hash, whether a .metatrash.json text
-	// attaches a GitHub service (see githubFolders).
-	githubBlobs sync.Map
+	// configBlobs caches .metatrash.json texts parsed, by blob hash (see
+	// cachedConfig).
+	configBlobs sync.Map
 }
 
 // watch returns a channel that is closed at the next branch update.
@@ -127,7 +127,11 @@ func (r *repository) snapshot(ctx context.Context, revision string) (string, map
 	if err != nil {
 		return "", nil, err
 	}
-	markFolderFiles(files, github)
+	readOnly, err := r.readOnlyRules(ctx, files, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	markFolderFiles(files, github, readOnly)
 	return revision, files, nil
 }
 

@@ -334,6 +334,29 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	if err != nil {
 		return nil, err
 	}
+	// Files locked against the writer are left alone, and its change never
+	// removes such a folder file along with its emptied folder.
+	person := personWrite(ctx)
+	readOnly, err := r.readOnlyRules(ctx, files, nil)
+	if err != nil {
+		return nil, err
+	}
+	touched := []string{in.Path}
+	if op == "move" {
+		touched = []string{in.From, in.To}
+	}
+	for _, p := range touched {
+		if _, exists := files[p]; exists || op != "delete" {
+			if level := fileLock(readOnly, p); blocks(level, person) {
+				return nil, readOnlyFile(p, level)
+			}
+		}
+	}
+	keep := func(p string) bool { return blocks(fileLock(readOnly, p), person) }
+	readOnlyAfter, err := r.readOnlyRules(ctx, files, written)
+	if err != nil {
+		return nil, err
+	}
 	texts := map[string]string{}
 	if op == "delete" {
 		f, ok := files[in.Path]
@@ -349,7 +372,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 			}
 		}
 		delete(files, in.Path)
-		changes := append([]commitChange{{f.ID, "delete", in.Path}}, removeEmptyFolderFiles(files, github, in.Path)...)
+		changes := append([]commitChange{{f.ID, "delete", in.Path}}, removeEmptyFolderFiles(files, github, keep, in.Path)...)
 		state, err := r.commitFiles(ctx, head, files, nil, nil, changes, "")
 		if err != nil {
 			return nil, err
@@ -360,10 +383,8 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if err := r.checkFolderConfig(ctx, files, in.Path, *in.Text); err != nil {
 			return nil, err
 		}
-		if !personWrite(ctx) {
-			if err := r.checkLocks(ctx, files, in.Path, *in.Text); err != nil {
-				return nil, err
-			}
+		if err := r.checkLocks(ctx, files, in.Path, *in.Text, personWrite(ctx)); err != nil {
+			return nil, err
 		}
 	}
 	if op == "write" {
@@ -428,6 +449,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	}
 	f.Protected = protectedFolderFile(github, dest)
 	f.Deletable = !f.Protected
+	f.ReadOnly = fileLock(readOnlyAfter, dest)
 	files[dest] = f
 	operation := op
 	if created {
@@ -438,7 +460,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	}
 	changes := []commitChange{{f.ID, operation, dest}}
 	if op == "move" {
-		changes = append(changes, removeEmptyFolderFiles(files, github, in.From)...)
+		changes = append(changes, removeEmptyFolderFiles(files, github, keep, in.From)...)
 	}
 	added, err := addFolderFiles(files, texts, github, r.rootAgents, dest)
 	if err != nil {

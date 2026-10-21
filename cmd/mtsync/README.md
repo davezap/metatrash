@@ -43,6 +43,10 @@ Linux and macOS.
   and `.metatrash.json` can't be deleted in a space, so deleting them locally
   brings them back; delete the folder's other files and the space removes
   them too.
+  A file the folder's `.metatrash.json` locks for everyone (`"readOnly":
+  {"spec.md": "everyone"}`) can't change in the space: a local change is kept
+  as a conflict copy and a deletion is undone, both with the space's version
+  put back. Files locked only for agents sync normally.
 - **Safety.** Every write carries the space's state token, so an agent's
   change mid-pass is never overwritten: the pass starts again. A file saved
   within the last second waits for the next pass. Rate limits (`429`) are

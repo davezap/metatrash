@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.46.0 - Locks with levels, and read-only files (2026-10-21)
+
+No database schema, configuration or grant change. No new Go modules. Tool schema 0.11.0. mtsync minimum stays 0.45.0; mtsync 0.46.0 handles files locked for everyone (older versions report the refusal and keep the local change).
+
+- **Lock levels.** A lock in `.metatrash.json` is `"agents"` (agents can't change it, people writing through Metatrash Sync can) or `"everyone"` (nobody can until a person lifts the lock); anything not locked is read-write for everyone. `locked` is now a map of key to level (`{"purpose": "everyone"}`); the 0.45.0 list form still works and locks for agents. `locked` itself is always locked for agents and can't be locked for everyone, so a person can always lift a lock. People are now held to `"everyone"` locks on keys too.
+- **`readOnly`** in `.metatrash.json` locks files of that folder: names or patterns (`spec.md`, `*.pdf`) of files in it, or subfolders ending in `/` (`archive/`) for everything under them, each with a level. A locked file can't be written, edited, moved, renamed or deleted, or created under a locked name, by a writer the lock covers: `read_only_file` (403). Not inherited. `readOnly` itself is an ordinary key, which `locked` can protect. A `.metatrash.json` is locked at most for agents. List, read and write results mark locked files with `readOnly`. An agent's delete or move never removes a locked `AGENTS.md` or `.metatrash.json` with its emptied folder.
+- **mtsync**: a change or deletion of a file locked for everyone is refused by the space; mtsync keeps a changed local version as a conflict copy (`spec.conflict-<time>.md`) and puts the space's version back.
+
 ## 0.45.0 - AGENTS.md and .metatrash.json in every folder; README.md is ordinary (2026-10-21)
 
 No database schema, configuration or grant change. No new Go modules. Tool schema 0.10.0. **mtsync 0.45.0 is required** (`clients.mtsync.minVersion`): older versions miss the folder files a write adds. Release this version (so `mtsync.json` offers 0.45.0) before or with deploying the server.
