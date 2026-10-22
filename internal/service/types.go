@@ -95,6 +95,9 @@ type HistoryEntry struct {
 	// By is who made the change (see authors.go); absent on older commits
 	// and the service's own.
 	By *changeAuthor `json:"by,omitempty"`
+	// Published lists the versions of the file's publishing folder whose
+	// text of the file this is (see publish.go).
+	Published []int `json:"published,omitempty"`
 }
 
 type HistoryResult struct {

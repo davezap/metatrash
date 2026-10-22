@@ -78,6 +78,27 @@ Agreed with Dave 2026-10-18.
 - **Folder selection in Slate Viewer.** The file tree selects folders as well
   as files, so the configurator has something to act on.
 
+## Policies and permissions
+
+Published versions and read acknowledgements shipped in 0.48.0 (Slate Viewer
+0.13.0). Still open:
+
+- **Per-folder permissions** (Dave, 2026-10-22: think more before building).
+  Today access is per space: each member or connection is read-only or
+  read-write for the whole space, and locks only tell agents from people.
+  Wanted: some folders read-only for some people (policies for employees)
+  and read-write elsewhere, and drafts hidden from readers. Idea discussed: a
+  member role in the database (editor, reader) and per-folder rules in
+  `.metatrash.json` naming roles, never people, such as `"readers":
+  "published" | "read" | "write" | "none"`. Every read path (list, read at a
+  revision, search, export, history, the website) would have to filter in
+  one place, with a test per interface. Until then drafts are visible to
+  everyone, which Dave accepts as transparent.
+- Reminders (email to people with outstanding files) and due dates.
+- Report on the website (account page) as well as in Slate Viewer and
+  `mtsync readers`.
+- An MCP tool for the report, so an agent can say who still has to read.
+
 ## GitHub folders
 
 Connect, pull, `pending` and `push` are done ([github.md](github.md)). Still

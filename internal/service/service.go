@@ -704,6 +704,9 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 	if len(entries) == 0 && c.Offset == 0 {
 		return nil, missing()
 	}
+	if err := r.markPublished(ctx, state, files, in.ID, entries); err != nil {
+		return nil, err
+	}
 	result := HistoryResult{Space: space, State: state, ID: in.ID, Entries: entries}
 	if len(entries) > c.Limit {
 		result.Entries = entries[:c.Limit]

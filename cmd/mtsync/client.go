@@ -326,6 +326,9 @@ type historyEntry struct {
 	Timestamp string `json:"timestamp"`
 	// By is who made the change (servers from 0.47.0; not on older changes).
 	By *changeAuthor `json:"by,omitempty"`
+	// Published lists the versions of its folder that published this text
+	// (servers from 0.48.0).
+	Published []int `json:"published,omitempty"`
 }
 
 // changeAuthor names who made a change: an account name, the app (Metatrash

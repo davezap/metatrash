@@ -639,7 +639,7 @@ func (s *Service) applyPull(ctx context.Context, r *repository, plan pullPlan) (
 	}
 	if head != plan.seenHead {
 		current, err := r.githubFolderService(ctx, files, folder)
-		if err != nil || current != plan.svc {
+		if err != nil || !current.equal(plan.svc) {
 			return nil, githubConflict(folder + " settings changed during the pull; pull again.")
 		}
 		baselines, err := r.githubBaselines(ctx, head)

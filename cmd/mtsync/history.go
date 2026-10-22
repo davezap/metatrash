@@ -135,6 +135,9 @@ func showHistory(ctx context.Context, file string, limit, offset int, asJSON boo
 		if h.By != nil {
 			line += "  by " + h.By.String()
 		}
+		for _, v := range h.Published {
+			line += fmt.Sprintf("  [published v%d]", v)
+		}
 		fmt.Fprintln(out, line)
 	}
 	if more {

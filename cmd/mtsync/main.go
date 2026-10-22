@@ -53,6 +53,12 @@ History (FILE is a file in a registered folder):
                            -json for editors)
   show FILE REVISION       print the file's text as it was at REVISION
 
+Published versions (PLACE is a registered folder or anything in it):
+  policies PLACE           published folders, their files, and which you still
+                           have to read (-json for editors)
+  ack FILE VERSION         confirm you read FILE as published in VERSION
+  readers PLACE            who has read what (needs read-write access; -json)
+
 One-off:
   SPACE[/PATH] FOLDER      sync one folder in this window, without registering it
                            (-once: one pass, then exit)
@@ -80,7 +86,7 @@ func run(args []string) error {
 	interval := flags.Duration("interval", 5*time.Second, "time between scans of each folder")
 	limit := flags.Int("limit", 10, "history: how many changes to list (1..100)")
 	offset := flags.Int("offset", 0, "history: skip this many of the newest changes")
-	asJSON := flags.Bool("json", false, "history: answer in JSON")
+	asJSON := flags.Bool("json", false, "history, policies and readers: answer in JSON")
 	keyEnv := flags.String("key-env", "", "one-off sync and export: name of an environment variable holding a space key, for spaces configured with keys instead of sign-in")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), usage, metatrash.Version)
@@ -154,6 +160,12 @@ func run(args []string) error {
 		return nil
 	case cmd == "history" && len(rest) == 2:
 		return showHistory(ctx, rest[1], *limit, *offset, *asJSON, os.Stdout)
+	case cmd == "policies" && len(rest) == 2:
+		return showPolicies(ctx, rest[1], *asJSON, os.Stdout)
+	case cmd == "ack" && len(rest) == 3:
+		return acknowledgeFile(ctx, rest[1], rest[2], os.Stdout)
+	case cmd == "readers" && len(rest) == 2:
+		return showReport(ctx, rest[1], *asJSON, os.Stdout)
 	case cmd == "show" && len(rest) == 3:
 		return showRevision(ctx, rest[1], rest[2], os.Stdout)
 	case cmd == "export" && (len(rest) == 2 || len(rest) == 3):

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.48.0 - Published versions and read acknowledgements (2026-10-22)
+
+**Database schema v12** (`deploy/account-schema-v12.sql`, then `deploy/account-grants.sql`): apply both before the new binary starts; it refuses to start on v11. No configuration change. No new Go modules. Tool schema 0.13.0. mtsync minimum stays 0.45.0; mtsync 0.48.0 adds `policies`, `ack` and `readers`, which Slate Viewer 0.13.0 uses.
+
+- **`publishedVersion`** in a folder's `.metatrash.json`: a whole number, the folder's official version. Version N is the folder's files as they were in the commit that set N, so publishing is one settings write (Slate Viewer's Publish, or an agent asked to publish); edits after it are drafts until the next number. It only goes up (`invalid_request` otherwise), is never inherited, and `locked` can keep agents from changing it (`{"publishedVersion": "agents"}`). The commit is found from the settings file's history, so nothing is copied or tagged. Everyone can still read drafts; per-folder permissions are on the roadmap.
+- **History marks published text**: an entry is `published: [N, ...]` when it is the file's text in version N (its newest change at or before the commit that set N). mtsync history prints `[published vN]`.
+- **`acknowledge` service**: `{"services": [{"type": "acknowledge", "files": ["*.md"]}]}` asks everyone in the space (owner and active members) to read the folder's published files; `files` takes names, patterns and `sub/` like `readOnly`, by default every `.md` file but `AGENTS.md`. It may sit on the root and inside other acknowledge folders (the nearest folder with a `publishedVersion` owns a file). Owned spaces only.
+- **Services registry**: service types are now entries in `serviceKinds` (`folder_config.go`) with their own checks, root and nesting rules, so the next service is one entry plus its code. GitHub's rules are unchanged.
+- **Acknowledgements** are kept in the new `metatrash_acknowledgements` table, one row per person, file and published text, never in the space. REST on the OAuth resource: `GET .../acknowledgements` (the caller's published folders and files, `outstanding` per file and in total), `GET .../acknowledgements?report=true` (who has read what; needs read-write access) and `POST .../acknowledgements {"path", "version"}` (confirm reading; only Metatrash Sync, so only a person; `conflict` 409 when the folder has published a newer version). A new version asks again only for files whose text changed.
+- **mtsync 0.48.0**: `policies PLACE` (published folders, files and what you still have to read; `-json` adds local file paths for `show`), `ack FILE VERSION`, `readers PLACE`.
+- `doctor` and startup check schema v12 and the two new grants. The website's file browser labels a published folder `Published vN`.
+- Tests: settings rules (versions only go up, not inherited, agent lock), publish points and history marks across drafts and versions, tracked-file rules, and acknowledgements end to end against MariaDB (agent refused, old version refused, report needs read-write, a new version re-asks only changed files); mtsync policies and ack. docs/api-contract.md (Folder settings, Acknowledgements), deployment (schema v12), roadmap, cmd/mtsync/README.md.
+
 ## 0.47.0 - History says who made each change (2026-10-21)
 
 No database schema, configuration or grant change. No new Go modules. Tool schema 0.12.0. mtsync minimum stays 0.45.0.

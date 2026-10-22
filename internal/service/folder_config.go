@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
 
 // A folder's settings are in a .metatrash.json file inside it: the services
-// attached to it and, from older spaces, a purpose and children (descriptions
-// now belong in the folder's AGENTS.md). Every folder has one (see
+// attached to it, its published version (see publish.go) and, from older
+// spaces, a purpose and children (descriptions now belong in the folder's
+// AGENTS.md). Every folder has one (see
 // folder_files.go). Agents read and write it; the service checks every write
 // so a mistake is reported instead of stored.
 const folderConfigName = ".metatrash.json"
@@ -23,6 +25,8 @@ const (
 	maxFolderChildren    = 200
 	maxFolderChildText   = 1000
 	maxFolderServices    = 8
+	maxPublishedVersion  = 1000000
+	maxAcknowledgeFiles  = 50
 	githubDefaultBranch  = "main"
 	githubDefaultPush    = "agent"
 	githubDefaultPull    = "auto"
@@ -46,16 +50,74 @@ type folderConfig struct {
 	// locks.go).
 	Locked   lockMap `json:"locked,omitempty"`
 	ReadOnly lockMap `json:"readOnly,omitempty"`
+	// PublishedVersion is the folder's official version: its files as they
+	// were when the version was set (see publish.go). Never inherited.
+	PublishedVersion *int `json:"publishedVersion,omitempty"`
 	// Reserved for folder actions; refused until they are implemented.
 	Actions json.RawMessage `json:"actions,omitempty"`
 }
 
+// folderService is one entry of services. Each type uses its own fields
+// (see serviceKinds) and refuses the others'.
 type folderService struct {
 	Type   string `json:"type"`
 	Repo   string `json:"repo,omitempty"`
 	Branch string `json:"branch,omitempty"`
 	Push   string `json:"push,omitempty"`
 	Pull   string `json:"pull,omitempty"`
+	// Files are the files an acknowledge service asks people to read, named
+	// like readOnly entries; by default every .md file in the folder and its
+	// subfolders other than AGENTS.md.
+	Files []string `json:"files,omitempty"`
+}
+
+// serviceKind describes one service type: check validates its settings,
+// root allows it on the space root, and nest allows folders with it inside
+// one another.
+type serviceKind struct {
+	check      func(svc folderService) error
+	root, nest bool
+}
+
+// serviceKinds are the services a folder can attach. A new service is one
+// entry here plus the code that acts on it.
+var serviceKinds = map[string]serviceKind{
+	"github":      {check: checkGitHubService},
+	"acknowledge": {check: checkAcknowledgeService, root: true, nest: true},
+}
+
+func checkGitHubService(svc folderService) error {
+	if !githubRepoPattern.MatchString(svc.Repo) || strings.HasSuffix(svc.Repo, "/.") || strings.HasSuffix(svc.Repo, "/..") {
+		return folderConfigError("github repo must be owner/name, for example dave-zap/website.")
+	}
+	if svc.Branch != "" && (!gitBranchPattern.MatchString(svc.Branch) || strings.Contains(svc.Branch, "..") || strings.Contains(svc.Branch, "//") || strings.HasSuffix(svc.Branch, "/") || strings.HasSuffix(svc.Branch, ".") || strings.HasSuffix(svc.Branch, ".lock")) {
+		return folderConfigError("github branch is not a valid branch name.")
+	}
+	if svc.Push != "" && svc.Push != "agent" && svc.Push != "auto" && svc.Push != "review" {
+		return folderConfigError(`github push must be "agent" (the default: only the push tool sends), "auto" or "review".`)
+	}
+	if svc.Pull != "" && svc.Pull != "auto" {
+		return folderConfigError(`github pull must be "auto".`)
+	}
+	if svc.Files != nil {
+		return folderConfigError("github takes no files.")
+	}
+	return nil
+}
+
+func checkAcknowledgeService(svc folderService) error {
+	if svc.Repo != "" || svc.Branch != "" || svc.Push != "" || svc.Pull != "" {
+		return folderConfigError("acknowledge takes only files (which files people must read; by default every .md file).")
+	}
+	if len(svc.Files) > maxAcknowledgeFiles {
+		return folderConfigError(fmt.Sprintf("acknowledge files is limited to %d entries.", maxAcknowledgeFiles))
+	}
+	for _, entry := range svc.Files {
+		if err := checkReadOnlyEntry(entry); err != nil {
+			return folderConfigError(fmt.Sprintf("acknowledge files entry %q must be one file name or pattern in this folder, such as leave.md or *.md, or a subfolder ending in /, such as hr/.", entry))
+		}
+	}
+	return nil
 }
 
 // isFolderConfig reports whether path names a folder configuration file.
@@ -109,7 +171,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly or locked, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion or locked, not %q.", key))
 		}
 	}
 	if c.Locked["locked"] == lockEveryone {
@@ -123,30 +185,24 @@ func parseFolderConfig(text string) (folderConfig, error) {
 			return c, err
 		}
 	}
+	if v := c.PublishedVersion; v != nil && (*v < 1 || *v > maxPublishedVersion) {
+		return c, folderConfigError(fmt.Sprintf("publishedVersion must be a whole number from 1 to %d.", maxPublishedVersion))
+	}
 	if len(c.Services) > maxFolderServices {
 		return c, folderConfigError(fmt.Sprintf("services is limited to %d entries.", maxFolderServices))
 	}
 	kinds := map[string]bool{}
 	for i := range c.Services {
 		svc := &c.Services[i]
-		switch svc.Type {
-		case "github":
-			if !githubRepoPattern.MatchString(svc.Repo) || strings.HasSuffix(svc.Repo, "/.") || strings.HasSuffix(svc.Repo, "/..") {
-				return c, folderConfigError("github repo must be owner/name, for example dave-zap/website.")
-			}
-			if svc.Branch != "" && (!gitBranchPattern.MatchString(svc.Branch) || strings.Contains(svc.Branch, "..") || strings.Contains(svc.Branch, "//") || strings.HasSuffix(svc.Branch, "/") || strings.HasSuffix(svc.Branch, ".") || strings.HasSuffix(svc.Branch, ".lock")) {
-				return c, folderConfigError("github branch is not a valid branch name.")
-			}
-			if svc.Push != "" && svc.Push != "agent" && svc.Push != "auto" && svc.Push != "review" {
-				return c, folderConfigError(`github push must be "agent" (the default: only the push tool sends), "auto" or "review".`)
-			}
-			if svc.Pull != "" && svc.Pull != "auto" {
-				return c, folderConfigError(`github pull must be "auto".`)
-			}
-		case "":
+		kind, known := serviceKinds[svc.Type]
+		switch {
+		case svc.Type == "":
 			return c, folderConfigError("each service needs a type.")
-		default:
-			return c, folderConfigError(fmt.Sprintf("unknown service type %q; supported: github.", svc.Type))
+		case !known:
+			return c, folderConfigError(fmt.Sprintf("unknown service type %q; supported: acknowledge, github.", svc.Type))
+		}
+		if err := kind.check(*svc); err != nil {
+			return c, err
 		}
 		if kinds[svc.Type] {
 			return c, folderConfigError(fmt.Sprintf("only one %s service per folder.", svc.Type))
@@ -172,6 +228,10 @@ func (svc folderService) withDefaults() folderService {
 	return svc
 }
 
+func (svc folderService) equal(other folderService) bool {
+	return svc.Type == other.Type && svc.Repo == other.Repo && svc.Branch == other.Branch && svc.Push == other.Push && svc.Pull == other.Pull && slices.Equal(svc.Files, other.Files)
+}
+
 func (c folderConfig) has(kind string) bool {
 	for _, svc := range c.Services {
 		if svc.Type == kind {
@@ -182,9 +242,10 @@ func (c folderConfig) has(kind string) bool {
 }
 
 // checkFolderConfig validates a configuration write against the rest of the
-// space: services only in owned spaces, never at the root, and no folder of
-// the same service kind inside or around another. Called under the write queue
-// with the snapshot the write applies to.
+// space: services only in owned spaces, on the root only where the kind allows
+// it, no folder of a non-nesting kind inside or around another, and a
+// publishedVersion that never goes down. Called under the write queue with the
+// snapshot the write applies to.
 func (r *repository) checkFolderConfig(ctx context.Context, files map[string]record, path, text string) error {
 	c, err := parseFolderConfig(text)
 	if err != nil {
@@ -194,11 +255,22 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 	if folder == "" && c.Inherit != nil && *c.Inherit {
 		return folderConfigError("the space root has no parent folder to inherit from.")
 	}
+	if f, ok := files[path]; ok && c.PublishedVersion != nil {
+		b, err := r.blob(ctx, f.Blob)
+		if err != nil {
+			return err
+		}
+		if old, err := parseFolderConfig(string(b)); err == nil && old.PublishedVersion != nil && *c.PublishedVersion < *old.PublishedVersion {
+			return folderConfigError(fmt.Sprintf("publishedVersion only goes up: it is %d, so publish the next version as %d.", *old.PublishedVersion, *old.PublishedVersion+1))
+		}
+	}
 	if len(c.Services) == 0 {
 		return nil
 	}
-	if folder == "" {
-		return folderConfigError("services cannot be attached to the space root; use a folder.")
+	for _, svc := range c.Services {
+		if folder == "" && !serviceKinds[svc.Type].root {
+			return folderConfigError(svc.Type + " services cannot be attached to the space root; use a folder.")
+		}
 	}
 	if !r.owned {
 		return folderConfigError("services are available only in your own spaces (connected through /mcp/account).")
@@ -221,7 +293,7 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 			continue
 		}
 		for _, svc := range c.Services {
-			if existing.has(svc.Type) {
+			if existing.has(svc.Type) && !serviceKinds[svc.Type].nest {
 				// Repos never nest. Say where the clash is and what to do instead.
 				if strings.HasPrefix(otherFolder, folder) {
 					return folderConfigError(fmt.Sprintf("%s already has a %s service and %s folders cannot nest; choose a folder that does not contain it.", otherFolder, svc.Type, svc.Type))
@@ -389,12 +461,15 @@ func markServiceFolders(nodes []*browserNode, prefix string, configs map[string]
 				node.Service = "GitHub " + svc.Repo
 			}
 		}
+		if node.Service == "" && configs[folder].PublishedVersion != nil {
+			node.Service = fmt.Sprintf("Published v%d", *configs[folder].PublishedVersion)
+		}
 		markServiceFolders(node.Children, folder, configs)
 	}
 }
 
 // lockableKeys are the keys locked may name.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "locked": true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "locked": true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.
@@ -447,7 +522,8 @@ func parentFolder(folder string) string {
 
 // effectiveSettings returns folder's settings with inherited ones filled in,
 // as top-level keys like configKeys. text, when set, stands for the folder's
-// own file. Services, readOnly and inherit itself are never inherited.
+// own file. Services, readOnly, publishedVersion and inherit itself are never
+// inherited.
 func (r *repository) effectiveSettings(ctx context.Context, files map[string]record, folder string, text *string) (map[string]string, error) {
 	own := ""
 	if text != nil {
@@ -467,7 +543,7 @@ func (r *repository) effectiveSettings(ctx context.Context, files map[string]rec
 		return nil, err
 	}
 	for k, v := range parent {
-		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "inherit" {
+		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "publishedVersion" && k != "inherit" {
 			keys[k] = v
 		}
 	}

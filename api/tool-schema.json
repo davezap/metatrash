@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.12.0",
+  "schemaVersion": "0.13.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.45.0"},
@@ -294,7 +294,7 @@
     },
     {
       "name": "write",
-      "description": "Create a file or replace its whole text. To change part of an existing file, use edit instead: it sends only the changed text. Every folder has an AGENTS.md (what the folder holds and how to work in it; rewrite it freely) and a .metatrash.json (its settings), added with the folder's first file and removed with its last other file; neither can be deleted or moved. A .metatrash.json is checked on write: a JSON object with optional inherit (true: take every setting but services from the parent folder, own keys override; new folders start with it), locked ({\"key\": \"agents\" or \"everyone\"}: keys of this file, purpose, children, services, inherit, readOnly or locked, that agents (\"agents\") or nobody (\"everyone\") may add, change or remove; refused with locked_setting; locked itself only a person changes), readOnly ({\"spec.md\": \"agents\", \"*.pdf\": \"everyone\", \"archive/\": \"agents\"}: files of this folder, by name, pattern or subfolder/, that may not be written, edited, moved, renamed, deleted or created; refused with read_only_file; not inherited; an ordinary key unless locked), purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"agent\"}]); unknown keys are refused. Services: own spaces only, not at the root, no github folder inside or around another. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed. Editing a github folder: pull first (at the start of each session), edit with write, move and delete, call pending to see what will be sent, then push with a message; nothing reaches GitHub until push (push \"agent\", the default). If push reports GitHub moved ahead, pull (it keeps your changes when no file changed on both sides), then push again. Results in a github folder carry a hint once changes have waited unpushed for 30 minutes.",
+      "description": "Create a file or replace its whole text. To change part of an existing file, use edit instead: it sends only the changed text. Every folder has an AGENTS.md (what the folder holds and how to work in it; rewrite it freely) and a .metatrash.json (its settings), added with the folder's first file and removed with its last other file; neither can be deleted or moved. A .metatrash.json is checked on write: a JSON object with optional inherit (true: take every setting but services from the parent folder, own keys override; new folders start with it), locked ({\"key\": \"agents\" or \"everyone\"}: keys of this file, purpose, children, services, inherit, readOnly, publishedVersion or locked, that agents (\"agents\") or nobody (\"everyone\") may add, change or remove; refused with locked_setting; locked itself only a person changes), readOnly ({\"spec.md\": \"agents\", \"*.pdf\": \"everyone\", \"archive/\": \"agents\"}: files of this folder, by name, pattern or subfolder/, that may not be written, edited, moved, renamed, deleted or created; refused with read_only_file; not inherited; an ordinary key unless locked), publishedVersion (a whole number: the folder's official version is its files as they were when the number was set; raising it publishes the current files as the next version; it never goes down and is not inherited), purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"agent\"}] or [{\"type\":\"acknowledge\",\"files\":[\"*.md\"]}]: everyone in the space is asked to read the folder's published files, by default every .md file but AGENTS.md; people confirm in Slate Viewer, agents cannot); unknown keys are refused. Services: own spaces only; github not at the root and no github folder inside or around another. Publish only when asked to: a published version is what people are asked to read. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed. Editing a github folder: pull first (at the start of each session), edit with write, move and delete, call pending to see what will be sent, then push with a message; nothing reaches GitHub until push (push \"agent\", the default). If push reports GitHub moved ahead, pull (it keeps your changes when no file changed on both sides), then push again. Results in a github folder carry a hint once changes have waited unpushed for 30 minutes.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -927,7 +927,7 @@
     },
     {
       "name": "history",
-      "description": "File history across moves and deletes, newest first, each change with who made it (by). Read old content using entry path+revision; for a delete entry, use the next older entry. Deleted files keep their history.",
+      "description": "File history across moves and deletes, newest first, each change with who made it (by) and, in a folder with publishedVersion, the versions that published that text (published). Read old content using entry path+revision; for a delete entry, use the next older entry. Deleted files keep their history.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -1005,6 +1005,14 @@
                 "timestamp": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "published": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "description": "Versions of the file's folder (publishedVersion) whose text of the file this is."
                 },
                 "by": {
                   "type": "object",
@@ -1165,6 +1173,18 @@
         "ifInState"
       ],
       "note": "OAuth only."
+    },
+    "acknowledgements": {
+      "method": "GET, POST",
+      "path": "/api/v1/account/spaces/{space}/acknowledgements",
+      "query": [
+        "report"
+      ],
+      "body": [
+        "path",
+        "version"
+      ],
+      "note": "OAuth only. GET: the caller's published folders and files, and which they still have to read; GET ?report=true: who has read what (read-write access); POST: confirm reading a file's published version (Metatrash Sync only)."
     }
   },
   "errorSchema": {
@@ -1218,7 +1238,7 @@
     ],
     "additionalProperties": false
   },
-  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema. conflict comes from edit (an oldText that no longer matches once) and from pull and push; github_unavailable from pull and push.",
+  "errorNotes": "state_mismatch includes currentState; rate_limited/queue_full include retryAfterSeconds (REST: Retry-After). MCP errors: isError=true + text JSON; success: structuredContent per outputSchema. conflict comes from edit (an oldText that no longer matches once), from pull and push, and from acknowledgements when the folder has published a newer version; github_unavailable from pull and push.",
   "accountTools": [
     {
       "name": "spaces",

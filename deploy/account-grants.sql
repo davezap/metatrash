@@ -51,5 +51,7 @@ GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_aliases TO 'metatrash_
 -- v10 sessions that survive restarts
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_sessions TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (auth_at, last_used_at) ON metatrash.metatrash_sessions TO 'metatrash_accounts'@'localhost';
+-- v12 policy acknowledgements
+GRANT SELECT, INSERT ON metatrash.metatrash_acknowledgements TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

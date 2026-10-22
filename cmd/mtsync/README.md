@@ -164,7 +164,23 @@ to have synced once, since its ID comes from the folder's `.mtsync/state.json`.
 `mtsync show FILE REVISION` prints the file's text at a revision from
 `history`, exactly as stored. For a revision from before a rename, give the
 path it had then (the entry's `file`). A `delete` entry has no text; show the
-one before it.
+one before it. In a folder with a published version (metatrash 0.48.0),
+`history` marks each entry that is the text of a published version
+(`[published v3]`; `published` in `-json`).
+
+`mtsync policies PLACE` (PLACE is a registered folder or anything in it)
+lists the space's published folders under it: each folder's version, when
+and by whom it was published, and its files, marked "to read" when its
+acknowledge service asks you to read a file you haven't confirmed, "read",
+and "draft changes" when the file changed since it was published. `-json`
+answers for editors with the server's fields (see the API contract,
+Acknowledgements) plus `file` and `publishedFile`, the local paths; show a
+published text with `mtsync show <publishedFile> <revision>`. `mtsync ack FILE
+VERSION` confirms you read FILE as published in VERSION (only for a file its
+folder asks you to read, and only at the folder's current version).
+`mtsync readers PLACE` shows who still has to read what (it needs read-write
+access; `-json` for editors). All three need metatrash 0.48.0 and a signed-in
+space.
 
 `mtsync list` shows, per folder, "in sync, checked <time>", the last error
 (for example signed out, or the space no longer connected; the service tries
@@ -187,6 +203,9 @@ All commands:
 | `export SPACE [FILE]` | save the space as it is now to a zip, for backups |
 | `history FILE` | a synced file's changes, newest first (`-limit`, `-offset`, `-json`) |
 | `show FILE REVISION` | print a synced file's text at a revision |
+| `policies PLACE` | published folders and files, and what you still have to read (`-json`) |
+| `ack FILE VERSION` | confirm you read FILE as published in VERSION |
+| `readers PLACE` | who has read what (read-write access; `-json`) |
 | `version` | the version |
 | `SPACE[/PATH] FOLDER` | sync one folder in this window without registering it; `-once` for one pass |
 
@@ -199,7 +218,7 @@ Flags go before the command:
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |
 | `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
-| `-json` | off | `history`: answer in JSON |
+| `-json` | off | `history`, `policies`, `readers`: answer in JSON |
 | `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
 
 One local folder syncs one space (or one folder of it); a local folder already

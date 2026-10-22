@@ -29,6 +29,9 @@ type repository struct {
 	// owner is the owning account's user ID (owned spaces only); a GitHub
 	// folder pulls through that account's GitHub connections.
 	owner string
+	// id is the space ID of an owned space, which keys its rows in the
+	// account database (acknowledgements).
+	id string
 	// changed is closed and replaced whenever the branch moves, waking list
 	// requests that wait with after= (see Service.waitForChange).
 	watchMu sync.Mutex
