@@ -174,6 +174,21 @@ func (s *Service) listConnectedSpaces(ctx context.Context, id oauthIdentity) (co
 	return result, nil
 }
 
+// connectionAccount returns the username of the account a connection signs
+// in as.
+func (s *Service) connectionAccount(ctx context.Context, id oauthIdentity) (string, error) {
+	if s.ownedDB == nil {
+		return "", fmt.Errorf("agent authorization unavailable")
+	}
+	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var username string
+	if err := s.ownedDB.db.QueryRowContext(lookup, "SELECT COALESCE(username, '') FROM metatrash_users WHERE user_id = ?", id.UserID).Scan(&username); err != nil {
+		return "", fmt.Errorf("cannot read the connection's account")
+	}
+	return username, nil
+}
+
 // pushAuthorFor returns the public username of the connection's user and the
 // app name the user approved, for signing pushes.
 func (s *Service) pushAuthorFor(ctx context.Context, id oauthIdentity) (pushAuthor, error) {

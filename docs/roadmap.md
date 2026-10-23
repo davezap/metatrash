@@ -151,7 +151,7 @@ the `review` push mode, which needs a review screen.
   with Azure Artifact Signing since 0.43.2 (deployment.md, Code signing).
 - **Slate**: a read-only Compare, so Slate Viewer's History panel works on
   documents it cannot edit. (Mermaid diagrams shipped in Slate 0.14, and the
-  website uses Slate 0.14.1 since Metatrash 0.44.0.)
+  website uses Slate 0.19.0 since Metatrash 0.49.3.)
 - **Slate Viewer as the space manager**: the desktop companion for managing
   Metatrash spaces (agreed direction 2026-10-17, not yet planned in detail).
 - Deferred with Dave 2026-10-12: bulk first download, on-demand files like

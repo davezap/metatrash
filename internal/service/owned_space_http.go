@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	pathpkg "path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -113,7 +115,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	// noindex until the page itself is known to be indexable (errors,
 	// redirects and members-only pages keep it).
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' https: data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
@@ -127,7 +129,9 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, problem(403, "forbidden", "Use the configured site address."))
 		return
 	}
-	if r.URL.RawQuery != "" {
+	// ?raw serves an image file itself, for the pictures in a document.
+	raw := r.URL.RawQuery == "raw"
+	if r.URL.RawQuery != "" && !raw {
 		sendError(w, missing())
 		return
 	}
@@ -235,6 +239,10 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, missing())
 		return
 	}
+	if raw {
+		h.serveRawImage(w, r, repo, path, file.Blob)
+		return
+	}
 	content, err := repo.blob(ctx, file.Blob)
 	if err != nil {
 		sendError(w, err)
@@ -243,7 +251,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	// Docs pages are all indexable; a web-readable space only in its top folder.
 	noIndex := !docs && (space.Visibility != spaceWeb || !indexable(path))
 	lowerPath := strings.ToLower(path)
-	page := browserPage{NoIndex: noIndex, BasePath: h.basePath, AccountsEnabled: true, Private: true, Docs: docs, Legal: h.docsSpace() != "", Web: space.Visibility == spaceWeb, Member: member, SpaceName: space.Name, SpaceRef: owner + "/" + space.Slug, Path: path, State: state, Text: string(content), Markdown: strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown"), Tree: fileTree(files, path, root)}
+	page := browserPage{NoIndex: noIndex, BasePath: h.basePath, AccountsEnabled: true, Private: true, Docs: docs, Legal: h.docsSpace() != "", Web: space.Visibility == spaceWeb, Member: member, SpaceName: space.Name, SpaceRef: owner + "/" + space.Slug, Path: path, State: state, Text: string(content), Markdown: strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown"), RawImages: true, Tree: fileTree(files, path, root)}
 	if !docs {
 		configs, err := repo.folderConfigs(ctx, files)
 		if err != nil {
@@ -263,5 +271,37 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	}
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(body.Bytes())
+	}
+}
+
+// rawImageTypes are the files ?raw serves, by extension: pictures only, so a
+// space's HTML or scripts never run on this site.
+var rawImageTypes = map[string]string{
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+	".webp": "image/webp", ".avif": "image/avif", ".bmp": "image/bmp", ".ico": "image/x-icon",
+	".svg": "image/svg+xml",
+}
+
+// serveRawImage sends an image file of a space as itself (path?raw), so a
+// document's pictures show on its page as they do in Slate Viewer. The
+// caller has checked the visitor may read the space.
+func (h *httpAdapter) serveRawImage(w http.ResponseWriter, r *http.Request, repo *repository, path, blob string) {
+	kind, ok := rawImageTypes[strings.ToLower(pathpkg.Ext(path))]
+	if !ok {
+		sendError(w, missing())
+		return
+	}
+	content, err := repo.blob(r.Context(), blob)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	// An SVG opened on its own runs nothing: no scripts, no other origin.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", kind)
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(content)
 	}
 }

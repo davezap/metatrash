@@ -1,7 +1,7 @@
 # Forms
 
 0.49.0. A form is a Markdown template with fields in it. People fill it in
-with Slate Viewer (Fill In) or `mtsync submit`; Metatrash checks the answers
+with Slate Viewer or `mtsync submit`; Metatrash checks the answers
 and files a filled-in copy in a review folder, usually in a private space
 only reviewers belong to. The person who sends it needs no access there.
 
@@ -137,8 +137,9 @@ The person keeps a receipt with the copy (My Submissions in Slate Viewer,
 
 ## Sending
 
-Slate Viewer: open the template, choose Fill In, answer, Send. Work in
-progress is kept on that computer only.
+Slate Viewer (0.16.0 and later): open the template in Preview, where it is
+ready to fill in, answer, Send. Work in progress is kept on that computer
+only. The website shows a template's fields greyed out; it can't send forms.
 
 mtsync: `mtsync submit FILE ANSWERS`, with the answers as JSON
 (`{"full_name": "Pat", "type": "Annual", "signature": "true"}`).

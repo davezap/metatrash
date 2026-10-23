@@ -227,15 +227,18 @@ every request, before quotas are charged or Git is touched.
   swaps only the document, with the address bar and history updated, so the
   tree keeps its open folders (`web/document.js`; whole pages without
   JavaScript or when a fetch fails). Markdown renders with the embedded Slate
-  (0.14.1) in read-only Preview, mounted once per page; ```mermaid blocks
-  load the embedded Mermaid from `/assets/mermaid/` only when a document has
-  one; other files show as
+  (0.19.0, the same as Slate Viewer; front matter hidden, a form's fields drawn greyed out) in read-only Preview, mounted once per
+  page; ```mermaid blocks load the embedded Mermaid from `/assets/mermaid/`
+  only when a document has one. In owned spaces and `/docs/`, relative images
+  load from `path?raw` (image types only, sandboxed, `nosniff`), and wiki
+  links open the nearest matching file in the tree. Other files show as
   escaped text, which is also the fallback without JavaScript.
 - Legacy `?path=` links redirect (308) to clean document URLs.
 - Assets come only from an explicit embedded allowlist, never from space
   storage. CSP allows same-origin scripts only where needed; space text is
   always escaped. Private pages (including spaces readable on the web) are
-  no-store and no-referrer, and block external images.
+  no-store and no-referrer; images may come from the site, `https:` or
+  `data:`.
 - Search engines: the site's pages and all of `/docs/` are indexable. Under
   `/spaces/`, in spaces anyone can read (public, or readable on the web), only
   files in the space's top folder are; subfolder files, members-only pages,

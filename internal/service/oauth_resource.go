@@ -139,7 +139,17 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 			sendError(w, err)
 			return
 		}
-		sendJSON(w, 200, value)
+		// The REST listing also names the account, so a tool can show who it
+		// is signed in as (mtsync whoami, 0.49.1).
+		account, err := h.service.connectionAccount(r.Context(), id)
+		if err != nil {
+			sendError(w, err)
+			return
+		}
+		sendJSON(w, 200, struct {
+			Account string `json:"account"`
+			connectedSpaces
+		}{account, value})
 		return
 	}
 	space, resource := parts[1], parts[2]

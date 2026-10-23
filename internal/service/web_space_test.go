@@ -74,12 +74,30 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 			t.Fatalf("%s sees the member wording", viewer)
 		}
 	}
+	// ?raw serves a picture itself, sandboxed, for the document's images;
+	// anything else, or another query, is not found.
+	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
+	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
+	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "pics/dot.svg", "text": `<svg xmlns="http://www.w3.org/2000/svg"/>`, "ifInState": state}, "")
+	svg := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/pics/dot.svg?raw", nil)
+	if svg.Code != 200 || svg.Header().Get("Content-Type") != "image/svg+xml" || !strings.Contains(svg.Header().Get("Content-Security-Policy"), "sandbox") || svg.Header().Get("X-Content-Type-Options") != "nosniff" || !strings.HasPrefix(svg.Body.String(), "<svg") {
+		t.Fatalf("raw svg: %d %v", svg.Code, svg.Header())
+	}
+	for _, path := range []string{"README.md?raw", "pics/dot.svg?raw=1", "pics/dot.svg?x"} {
+		if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/"+path, nil); res.Code != 404 {
+			t.Fatalf("%s: %d", path, res.Code)
+		}
+	}
+	if body := oauthCall(w.h, "GET", page, nil).Body.String(); !strings.Contains(body, `data-raw-images="true"`) {
+		t.Fatal("page lacks data-raw-images")
+	}
+
 	// The other space (the member's) stays private.
 	if res := oauthCall(w.h, "GET", "/spaces/"+w.joinName+"/README.md", nil, strangerSession); res.Code != 404 {
 		t.Fatalf("other space: %d", res.Code)
 	}
 	// Agents: a stranger's app still cannot reach the space.
-	token := w.connect(stranger, map[string]string{}, "")
+	token = w.connect(stranger, map[string]string{}, "")
 	w.tool(token, "read", map[string]any{"space": w.ownedName, "path": "README.md"}, "not_found")
 	// Writes through the website do not exist.
 	if res := oauthCall(w.h, "POST", page, url.Values{"text": {"x"}}); res.Code != 405 {

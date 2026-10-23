@@ -38,6 +38,26 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
 }
 
+/* Paper: a soft, warm page (not white) with near-black ink, for contrast without glare. */
+.slate-editor-host[data-theme="paper"]{
+  color-scheme: light;
+  --bg: #d9d2c3;
+  --panel: #e2dccf;
+  --panel-muted: #dad4c5;
+  --panel-hover: #d5cdbc;
+  --border: #cac0ac;
+  --border-strong: #b8ac95;
+  --text: #16130f;
+  --text-muted: #4f473b;
+  --accent: #234f99;
+  --accent-soft: #d2d7de;
+  --accent-strong: #173f85;
+  --danger: #a8303c;
+  --danger-soft: #e5cfca;
+  --complete: #1f8f4e;
+  --shadow: 0 10px 30px rgba(70, 52, 22, 0.12);
+}
+
 .slate-editor-host, .slate-editor-host *{ box-sizing: border-box; }
 .slate-editor-host [hidden]{ display: none !important; }
 
@@ -375,7 +395,7 @@
 }
 
 .slate-editor-host .editor-grid.live-view .editor-pane{ display: none; }
-.slate-editor-host .editor-grid.source-view .preview-pane{ display: none; }
+.slate-editor-host .editor-grid.source-view > .preview-pane{ display: none; }
 
 .slate-editor-host .editor-pane{ min-width: 0; min-height: 0; position: relative; }
 
@@ -587,6 +607,8 @@
 .slate-editor-host .live-block > .live-heading{ margin-bottom: .4em; }
 .slate-editor-host .live-block > blockquote, .slate-editor-host .live-block > pre, .slate-editor-host .live-block > table{ margin-top: .55em; margin-bottom: .55em; }
 .slate-editor-host .live-block.is-empty{ min-height: 1.15em; }
+.slate-editor-host .live-block.is-comment{ display: none; }
+.slate-editor-host .live-block.is-front-matter{ display: none; }
 
 .slate-editor-host .live-block.is-active:not(.is-image-block):not(.is-video-block){
   min-height: 1.7em;
@@ -1039,6 +1061,140 @@
 .slate-editor-host .compare-done:hover:not(:disabled){ background: var(--accent-strong); }
 .slate-editor-host .compare-chunk-button{ font: 12px/1.3 var(--font-ui); padding: 3px 9px; }
 .slate-editor-host .compare-chunk-button:hover{ filter: brightness(1.1); }
+
+/* Show Changes: another version's differences, read only, in place of the document. Preview
+   draws them rendered (removed words struck through in red, added words green); Edit and Source
+   show the Markdown in the merge view. */
+.slate-editor-host .editor-app[data-showing-changes="true"] .editor-grid > .preview-pane,
+.slate-editor-host .editor-app[data-showing-changes="true"] .editor-grid > .editor-pane,
+.slate-editor-host .editor-app[data-showing-changes="true"] .format-controls{ display: none !important; }
+.slate-editor-host .changes-pane{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.slate-editor-host .changes-pane[hidden]{ display: none; }
+.slate-editor-host .changes-pane > .changes-preview,
+.slate-editor-host .changes-pane > .changes-source{ flex: 1 1 auto; min-height: 0; height: auto; }
+.slate-editor-host .changes-pane[data-form="preview"] > .changes-source,
+.slate-editor-host .changes-pane[data-form="source"] > .changes-preview{ display: none; }
+.slate-editor-host .changes-title{ font-weight: 600; }
+.slate-editor-host .view-switcher[hidden]{ display: none; }
+.slate-editor-host .format-toolbar .changes-toggle{
+  height: 33px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-muted);
+  font-weight: 650;
+}
+.slate-editor-host .format-toolbar .changes-toggle[hidden]{ display: none; }
+.slate-editor-host .format-toolbar .changes-toggle.active{
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.slate-editor-host .format-toolbar .changes-toggle:disabled{ opacity: .6; cursor: progress; }
+.slate-editor-host .changes-bar .compare-button[aria-label]{ min-width: 30px; }
+.slate-editor-host{
+  --diff-added: #2ea043;
+  --diff-removed: #e5534b;
+  --diff-added-soft: color-mix(in srgb, var(--diff-added) 13%, transparent);
+  --diff-removed-soft: color-mix(in srgb, var(--diff-removed) 12%, transparent);
+  --diff-added-text: color-mix(in srgb, var(--diff-added) 30%, transparent);
+  --diff-removed-text: color-mix(in srgb, var(--diff-removed) 22%, transparent);
+}
+.slate-editor-host[data-theme="paper"]{ --diff-added: #1f7a3c; --diff-removed: #b42d24; }
+.slate-editor-host .changes-preview .live-block.slate-diff-added,
+.slate-editor-host .changes-preview .live-block.slate-diff-removed,
+.slate-editor-host .changes-preview .live-block.slate-diff-changed{
+  margin-left: -14px;
+  padding-left: 11px;
+  border-left: 3px solid var(--diff-added);
+  border-radius: 0 5px 5px 0;
+}
+.slate-editor-host .changes-preview .live-block.slate-diff-added{ background: var(--diff-added-soft); }
+.slate-editor-host .changes-preview .live-block.slate-diff-removed{
+  border-left-color: var(--diff-removed);
+  background: var(--diff-removed-soft);
+  color: var(--text-muted);
+}
+.slate-editor-host .changes-preview .live-block.slate-diff-removed :is(p, h1, h2, h3, h4, h5, h6, .live-line-content, td, th, pre, a){
+  text-decoration: line-through;
+  text-decoration-color: var(--diff-removed);
+}
+.slate-editor-host .changes-preview .live-block.slate-diff-removed img,
+.slate-editor-host .changes-preview .live-block.slate-diff-removed .slate-diagram,
+.slate-editor-host .changes-preview .live-block.slate-diff-removed .live-media-frame{ opacity: .5; }
+.slate-editor-host .changes-preview .live-block.slate-diff-changed{ border-left-color: #d4a72c; }
+.slate-editor-host .changes-preview ins.slate-diff-ins{
+  text-decoration: none;
+  background: var(--diff-added-text);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px var(--diff-added-text);
+}
+.slate-editor-host .changes-preview del.slate-diff-del{
+  color: var(--text-muted);
+  background: var(--diff-removed-text);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px var(--diff-removed-text);
+  text-decoration: line-through;
+  text-decoration-color: var(--diff-removed);
+}
+.slate-editor-host .changes-preview del.slate-diff-del + ins.slate-diff-ins{ margin-left: 2px; }
+
+/* Fill mode: a form template drawn with real inputs for its fields, in place of the document. */
+.slate-editor-host .editor-app[data-filling="true"] .editor-grid > .preview-pane,
+.slate-editor-host .editor-app[data-filling="true"] .editor-grid > .editor-pane,
+.slate-editor-host .editor-app[data-filling="true"] .editor-grid > .changes-pane,
+.slate-editor-host .editor-app[data-filling="true"] .format-controls,
+.slate-editor-host .editor-app[data-filling="true"]:not([data-fill-in-preview="true"]) .view-switcher,
+.slate-editor-host .editor-app[data-filling="true"] .changes-toggle{ display: none !important; }
+.slate-editor-host .fill-pane{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.slate-editor-host .fill-pane[hidden]{ display: none; }
+.slate-editor-host .fill-pane > .fill-form{ display: block; flex: 1 1 auto; min-height: 0; height: auto; }
+.slate-editor-host .fill-status[data-kind="error"]{ color: var(--danger); font-weight: 600; }
+.slate-editor-host .fill-status[data-kind="done"]{ color: var(--complete); font-weight: 600; }
+.slate-editor-host .form-field{ display: inline-flex; flex-direction: column; vertical-align: top; gap: 3px; max-width: 100%; }
+.slate-editor-host .form-field-textarea,
+.slate-editor-host .form-field-choice{ display: flex; margin: 6px 0; }
+.slate-editor-host .form-control{
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 4px 8px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.slate-editor-host textarea.form-control{ width: 100%; resize: vertical; line-height: 1.5; }
+.slate-editor-host .form-control:focus,
+.slate-editor-host .form-option input:focus-visible{ outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.slate-editor-host .form-options{ display: inline-flex; flex-wrap: wrap; gap: 4px 16px; }
+.slate-editor-host .form-field-choice .form-options{ flex-direction: column; }
+.slate-editor-host .form-option{ display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+.slate-editor-host .form-option input{ accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.slate-editor-host .form-sign{ padding: 6px 10px; border: 1px dashed var(--border-strong); border-radius: 6px; }
+.slate-editor-host .form-field.has-error .form-control,
+.slate-editor-host .form-field.has-error .form-sign{ border-color: var(--danger); }
+.slate-editor-host .form-error{ color: var(--danger); font: 12px/1.35 var(--font-ui); }
+.slate-editor-host .form-error[hidden]{ display: none; }
+.slate-editor-host .form-read-only .form-control,
+.slate-editor-host .form-read-only .form-option,
+.slate-editor-host .form-read-only .form-sign{ opacity: .6; cursor: default; }
+.slate-editor-host .form-hint{
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+}
+.slate-editor-host .form-hint-block{
+  display: block;
+  font-style: normal;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 6px 6px 0;
+}
+@media print{
+  .slate-editor-host .changes-bar{ display: none; }
+}
 
 /* Diagrams (```mermaid), drawn by mermaid/mermaid.js once a document has one. */
 .slate-editor-host .slate-diagram{

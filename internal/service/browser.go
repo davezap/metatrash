@@ -169,16 +169,19 @@ type browserPage struct {
 	// Legal is set when a docs space is configured: the footer then links to
 	// About, Privacy and Terms under /docs/.
 	// NoIndex asks search engines to skip the page (see indexable).
-	NoIndex           bool
-	Legal             bool
-	SpaceName         string
-	SpaceRef          string // owner/slug
-	BasePath, MCPURL  string
-	AccountMCPURL     string // sign-in endpoint; empty when OAuth is off
-	AccountsEnabled   bool
-	Home              bool
-	About             bool
-	Markdown          bool
+	NoIndex          bool
+	Legal            bool
+	SpaceName        string
+	SpaceRef         string // owner/slug
+	BasePath, MCPURL string
+	AccountMCPURL    string // sign-in endpoint; empty when OAuth is off
+	AccountsEnabled  bool
+	Home             bool
+	About            bool
+	Markdown         bool
+	// RawImages: path?raw serves a space's image files (owned spaces), so
+	// document.js shows a document's relative pictures.
+	RawImages         bool
 	State, Path, Text string
 	Tree              []*browserNode
 	Recent            []recentFile

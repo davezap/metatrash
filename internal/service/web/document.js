@@ -11,6 +11,21 @@
 
   // Slate supports one editor per page: mount it once, then swap its text.
   let editor = null;
+
+  // Pictures: a relative image is a file of the space, which path?raw serves
+  // (owned spaces and the docs; see data-raw-images), as Slate Viewer shows it.
+  function imageUrl(url) {
+    if (main.dataset.rawImages !== "true" || /^[a-z][a-z0-9+.-]*:|^\/\/|^#/i.test(url)) return null;
+    try {
+      const resolved = new URL(url, window.location.href);
+      if (resolved.origin !== window.location.origin) return null;
+      resolved.search = "raw";
+      resolved.hash = "";
+      return resolved.href;
+    } catch (error) {
+      return null;
+    }
+  }
   function source() {
     return document.getElementById("document-source");
   }
@@ -37,6 +52,7 @@
           outlineOpen: false,
           theme: "dark",
           showReadyToast: false,
+          resolveUrl: (url, { kind }) => (kind === "image" ? imageUrl(url) : null),
         }).then((api) => {
           const pane = host.querySelector("#previewPane");
           pane.setAttribute("aria-label", "Document contents");
@@ -47,11 +63,22 @@
       } else {
         await (await editor).setMarkdown(pre.textContent);
       }
+      await showForm(await editor);
       host.hidden = false;
       pre.hidden = true;
     } catch (error) {
       editor = null;
       showSource();
+    }
+  }
+  // A form template shows its fields as greyed-out boxes: forms are filled in
+  // and sent from Slate Viewer, not from this page.
+  async function showForm(api) {
+    const form = api.getForm();
+    if (form && !form.error) {
+      await api.startFill({ inPreview: true, readOnly: true, status: "Fill in and send this form from Slate Viewer." });
+    } else if (api.isFilling()) {
+      api.endFill();
     }
   }
   // The rendered document scrolls inside Slate's preview pane, which stays
@@ -115,6 +142,65 @@
     for (const link of tree.querySelectorAll("a[href]")) if (link.href === path) return true;
     return false;
   }
+  // [[Wiki links]] open the file of that name in this space, the nearest one
+  // to this document when several share it, as in Slate Viewer. Slate itself
+  // only stops the click, so this listens before it (capture).
+  function spaceSafeName(name) {
+    const slug = name
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^[-.]+|-+$/g, "");
+    return slug || "note";
+  }
+  function wikiTarget(name) {
+    if (!tree) return null;
+    const bare = (path) => path.toLowerCase().replace(/\.(md|markdown|mdown|mkd)$/, "");
+    const wanted = bare(name.split("#")[0].trim().replace(/\\/g, "/"));
+    if (!wanted) return null;
+    const slug = spaceSafeName(wanted.split("/").pop());
+    const here = new URL(window.location.href).pathname;
+    const hereDir = here.slice(0, here.lastIndexOf("/") + 1);
+    let best = null;
+    let bestDistance = Infinity;
+    for (const link of tree.querySelectorAll("a[href]")) {
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin) continue;
+      let path;
+      try {
+        path = decodeURIComponent(url.pathname);
+      } catch (error) {
+        continue;
+      }
+      const file = bare(path);
+      const base = file.slice(file.lastIndexOf("/") + 1);
+      if (!file.endsWith("/" + wanted) && (wanted.includes("/") || base !== slug)) continue;
+      const dir = url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1);
+      const distance = dir === hereDir ? 0 : dir.startsWith(hereDir) ? dir.length - hereDir.length : 1000 + dir.length;
+      if (distance < bestDistance) {
+        best = url.href;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+  host.addEventListener(
+    "click",
+    (event) => {
+      const wiki = event.target.closest(".wiki-link");
+      if (!wiki || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = wikiTarget(wiki.dataset.noteName || wiki.textContent || "");
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (openInPage) openInPage(target, true);
+      else window.location.assign(target);
+    },
+    true,
+  );
+
   host.addEventListener("click", (event) => {
     const link = event.target.closest("a[href]");
     if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

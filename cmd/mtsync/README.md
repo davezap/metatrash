@@ -138,6 +138,13 @@ holds that folder's contents, the rest of the space is left alone, and new
 files are created inside it. Different folders of one space can go to
 different places on your computer.
 
+**One account per computer.** This computer signs in as one account per
+site, and every registered folder syncs as that account. `mtsync whoami` says
+which. To switch, run `mtsync login` again with the browser signed in to the
+other account (the connect page names the account it uses, with a Sign out link to change it). Folders
+of spaces the new account can't reach stop with `not_found` in the log and keep
+their files; they carry on when you switch back.
+
 The running service picks up `add` and `remove` within a few seconds; there is
 nothing to restart. `add` checks that this computer can reach the space and
 refuses a folder inside, or containing, one already registered. It creates the
@@ -204,6 +211,7 @@ All commands:
 | --- | --- |
 | `login`, `logout` | connect this computer to your account, or forget it |
 | `spaces` | the spaces this computer may use, with access |
+| `whoami` | the account this computer signs in as (`-json` for editors; needs metatrash 0.49.1) |
 | `add SPACE[/PATH] FOLDER` | register a folder for a space, or for one folder of it |
 | `remove FOLDER` or `remove SPACE` | unregister a folder |
 | `list` | registered folders and their state |

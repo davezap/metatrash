@@ -67,3 +67,30 @@ func TestSubmitAndReceipts(t *testing.T) {
 		t.Fatalf("answers: %s %v", b, err)
 	}
 }
+
+// whoami names the account from the space listing, and says so when signed out.
+func TestWhoami(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/account/spaces" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"account":"bartco","spaces":[]}`)
+	}))
+	defer server.Close()
+	ok := func(context.Context, bool) (string, error) { return "t", nil }
+	out := &strings.Builder{}
+	if err := whoami(context.Background(), server.URL, ok, false, out); err != nil || !strings.Contains(out.String(), "as bartco.") {
+		t.Fatalf("whoami: %q %v", out, err)
+	}
+	out.Reset()
+	if err := whoami(context.Background(), server.URL, ok, true, out); err != nil || !strings.Contains(out.String(), `"account": "bartco"`) || !strings.Contains(out.String(), `"signedIn": true`) {
+		t.Fatalf("whoami -json: %q %v", out, err)
+	}
+	out.Reset()
+	gone := func(context.Context, bool) (string, error) { return "", errSignedOut }
+	if err := whoami(context.Background(), server.URL, gone, true, out); err != nil || !strings.Contains(out.String(), `"signedIn": false`) {
+		t.Fatalf("signed out: %q %v", out, err)
+	}
+}

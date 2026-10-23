@@ -60,6 +60,11 @@ func TestFormSubmissionsAgainstDatabase(t *testing.T) {
 	}
 	good := map[string]any{"name": "Pat", "type": "Sick", "sig": "true"}
 
+	// The REST listing names the account a connection signs in as.
+	if res := w.rest(person, "GET", "/api/v1/account/spaces", ""); res.Code != 200 || !strings.Contains(res.Body.String(), `"account":"`+w.owner.Username+`"`) {
+		t.Fatalf("account: %d %s", res.Code, res.Body)
+	}
+
 	// Agents cannot send forms; wrong answers name each field.
 	send(agent, "hr/leave.md", good, "", 403)
 	refused := send(person, "hr/leave.md", map[string]any{"type": "Holiday"}, "", 400)["error"].(map[string]any)

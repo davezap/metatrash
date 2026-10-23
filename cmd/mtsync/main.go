@@ -32,6 +32,7 @@ Set up:
   login                    connect this computer; choose spaces in the browser
   spaces                   list the spaces this computer may use
   logout                   forget this computer's sign-in
+  whoami                   the account this computer signs in as (-json)
 
 Folders (the service syncs every registered folder):
   add SPACE[/PATH] FOLDER  register FOLDER to sync with SPACE (owner/slug, or public),
@@ -92,7 +93,7 @@ func run(args []string) error {
 	interval := flags.Duration("interval", 5*time.Second, "time between scans of each folder")
 	limit := flags.Int("limit", 10, "history: how many changes to list (1..100)")
 	offset := flags.Int("offset", 0, "history: skip this many of the newest changes")
-	asJSON := flags.Bool("json", false, "history, policies, readers, submit and submissions: answer in JSON")
+	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions and whoami: answer in JSON")
 	keyEnv := flags.String("key-env", "", "one-off sync and export: name of an environment variable holding a space key, for spaces configured with keys instead of sign-in")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), usage, metatrash.Version)
@@ -128,6 +129,8 @@ func run(args []string) error {
 		return nil
 	case cmd == "spaces" && len(rest) == 1:
 		return listSpaces(ctx, base)
+	case cmd == "whoami" && len(rest) == 1:
+		return whoami(ctx, base, tokenSource(base), *asJSON, os.Stdout)
 	case cmd == "add" && len(rest) == 3:
 		return addFolder(ctx, base, rest[1], rest[2], os.Stdout)
 	case cmd == "remove" && len(rest) == 2:
@@ -250,6 +253,36 @@ func spaceToken(server, keyEnv string) (func(context.Context, bool) (string, err
 		return nil, false, fmt.Errorf("environment variable %s is empty", keyEnv)
 	}
 	return func(context.Context, bool) (string, error) { return key, nil }, false, nil
+}
+
+// whoami prints the account this computer signs in as on server (metatrash
+// 0.49.1 names it in the space listing; older servers do not).
+func whoami(ctx context.Context, server string, token func(context.Context, bool) (string, error), asJSON bool, out io.Writer) error {
+	c := newClient(server, "", token, true)
+	c.base = strings.TrimSuffix(c.base, "/")
+	var answer struct {
+		Account string `json:"account"`
+	}
+	err := c.do(ctx, "GET", "", nil, nil, &answer)
+	signedIn := err == nil
+	if errors.Is(err, errSignedOut) {
+		err = nil
+	}
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(out, map[string]any{"server": server, "signedIn": signedIn, "account": answer.Account})
+	}
+	switch {
+	case !signedIn:
+		fmt.Fprintf(out, "Not signed in to %s. Run mtsync login.\n", server)
+	case answer.Account == "":
+		fmt.Fprintf(out, "Signed in to %s (this server does not say as whom; it needs metatrash 0.49.1).\n", server)
+	default:
+		fmt.Fprintf(out, "Signed in to %s as %s.\n", server, answer.Account)
+	}
+	return nil
 }
 
 func listSpaces(ctx context.Context, server string) error {

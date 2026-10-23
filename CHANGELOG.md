@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.49.3 - Forms on the website (2026-10-23)
+
+No schema, grant or configuration change. Deploy the binary only.
+
+- **Slate 0.19.0 on the website**, as in Slate Viewer 0.16.0: Preview hides front matter (the `---` block at the top), and a form template shows its fields as greyed-out boxes, with a note to fill it in and send it from Slate Viewer, instead of its `{{…}}` tokens.
+
+## 0.49.2 - Documents render as in Slate Viewer (2026-10-23)
+
+No schema, grant or configuration change. Deploy the binary only.
+
+- **Slate 0.18.0 on the website** (was 0.14.1), the same Slate as Slate Viewer 0.15: HTML comments stay hidden, form fields show as blanks, the newer Markdown rendering, and the Mermaid entry for charts and diagrams (`web/mermaid/mermaid.js`; the chunks are unchanged).
+- **Pictures from the space**: in owned spaces and `/docs/`, a document's relative images (`![](../pics/a.png)`) now show. `path?raw` sends an image file itself (png, jpg, gif, webp, avif, bmp, ico, svg) to anyone who may read the space, with `nosniff` and a sandboxing CSP; any other file or query is 404.
+- **Images on the web**: owned-space and `/docs/` pages now show `https:` images, as the public explorer already did (`no-referrer` stays).
+- **Wiki links** (`[[name]]`) open the matching file from the folder tree, the one nearest the current document, instead of doing nothing.
+- Tests: `?raw` for an SVG (type, sandbox, nosniff), refused queries and non-images, and the page attribute that turns it on.
+
+## 0.49.1 - Who is signed in (2026-10-23)
+
+No schema, grant or configuration change.
+
+- **REST**: `GET /api/v1/account/spaces` also returns `account`, the username the connection signs in as.
+- **mtsync 0.49.1**: `whoami` prints the account this computer signs in as (`-json`: `server`, `signedIn`, `account`). Slate Viewer 0.15.1 shows it in Open Space, with Switch Account.
+- The 0.48.0 and 0.49.0 notes below said `doctor`; the command is `mt check`.
+- Tests: the listing names the account (against MariaDB); mtsync whoami signed in, as JSON and signed out.
+
 ## 0.49.0 - Forms (2026-10-23)
 
 **Database schema v13** (`deploy/account-schema-v13.sql`, then `deploy/account-grants.sql`): apply both before the new binary starts; it refuses to start on v12. No configuration change. No new Go modules. Tool schema unchanged. mtsync minimum stays 0.45.0; mtsync 0.49.0 adds `submit`, `submissions` and `submission`, which Slate Viewer 0.15.0 uses. **CI**: `.github/workflows/ci.yml` must apply schema v1–v13 and set `schema_version = 13`.
@@ -8,7 +33,7 @@
 - **Submissions**: `POST .../submissions {"path", "answers", "revision"?, "blob"?, "today"?}` on the OAuth REST resource. Only a person (Metatrash Sync) can send a form, with read access to the template. The server re-reads the template, checks every answer (`invalid_answers` with a problem per field) and files the filled-in copy as a new file in the `submitTo` folder, written for the person (author trailers name them), who needs no access to that space. `submitTo` must be a space with the same owner as the template's space, outside GitHub folders. The copy is `<space slug>-<username>-<form>-<YYYY-MM-DDTHHMMZ>.md` with the answers in front matter and the comments left out. A template that changed since the person started (`revision` or `blob`) is `template_changed` (409). 60 per person per hour.
 - **Receipts**: the new `metatrash_form_submissions` table keeps one row per submission with the copy, so `GET .../submissions` (the caller's, newest first) and `GET .../submissions?id=ID` (with the text) show people what they sent.
 - **mtsync 0.49.0**: `submit FILE ANSWERS` (JSON file or `-` for stdin; sends the synced copy's blob hash; `-json` prints the receipt, or the refusal with its fields), `submissions PLACE`, `submission PLACE ID`.
-- `doctor` and startup check schema v13 and the two new grants.
+- `mt check` and startup check schema v13 and the two new grants.
 - Tests: template parsing and every mistake it reports, answer checks per type, the filed copy (escaping, choices, block quotes, comments gone, signature), and submissions end to end against MariaDB (agent refused, per-field refusals, read-only member sends, copy and folder files in the review space, author trailers, receipts per person, changed template, same-owner rule); mtsync submit and receipts. docs/forms.md (new), api-contract (Form submissions), deployment (schema v13), roadmap (forms and quizzes), cmd/mtsync/README.md.
 
 ## 0.48.0 - Published versions and read acknowledgements (2026-10-22)
@@ -21,7 +46,7 @@
 - **Services registry**: service types are now entries in `serviceKinds` (`folder_config.go`) with their own checks, root and nesting rules, so the next service is one entry plus its code. GitHub's rules are unchanged.
 - **Acknowledgements** are kept in the new `metatrash_acknowledgements` table, one row per person, file and published text, never in the space. REST on the OAuth resource: `GET .../acknowledgements` (the caller's published folders and files, `outstanding` per file and in total), `GET .../acknowledgements?report=true` (who has read what; needs read-write access) and `POST .../acknowledgements {"path", "version"}` (confirm reading; only Metatrash Sync, so only a person; `conflict` 409 when the folder has published a newer version). A new version asks again only for files whose text changed.
 - **mtsync 0.48.0**: `policies PLACE` (published folders, files and what you still have to read; `-json` adds local file paths for `show`), `ack FILE VERSION`, `readers PLACE`.
-- `doctor` and startup check schema v12 and the two new grants. The website's file browser labels a published folder `Published vN`.
+- `mt check` and startup check schema v12 and the two new grants. The website's file browser labels a published folder `Published vN`.
 - Tests: settings rules (versions only go up, not inherited, agent lock), publish points and history marks across drafts and versions, tracked-file rules, and acknowledgements end to end against MariaDB (agent refused, old version refused, report needs read-write, a new version re-asks only changed files); mtsync policies and ack. docs/api-contract.md (Folder settings, Acknowledgements), deployment (schema v12), roadmap, cmd/mtsync/README.md.
 
 ## 0.47.0 - History says who made each change (2026-10-21)
