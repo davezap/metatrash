@@ -201,6 +201,17 @@ the form, so a form that changed since (or isn't synced yet) is refused.
 `mtsync submission PLACE ID` prints the copy that was filed. `-json` for
 editors (with `-json`, a refusal is printed as `{"error": {...}}` too).
 
+Since metatrash 0.50.0 every copy has a review: waiting, approved or
+declined, with the reviewer's note, and `submissions` shows it. A quiz is
+marked when it is sent (Passed, Not passed, with the score, or Waiting for a
+reviewer when it has free-text answers). In a published folder the form that
+counts is its published version: `-published N` answers version N (Slate
+Viewer uses it), instead of your synced copy. A reviewer (with write access to
+the space a copy is filed in) reviews it with `mtsync review FILE REVIEW`,
+where REVIEW is a JSON file or `-`: `{"status": "approved", "note": "Enjoy"}`
+or `"declined"` for a form, `{"marks": {"why": true}, "note": "..."}` for a
+quiz (a tick or cross for every free-text answer; the score decides).
+
 `mtsync list` shows, per folder, "in sync, checked <time>", the last error
 (for example signed out, or the space no longer connected; the service tries
 such a folder again every minute), or "service not running".
@@ -226,9 +237,10 @@ All commands:
 | `policies PLACE` | published folders and files, and what you still have to read (`-json`) |
 | `ack FILE VERSION` | confirm you read FILE as published in VERSION |
 | `readers PLACE` | who has read what (read-write access; `-json`) |
-| `submit FILE ANSWERS` | send answers (JSON file, or `-` for stdin) to a form (`-json`) |
-| `submissions PLACE` | the forms you sent from that space (`-json`) |
+| `submit FILE ANSWERS` | send answers (JSON file, or `-` for stdin) to a form (`-json`, `-published N`) |
+| `submissions PLACE` | the forms you sent from that space, and their reviews (`-json`) |
 | `submission PLACE ID` | print the copy of one that was filed (`-json`) |
+| `review FILE REVIEW` | approve, decline or mark a copy filed in your space (`-json`; metatrash 0.50.0) |
 | `version` | the version |
 | `SPACE[/PATH] FOLDER` | sync one folder in this window without registering it; `-once` for one pass |
 
@@ -241,7 +253,8 @@ Flags go before the command:
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |
 | `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
-| `-json` | off | `history`, `policies`, `readers`: answer in JSON |
+| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`: answer in JSON |
+| `-published` | `0` | `submit`: answer this published version of the form's folder, as Slate Viewer shows it |
 | `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
 
 One local folder syncs one space (or one folder of it); a local folder already

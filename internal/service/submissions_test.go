@@ -139,4 +139,17 @@ func TestFormSubmissionsAgainstDatabase(t *testing.T) {
 	if target := send(person, "hr/leave.md", good, "", 201)["target"].(string); target != w.member.Username+"/"+review.Slug+"/"+slug+"-"+w.owner.Username+"-leave-2026-10-23T0914Z.md" {
 		t.Fatalf("root target: %s", target)
 	}
+
+	// In a folder that asks people to read it, sending the form confirms it.
+	put("hr/.metatrash.json", `{"services":[{"type":"acknowledge"}],"publishedVersion":1}`)
+	before := call(person, "GET", "acknowledgements", "", 200)["outstanding"].(float64)
+	if before < 1 {
+		t.Fatalf("before sending: %v", before)
+	}
+	if sent := send(person, "hr/leave.md", good, "", 201); sent["acknowledged"] != float64(1) {
+		t.Fatalf("acknowledged: %v", sent["acknowledged"])
+	}
+	if got := call(person, "GET", "acknowledgements", "", 200); got["outstanding"].(float64) != before-1 {
+		t.Fatalf("after sending: %v", got)
+	}
 }

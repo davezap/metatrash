@@ -95,6 +95,15 @@ type formTemplate struct {
 	Form, Title, SubmitTo string
 	Fields                []formField
 	body                  []string
+	// A quiz (0.50.0) covers one file of its folder, which counts as read
+	// once the person scores PassMark percent; after a fail they may send it
+	// again after RetryAfter. See quiz.go.
+	Quiz       bool
+	Covers     string
+	PassMark   int
+	RetryAfter time.Duration
+	// Unmarked names fields that are not questions, such as a name.
+	Unmarked map[string]bool
 }
 
 // FieldError is one field's problem in a refused submission.
@@ -272,6 +281,9 @@ func parseFormTemplate(text string) (formTemplate, error) {
 	if t.SubmitTo == "" {
 		return t, formError("submitTo is missing: name the space and folder that receive the answers, such as owner/hr-review/leave/.")
 	}
+	if err := t.readQuizKeys(keys); err != nil {
+		return t, err
+	}
 	names := map[string]bool{}
 	optionsUsed := map[int]bool{}
 	var problemText string
@@ -368,6 +380,11 @@ func parseFormTemplate(text string) (formTemplate, error) {
 	}
 	if len(t.Fields) == 0 {
 		return t, formError("it has no fields; add one such as {{text name=full_name required}}.")
+	}
+	for name := range t.Unmarked {
+		if !names[name] {
+			return t, formError("unmarked names " + name + ", which is not a field of this quiz.")
+		}
 	}
 	return t, nil
 }
@@ -684,10 +701,22 @@ func checkAnswer(f formField, s, today string) string {
 	return ""
 }
 
-// submission describes who sent a form, for the filed copy.
+// submission describes who sent a form, and its review, for the filed copy.
 type submission struct {
-	Template, Revision, By string
-	At                     time.Time
+	// Template is owner/slug/path; Revision the state it was checked
+	// against and Blob the template text's blob; ID the receipt's.
+	Template, Revision, Blob, ID, By string
+	At                               time.Time
+	// Status is submitted, approved or declined.
+	Status string
+	// Marks holds a quiz's marks by field: true, false, or nil while a
+	// reviewer still has to tick it. Score is set once every mark is in.
+	Marks map[string]*bool
+	Score *int
+	// Set by a review.
+	ReviewedBy string
+	ReviewedAt time.Time
+	Note       string
 }
 
 // render is the filed copy: front matter with the answers, then the
@@ -703,9 +732,42 @@ func (t formTemplate) render(answers formAnswers, sub submission) string {
 	line("title", t.Title)
 	line("template", sub.Template)
 	out.WriteString("templateRevision: " + sub.Revision + "\n")
+	if sub.Blob != "" {
+		out.WriteString("templateBlob: " + sub.Blob + "\n")
+	}
+	if sub.ID != "" {
+		out.WriteString("submission: " + sub.ID + "\n")
+	}
 	line("submittedBy", sub.By)
 	out.WriteString("submittedAt: " + sub.At.UTC().Format(time.RFC3339) + "\n")
-	out.WriteString("status: submitted\n")
+	status := sub.Status
+	if status == "" {
+		status = "submitted"
+	}
+	out.WriteString("status: " + status + "\n")
+	if t.Quiz {
+		out.WriteString("quiz: true\n")
+		out.WriteString("passMark: " + strconv.Itoa(t.PassMark) + "\n")
+		if sub.Score != nil {
+			out.WriteString("score: " + strconv.Itoa(*sub.Score) + "\n")
+		}
+		if sub.Marks != nil {
+			out.WriteString("marks:\n")
+			for _, f := range t.Fields {
+				if m, ok := sub.Marks[f.Name]; ok {
+					b, _ := json.Marshal(m)
+					out.WriteString("  " + f.Name + ": " + string(b) + "\n")
+				}
+			}
+		}
+	}
+	if sub.ReviewedBy != "" {
+		line("reviewedBy", sub.ReviewedBy)
+		out.WriteString("reviewedAt: " + sub.ReviewedAt.UTC().Format(time.RFC3339) + "\n")
+		if sub.Note != "" {
+			line("note", sub.Note)
+		}
+	}
 	out.WriteString("answers:\n")
 	for _, f := range t.Fields {
 		value, ok := answers[f.Name]
@@ -791,6 +853,17 @@ func (t formTemplate) render(answers formAnswers, sub submission) string {
 					b.WriteString("_(blank)_")
 				} else {
 					b.WriteString("**" + escapeInline(value) + "**")
+				}
+			}
+			// A marked quiz answer is followed by a tick or a cross.
+			if mark := sub.Marks[field.Name]; mark != nil {
+				if s := b.String(); s != "" && !strings.HasSuffix(s, " ") {
+					b.WriteString(" ")
+				}
+				if *mark {
+					b.WriteString("✓")
+				} else {
+					b.WriteString("✗")
 				}
 			}
 		}

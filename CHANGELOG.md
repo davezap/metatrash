@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.50.0 - Reviews and quizzes (2026-10-23)
+
+**Database schema v14** (`deploy/account-schema-v14.sql`, then `deploy/account-grants.sql`): apply both before the new binary starts; it refuses to start on v13. No configuration change. No new Go modules. Tool schema unchanged. mtsync 0.50.0 adds `review` and `submit -published N`, and `policies -json` passes on `covers` and `quiz`; Slate Viewer 0.17.0 uses them. **CI**: `.github/workflows/ci.yml` must apply schema v1–v14 and set `schema_version = 14`.
+
+- **Every filed copy is reviewed**: copies and receipts have a `status`, `submitted` (waiting), `approved` or `declined`. A reviewer (read-write access to the review space) reviews a copy with `POST .../reviews` on that space, `mtsync review` or Slate Viewer: Approve or Decline with a note for a form. The receipt and the copy are updated (the copy is filled in again with `reviewedBy`, `reviewedAt` and `note`); My Submissions shows the status and note. New copies also carry `templateBlob` and `submission` (the receipt id).
+- **Quizzes**: a form with `quiz: true`, `covers` (the policy file it tests), `passMark` (default 100), `retryAfter` (default `1h`) and `unmarked` (fields that are not questions), in a folder whose `acknowledge` service asks people to read it. The answer key is a reviewer's filled-in copy named `<space slug>-<form>-answers.md` in the quiz's `submitTo` folder, valid for the quiz text it was made from. The server marks choices, drop-downs, yes/no, numbers, dates and times on send; free text waits for a reviewer's tick. The copy shows ✓ and ✗, `marks` and `score`; at or over the pass mark it is approved. Without a key only reviewers can send the quiz (`no_answer_key`); a passed quiz, one waiting for review, or a fail within `retryAfter` can't be sent again (`quiz_passed`, `quiz_waiting`, `retry_later`).
+- **Passing a quiz confirms the policy**: the quiz is not a file to read (no dot), and the file it covers counts as read while the person has passed the quiz as published now. A new version of the policy alone does not ask again; a changed quiz does. I Have Read This is refused for a covered file (`quiz_required`). Acknowledgements and the readers report show each person's quiz state.
+- **Published forms are what's sent**: in a folder with a published version, the server checks answers against the published text (people see it in Slate Viewer), and the copy's `templateRevision` is the commit that published it. `"version": N` in the request names the version answered; an older Slate Viewer, which sent the draft, is refused with `template_changed` when the draft differs.
+- Tests: quiz keys, marking, ticks in the copy and reading copies back; against MariaDB, a quiz from no key, through the reviewer's key, a fail with a reviewer's tick and note, the retry wait, a pass that clears the policy, a policy-only republish (still read) and a changed quiz (asks again, needs a new key), and a form approved with a note; mtsync review and `-published`.
+
+## 0.49.4 - Sending a form counts as reading it (2026-10-23)
+
+No schema, grant or configuration change. Deploy the binary only.
+
+- **Forms in read-tracked folders**: when an `acknowledge` service asks people to read a form template, sending it also confirms the sender has read the folder's published version. The answer to sending has `acknowledged` with that version; Slate Viewer 0.16.1 updates the dot and the read bar.
+- **Website**: documents no longer start with a large empty space. The site's stylesheet still laid out Slate's editor as two rows; Slate 0.17 and later have three (toolbar, document, status bar), so the empty toolbar row took the spare height. Slate 0.19.1 also drops the space above a first heading after hidden front matter.
+- Tests: sending a form in an acknowledge folder confirms it and clears it from the caller's outstanding files.
+
 ## 0.49.3 - Forms on the website (2026-10-23)
 
 No schema, grant or configuration change. Deploy the binary only.

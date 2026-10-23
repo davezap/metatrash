@@ -159,6 +159,20 @@ type policyFile struct {
 	Tracked      bool       `json:"tracked"`
 	Outstanding  bool       `json:"outstanding"`
 	Acknowledged *policyAck `json:"acknowledged,omitempty"`
+	// A quiz (0.50.0) is never a file to read: Covers names the file it
+	// tests. That file names its Quiz instead, and counts as read once the
+	// person passes the quiz as published now (quiz.go).
+	Covers string      `json:"covers,omitempty"`
+	Quiz   *policyQuiz `json:"quiz,omitempty"`
+}
+
+// policyQuiz is the quiz that covers a file, and the person's state in it.
+type policyQuiz struct {
+	Path          string `json:"path"`
+	PublishedPath string `json:"publishedPath"`
+	quizState
+	id, blob   string
+	retryAfter time.Duration
 }
 
 type policyFolder struct {
@@ -243,9 +257,38 @@ func (r *repository) publishedFolders(ctx context.Context, state string, files m
 			}
 			pf.Files = append(pf.Files, policyFile{ID: f.ID, Path: now, PublishedPath: p, Blob: f.Blob, Draft: files[now].Blob != f.Blob, Tracked: ack && svc.tracked(folder, now)})
 		}
+		if ack {
+			r.linkQuizzes(ctx, pf.Files)
+		}
 		folders = append(folders, pf)
 	}
 	return folders, nil
+}
+
+// linkQuizzes finds the quizzes among a folder's published files: they are
+// not files to read, and each names the tracked file it covers.
+func (r *repository) linkQuizzes(ctx context.Context, files []policyFile) {
+	byPublished := map[string]int{}
+	for i, f := range files {
+		byPublished[f.PublishedPath] = i
+	}
+	for i := range files {
+		f := &files[i]
+		if !strings.HasSuffix(strings.ToLower(f.PublishedPath), ".md") {
+			continue
+		}
+		meta := r.quizMeta(ctx, f.Blob, f.PublishedPath)
+		if !meta.quiz {
+			continue
+		}
+		f.Tracked = false
+		j, ok := byPublished[meta.covers]
+		if !ok || !files[j].Tracked || files[j].Quiz != nil {
+			continue
+		}
+		f.Covers = files[j].Path
+		files[j].Quiz = &policyQuiz{Path: f.Path, PublishedPath: f.PublishedPath, quizState: quizState{Status: "new"}, id: f.ID, blob: f.Blob, retryAfter: meta.retryAfter}
+	}
 }
 
 // ackIndex holds acknowledgement rows by person and file, oldest first.
@@ -291,6 +334,7 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 	}
 	result := policiesResult{Space: space, State: state, Folders: folders}
 	var idx ackIndex
+	var quizzes []quizRow
 	for _, f := range folders {
 		if f.Acknowledge && idx == nil {
 			rows, err := s.ownedDB.acknowledgements(ctx, r.id, userID)
@@ -298,12 +342,23 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 				return policiesResult{}, err
 			}
 			idx = indexAcks(rows)
+			if quizzes, err = s.ownedDB.quizRows(ctx, r.id, userID); err != nil {
+				return policiesResult{}, err
+			}
 		}
 	}
 	for i := range result.Folders {
 		for j := range result.Folders[i].Files {
 			f := &result.Folders[i].Files[j]
 			if !f.Tracked {
+				continue
+			}
+			if q := f.Quiz; q != nil {
+				q.quizState = quizStateOf(quizzes, userID, q.id, q.blob, q.retryAfter)
+				f.Outstanding = q.Status != "passed"
+				if f.Outstanding {
+					result.Outstanding++
+				}
 				continue
 			}
 			f.Acknowledged = idx.status(userID, *f)
@@ -334,6 +389,8 @@ type reportStatus struct {
 	// Status is "read" (this text), "older" (an earlier text) or "unread".
 	Status       string     `json:"status"`
 	Acknowledged *policyAck `json:"acknowledged,omitempty"`
+	// Quiz is the person's state in the quiz that covers the file.
+	Quiz *quizState `json:"quiz,omitempty"`
 }
 
 type reportResult struct {
@@ -368,16 +425,36 @@ func (s *Service) policyReport(ctx context.Context, r *repository, space string)
 		return reportResult{}, err
 	}
 	var idx ackIndex
+	var quizzes []quizRow
 	if len(tracked) > 0 {
 		rows, err := s.ownedDB.acknowledgements(ctx, r.id, "")
 		if err != nil {
 			return reportResult{}, err
 		}
 		idx = indexAcks(rows)
+		if quizzes, err = s.ownedDB.quizRows(ctx, r.id, ""); err != nil {
+			return reportResult{}, err
+		}
 	}
 	for _, person := range readers {
 		row := reportPerson{Name: person.Name, Files: []reportStatus{}}
 		for _, f := range tracked {
+			if q := f.Quiz; q != nil {
+				// A covered file is read once its quiz is passed.
+				st := quizStateOf(quizzes, person.UserID, q.id, q.blob, q.retryAfter)
+				status := reportStatus{Status: "unread", Quiz: &st}
+				switch {
+				case st.Status == "passed":
+					status.Status = "read"
+				case st.Older:
+					status.Status = "older"
+				}
+				if status.Status != "read" {
+					row.Outstanding++
+				}
+				row.Files = append(row.Files, status)
+				continue
+			}
 			ack := idx.status(person.UserID, f)
 			st := reportStatus{Status: "unread", Acknowledged: ack}
 			if ack != nil && ack.Current {
@@ -415,6 +492,9 @@ func (s *Service) acknowledge(ctx context.Context, r *repository, space, userID,
 			}
 			if !f.Tracked {
 				return policyFile{}, invalid(path + " is not a file its folder asks people to read (an acknowledge service in " + folder.Folder + folderConfigName + ").")
+			}
+			if f.Quiz != nil {
+				return policyFile{}, problem(409, "quiz_required", path+" is confirmed by passing its quiz, "+f.Quiz.Path+".")
 			}
 			if version != folder.Version {
 				return policyFile{}, problem(409, "conflict", fmt.Sprintf("%s is now at version %d, not %d; read the new version, then confirm it.", folder.Folder, folder.Version, version))

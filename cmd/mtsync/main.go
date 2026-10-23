@@ -62,9 +62,13 @@ Published versions (PLACE is a registered folder or anything in it):
 
 Forms (a form template is a .md file whose front matter has form:):
   submit FILE ANSWERS      send answers to the form FILE; ANSWERS is a JSON file of
-                           field name to answer, or - to read it from stdin (-json)
-  submissions PLACE        the forms you sent from this space (-json)
+                           field name to answer, or - to read it from stdin (-json;
+                           -published N to answer version N of a published folder)
+  submissions PLACE        the forms you sent from this space, and their reviews (-json)
   submission PLACE ID      print the filed copy of one of them (-json)
+  review FILE REVIEW       review a copy filed in your space: REVIEW is a JSON file,
+                           or - for stdin: {"status": "approved"|"declined", "note": ...}
+                           for a form, {"marks": {"field": true|false}} for a quiz (-json)
 
 One-off:
   SPACE[/PATH] FOLDER      sync one folder in this window, without registering it
@@ -93,7 +97,8 @@ func run(args []string) error {
 	interval := flags.Duration("interval", 5*time.Second, "time between scans of each folder")
 	limit := flags.Int("limit", 10, "history: how many changes to list (1..100)")
 	offset := flags.Int("offset", 0, "history: skip this many of the newest changes")
-	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions and whoami: answer in JSON")
+	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions, review and whoami: answer in JSON")
+	published := flags.Int("published", 0, "submit: answer this published version of the form's folder, as Slate Viewer shows it")
 	keyEnv := flags.String("key-env", "", "one-off sync and export: name of an environment variable holding a space key, for spaces configured with keys instead of sign-in")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), usage, metatrash.Version)
@@ -176,7 +181,9 @@ func run(args []string) error {
 	case cmd == "readers" && len(rest) == 2:
 		return showReport(ctx, rest[1], *asJSON, os.Stdout)
 	case cmd == "submit" && len(rest) == 3:
-		return submitForm(ctx, rest[1], rest[2], *asJSON, os.Stdin, os.Stdout)
+		return submitForm(ctx, rest[1], rest[2], *published, *asJSON, os.Stdin, os.Stdout)
+	case cmd == "review" && len(rest) == 3:
+		return reviewCopy(ctx, rest[1], rest[2], *asJSON, os.Stdin, os.Stdout)
 	case cmd == "submissions" && len(rest) == 2:
 		return showSubmissions(ctx, rest[1], "", *asJSON, os.Stdout)
 	case cmd == "submission" && len(rest) == 3:

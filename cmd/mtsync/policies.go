@@ -37,6 +37,22 @@ type policyFile struct {
 	// the folder's revision.
 	File          string `json:"file,omitempty"`
 	PublishedFile string `json:"publishedFile,omitempty"`
+	// A quiz (0.50.0) names the file it Covers; that file names its Quiz.
+	Covers string      `json:"covers,omitempty"`
+	Quiz   *policyQuiz `json:"quiz,omitempty"`
+}
+
+// policyQuiz is the quiz that covers a file, and the person's state in it:
+// status is new, waiting (for a reviewer), failed or passed.
+type policyQuiz struct {
+	Path          string `json:"path"`
+	PublishedPath string `json:"publishedPath"`
+	Status        string `json:"status"`
+	Score         *int   `json:"score,omitempty"`
+	RetryAt       string `json:"retryAt,omitempty"`
+	Older         bool   `json:"older,omitempty"`
+	File          string `json:"file,omitempty"`
+	PublishedFile string `json:"publishedFile,omitempty"`
 }
 
 type policyFolder struct {
@@ -176,6 +192,10 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 			f := &answer.Folders[i].Files[j]
 			f.File = filepath.Join(e.Folder, filepath.FromSlash(f.Path))
 			f.PublishedFile = filepath.Join(e.Folder, filepath.FromSlash(f.PublishedPath))
+			if q := f.Quiz; q != nil {
+				q.File = filepath.Join(e.Folder, filepath.FromSlash(q.Path))
+				q.PublishedFile = filepath.Join(e.Folder, filepath.FromSlash(q.PublishedPath))
+			}
 		}
 	}
 	if asJSON {
@@ -198,6 +218,23 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 		for _, file := range f.Files {
 			state := ""
 			switch {
+			case file.Covers != "":
+				state = "quiz for " + file.Covers
+			case file.Outstanding && file.Quiz != nil:
+				state = "to read, then pass " + file.Quiz.Path
+				switch file.Quiz.Status {
+				case "waiting":
+					state += " (waiting for a reviewer)"
+				case "failed":
+					state += " (not passed"
+					if file.Quiz.Score != nil {
+						state += fmt.Sprintf(", %d%%", *file.Quiz.Score)
+					}
+					if file.Quiz.RetryAt != "" {
+						state += "; try again from " + localTime(file.Quiz.RetryAt)
+					}
+					state += ")"
+				}
 			case file.Outstanding:
 				state = "to read"
 			case file.Tracked:

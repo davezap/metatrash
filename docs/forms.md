@@ -104,6 +104,8 @@ form: leave-request
 title: "Leave request"
 template: "dave/team/hr/forms/leave-request.md"
 templateRevision: 3f2a9c1…
+templateBlob: 8d41e07…
+submission: 5be0c2a9…
 submittedBy: "pat"
 submittedAt: 2026-10-23T09:14:00Z
 status: submitted
@@ -141,6 +143,15 @@ Slate Viewer (0.16.0 and later): open the template in Preview, where it is
 ready to fill in, answer, Send. Work in progress is kept on that computer
 only. The website shows a template's fields greyed out; it can't send forms.
 
+In a folder with an `acknowledge` service, sending a form also confirms the
+person has read it (the folder's published version), so they don't need to
+choose I Have Read This as well (0.49.4).
+
+In a folder with a published version, the form that counts is the published
+one, which is what people see (0.50.0): Slate Viewer sends it from the
+published view and greys out Show Draft, and a form not in the published
+version yet is sent as it is now (a quiz can't be: publish it first).
+
 mtsync: `mtsync submit FILE ANSWERS`, with the answers as JSON
 (`{"full_name": "Pat", "type": "Annual", "signature": "true"}`).
 
@@ -155,3 +166,80 @@ contract, Form submissions). Only a person can send a form; agents can't.
    `submitTo: <you>/hr-review/<folder>/`.
 3. Everyone who can read the template can now send it; copies appear in the
    review space, and only its members can read them.
+
+## Reviews
+
+0.50.0. Every filed copy waits for a review: its `status` is `submitted`,
+then `approved` or `declined`. Reviewers are the people with write access
+to the review space. In Slate Viewer they open a copy there and choose
+Approve or Decline, with a note; with mtsync, `mtsync review FILE -` reading
+`{"status": "approved", "note": "Enjoy"}`. The copy's front matter gets
+`reviewedBy`, `reviewedAt` and `note`, and the sender sees the status and
+note in My Submissions. A copy can be reviewed again, which replaces the
+earlier review. Copies sent before 0.50.0 can't be reviewed.
+
+## Quizzes
+
+0.50.0. A quiz is a form in a folder whose `acknowledge` service asks people
+to read its files. Instead of I Have Read This, the file it covers counts as
+read once the person passes the quiz.
+
+```markdown
+---
+form: wfh-quiz
+title: Working from home quiz
+submitTo: dave/hr-review/quizzes/
+quiz: true
+covers: wfh-policy.md
+passMark: 80
+retryAfter: 1h
+unmarked: name
+---
+
+Name: {{text name=name required}}
+
+Where may you work? {{choice name=where required}}
+- ( ) At home
+- ( ) In a cafe
+
+Must your laptop be locked when you leave it? {{yesno name=locked required}}
+
+Why? {{textarea name=why required}}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `quiz` | `true` makes the form a quiz |
+| `covers` | the file it tests: next to the quiz or below it, tracked by the folder's `acknowledge` service |
+| `passMark` | the percentage to pass, 1 to 100 (default 100) |
+| `retryAfter` | how long to wait after a fail before trying again: `30m`, `1h`, `2d`, or `0` (default `1h`) |
+| `unmarked` | fields that are not questions, such as a name, comma-separated |
+
+**The answer key** is a filled-in copy of the quiz in the review space's
+`submitTo` folder, named `<space slug>-<form>-answers.md` (for a quiz in
+`dave/team`: `team-wfh-quiz-answers.md`). A reviewer makes it by sending the
+quiz with the right answers (reviewers may send it before there is a key;
+nobody else can) and choosing **Use This as Answers** on their copy in Slate
+Viewer, which copies it to that name. The key only counts for the quiz text
+it was filled in from (`templateBlob`): after changing the quiz, publish it
+and make a new key. Never put answers in the quiz itself: everyone in the
+space can read it.
+
+**Marking.** When a quiz is sent, the server marks every answer the key has
+an answer for: choices, drop-downs, yes/no, numbers, dates and times against
+the key. Free text (`text`, `textarea`, `email`, `phone`) waits for a
+reviewer, who ticks or crosses each answer and chooses Reviewed. Fields in
+`unmarked`, fields the key leaves blank, and signatures are not marked. The
+copy shows ✓ or ✗ after each marked answer, with `marks` and `score` in its
+front matter; the score is the share of marked answers that are right. At or
+over `passMark` the copy is approved, and the file the quiz covers counts as
+read; under it, declined. The person sees their ticks and crosses and the
+score in My Submissions, never the key.
+
+**Again.** After a fail the person can fix their answers and send them again,
+or start again, once `retryAfter` has passed. While a copy waits for a
+reviewer, and after a pass, the quiz can't be sent again. A new published
+version of the policy alone doesn't ask for the quiz again; a changed quiz
+does.
+
+Agents can't take quizzes, just as they can't send forms.

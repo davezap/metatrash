@@ -603,6 +603,9 @@
 
 .slate-editor-host .live-block.is-rendered{ cursor: text; }
 .slate-editor-host .live-block:first-child > :first-child{ margin-top: 0; }
+/* Front matter and comments at the top are hidden, so the first block shown starts flush too. */
+.slate-editor-host .live-block:is(.is-front-matter, .is-comment):first-child + .live-block > :first-child,
+.slate-editor-host .live-block.is-front-matter:first-child + .live-block.is-comment + .live-block > :first-child{ margin-top: 0; }
 .slate-editor-host .live-block > .live-paragraph{ margin: .28em 0; }
 .slate-editor-host .live-block > .live-heading{ margin-bottom: .4em; }
 .slate-editor-host .live-block > blockquote, .slate-editor-host .live-block > pre, .slate-editor-host .live-block > table{ margin-top: .55em; margin-bottom: .55em; }

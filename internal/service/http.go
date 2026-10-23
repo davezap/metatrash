@@ -277,6 +277,16 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "GET" || r.Method == "POST" {
 			op = resource
 		}
+	case "reviews":
+		// Reviews of filed form copies (0.50.0), kept in the account database.
+		if metadataPath == "" {
+			sendError(w, missing())
+			return
+		}
+		allow = "POST"
+		if r.Method == "POST" {
+			op = resource
+		}
 	case "pull", "push", "pending":
 		// GitHub folders exist only in owned spaces, so only the OAuth resource offers these.
 		if metadataPath == "" {
@@ -299,7 +309,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "edit" || op == "move" || op == "delete" || op == "pull" || op == "push"
+	write := op == "write" || op == "edit" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -316,6 +326,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	case "submissions":
 		h.serveSubmissions(w, r, repo, space)
+		return
+	case "reviews":
+		h.serveReviews(w, r, repo)
 		return
 	case "pull", "push":
 		h.serveGitHubPost(w, r, op, repo, space)

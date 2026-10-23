@@ -56,5 +56,8 @@ GRANT SELECT, INSERT ON metatrash.metatrash_acknowledgements TO 'metatrash_accou
 
 -- v13 form submissions
 GRANT SELECT, INSERT ON metatrash.metatrash_form_submissions TO 'metatrash_accounts'@'localhost';
+-- v14 reviews
+GRANT UPDATE (status, score, marks, reviewed_by, reviewed_at, note, text)
+    ON metatrash.metatrash_form_submissions TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

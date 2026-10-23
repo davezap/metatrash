@@ -10,6 +10,12 @@ import (
 // syncToken signs user in through Metatrash Sync with one space chosen.
 func (w *oauthWorld) syncToken(user userAccount, spaceID, permission string) string {
 	w.t.Helper()
+	return w.syncTokens(user, map[string]string{spaceID: permission})
+}
+
+// syncTokens signs user in through Metatrash Sync with these spaces chosen.
+func (w *oauthWorld) syncTokens(user userAccount, spaces map[string]string) string {
+	w.t.Helper()
 	const syncID, redirect = "https://metatrash.com/oauth/clients/sync", "http://127.0.0.1:49152/callback"
 	verifier, challenge := pkcePair(w.t)
 	res := oauthCall(w.h, "GET", authorizeURL(map[string]string{"client_id": syncID, "redirect_uri": redirect, "code_challenge": challenge, "resource": "https://metatrash.com/api/v1/account"}), nil)
@@ -20,7 +26,11 @@ func (w *oauthWorld) syncToken(user userAccount, spaceID, permission string) str
 	if page.Code != 200 || match == nil {
 		w.t.Fatalf("consent page: %d %s", page.Code, page.Body)
 	}
-	res = oauthCall(w.h, "POST", "/oauth/consent", url.Values{"csrf": {match[1]}, "decision": {"approve"}, "s-" + spaceID: {permission}}, browser, session)
+	form := url.Values{"csrf": {match[1]}, "decision": {"approve"}}
+	for id, permission := range spaces {
+		form.Set("s-"+id, permission)
+	}
+	res = oauthCall(w.h, "POST", "/oauth/consent", form, browser, session)
 	loc, _ := url.Parse(res.Header().Get("Location"))
 	if res.Code != 303 || loc == nil {
 		w.t.Fatalf("approval: %d %s", res.Code, res.Header().Get("Location"))

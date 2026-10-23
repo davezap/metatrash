@@ -43,11 +43,15 @@ func TestSubmitAndReceipts(t *testing.T) {
 	}))
 	defer server.Close()
 	c := newClient(server.URL, "dave/work/hr", func(context.Context, bool) (string, error) { return "t", nil }, true)
-	r, err := c.submit(context.Background(), "forms/leave.md", "abc", json.RawMessage(`{"name":"Pat"}`))
-	if err != nil || r.Template != "forms/leave.md" || posted["path"] != "hr/forms/leave.md" || posted["blob"] != "abc" || posted["today"] == "" {
+	r, err := c.submit(context.Background(), "forms/leave.md", "abc", 0, json.RawMessage(`{"name":"Pat"}`))
+	if err != nil || r.Template != "forms/leave.md" || posted["path"] != "hr/forms/leave.md" || posted["blob"] != "abc" || posted["today"] == "" || posted["version"] != nil {
 		t.Fatalf("submit: %+v %v %v", r, posted, err)
 	}
-	_, err = c.submit(context.Background(), "forms/leave.md", "abc", json.RawMessage(`{"name":""}`))
+	posted = nil
+	if _, err := c.submit(context.Background(), "forms/leave.md", "abc", 3, json.RawMessage(`{"name":"Pat"}`)); err != nil || posted["version"] != float64(3) || posted["blob"] != nil {
+		t.Fatalf("submit published: %v %v", posted, err)
+	}
+	_, err = c.submit(context.Background(), "forms/leave.md", "abc", 0, json.RawMessage(`{"name":""}`))
 	var refused *apiError
 	if !errors.As(err, &refused) || refused.Status != 400 || len(refused.Fields) != 1 || refused.Fields[0].Name != "name" {
 		t.Fatalf("refused: %v", err)
@@ -92,5 +96,33 @@ func TestWhoami(t *testing.T) {
 	gone := func(context.Context, bool) (string, error) { return "", errSignedOut }
 	if err := whoami(context.Background(), server.URL, gone, true, out); err != nil || !strings.Contains(out.String(), `"signedIn": false`) {
 		t.Fatalf("signed out: %q %v", out, err)
+	}
+}
+
+// review posts the copy's path in the space with the review, and reads the
+// updated receipt.
+func TestReview(t *testing.T) {
+	var posted map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/account/spaces/dave/review/reviews" {
+			http.NotFound(w, r)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &posted)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"r1","title":"WFH quiz","template":"policies/q.md","status":"declined","quiz":true,"score":75,"note":"Read it again."}`)
+	}))
+	defer server.Close()
+	c := newClient(server.URL, "dave/review", func(context.Context, bool) (string, error) { return "t", nil }, true)
+	r, err := c.review(context.Background(), "quizzes/x.md", json.RawMessage(`{"marks":{"why":true}}`))
+	if err != nil || posted["path"] != "quizzes/x.md" || posted["marks"].(map[string]any)["why"] != true {
+		t.Fatalf("review: %v %v", posted, err)
+	}
+	if got := reviewLine(r); got != "Not passed (75%): Read it again." {
+		t.Fatalf("line: %q", got)
+	}
+	if got := reviewLine(receipt{Status: "approved"}); got != "Approved" {
+		t.Fatalf("form line: %q", got)
 	}
 }

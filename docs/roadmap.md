@@ -80,22 +80,122 @@ Agreed with Dave 2026-10-18.
 
 ## Forms and quizzes
 
-Phase 1, forms, shipped in 0.49.0 (Slate 0.18.0, Slate Viewer 0.15.0): form
-templates with fields, fill mode, submit to a review space, My Submissions.
-Design: Dave's "Forms and quizzes: design proposal" doc (2026-10-23).
+Design: Dave's "Forms and quizzes: design proposal" doc
+(https://claude.ai/artifact/WNBXHhfrc5Ukkvg4De7eU6, 2026-10-23), whose
+"Decisions so far" section records Dave's answers. Syntax and behaviour of
+what has shipped: docs/forms.md.
 
-- **Phase 2, quizzes.** A form in a policy folder (`quiz: true`, `covers:
-  policy.md`) replaces I Have Read This: the server marks it against an
-  answer key in the review space (a quiz filled in by a reviewer, named
-  `<space>-<template>-answers.md`, or "Use This as Answers"), ✓ or ✗ per
-  answer, 100% marks the policy read (`passMark` per quiz, 100% by default).
-  Free-text answers wait for a reviewer, who ticks each and chooses Reviewed.
-  On a fail: fix and resend, or start again, each after a configurable
-  stand-down (`retryAfter`).
-- **Phase 3, review and extras.** Reviewers set `status` (approved,
-  declined, with a note) and submitters see it in My Submissions; pre-filled
-  fields (`default=@name`), conditional questions (`show-if`), recurring
-  forms (`repeat: yearly`), filling in on the website.
+**Shipped (phase 1, forms)**
+
+- 0.49.0 (Slate 0.18.0, Slate Viewer 0.15.0): form templates (front matter
+  `form`, `title`, `submitTo`; `{{type name=… …}}` fields), schema v13 table
+  `metatrash_form_submissions`, `POST`/`GET .../submissions`, mtsync
+  `submit`/`submissions`/`submission`, Viewer fill mode and My Submissions.
+  Server re-checks every answer and files the copy, with the answers in its
+  front matter, in the review space (same owner as the form's space).
+- 0.49.1: REST spaces listing names the `account`; mtsync `whoami`; Viewer
+  0.15.1 Switch Account.
+- 0.49.2: the website on Slate 0.18.0 (`?raw` images, https images, wiki
+  links).
+- 0.49.3 (Slate 0.19.0, Viewer 0.16.0): no Fill In step. A form's Preview
+  is the form, ready to fill in; drafts save as you type (localStorage);
+  Edit/Source show the template. Greyed-out fields (`readOnly`) where it
+  can't be sent: outside its space, unsaved changes, the published version,
+  and always on the website. Preview hides front matter everywhere.
+- 0.49.4 (Slate 0.19.1, Viewer 0.16.1): sending a form in an `acknowledge`
+  folder also confirms it as read at the published version (`acknowledged`
+  in the answer). Website stylesheet fixed for Slate's three-row layout.
+
+Where the code is: `internal/service/forms.go` (parsing, checks, the filed
+copy), `submissions.go` (endpoint, receipts, acknowledge on send); Slate
+`src/forms.js` (same parser) and fill mode in `src/slate.js` (`startFill`
+with `inPreview`/`readOnly`, `slate:mode-change`); Viewer `src/lib/forms.ts`,
+`FormBanner.svelte`, `SubmissionsDialog.svelte` and the Forms section of
+`App.svelte` (`syncFormView`). Server and Slate parsers must stay in step.
+
+Gotchas: front matter must start on line 1 (Viewer's New File adds a
+`# name` heading first, so a pasted template isn't a form until that line
+goes; a published version taken before the fix stays broken until the next
+publish). A file with `submittedAt` is a filed copy, never a form.
+
+**Shipped (phase 2, review and quizzes): 0.50.0 (mtsync 0.50.0, Slate
+Viewer 0.17.0; Slate unchanged), as agreed with Dave 2026-10-23**
+
+Every filed copy needs a review, automatic, by a person, or both (Dave): a
+leave form needs approving, and scoring the pass mark on a quiz is the same
+thing. So phase 2 builds one review step for every submission, and quizzes
+use it.
+
+- **Status.** Each copy (and its receipt) has a `status`: `submitted`
+  (waiting for review), `approved` or `declined`. The copy's front matter
+  also gets `submission` (the receipt id), `templateBlob`, and after review
+  `reviewedBy`, `reviewedAt` and `note`. Schema v14 adds these to
+  `metatrash_form_submissions` (rows are now updated by reviews; grants add
+  UPDATE).
+- **Reviewing.** A reviewer (a person with write access to the review
+  space) reviews a copy in that space: `POST .../reviews` on the review
+  space with `{"path", "status", "note", "marks"}`; `mtsync review`; Slate
+  Viewer shows a review bar on a copy (Approve / Decline with a note for a
+  form; a tick per free-text answer and Reviewed for a quiz). The server
+  updates the receipt and rewrites the copy's front matter (and the ✓/✗).
+  The sender sees the status and note in My Submissions.
+- **Quiz template keys:** `quiz: true`, `covers: wfh-policy.md` (a file the
+  folder's acknowledge service tracks, in the same folder), `passMark`
+  (percent, default 100), `retryAfter` (`30m`, `1h`, `2d`; default `1h`,
+  `0` for none), `unmarked` (comma list of fields that are not questions,
+  such as a name, so a key answer there is never marked).
+- **Answer key:** a filled-in copy of the quiz in the review space, in the
+  quiz's `submitTo` folder, named `<space slug>-<form>-answers.md`. A
+  reviewer makes it by sending the quiz (reviewers may send it before there
+  is a key) and choosing **Use This as Answers** on their copy, which copies
+  it to that name. The key only counts for the quiz text it was made from
+  (`templateBlob`); after the quiz changes, make a new one.
+- **No key, no quiz.** Without a key for the quiz as published, sending is
+  refused for everyone but reviewers.
+- **Marking.** On send the server marks every answer the key has an answer
+  for: choice, select, yesno, number, date and time against the key; a
+  field the key leaves blank is not marked (such as a name). Free text
+  (text, textarea, email, phone) with a key answer waits for a reviewer's
+  tick. The copy shows ✓ or ✗ after each marked answer; the person sees
+  their ticks, never the key. Score = correct ÷ marked; at or over
+  `passMark` the copy is `approved`, under it `declined`; with free text
+  still to tick it stays `submitted` and the server marks it when the
+  reviewer chooses Reviewed.
+- **Passing confirms the policy.** A quiz is never a file to read itself
+  (no red dot). The file it `covers` counts as read while the person has an
+  approved copy of the quiz as published now: a new published version asks
+  again only if the quiz changed, not the policy (Dave). I Have Read This
+  is refused for a covered file.
+- **Retries.** After a fail the person can fix their answers and resend, or
+  start again, once `retryAfter` has passed (the server enforces it). While
+  a copy waits for review, and after a pass, the quiz can't be sent again.
+- **Published version is what's sent.** In a published folder the form that
+  counts is its published text: Slate Viewer sends it from the published
+  view (greyed out in Show Draft), and the server checks against it
+  (`"version"` in the request, `mtsync submit -published N`). A form added
+  since the version is sent as it is; a quiz must be published first.
+- Not in phase 2: `needs-info`, email, multi-step approval (phase 3).
+
+Where the code is: `internal/service/quiz.go` (keys, marking, quiz state),
+`reviews.go` (the reviews endpoint), `submissions.go` (published send,
+retries), `acknowledgements.go` (`linkQuizzes`, covered files); mtsync
+`review` in `cmd/mtsync/forms.go`; Viewer `ReviewBanner.svelte`,
+`FormBanner.svelte` (quiz states), `PolicyBanner.svelte` (Take the Quiz),
+`parseFiledCopy`/`answerKeyText` in `src/lib/forms.ts`.
+
+**Phase 3, notifications and more (later; Dave, 2026-10-23)**
+
+- A third status, `needs-info`: bounces the copy back with a note; the
+  sender reopens the form with the old answers and the resend is filed as
+  a new copy linked to the first.
+- Template keys: `notify: [sender, reviewers]` (email on each step, using
+  the existing mail setup), optional `reviewers:` address for new-copy
+  alerts (default: the review space's members).
+- Open for Dave: are decisions final; multi-step approval (manager then
+  HR; leave out at first); should approved copies move (e.g. `approved/`).
+- Also parked here: pre-filled fields (`default=@name`), conditional
+  questions (`show-if`), recurring forms (`repeat: yearly`), sending from
+  the website.
 - Groups and hidden folders (Dave, 2026-10-23) would let review folders live
   in the same space; parked, a separate review space works for now.
 
