@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v12 (from 0.48.0).
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v13 (from 0.49.0).
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -145,7 +145,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v12 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v13 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -395,7 +395,7 @@ moves memberships and app connections and keeps the old address.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v12 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v13 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -413,6 +413,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.31.0 | schema v10 (`metatrash_sessions`; that upgrade signed everyone out once) | 9; everyone is signed out |
 | 0.32.0 | schema v11 (session `device` and `ip`) | 10 |
 | 0.48.0 | schema v12 (`metatrash_acknowledgements`) and grants (`SELECT, INSERT` on it) | 11; confirmations stay in the table |
+| 0.49.0 | schema v13 (`metatrash_form_submissions`) and grants (`SELECT, INSERT` on it) | 12; receipts stay in the table, filed copies stay in their spaces |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer
@@ -469,7 +470,7 @@ addresses are only in the notice emails.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v12 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v13 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - CI runs both on every push (see Automated builds and releases).
 

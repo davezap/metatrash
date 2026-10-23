@@ -267,7 +267,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "POST" {
 			op = "move"
 		}
-	case "acknowledgements":
+	case "acknowledgements", "submissions":
 		// Kept in the account database, so only the OAuth resource offers them.
 		if metadataPath == "" {
 			sendError(w, missing())
@@ -313,6 +313,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 	switch op {
 	case "acknowledgements":
 		h.serveAcknowledgements(w, r, repo, space, access)
+		return
+	case "submissions":
+		h.serveSubmissions(w, r, repo, space)
 		return
 	case "pull", "push":
 		h.serveGitHubPost(w, r, op, repo, space)

@@ -17,10 +17,18 @@ import (
 
 // apiError is a metatrash error response.
 type apiError struct {
-	Status       int
+	Status       int    `json:"status"`
 	Code         string `json:"code"`
 	Message      string `json:"message"`
-	CurrentState string `json:"currentState"`
+	CurrentState string `json:"currentState,omitempty"`
+	// Fields lists each refused answer of a form (submit).
+	Fields []fieldProblem `json:"fields,omitempty"`
+}
+
+// fieldProblem is one refused answer.
+type fieldProblem struct {
+	Name    string `json:"name"`
+	Message string `json:"message"`
 }
 
 func (e *apiError) Error() string {

@@ -114,8 +114,8 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 	}
 	var version int
 	var source string
-	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 12 || source == "" {
-		return fmt.Errorf("account schema v12/migration is not ready; follow docs/deployment.md")
+	if err := s.db.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version, &source); err != nil || version != 13 || source == "" {
+		return fmt.Errorf("account schema v13/migration is not ready; follow docs/deployment.md")
 	}
 	var usernameIndex int
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'metatrash_users' AND index_name = 'metatrash_users_username' AND non_unique = 0 AND column_name = 'username' AND seq_in_index = 1 AND sub_part IS NULL").Scan(&usernameIndex); err != nil || usernameIndex != 1 {
@@ -143,6 +143,9 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 		return err
 	}
 	if err := s.checkAcknowledgementSchema(ctx); err != nil {
+		return err
+	}
+	if err := s.checkSubmissionSchema(ctx); err != nil {
 		return err
 	}
 	// Validate persisted records at startup, including the preserved service cap.
@@ -224,8 +227,8 @@ func (s *accountDatabase) ByID(ctx context.Context, id string) (userAccount, boo
 func lockAccountMeta(ctx context.Context, tx *sql.Tx) (string, error) {
 	var version int
 	var source string
-	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version < 1 || version > 12) {
-		return "", fmt.Errorf("account schema version 1 through 12 is required")
+	if err := tx.QueryRowContext(ctx, "SELECT schema_version, migration_source FROM metatrash_account_meta WHERE singleton_id = 1 FOR UPDATE").Scan(&version, &source); err != nil || (version < 1 || version > 13) {
+		return "", fmt.Errorf("account schema version 1 through 13 is required")
 	}
 	return source, nil
 }

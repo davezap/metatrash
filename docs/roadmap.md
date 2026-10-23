@@ -78,6 +78,27 @@ Agreed with Dave 2026-10-18.
 - **Folder selection in Slate Viewer.** The file tree selects folders as well
   as files, so the configurator has something to act on.
 
+## Forms and quizzes
+
+Phase 1, forms, shipped in 0.49.0 (Slate 0.18.0, Slate Viewer 0.15.0): form
+templates with fields, fill mode, submit to a review space, My Submissions.
+Design: Dave's "Forms and quizzes: design proposal" doc (2026-10-23).
+
+- **Phase 2, quizzes.** A form in a policy folder (`quiz: true`, `covers:
+  policy.md`) replaces I Have Read This: the server marks it against an
+  answer key in the review space (a quiz filled in by a reviewer, named
+  `<space>-<template>-answers.md`, or "Use This as Answers"), ✓ or ✗ per
+  answer, 100% marks the policy read (`passMark` per quiz, 100% by default).
+  Free-text answers wait for a reviewer, who ticks each and chooses Reviewed.
+  On a fail: fix and resend, or start again, each after a configurable
+  stand-down (`retryAfter`).
+- **Phase 3, review and extras.** Reviewers set `status` (approved,
+  declined, with a note) and submitters see it in My Submissions; pre-filled
+  fields (`default=@name`), conditional questions (`show-if`), recurring
+  forms (`repeat: yearly`), filling in on the website.
+- Groups and hidden folders (Dave, 2026-10-23) would let review folders live
+  in the same space; parked, a separate review space works for now.
+
 ## Policies and permissions
 
 Published versions and read acknowledgements shipped in 0.48.0 (Slate Viewer

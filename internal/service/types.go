@@ -10,7 +10,9 @@ type Error struct {
 	Message           string `json:"message"`
 	CurrentState      string `json:"currentState,omitempty"`
 	RetryAfterSeconds int    `json:"retryAfterSeconds,omitempty"`
-	Status            int    `json:"-"`
+	// Fields lists each refused answer of a form submission.
+	Fields []FieldError `json:"fields,omitempty"`
+	Status int          `json:"-"`
 }
 
 func (e *Error) Error() string { return e.Message }

@@ -182,6 +182,18 @@ folder asks you to read, and only at the folder's current version).
 access; `-json` for editors). All three need metatrash 0.48.0 and a signed-in
 space.
 
+`mtsync submit FILE ANSWERS` sends your answers to a form (metatrash 0.49.0;
+a form template is a `.md` file whose front matter has `form:`, see the
+server's docs/forms.md). ANSWERS is a JSON file of field name to answer, or
+`-` to read it from standard input: `{"full_name": "Pat", "type": "Annual",
+"kit": ["Laptop"], "signature": "true"}`. The server checks every answer and
+files the filled-in copy where the template's `submitTo` says; refused
+answers are listed per field. mtsync sends the hash of your synced copy of
+the form, so a form that changed since (or isn't synced yet) is refused.
+`mtsync submissions PLACE` lists the forms you sent from that space, and
+`mtsync submission PLACE ID` prints the copy that was filed. `-json` for
+editors (with `-json`, a refusal is printed as `{"error": {...}}` too).
+
 `mtsync list` shows, per folder, "in sync, checked <time>", the last error
 (for example signed out, or the space no longer connected; the service tries
 such a folder again every minute), or "service not running".
@@ -206,6 +218,9 @@ All commands:
 | `policies PLACE` | published folders and files, and what you still have to read (`-json`) |
 | `ack FILE VERSION` | confirm you read FILE as published in VERSION |
 | `readers PLACE` | who has read what (read-write access; `-json`) |
+| `submit FILE ANSWERS` | send answers (JSON file, or `-` for stdin) to a form (`-json`) |
+| `submissions PLACE` | the forms you sent from that space (`-json`) |
+| `submission PLACE ID` | print the copy of one that was filed (`-json`) |
 | `version` | the version |
 | `SPACE[/PATH] FOLDER` | sync one folder in this window without registering it; `-once` for one pass |
 

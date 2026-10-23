@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.49.0 - Forms (2026-10-23)
+
+**Database schema v13** (`deploy/account-schema-v13.sql`, then `deploy/account-grants.sql`): apply both before the new binary starts; it refuses to start on v12. No configuration change. No new Go modules. Tool schema unchanged. mtsync minimum stays 0.45.0; mtsync 0.49.0 adds `submit`, `submissions` and `submission`, which Slate Viewer 0.15.0 uses. **CI**: `.github/workflows/ci.yml` must apply schema v1–v13 and set `schema_version = 13`.
+
+- **Form templates**: a `.md` file whose front matter has `form`, `title` and `submitTo` (`owner/space/folder/`), with `{{type name=… …}}` fields: `text`, `textarea`, `number`, `date`, `time`, `email`, `phone`, `choice` (one, or `multi`), `select`, `yesno` and `sign`, with `required`, lengths, `pattern` (RE2), ranges and options from the list below a choice. Tokens in code and comments are text. docs/forms.md describes it all; Slate 0.18.0 parses the same syntax.
+- **Submissions**: `POST .../submissions {"path", "answers", "revision"?, "blob"?, "today"?}` on the OAuth REST resource. Only a person (Metatrash Sync) can send a form, with read access to the template. The server re-reads the template, checks every answer (`invalid_answers` with a problem per field) and files the filled-in copy as a new file in the `submitTo` folder, written for the person (author trailers name them), who needs no access to that space. `submitTo` must be a space with the same owner as the template's space, outside GitHub folders. The copy is `<space slug>-<username>-<form>-<YYYY-MM-DDTHHMMZ>.md` with the answers in front matter and the comments left out. A template that changed since the person started (`revision` or `blob`) is `template_changed` (409). 60 per person per hour.
+- **Receipts**: the new `metatrash_form_submissions` table keeps one row per submission with the copy, so `GET .../submissions` (the caller's, newest first) and `GET .../submissions?id=ID` (with the text) show people what they sent.
+- **mtsync 0.49.0**: `submit FILE ANSWERS` (JSON file or `-` for stdin; sends the synced copy's blob hash; `-json` prints the receipt, or the refusal with its fields), `submissions PLACE`, `submission PLACE ID`.
+- `doctor` and startup check schema v13 and the two new grants.
+- Tests: template parsing and every mistake it reports, answer checks per type, the filed copy (escaping, choices, block quotes, comments gone, signature), and submissions end to end against MariaDB (agent refused, per-field refusals, read-only member sends, copy and folder files in the review space, author trailers, receipts per person, changed template, same-owner rule); mtsync submit and receipts. docs/forms.md (new), api-contract (Form submissions), deployment (schema v13), roadmap (forms and quizzes), cmd/mtsync/README.md.
+
 ## 0.48.0 - Published versions and read acknowledgements (2026-10-22)
 
 **Database schema v12** (`deploy/account-schema-v12.sql`, then `deploy/account-grants.sql`): apply both before the new binary starts; it refuses to start on v11. No configuration change. No new Go modules. Tool schema 0.13.0. mtsync minimum stays 0.45.0; mtsync 0.48.0 adds `policies`, `ack` and `readers`, which Slate Viewer 0.13.0 uses.
