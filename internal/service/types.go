@@ -34,8 +34,9 @@ type File struct {
 	// ReadOnly, also derived, is the lock a readOnly entry in its folder's
 	// settings puts on the file: "agents" or "everyone" (see locks.go).
 	ReadOnly string `json:"readOnly,omitempty"`
-	// Blob is the Git blob hash of the text, sent only by REST list with
-	// blobs=true so sync clients can spot changed files without reading them.
+	// Blob is the Git blob hash of the text. Read, write, edit, append, move
+	// and delete results carry it, and list with blobs=true or since=, so a
+	// client can tell a changed file without reading it (read's ifBlob).
 	Blob string `json:"blob,omitempty"`
 }
 
@@ -57,6 +58,10 @@ type ReadResult struct {
 	// Effective is set when the file is a .metatrash.json that inherits: the
 	// folder's settings with the inherited ones filled in.
 	Effective json.RawMessage `json:"effective,omitempty"`
+	// Unchanged is set when the read gave ifBlob and the file still has that
+	// blob; Text is then empty, so an agent re-checking a file it holds pays
+	// for no text.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 type ListResult struct {
@@ -126,11 +131,17 @@ type Input struct {
 	CreateOnly bool    `json:"createOnly,omitempty"`
 	// Strict refuses a stale ifInState even when the touched files are
 	// unchanged. REST write, move and delete default to it (see parseBody).
-	Strict     bool   `json:"strict,omitempty"`
-	From       string `json:"from,omitempty"`
-	To         string `json:"to,omitempty"`
-	StartLine  int    `json:"-"`
-	LineCount  int    `json:"-"`
+	Strict    bool   `json:"strict,omitempty"`
+	From      string `json:"from,omitempty"`
+	To        string `json:"to,omitempty"`
+	StartLine int    `json:"-"`
+	LineCount int    `json:"-"`
+	// IfBlob makes a read answer unchanged without the text when the file
+	// still has this blob.
+	IfBlob string `json:"-"`
+	// Line is where append puts its text: before that line (1 = top);
+	// 0 adds it at the end.
+	Line       int    `json:"-"`
 	Edits      []Edit `json:"-"`
 	Query      string `json:"-"`
 	Regex      bool   `json:"-"`

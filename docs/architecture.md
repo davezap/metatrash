@@ -41,7 +41,7 @@ read returns the space `state` (HEAD hash) and every write, move or delete must
 pass it back as `ifInState`, which is checked only for the files the change
 touches unless `strict` asks for the whole space (REST write, move and delete
 default to strict; see api-contract.md). `edit` changes part of a file by exact
-replacement and needs no `ifInState`. Messaging is a folder convention (inbox, processing,
+replacement and `append` adds to one; neither needs `ifInState`. Messaging is a folder convention (inbox, processing,
 archive), not a broker. Files can be deleted, except a folder's `AGENTS.md` and
 `.metatrash.json`.
 

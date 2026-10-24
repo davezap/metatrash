@@ -83,7 +83,7 @@ func TestMCPSmoke(t *testing.T) {
 	}
 	rpc("notifications/initialized", "", map[string]any{}, 202)
 	list := rpc("tools/list", "", map[string]any{}, 200)
-	if len(list["tools"].([]any)) != 8 {
+	if len(list["tools"].([]any)) != 9 {
 		t.Fatal(list)
 	}
 	call := func(name, key string, args map[string]any, code string) map[string]any {
@@ -135,6 +135,38 @@ func TestMCPSmoke(t *testing.T) {
 		t.Fatal(ranged)
 	}
 	call("read", "", map[string]any{"space": "public", "path": "moved.txt", "text": "extra"}, "invalid_request")
+	// Blobs: results carry them, and read with ifBlob skips the text while
+	// the file is the same.
+	blob := ranged["file"].(map[string]any)["blob"]
+	if blob != edited["file"].(map[string]any)["blob"] || blob == nil {
+		t.Fatal(ranged, edited)
+	}
+	same := call("read", "", map[string]any{"space": "public", "path": "moved.txt", "ifBlob": blob}, "")
+	if same["unchanged"] != true || same["file"].(map[string]any)["text"] != "" {
+		t.Fatal(same)
+	}
+	// append adds lines without a read: at the end, before a line, and to a
+	// new file.
+	appended := call("append", "", map[string]any{"space": "public", "path": "moved.txt", "text": "last"}, "")
+	if appended["file"].(map[string]any)["blob"] == blob {
+		t.Fatal(appended)
+	}
+	call("append", "", map[string]any{"space": "public", "path": "moved.txt", "text": "first", "line": 1}, "")
+	call("append", "", map[string]any{"space": "public", "path": "moved.txt", "text": "x", "line": 9}, "invalid_request")
+	call("append", "", map[string]any{"space": "public", "path": "absent.txt", "text": "x", "line": 1}, "not_found")
+	if made := call("append", "", map[string]any{"space": "public", "path": "log.txt", "text": "one\n"}, ""); made["created"] != true {
+		t.Fatal(made)
+	}
+	changed := call("read", "", map[string]any{"space": "public", "path": "moved.txt", "ifBlob": blob}, "")
+	if changed["unchanged"] != nil || changed["file"].(map[string]any)["text"] != "first\nhi\nlast" {
+		t.Fatal(changed)
+	}
+	// list since: only what changed since a state, and what was removed.
+	since := call("list", "", map[string]any{"space": "public", "since": appended["newState"]}, "")
+	if files := since["files"].([]any); len(files) != 2 || files[0].(map[string]any)["path"] != "log.txt" || files[1].(map[string]any)["path"] != "moved.txt" {
+		t.Fatal(since)
+	}
+	call("list", "", map[string]any{"space": "public", "since": appended["newState"], "cursor": "x.y"}, "invalid_request")
 	// Credentials must be rechecked on every request, never retained from a session.
 	privateState := call("list", "reader", map[string]any{"space": "private"}, "")["state"]
 	call("list", "", map[string]any{"space": "private"}, "unauthorized")

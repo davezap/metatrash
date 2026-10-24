@@ -262,10 +262,10 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "GET" {
 			op = "export"
 		}
-	case "move":
+	case "move", "append":
 		allow = "POST"
 		if r.Method == "POST" {
-			op = "move"
+			op = resource
 		}
 	case "acknowledgements", "submissions":
 		// Kept in the account database, so only the OAuth resource offers them.
@@ -309,7 +309,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "edit" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews"
+	write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -510,7 +510,7 @@ func parseQuery(raw, op string) (Input, error) {
 	allowed := map[string]bool{}
 	switch op {
 	case "read":
-		allowed["path"], allowed["revision"], allowed["startLine"], allowed["lineCount"] = true, true, true, true
+		allowed["path"], allowed["revision"], allowed["startLine"], allowed["lineCount"], allowed["ifBlob"] = true, true, true, true, true
 	case "search":
 		for _, k := range []string{"query", "prefix", "regex", "ignoreCase", "context", "limit", "revision"} {
 			allowed[k] = true
@@ -527,7 +527,7 @@ func parseQuery(raw, op string) (Input, error) {
 			return in, invalid("Unknown or duplicate query parameter.")
 		}
 	}
-	in.Path, in.Revision, in.Prefix, in.ID, in.Cursor = q.Get("path"), q.Get("revision"), q.Get("prefix"), q.Get("id"), q.Get("cursor")
+	in.Path, in.Revision, in.Prefix, in.ID, in.Cursor, in.IfBlob = q.Get("path"), q.Get("revision"), q.Get("prefix"), q.Get("id"), q.Get("cursor"), q.Get("ifBlob")
 	if _, ok := q["revision"]; ok && !hashPattern.MatchString(in.Revision) {
 		return in, invalid("Invalid revision.")
 	}
@@ -600,6 +600,8 @@ func parseBody(b []byte, op string, in *Input) error {
 	in.Strict = op != "edit"
 	if op == "edit" {
 		allowed["path"], allowed["edits"] = true, true
+	} else if op == "append" {
+		allowed = map[string]bool{"path": true, "text": true, "line": true}
 	} else if op == "write" {
 		allowed["text"], allowed["createOnly"] = true, true
 	} else if op == "move" {
@@ -640,6 +642,18 @@ func parseBody(b []byte, op string, in *Input) error {
 			return invalid(`Send {"path", "edits": [{"oldText", "newText", "replaceAll"?}], "ifInState"?, "strict"?}.`)
 		}
 		in.Path, in.Edits, in.IfInState, in.Strict = body.Path, body.Edits, body.IfInState, body.Strict
+		return nil
+	}
+	if op == "append" {
+		var body struct {
+			Path string  `json:"path"`
+			Text *string `json:"text"`
+			Line int     `json:"line"`
+		}
+		if err := strictJSON(b, &body); err != nil {
+			return invalid(`Send {"path", "text", "line"?}.`)
+		}
+		in.Path, in.Text, in.Line, in.Strict = body.Path, body.Text, body.Line, false
 		return nil
 	}
 	if err := strictJSON(b, in); err != nil {

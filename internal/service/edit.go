@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // Edit replaces one exact piece of a file's text. Edits let an agent change
@@ -144,6 +145,81 @@ func (s *Service) edit(ctx context.Context, r *repository, space string, in Inpu
 		return v, nil
 	}
 	return value, err
+}
+
+// checkAppendInput validates an append request before it is queued.
+func checkAppendInput(in Input) error {
+	if !validPath(in.Path) {
+		return invalid("Valid path is required.")
+	}
+	if in.Text == nil || *in.Text == "" {
+		return invalid("text is required.")
+	}
+	if !utf8.ValidString(*in.Text) || strings.ContainsRune(*in.Text, 0) {
+		return invalid("Text must be UTF-8 without NUL.")
+	}
+	if in.Line < 0 {
+		return invalid("line must be 1 or more; leave it out to add at the end.")
+	}
+	return nil
+}
+
+// appendText adds text to a file without the agent reading it: at the end,
+// or before in.Line. Without a line it creates a missing file. It runs on
+// the write queue against the head, so it needs no ifInState.
+func (s *Service) appendText(ctx context.Context, r *repository, space string, in Input) (any, error) {
+	head, files, err := r.snapshot(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	text := ""
+	if f, ok := files[in.Path]; ok {
+		b, err := r.blob(ctx, f.Blob)
+		if err != nil {
+			return nil, err
+		}
+		text = string(b)
+	} else if in.Line > 0 {
+		return nil, missing()
+	}
+	text, err = insertText(text, *in.Text, in.Line)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(text)) > r.limits.MaxFileBytes {
+		return nil, problem(413, "payload_too_large", "The text would exceed the file limit.")
+	}
+	in.Text, in.IfInState, in.Strict, in.CreateOnly = &text, head, false, false
+	return s.mutate(ctx, r, space, "write", in)
+}
+
+// insertText puts add into text before line (1-based), or at the end when
+// line is 0 or one past the last line. Added text starts on a line of its
+// own and, before an existing line, ends with a line break; in a file with
+// CRLF endings, LF line breaks in add become CRLF.
+func insertText(text, add string, line int) (string, error) {
+	newline := "\n"
+	if strings.Contains(text, "\r\n") {
+		newline = "\r\n"
+		if !strings.Contains(add, "\r") {
+			add = strings.ReplaceAll(add, "\n", "\r\n")
+		}
+	}
+	lines := splitLines(text)
+	if line > len(lines)+1 {
+		return "", invalid(fmt.Sprintf("line %d is past the end of the file, which has %d lines; leave line out to add at the end.", line, len(lines)))
+	}
+	if line == 0 || line == len(lines)+1 {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += newline
+		}
+		return text + add, nil
+	}
+	if !strings.HasSuffix(add, "\n") {
+		add += newline
+	}
+	before := strings.Join(lines[:line-1], "")
+	return before + add + text[len(before):], nil
 }
 
 // applyEdits applies each edit in turn to text. An oldText must match

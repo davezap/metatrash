@@ -214,6 +214,25 @@ func TestEditAndSearchOverREST(t *testing.T) {
 	if out["file"].(map[string]any)["text"] != "one\n2\nthree\n" {
 		t.Fatalf("after edit: %v", out)
 	}
+	blob := out["file"].(map[string]any)["blob"].(string)
+	if blob != blobHash([]byte("one\n2\nthree\n")) {
+		t.Fatalf("read blob: %v", out)
+	}
+	if code, out = call("GET", "/api/v1/spaces/public/file?path=a.md&ifBlob="+blob, nil); code != 200 || out["unchanged"] != true || out["file"].(map[string]any)["text"] != "" {
+		t.Fatalf("unchanged read: %d %v", code, out)
+	}
+	if code, _ = call("GET", "/api/v1/spaces/public/file?path=a.md&ifBlob=abc", nil); code != 400 {
+		t.Fatalf("bad ifBlob: %d", code)
+	}
+	if code, out = call("POST", "/api/v1/spaces/public/append", map[string]any{"path": "a.md", "text": "zero", "line": 1}); code != 200 || out["file"].(map[string]any)["blob"] != blobHash([]byte("zero\none\n2\nthree\n")) {
+		t.Fatalf("append: %d %v", code, out)
+	}
+	if code, _ = call("POST", "/api/v1/spaces/public/append", map[string]any{"path": "a.md", "text": "x", "ifInState": list["state"]}); code != 400 {
+		t.Fatalf("append with ifInState: %d", code)
+	}
+	if code, _ = call("POST", "/api/v1/spaces/public/append", map[string]any{"path": "new.md", "text": "# New\n"}); code != 201 {
+		t.Fatalf("append creates: %d", code)
+	}
 }
 
 // Writes check only the files they touch against ifInState, unless strict.
@@ -291,5 +310,31 @@ func TestPerFileWriteChecks(t *testing.T) {
 	}
 	if code, out := put("rest/one.md", map[string]any{"text": "1", "ifInState": base, "strict": false}); code != 201 || out["rebased"] != true {
 		t.Fatalf("REST strict false: %d %v", code, out)
+	}
+}
+
+func TestInsertText(t *testing.T) {
+	for _, c := range []struct {
+		text, add string
+		line      int
+		want      string
+	}{
+		{"", "a\n", 0, "a\n"},
+		{"", "a", 1, "a"},
+		{"one\n", "two\n", 0, "one\ntwo\n"},
+		{"one", "two", 0, "one\ntwo"},
+		{"one\ntwo\n", "zero", 1, "zero\none\ntwo\n"},
+		{"one\ntwo\n", "mid\n", 2, "one\nmid\ntwo\n"},
+		{"one\ntwo\n", "end", 3, "one\ntwo\nend"},
+		{"one\r\ntwo\r\n", "a\nb", 2, "one\r\na\r\nb\r\ntwo\r\n"},
+		{"one\r\ntwo", "x", 0, "one\r\ntwo\r\nx"},
+	} {
+		got, err := insertText(c.text, c.add, c.line)
+		if err != nil || got != c.want {
+			t.Errorf("insertText(%q, %q, %d) = %q, %v; want %q", c.text, c.add, c.line, got, err, c.want)
+		}
+	}
+	if _, err := insertText("one\n", "x", 3); err == nil {
+		t.Error("line past the end accepted")
 	}
 }

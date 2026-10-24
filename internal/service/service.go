@@ -212,6 +212,9 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		if !validPath(in.Path) {
 			return nil, invalid("Invalid path.")
 		}
+		if in.IfBlob != "" && !hashPattern.MatchString(in.IfBlob) {
+			return nil, invalid("ifBlob must be a blob hash from an earlier result.")
+		}
 		state, files, err := r.snapshot(ctx, in.Revision)
 		if err != nil {
 			return nil, err
@@ -220,12 +223,17 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		if !ok {
 			return nil, missing()
 		}
+		result := ReadResult{Space: space, State: state}
+		result.File.File = withBlob(f)
+		if in.IfBlob == f.Blob {
+			result.Unchanged = true
+			return result, nil
+		}
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
 			return nil, err
 		}
-		result := ReadResult{Space: space, State: state}
-		result.File.File, result.File.Text = f.File, string(b)
+		result.File.Text = string(b)
 		if isFolderConfig(in.Path) {
 			text := string(b)
 			if inherits := configKeys(text)["inherit"] == "true"; inherits && in.Path != folderConfigName {
@@ -251,11 +259,15 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		return s.page(ctx, r, space, op, in)
 	case "search":
 		return s.search(ctx, r, space, in)
-	case "edit":
-		if err := checkEditInput(in); err != nil {
+	case "edit", "append":
+		check, run := checkEditInput, s.edit
+		if op == "append" {
+			check, run = checkAppendInput, s.appendText
+		}
+		if err := check(in); err != nil {
 			return nil, err
 		}
-		value, err := s.queued(ctx, func() (any, error) { return s.edit(ctx, r, space, in) })
+		value, err := s.queued(ctx, func() (any, error) { return run(ctx, r, space, in) })
 		if err != nil {
 			return nil, err
 		}
@@ -377,7 +389,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if err != nil {
 			return nil, err
 		}
-		return Mutation{Space: space, OldState: head, NewState: state, File: f.File, Rebased: rebased}, nil
+		return Mutation{Space: space, OldState: head, NewState: state, File: withBlob(f), Rebased: rebased}, nil
 	}
 	if op == "write" && isFolderConfig(in.Path) {
 		if err := r.checkFolderConfig(ctx, files, in.Path, *in.Text); err != nil {
@@ -430,7 +442,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 				return nil, err
 			}
 			if string(b) == *in.Text {
-				return WriteResult{Mutation: Mutation{Space: space, OldState: head, NewState: head, File: f.File, Rebased: rebased}}, nil
+				return WriteResult{Mutation: Mutation{Space: space, OldState: head, NewState: head, File: withBlob(f), Rebased: rebased}}, nil
 			}
 		} else {
 			id, err := randomHex(16)
@@ -470,11 +482,21 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	if err != nil {
 		return nil, err
 	}
-	m := Mutation{Space: space, OldState: head, NewState: state, File: f.File, Rebased: rebased}
+	if op == "write" {
+		f.Blob = blobHash([]byte(*in.Text))
+	}
+	m := Mutation{Space: space, OldState: head, NewState: state, File: withBlob(f), Rebased: rebased}
 	if op == "move" {
 		return m, nil
 	}
 	return WriteResult{Mutation: m, Created: created, Changed: true}, nil
+}
+
+// withBlob is the file as results show it, with its blob hash.
+func withBlob(f record) File {
+	file := f.File
+	file.Blob = f.Blob
+	return file
 }
 
 // folderFileKept is the refusal to delete or move a folder's own file.
@@ -626,6 +648,9 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 			return nil, invalid("Cursor arguments changed.")
 		}
 		c = saved
+	}
+	if op == "list" && in.Since != "" && (!hashPattern.MatchString(in.Since) || in.Cursor != "") {
+		return nil, invalid("since must be a state, without cursor.")
 	}
 	if op == "list" && in.After != "" {
 		s.waitForChange(ctx, r, in.After)

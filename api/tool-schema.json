@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.13.0",
+  "schemaVersion": "0.14.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.45.0"},
@@ -21,7 +21,7 @@
   "tools": [
     {
       "name": "read",
-      "description": "Read text at HEAD or revision; returns snapshot state. Start with path AGENTS.md: instructions for agents in this space; each folder has its own. A .metatrash.json that inherits also returns effective: its settings with the parent folder's filled in. For a long file, read only the lines you need with startLine and lineCount (search gives line numbers); lines then reports the range and the file's total lines.",
+      "description": "Read a file at the head or a revision; returns the state. Start with AGENTS.md: instructions for agents; each folder has its own. For a long file read only the lines you need with startLine and lineCount (search gives line numbers). To check a file you read before, pass its blob as ifBlob: if it is the same, the answer has unchanged: true and no text. A .metatrash.json that inherits also returns effective: its settings with the parent's filled in.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -32,7 +32,7 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "path": {
             "type": "string",
@@ -48,13 +48,18 @@
           "startLine": {
             "type": "integer",
             "minimum": 1,
-            "description": "First line to return (1-based). With startLine or lineCount, text holds only those lines, each with its line ending."
+            "description": "First line (1-based). With startLine or lineCount, text holds only those lines."
           },
           "lineCount": {
             "type": "integer",
             "minimum": 1,
             "maximum": 5000,
-            "description": "How many lines to return from startLine (default: to the end)."
+            "description": "Lines from startLine (default: to the end)."
+          },
+          "ifBlob": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Blob from an earlier result: if the file still has it, return unchanged: true without text."
           }
         },
         "required": [
@@ -81,7 +86,7 @@
               "id": {
                 "type": "string",
                 "pattern": "^[0-9a-f]{32}$",
-                "description": "Stable across edits/moves."
+                "description": "Stable across edits and moves."
               },
               "path": {
                 "type": "string",
@@ -98,12 +103,20 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
               "readOnly": {
                 "type": "string",
-                "enum": ["agents", "everyone"],
-                "description": "Set when a readOnly entry in the folder's .metatrash.json locks the file: \"agents\" (agents cannot write, edit, move, rename or delete it; refused with read_only_file) or \"everyone\" (nobody can until a person lifts the lock)."
+                "enum": [
+                  "agents",
+                  "everyone"
+                ],
+                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Git blob hash of the text; pass it to read as ifBlob."
               },
               "text": {
                 "type": "string"
@@ -148,6 +161,10 @@
               "total"
             ],
             "additionalProperties": false
+          },
+          "unchanged": {
+            "type": "boolean",
+            "description": "Present (true) when ifBlob matched; text is then empty."
           }
         },
         "required": [
@@ -160,7 +177,7 @@
     },
     {
       "name": "search",
-      "description": "Find lines in a space's files, like grep: returns each matching line with its path, file ID and line number, and optionally lines of context. Use it to locate text before an edit, or to choose which lines to read, instead of reading whole files. Plain text by default; regex uses RE2 syntax. Results are in path and line order, up to limit.",
+      "description": "Find lines in a space's files, like grep: each match with path, file ID, line number and optional context. Use it to locate text for edit or choose lines to read instead of reading whole files. Plain text, or RE2 with regex.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -171,7 +188,7 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "query": {
             "type": "string",
@@ -294,7 +311,7 @@
     },
     {
       "name": "write",
-      "description": "Create a file or replace its whole text. To change part of an existing file, use edit instead: it sends only the changed text. Every folder has an AGENTS.md (what the folder holds and how to work in it; rewrite it freely) and a .metatrash.json (its settings), added with the folder's first file and removed with its last other file; neither can be deleted or moved. A .metatrash.json is checked on write: a JSON object with optional inherit (true: take every setting but services from the parent folder, own keys override; new folders start with it), locked ({\"key\": \"agents\" or \"everyone\"}: keys of this file, purpose, children, services, inherit, readOnly, publishedVersion or locked, that agents (\"agents\") or nobody (\"everyone\") may add, change or remove; refused with locked_setting; locked itself only a person changes), readOnly ({\"spec.md\": \"agents\", \"*.pdf\": \"everyone\", \"archive/\": \"agents\"}: files of this folder, by name, pattern or subfolder/, that may not be written, edited, moved, renamed, deleted or created; refused with read_only_file; not inherited; an ordinary key unless locked), publishedVersion (a whole number: the folder's official version is its files as they were when the number was set; raising it publishes the current files as the next version; it never goes down and is not inherited), purpose (text), children ({\"name\" or \"folder/\": text}) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\",\"push\":\"agent\"}] or [{\"type\":\"acknowledge\",\"files\":[\"*.md\"]}]: everyone in the space is asked to read the folder's published files, by default every .md file but AGENTS.md; people confirm in Slate Viewer, agents cannot); unknown keys are refused. Services: own spaces only; github not at the root and no github folder inside or around another. Publish only when asked to: a published version is what people are asked to read. Files under a github folder belong to that repo; files outside it are space-only. Names starting with a dot (.gitignore, .github/workflows/ci.yml) are allowed only inside a github folder; .git is never allowed. Editing a github folder: pull first (at the start of each session), edit with write, move and delete, call pending to see what will be sent, then push with a message; nothing reaches GitHub until push (push \"agent\", the default). If push reports GitHub moved ahead, pull (it keeps your changes when no file changed on both sides), then push again. Results in a github folder carry a hint once changes have waited unpushed for 30 minutes.",
+      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file, go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": \"agents\" or \"everyone\"}), locked ({\"key\": \"agents\" or \"everyone\"}: settings agents or nobody may change), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked) and services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}]); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -307,7 +324,7 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "path": {
             "type": "string",
@@ -323,17 +340,17 @@
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "State from read, list or search. Refused with state_mismatch only if a file this change touches changed since (or anything, with strict); on state_mismatch, re-read before retrying."
+            "description": "State from read, list or search. state_mismatch only if a file this change touches changed since; then re-read."
           },
           "createOnly": {
             "type": "boolean",
             "default": false,
-            "description": "Fail if path exists."
+            "description": "Fail if the path exists."
           },
           "strict": {
             "type": "boolean",
             "default": false,
-            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
+            "description": "Refuse if anything in the space changed since ifInState, not only this change's files."
           }
         },
         "required": [
@@ -365,7 +382,7 @@
               "id": {
                 "type": "string",
                 "pattern": "^[0-9a-f]{32}$",
-                "description": "Stable across edits/moves."
+                "description": "Stable across edits and moves."
               },
               "path": {
                 "type": "string",
@@ -382,12 +399,20 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
               "readOnly": {
                 "type": "string",
-                "enum": ["agents", "everyone"],
-                "description": "Set when a readOnly entry in the folder's .metatrash.json locks the file: \"agents\" (agents cannot write, edit, move, rename or delete it; refused with read_only_file) or \"everyone\" (nobody can until a person lifts the lock)."
+                "enum": [
+                  "agents",
+                  "everyone"
+                ],
+                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Git blob hash of the text; pass it to read as ifBlob."
               }
             },
             "required": [
@@ -427,7 +452,7 @@
     },
     {
       "name": "edit",
-      "description": "Change part of an existing file without sending its whole text: each edit replaces oldText, which must match the current text exactly once (include enough surrounding text to make it unique, or set replaceAll), with newText. Edits apply in order; all or none are saved, as one change in the file's history. No ifInState is needed: an oldText that no longer matches is refused with conflict, so read or search again and retry. Pass ifInState to also refuse when this file changed since that state (other files may have changed). Files written with CRLF line endings match LF oldText. Same rules as write otherwise: .metatrash.json is validated and its locked keys enforced, files marked readOnly are refused (read_only_file), the file limit applies. To create a file or replace all of it, use write.",
+      "description": "Change part of a file without sending its whole text: each edit replaces oldText, which must match the current text exactly once (include more surrounding text, or set replaceAll), with newText. Edits apply in order, all or none. No ifInState needed: an oldText that no longer matches is refused with conflict; search or read again. LF oldText matches CRLF files. Same rules as write otherwise.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -440,7 +465,7 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "path": {
             "type": "string",
@@ -482,12 +507,12 @@
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "Optional state from read, list or search: refuse with state_mismatch if this file changed since then (or anything, with strict)."
+            "description": "Optional state: refuse if this file changed since (or anything, with strict)."
           },
           "strict": {
             "type": "boolean",
             "default": false,
-            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
+            "description": "Refuse if anything in the space changed since ifInState, not only this change's files."
           }
         },
         "required": [
@@ -518,7 +543,7 @@
               "id": {
                 "type": "string",
                 "pattern": "^[0-9a-f]{32}$",
-                "description": "Stable across edits/moves."
+                "description": "Stable across edits and moves."
               },
               "path": {
                 "type": "string",
@@ -535,12 +560,151 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
               "readOnly": {
                 "type": "string",
-                "enum": ["agents", "everyone"],
-                "description": "Set when a readOnly entry in the folder's .metatrash.json locks the file: \"agents\" (agents cannot write, edit, move, rename or delete it; refused with read_only_file) or \"everyone\" (nobody can until a person lifts the lock)."
+                "enum": [
+                  "agents",
+                  "everyone"
+                ],
+                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Git blob hash of the text; pass it to read as ifBlob."
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "bytes",
+              "protected",
+              "deletable"
+            ],
+            "additionalProperties": false
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "hint": {
+            "type": "string",
+            "description": "Present when this change lies in a GitHub folder whose oldest unpushed change is over 30 minutes old (at most once per 30 minutes per folder): check pending and push when the work is ready."
+          },
+          "rebased": {
+            "type": "boolean",
+            "description": "Present (true) when ifInState was older than the space's state: the change was applied on top of newer changes to other files."
+          }
+        },
+        "required": [
+          "space",
+          "oldState",
+          "newState",
+          "file",
+          "created",
+          "changed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "append",
+      "description": "Add text to a file without reading it: at the end (creating the file if absent), or before a line with line (1 = top), e.g. a log entry, a note, or the newest entry under a changelog's title. The text starts on a line of its own. No ifInState needed. Same rules as write otherwise.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "owner/slug from spaces, or public."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "description": "Case-sensitive relative path."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Text to add; a line break ends it when it goes before a line."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Insert before this line (1 = top); leave out to add at the end."
+          }
+        },
+        "required": [
+          "space",
+          "path",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
+          },
+          "oldState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "newState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Stable across edits and moves."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "protected": {
+                "type": "boolean"
+              },
+              "deletable": {
+                "type": "boolean",
+                "description": "False for a folder's AGENTS.md and .metatrash.json."
+              },
+              "readOnly": {
+                "type": "string",
+                "enum": [
+                  "agents",
+                  "everyone"
+                ],
+                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Git blob hash of the text; pass it to read as ifBlob."
               }
             },
             "required": [
@@ -580,7 +744,7 @@
     },
     {
       "name": "list",
-      "description": "List files and snapshot state; folders are implicit. A folder may describe itself in its .metatrash.json; list when a folder has none.",
+      "description": "List files and the state; folders are implicit. With since (a state you had), only files added or changed since (with blob) and removed paths, in one answer.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -591,7 +755,7 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "prefix": {
             "type": "string",
@@ -608,7 +772,12 @@
           },
           "cursor": {
             "type": "string",
-            "description": "Previous nextCursor; keep other arguments unchanged."
+            "description": "nextCursor from the previous page; same other arguments."
+          },
+          "since": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Earlier state: list only what changed since. Not with cursor."
           }
         },
         "required": [
@@ -636,7 +805,7 @@
                 "id": {
                   "type": "string",
                   "pattern": "^[0-9a-f]{32}$",
-                  "description": "Stable across edits/moves."
+                  "description": "Stable across edits and moves."
                 },
                 "path": {
                   "type": "string",
@@ -653,12 +822,20 @@
                 },
                 "deletable": {
                   "type": "boolean",
-                  "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
+                  "description": "False for a folder's AGENTS.md and .metatrash.json."
                 },
                 "readOnly": {
                   "type": "string",
-                  "enum": ["agents", "everyone"],
-                  "description": "Set when a readOnly entry in the folder's .metatrash.json locks the file: \"agents\" (agents cannot write, edit, move, rename or delete it; refused with read_only_file) or \"everyone\" (nobody can until a person lifts the lock)."
+                  "enum": [
+                    "agents",
+                    "everyone"
+                  ],
+                  "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                },
+                "blob": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "description": "Git blob hash of the text; pass it to read as ifBlob."
                 }
               },
               "required": [
@@ -676,6 +853,13 @@
               "string",
               "null"
             ]
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "With since: paths removed since then."
           }
         },
         "required": [
@@ -689,7 +873,7 @@
     },
     {
       "name": "move",
-      "description": "Atomic same-space file move; preserves ID/text. Destination must be absent. No directory moves. AGENTS.md and .metatrash.json files never move. Files marked readOnly cannot move, and nothing moves to a locked name (read_only_file).",
+      "description": "Move a file in the space, keeping its ID and history. The destination must be absent; no folder moves; AGENTS.md, .metatrash.json and readOnly files never move.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -702,7 +886,7 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "from": {
             "type": "string",
@@ -721,12 +905,12 @@
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "State from read, list or search. Refused with state_mismatch only if a file this change touches changed since (or anything, with strict); on state_mismatch, re-read before retrying."
+            "description": "State from read, list or search. state_mismatch only if a file this change touches changed since; then re-read."
           },
           "strict": {
             "type": "boolean",
             "default": false,
-            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
+            "description": "Refuse if anything in the space changed since ifInState, not only this change's files."
           }
         },
         "required": [
@@ -758,7 +942,7 @@
               "id": {
                 "type": "string",
                 "pattern": "^[0-9a-f]{32}$",
-                "description": "Stable across edits/moves."
+                "description": "Stable across edits and moves."
               },
               "path": {
                 "type": "string",
@@ -775,12 +959,20 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
               "readOnly": {
                 "type": "string",
-                "enum": ["agents", "everyone"],
-                "description": "Set when a readOnly entry in the folder's .metatrash.json locks the file: \"agents\" (agents cannot write, edit, move, rename or delete it; refused with read_only_file) or \"everyone\" (nobody can until a person lifts the lock)."
+                "enum": [
+                  "agents",
+                  "everyone"
+                ],
+                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Git blob hash of the text; pass it to read as ifBlob."
               }
             },
             "required": [
@@ -812,7 +1004,7 @@
     },
     {
       "name": "delete",
-      "description": "Delete a file. Earlier revisions stay readable with read and a revision. A folder's AGENTS.md and .metatrash.json cannot be deleted; they go with the folder's last other file. Rewrite .metatrash.json to remove settings. Files marked readOnly cannot be deleted (read_only_file).",
+      "description": "Delete a file; old revisions stay readable. A folder's AGENTS.md and .metatrash.json go only with its last other file; readOnly files are refused.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -825,7 +1017,7 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "path": {
             "type": "string",
@@ -837,12 +1029,12 @@
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "State from read, list or search. Refused with state_mismatch only if a file this change touches changed since (or anything, with strict); on state_mismatch, re-read before retrying."
+            "description": "State from read, list or search. state_mismatch only if a file this change touches changed since; then re-read."
           },
           "strict": {
             "type": "boolean",
             "default": false,
-            "description": "Refuse when anything in the space changed since ifInState, not only the files this change touches. Use it when this change depends on other files you read."
+            "description": "Refuse if anything in the space changed since ifInState, not only this change's files."
           }
         },
         "required": [
@@ -873,7 +1065,7 @@
               "id": {
                 "type": "string",
                 "pattern": "^[0-9a-f]{32}$",
-                "description": "Stable across edits/moves."
+                "description": "Stable across edits and moves."
               },
               "path": {
                 "type": "string",
@@ -890,12 +1082,20 @@
               },
               "deletable": {
                 "type": "boolean",
-                "description": "False for a folder's AGENTS.md and .metatrash.json (protected); delete and move refuse them."
+                "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
               "readOnly": {
                 "type": "string",
-                "enum": ["agents", "everyone"],
-                "description": "Set when a readOnly entry in the folder's .metatrash.json locks the file: \"agents\" (agents cannot write, edit, move, rename or delete it; refused with read_only_file) or \"everyone\" (nobody can until a person lifts the lock)."
+                "enum": [
+                  "agents",
+                  "everyone"
+                ],
+                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Git blob hash of the text; pass it to read as ifBlob."
               }
             },
             "required": [
@@ -927,7 +1127,7 @@
     },
     {
       "name": "history",
-      "description": "File history across moves and deletes, newest first, each change with who made it (by) and, in a folder with publishedVersion, the versions that published that text (published). Read old content using entry path+revision; for a delete entry, use the next older entry. Deleted files keep their history.",
+      "description": "File history across moves and deletes, newest first, with who made each change (by) and, where published, the versions (published). Read old text with an entry's path and revision; for a delete, use the next older entry.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -938,12 +1138,12 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "id": {
             "type": "string",
             "pattern": "^[0-9a-f]{32}$",
-            "description": "Stable file ID from read/list."
+            "description": "File ID from read or list."
           },
           "limit": {
             "type": "integer",
@@ -953,7 +1153,7 @@
           },
           "cursor": {
             "type": "string",
-            "description": "Previous nextCursor; keep other arguments unchanged."
+            "description": "nextCursor from the previous page; same other arguments."
           }
         },
         "required": [
@@ -1018,11 +1218,23 @@
                   "type": "object",
                   "description": "Who made the change: name (the account's username, or its email address before the @), app (the app it was made through: Metatrash Sync for a person, the connected app such as Claude for an agent, or space key) and kind (person or agent). Absent on changes before 0.47.0 and on the service's own.",
                   "properties": {
-                    "name": {"type": "string"},
-                    "app": {"type": "string"},
-                    "kind": {"type": "string", "enum": ["person", "agent"]}
+                    "name": {
+                      "type": "string"
+                    },
+                    "app": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    }
                   },
-                  "required": ["kind"],
+                  "required": [
+                    "kind"
+                  ],
                   "additionalProperties": false
                 }
               },
@@ -1061,7 +1273,8 @@
         "path",
         "revision",
         "startLine",
-        "lineCount"
+        "lineCount",
+        "ifBlob"
       ]
     },
     "search": {
@@ -1099,6 +1312,15 @@
         "edits",
         "ifInState",
         "strict"
+      ]
+    },
+    "append": {
+      "method": "POST",
+      "path": "/api/v1/spaces/{space}/append",
+      "body": [
+        "path",
+        "text",
+        "line"
       ]
     },
     "list": {
@@ -1303,7 +1525,7 @@
     },
     {
       "name": "pull",
-      "description": "Fill or update a GitHub folder from its repository (the github service in the folder's .metatrash.json: repo and branch, default main) and record the commit it came from (the baseline for pending and push). Call it at the start of each session. The first pull needs the folder empty apart from .metatrash.json files, or holding identical copies; it refuses and names any other files. Later pulls bring the folder to the branch's latest commit (creating, updating and deleting files). Files changed here since the last pull or push stay as they are and stay pending, as long as GitHub did not change the same files; a file changed on both sides stops the pull (conflict, naming the files; no line merging). UTF-16 and UTF-32 files with a byte order mark are converted to UTF-8 with a UTF-8 byte order mark and listed under converted; GitHub keeps the original until the file is edited and pushed. Files Metatrash cannot hold (binary, other encodings such as Latin-1, over the file limit, names outside the path rules, symbolic links, submodules, .metatrash.json) are skipped and listed; they stay on GitHub untouched. Needs write access. Errors: conflict (see message), forbidden (no GitHub connection or the app cannot reach the repo), storage_limit, github_unavailable.",
+      "description": "Fill or update a GitHub folder (the github service in its .metatrash.json) from its branch; call it at the start of each session. The first pull needs the folder empty apart from .metatrash.json. Files changed here since the last pull or push stay pending unless GitHub changed them too (conflict, naming them). Files Metatrash cannot hold (binary, non-UTF encodings, too big, bad names) are skipped and listed; UTF-16/32 files are converted and listed. Needs write access.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1316,14 +1538,14 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "folder": {
             "type": "string",
             "minLength": 1,
             "maxLength": 241,
             "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,6}[A-Za-z0-9._][A-Za-z0-9._-]*/?$",
-            "description": "The GitHub folder, for example site/ (the folder holding the .metatrash.json with the github service)."
+            "description": "The GitHub folder, e.g. site/."
           }
         },
         "required": [
@@ -1468,7 +1690,7 @@
     },
     {
       "name": "pending",
-      "description": "List what push would send from a GitHub folder: files added, modified and deleted since the last pull or push (each with baseState, the space revision holding the previous version: read the path with that revision to compare). Also lists files .gitignore excludes (notPushed; .gitignore applies only to files the repository does not hold, as in git), changes push refuses (refused: files in .github/workflows/), and unchanged files pull converted to UTF-8 (converted: GitHub keeps its UTF-16/UTF-32 copy unless the file is edited; some Windows files need UTF-16, such as PowerShell 5.1 scripts with non-ASCII text and .reg files). upToDate means nothing to push; oldestChange says when the oldest pending change was written. Pass state as ifInState to push to send exactly what you checked. Read access is enough. Errors: conflict (not pulled yet).",
+      "description": "What push would send from a GitHub folder: files added, modified and deleted since the last pull or push, each with baseState (read the path at it to compare); also notPushed (.gitignore), refused (.github/workflows/) and converted. upToDate: nothing to send. Pass state as ifInState to push to send exactly what you checked.",
       "annotations": {
         "readOnlyHint": true,
         "idempotentHint": true,
@@ -1480,14 +1702,14 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "folder": {
             "type": "string",
             "minLength": 1,
             "maxLength": 241,
             "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,6}[A-Za-z0-9._][A-Za-z0-9._-]*/?$",
-            "description": "The GitHub folder, for example site/ (the folder holding the .metatrash.json with the github service)."
+            "description": "The GitHub folder, e.g. site/."
           }
         },
         "required": [
@@ -1652,7 +1874,7 @@
     },
     {
       "name": "push",
-      "description": "Send a GitHub folder's pending changes to GitHub as one commit on its branch, with your message; check pending first. All or nothing: it refuses (and sends nothing) when the folder has not been pulled, when GitHub moved ahead of the last pull or push (pull, then push again), when a change touches .github/workflows/, or when the folder's push mode is \"review\". Never forces. GitHub records the commit as the Metatrash app and signs it (Verified); the message names you in a Co-authored-by trailer (your GitHub account if you linked one under Connect GitHub, else your Metatrash username) and adds Metatrash-Space and Metatrash-Agent trailers. Files pull skipped stay on GitHub untouched; files .gitignore excludes are not sent. Nothing pending: upToDate, no commit. Changes written while a push runs stay pending. Needs write access. Limits: 1000 files, 40 MB, 10 pushes per space per 10 minutes. Errors: invalid_request, conflict (see message), state_mismatch (folder changed since ifInState), forbidden, payload_too_large, rate_limited, github_unavailable.",
+      "description": "Send a GitHub folder's pending changes as one signed commit with your message; check pending first. All or nothing: refused if not pulled, if GitHub moved ahead (pull, then push again), for .github/workflows/ changes, or when the folder's push mode is review. Never forces. Limits: 1000 files, 40 MB, 10 pushes per space per 10 minutes.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1665,25 +1887,25 @@
           "space": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "Space name. On /mcp/account: owner/slug from spaces, public, or a space ID."
+            "description": "owner/slug from spaces, or public."
           },
           "folder": {
             "type": "string",
             "minLength": 1,
             "maxLength": 241,
             "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,6}[A-Za-z0-9._][A-Za-z0-9._-]*/?$",
-            "description": "The GitHub folder, for example site/ (the folder holding the .metatrash.json with the github service)."
+            "description": "The GitHub folder, e.g. site/."
           },
           "message": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4000,
-            "description": "Commit message: a short first line, then details if useful. At most 4000 characters."
+            "description": "Commit message: a short first line, then details if useful."
           },
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "Optional state from pending (or read/list): push refuses if any file in the folder changed since then. Writes elsewhere in the space do not count."
+            "description": "Optional state from pending: refuse if a file in the folder changed since."
           }
         },
         "required": [

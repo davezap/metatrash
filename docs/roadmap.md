@@ -1,26 +1,26 @@
 # Roadmap
 
-Open work as of 0.51.1 (2026-10-24). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.52.0 (2026-10-24). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
-Follow-ups to 0.40.0 (`edit`, `search`, read line ranges), agreed with Dave
-2026-10-16 and 2026-10-18.
+`append`, blobs with `ifBlob` reads, MCP `list since` and shorter tool
+descriptions shipped in 0.52.0. What is left needs measuring first:
 
-- **`append` and `insert` tools.** Add text to a file without reading it.
-  `append` adds to the end (creating the file if absent): logs, notes,
-  agent-to-agent messages. `insert` puts text before a given line number
-  (1 = top), for files whose newest entries come first under a title block,
-  such as a changelog. Neither needs `ifInState`; same limits and rules as
-  write. Possibly one tool with an optional line (absent = end). Today `write`
-  replaces the whole file, and `edit` can already insert after known text
-  (`oldText` the title block, `newText` the title block plus the new entry),
-  which is safer when other agents may have shifted the lines; a line number
-  suits text with no unique anchor.
-- **Unchanged reads.** `read` takes the blob hash (or state) the agent already
-  has and answers `unchanged: true` without the text when the file is the
-  same. Needs read results to carry the file's blob, which MCP results do not
-  today.
+- **Which result copy the model reads.** Every MCP result is sent as
+  `structuredContent` and again as JSON text, as the MCP spec asks. If a
+  client (Claude.ai, Claude Code, ChatGPT) puts both into the model's
+  context, a read costs its text twice. Check each client with a known file
+  before changing anything; if one does, consider a smaller text copy (for
+  read, the file's text alone after a short header).
+- **Output schemas.** Tool definitions are about 15 KB without output schemas
+  and 35 KB with them. If clients pass output schemas to the model, trim
+  their descriptions too (they repeat the file object's fields for every
+  tool).
+- **Read several files at once.** One `read` with `paths` (and `ifBlob`
+  each) would save a round of calls when an agent starts in a folder
+  (AGENTS.md, .metatrash.json, README). Only worth it if agents are seen
+  making those calls one by one.
 
 ## Account lifecycle
 

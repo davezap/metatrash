@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.52.0 - Fewer tokens per change: append, unchanged reads (2026-10-24)
+
+No database, grant or configuration change. No new Go modules. Deploy the binary only. tool-schema.json is 0.14.0; mtsync and Slate Viewer are unchanged and keep working (results gain a `blob` field they ignore). Agents that connected before should reconnect, or remove and re-add the connector, to see the new tool and arguments.
+
+- **`append`** (MCP tool, `POST /api/v1/spaces/{space}/append` and the account route): `{path, text, line?}` adds text to a file without reading it. Without `line` it goes at the end and a missing file is created; with `line` it goes before that line (1 = top), for files whose newest entries come first under a title, such as a changelog. The text starts on a line of its own and, before an existing line, ends with a line break; LF breaks become CRLF in a CRLF file. No `ifInState`: it runs in the write queue on the latest state. Otherwise write's rules and result; it counts as one write. A `line` past the end is `invalid_request`, a `line` for a missing file `not_found`.
+- **Blobs on results**: read, write, edit, append, move and delete results give the file's `blob` (its Git blob hash).
+- **Unchanged reads**: `read` with `ifBlob` answers `unchanged: true` with empty `text` when the file still has that blob, so an agent can re-check a file it already holds without reading it again (MCP, and REST `?ifBlob=`).
+- **MCP `list` takes `since`**, as REST has since 0.37.0: only the files added or changed since a state (with `blob`) and the paths removed, so an agent coming back to a space need not list it all.
+- **Shorter tool descriptions**: the tool definitions an agent loads per session went from about 19.5 KB to 15.3 KB (input schemas and descriptions, all 13 tools of `/mcp/account`, `append` included), and the account server instructions from 1.4 KB to 1.1 KB. The `.metatrash.json` rules in `write` are now a compact list of keys (refusals still say which rule), and the GitHub tools no longer list their errors. The instructions now point agents at `append`, `ifBlob` and `list since`.
+- docs/api-contract.md (Operations, "Search, line ranges and edit", list), docs/architecture.md, README.md and docs/roadmap.md (what is left: measuring what clients pass to the model).
+- Tests: `insertText` (end, top, middle, one past the end, past the end, empty file, no final line break, CRLF); append, `ifBlob` and the blob on results over REST and MCP, MCP `list since`, append's refusals. The service and mtsync tests pass (without MariaDB; nothing touches the database).
+
 ## 0.51.1 - mtsync show takes the revisions history prints (2026-10-24)
 
 No server change. No schema, grant or configuration change. Only mtsync changes.
