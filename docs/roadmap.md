@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work after 0.43.0. Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.51.1 (2026-10-24). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -61,132 +61,66 @@ Open:
 
 Agreed with Dave 2026-10-18.
 
-- **Owner-set read-only files** (private spaces). Partly done in 0.45.0:
-  `locked` in a folder's `.metatrash.json` keeps settings out of agents'
-  reach, and only Metatrash Sync (the built-in client
-  `{issuer}/oauth/clients/sync`) can change them. Still open: locking files
-  themselves (an `AGENTS.md`, a folder), and whether members' sync clients
-  count as the owner's (today any Metatrash Sync write counts as a person's).
-- **Public space AGENTS.md.** Since 0.45.0 anyone can rewrite the public
-  space's root `AGENTS.md`, and agents read it first, so anyone can plant
-  instructions there. Lock it (read-only to agents in configured spaces) once
-  file locks exist.
-- **Folder configurator in Slate Viewer.** A `…` button beside the selected
-  file or folder opens its settings, written to the folder's
-  `.metatrash.json`: read-only (owner only), purpose and child descriptions,
-  and later services and triggers (GitHub, folder actions).
-- **Folder selection in Slate Viewer.** The file tree selects folders as well
-  as files, so the configurator has something to act on.
+- **Owner-set read-only files:** done in 0.45.0–0.46.0. `locked` keys and
+  `readOnly` files in a folder's `.metatrash.json`, each at level `agents`
+  or `everyone`. Still open: whether members' sync clients count as the
+  owner's (today any Metatrash Sync write counts as a person's).
+- **Public space AGENTS.md.** Anyone can rewrite the public space's root
+  `AGENTS.md`, and agents read it first, so anyone can plant instructions
+  there. Lock it with `readOnly` at level `everyone` (or `agents`).
+- **Folder configurator and folder selection in Slate Viewer:** done. The
+  tree selects folders, and a folder's Properties (right-click, or Alt+Enter)
+  writes its `.metatrash.json`: locks, read-only files, publishing and the
+  acknowledge service. Still to add there: triggers (GitHub, folder actions).
 
 ## Forms and quizzes
 
 Design: Dave's "Forms and quizzes: design proposal" doc
 (https://claude.ai/artifact/WNBXHhfrc5Ukkvg4De7eU6, 2026-10-23), whose
 "Decisions so far" section records Dave's answers. Syntax and behaviour of
-what has shipped: docs/forms.md.
+what has shipped: docs/forms.md; release details: CHANGELOG.md.
 
-**Shipped (phase 1, forms)**
+**Done**
 
-- 0.49.0 (Slate 0.18.0, Slate Viewer 0.15.0): form templates (front matter
-  `form`, `title`, `submitTo`; `{{type name=… …}}` fields), schema v13 table
-  `metatrash_form_submissions`, `POST`/`GET .../submissions`, mtsync
-  `submit`/`submissions`/`submission`, Viewer fill mode and My Submissions.
-  Server re-checks every answer and files the copy, with the answers in its
-  front matter, in the review space (same owner as the form's space).
-- 0.49.1: REST spaces listing names the `account`; mtsync `whoami`; Viewer
-  0.15.1 Switch Account.
-- 0.49.2: the website on Slate 0.18.0 (`?raw` images, https images, wiki
-  links).
-- 0.49.3 (Slate 0.19.0, Viewer 0.16.0): no Fill In step. A form's Preview
-  is the form, ready to fill in; drafts save as you type (localStorage);
-  Edit/Source show the template. Greyed-out fields (`readOnly`) where it
-  can't be sent: outside its space, unsaved changes, the published version,
-  and always on the website. Preview hides front matter everywhere.
-- 0.49.4 (Slate 0.19.1, Viewer 0.16.1): sending a form in an `acknowledge`
-  folder also confirms it as read at the published version (`acknowledged`
-  in the answer). Website stylesheet fixed for Slate's three-row layout.
+- **Forms (phase 1):** Metatrash 0.49.0–0.49.4, Slate 0.18.0–0.19.1, Slate
+  Viewer 0.15.0–0.16.1. Form templates (`form`, `title`, `submitTo`,
+  `{{type name=… …}}` fields), schema v13, `mtsync submit`/`submissions`,
+  Viewer fill mode with drafts saved as you type, My Submissions and Switch
+  Account. The server re-checks every answer and files a copy in the review
+  space (same owner as the form's space). Sending a form in an
+  `acknowledge` folder also confirms it as read.
+- **Review (phase 2):** Metatrash 0.50.0, Slate Viewer 0.17.0. Every copy is
+  `submitted`, then `approved` or `declined`, with `reviewedBy` and a note
+  (schema v14). Reviewers (write access to the review space) review in
+  Slate Viewer's review bar or with `mtsync review`; the sender sees the
+  result in My Submissions. In a published folder the published text of a
+  form is what's sent and checked.
+- **Quizzes:** 0.50.0, reworked in Metatrash 0.51.0 and Slate Viewer 0.18.0
+  (Dave, 2026-10-24). `quiz: true`, `passMark` (default 100), `retryAfter`
+  (default 1h), `unmarked` (fields that aren't questions). `covers` is a
+  comma list of files, `*` patterns, `folder/` and `/`-rooted paths (default
+  `*.md`, across published folders). A quiz is its own item to pass, with
+  its own red dot until passed; reading the covered policies is a separate
+  I Have Read This, and `readFirst` (default on) refuses the quiz until they
+  are read. The answer key is `<space slug>-<form>-answers.md` in the
+  `submitTo` folder, made with **Use This as Answers**, valid only for the
+  quiz text it came from; without one only reviewers can send. Choice-type
+  answers are marked on send, free text waits for a reviewer's tick; people
+  see their ticks, never the key. Changing the quiz text and publishing asks
+  everyone again; changing only a policy doesn't.
 
-Where the code is: `internal/service/forms.go` (parsing, checks, the filed
-copy), `submissions.go` (endpoint, receipts, acknowledge on send); Slate
-`src/forms.js` (same parser) and fill mode in `src/slate.js` (`startFill`
-with `inPreview`/`readOnly`, `slate:mode-change`); Viewer `src/lib/forms.ts`,
-`FormBanner.svelte`, `SubmissionsDialog.svelte` and the Forms section of
-`App.svelte` (`syncFormView`). Server and Slate parsers must stay in step.
+Where the code is: server `internal/service/forms.go` (parsing, the filed
+copy), `submissions.go` (sending, receipts, retries, read-first),
+`quiz.go` (keys, covers, marking), `reviews.go`, `acknowledgements.go`
+(`linkQuizzes`); mtsync `cmd/mtsync/forms.go` and `policies.go`; Slate
+`src/forms.js` and fill mode in `src/slate.js`; Viewer `src/lib/forms.ts`,
+`policies.ts`, `FormBanner.svelte`, `ReviewBanner.svelte`,
+`PolicyBanner.svelte`, `SubmissionsDialog.svelte`. Server and Slate
+parsers must stay in step.
 
 Gotchas: front matter must start on line 1 (Viewer's New File adds a
-`# name` heading first, so a pasted template isn't a form until that line
-goes; a published version taken before the fix stays broken until the next
-publish). A file with `submittedAt` is a filed copy, never a form.
-
-**Shipped (phase 2, review and quizzes): 0.50.0 (mtsync 0.50.0, Slate
-Viewer 0.17.0; Slate unchanged), as agreed with Dave 2026-10-23**
-
-Every filed copy needs a review, automatic, by a person, or both (Dave): a
-leave form needs approving, and scoring the pass mark on a quiz is the same
-thing. So phase 2 builds one review step for every submission, and quizzes
-use it.
-
-- **Status.** Each copy (and its receipt) has a `status`: `submitted`
-  (waiting for review), `approved` or `declined`. The copy's front matter
-  also gets `submission` (the receipt id), `templateBlob`, and after review
-  `reviewedBy`, `reviewedAt` and `note`. Schema v14 adds these to
-  `metatrash_form_submissions` (rows are now updated by reviews; grants add
-  UPDATE).
-- **Reviewing.** A reviewer (a person with write access to the review
-  space) reviews a copy in that space: `POST .../reviews` on the review
-  space with `{"path", "status", "note", "marks"}`; `mtsync review`; Slate
-  Viewer shows a review bar on a copy (Approve / Decline with a note for a
-  form; a tick per free-text answer and Reviewed for a quiz). The server
-  updates the receipt and rewrites the copy's front matter (and the ✓/✗).
-  The sender sees the status and note in My Submissions.
-- **Quiz template keys:** `quiz: true`, `covers: wfh-policy.md` (a file the
-  folder's acknowledge service tracks, in the same folder), `passMark`
-  (percent, default 100), `retryAfter` (`30m`, `1h`, `2d`; default `1h`,
-  `0` for none), `unmarked` (comma list of fields that are not questions,
-  such as a name, so a key answer there is never marked).
-- **Answer key:** a filled-in copy of the quiz in the review space, in the
-  quiz's `submitTo` folder, named `<space slug>-<form>-answers.md`. A
-  reviewer makes it by sending the quiz (reviewers may send it before there
-  is a key) and choosing **Use This as Answers** on their copy, which copies
-  it to that name. The key only counts for the quiz text it was made from
-  (`templateBlob`); after the quiz changes, make a new one.
-- **No key, no quiz.** Without a key for the quiz as published, sending is
-  refused for everyone but reviewers.
-- **Marking.** On send the server marks every answer the key has an answer
-  for: choice, select, yesno, number, date and time against the key; a
-  field the key leaves blank is not marked (such as a name). Free text
-  (text, textarea, email, phone) with a key answer waits for a reviewer's
-  tick. The copy shows ✓ or ✗ after each marked answer; the person sees
-  their ticks, never the key. Score = correct ÷ marked; at or over
-  `passMark` the copy is `approved`, under it `declined`; with free text
-  still to tick it stays `submitted` and the server marks it when the
-  reviewer chooses Reviewed.
-- **Changed in 0.51.0 (Dave, 2026-10-24):** a quiz covers several
-  policies (`covers` list with patterns and folders), is its own item to
-  pass with its own red dot, and passing it is separate from reading;
-  `readFirst` (default on) makes people read the covered policies first.
-  The rest of this paragraph is how 0.50.0 worked.
-- **Passing confirms the policy (0.50.0).** A quiz is never a file to read
-  itself (no red dot). The file it `covers` counts as read while the person has an
-  approved copy of the quiz as published now: a new published version asks
-  again only if the quiz changed, not the policy (Dave). I Have Read This
-  is refused for a covered file.
-- **Retries.** After a fail the person can fix their answers and resend, or
-  start again, once `retryAfter` has passed (the server enforces it). While
-  a copy waits for review, and after a pass, the quiz can't be sent again.
-- **Published version is what's sent.** In a published folder the form that
-  counts is its published text: Slate Viewer sends it from the published
-  view (greyed out in Show Draft), and the server checks against it
-  (`"version"` in the request, `mtsync submit -published N`). A form added
-  since the version is sent as it is; a quiz must be published first.
-- Not in phase 2: `needs-info`, email, multi-step approval (phase 3).
-
-Where the code is: `internal/service/quiz.go` (keys, marking, quiz state),
-`reviews.go` (the reviews endpoint), `submissions.go` (published send,
-retries), `acknowledgements.go` (`linkQuizzes`, covered files); mtsync
-`review` in `cmd/mtsync/forms.go`; Viewer `ReviewBanner.svelte`,
-`FormBanner.svelte` (quiz states), `PolicyBanner.svelte` (Take the Quiz),
-`parseFiledCopy`/`answerKeyText` in `src/lib/forms.ts`.
+`# name` heading first). A file with `submittedAt` is a filed copy, never a
+form. A quiz must be published before it can be taken.
 
 **Phase 3, notifications and more (later; Dave, 2026-10-23)**
 
@@ -208,6 +142,21 @@ retries), `acknowledgements.go` (`linkQuizzes`, covered files); mtsync
 
 Published versions and read acknowledgements shipped in 0.48.0 (Slate Viewer
 0.13.0). Still open:
+
+- **Open question: publishing folders inside folders** (Dave, 2026-10-24).
+  A published version belongs to one folder: each file is published by the
+  nearest folder above it with its own `publishedVersion`. Publishing a
+  subfolder on its own (Dave did this with `policies/isg`, now v2 beside
+  `policies/` at v5) makes it a separate unit, and the parent's versions
+  stop including it. Good: sets of policies can be released on their own
+  schedules, with their own history and owners. Bad: it surprises people
+  (publishing the parent looks like it covers everything), each publishing
+  subfolder needs its own acknowledge service because services aren't
+  inherited, and two version numbers are harder to explain. To decide:
+  keep this, or make publishing include subfolders by default. Either way,
+  Slate Viewer could warn before publishing a folder inside one that is
+  already published, and show which folder each file publishes with.
+  Today, to fold a subfolder back in, remove its `publishedVersion`.
 
 - **Per-folder permissions** (Dave, 2026-10-22: think more before building).
   Today access is per space: each member or connection is read-only or
@@ -262,6 +211,25 @@ the `review` push mode, which needs a review screen.
 - Deferred with Dave 2026-10-12: bulk first download, on-demand files like
   OneDrive, automatic three-way merge of conflicts.
 
+## Website document viewer layout
+
+Dave, 2026-10-24: on a document page (owned spaces, `/docs/`, the public
+explorer) the outer page scrolls and the document doesn't fill the window:
+Slate's status bar sits part way down with empty space below it, and the
+browser shows a second scroll bar for the whole page. Wanted:
+
+- The outer page never has a vertical scroll bar. Header and footer stay put.
+- The document (Slate's toolbar, document and status bar) uses all the
+  height between the header and the footer, and scrolls inside itself.
+- The space navigation (the explorer tree) has its own scroll bar when it
+  overflows, independent of the document.
+
+Likely a flex column on the page body (`height: 100dvh`, header and footer
+`flex: none`, the main row `flex: 1; min-height: 0`), with the tree and
+Slate's container each `overflow: auto; min-height: 0`. Check
+`internal/service/web/style.css` and `page.html`, and narrow screens, where
+the tree may stack above the document.
+
 ## Maintenance
 
 - **Old READMEs**: spaces made before 0.45.0 still hold the old agent
@@ -276,7 +244,7 @@ the `review` push mode, which needs a review screen.
 
 ## Owner checks still to run
 
-Live checks not yet reported done. The server is at schema v11 with current
+Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
 
 From 0.30.0 (2026-10-09):

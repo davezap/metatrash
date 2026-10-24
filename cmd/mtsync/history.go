@@ -81,8 +81,13 @@ type historyItem struct {
 	File string `json:"file,omitempty"`
 }
 
-// revisionPattern is a full Git commit hash, as history gives revisions.
-var revisionPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+// revisionPattern is a Git commit hash: all 40 characters, as history -json
+// gives them, or at least 7 of its first ones, as the plain listing prints.
+var revisionPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// historyScanLimit is how far back show looks in a file's history for a
+// revision: 10 pages of 100.
+const historyScanLimit = 1000
 
 // showHistory lists changes to a synced file, newest first.
 func showHistory(ctx context.Context, file string, limit, offset int, asJSON bool, out io.Writer) error {
@@ -147,24 +152,75 @@ func showHistory(ctx context.Context, file string, limit, offset int, asJSON boo
 	return nil
 }
 
-// showRevision prints a synced file's text as it was at revision. For a file
-// since renamed, give the path it had then (history's "file").
+// showRevision prints a synced file's text as it was at revision, which may
+// be shortened as history prints it. A revision in the file's history is read
+// at the path the file had then, so the file's current name works across
+// renames; for a file no longer in the folder, give the path it had then
+// (history's "file") and the whole revision.
 func showRevision(ctx context.Context, file, revision string, out io.Writer) error {
 	e, rel, err := syncedFile(file)
 	if err != nil {
 		return err
 	}
+	revision = strings.ToLower(revision)
 	if !revisionPattern.MatchString(revision) {
-		return fmt.Errorf("%q is not a revision; use one from mtsync history (all 40 characters)", revision)
+		return fmt.Errorf("%q is not a revision; use one from mtsync history", revision)
 	}
 	c := folderClient(e, tokenSource(e.Server))
-	text, err := c.read(ctx, rel, revision)
+	readPath := rel
+	if id, idErr := fileID(e, rel); idErr == nil {
+		entry, found, err := findRevision(ctx, c, id, revision)
+		if err != nil {
+			return err
+		}
+		switch {
+		case found && entry.Operation == "delete":
+			return fmt.Errorf("%s is the file's deletion, which has no text; show the change before it", entry.Revision[:12])
+		case found && !strings.HasPrefix(entry.Path, c.prefix):
+			return fmt.Errorf("at %s the file was %s, outside the synced folder", entry.Revision[:12], entry.Path)
+		case found:
+			revision, readPath = entry.Revision, strings.TrimPrefix(entry.Path, c.prefix)
+		case len(revision) < 40:
+			return fmt.Errorf("%s is not in the last %d changes to %s; give all 40 characters (mtsync -json history)", revision, historyScanLimit, rel)
+		}
+	} else if len(revision) < 40 {
+		return fmt.Errorf("%w; for a short revision give the file's current name, or give all 40 characters (mtsync -json history)", idErr)
+	}
+	text, err := c.read(ctx, readPath, revision)
 	if errorCode(err) == "not_found" {
-		return fmt.Errorf("%s did not exist at %s; a delete entry has no text, so pick the one before it (or the path it had then): %w", path.Join(e.Space, rel), revision[:12], err)
+		return fmt.Errorf("%s did not exist at %s; a delete entry has no text, so pick the one before it (or the path it had then): %w", path.Join(e.Space, readPath), revision[:12], err)
 	}
 	if err != nil {
 		return err
 	}
 	_, err = io.WriteString(out, text)
 	return err
+}
+
+// findRevision looks for the entry in the file's history whose revision
+// starts with prefix, newest first. Two different matches are refused.
+func findRevision(ctx context.Context, c *client, id, prefix string) (historyEntry, bool, error) {
+	var match historyEntry
+	found := false
+	for offset := 0; offset < historyScanLimit; offset += 100 {
+		entries, more, err := c.history(ctx, id, 100, offset)
+		if err != nil {
+			return historyEntry{}, false, err
+		}
+		for _, h := range entries {
+			if !strings.HasPrefix(h.Revision, prefix) {
+				continue
+			}
+			if found && h.Revision != match.Revision {
+				return historyEntry{}, false, fmt.Errorf("%s matches more than one change to this file; give more characters", prefix)
+			}
+			if !found {
+				match, found = h, true
+			}
+		}
+		if !more || (found && len(prefix) == 40) {
+			break
+		}
+	}
+	return match, found, nil
 }

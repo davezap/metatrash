@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.51.1 - mtsync show takes the revisions history prints (2026-10-24)
+
+No server change. No schema, grant or configuration change. Only mtsync changes.
+
+- **`mtsync show` accepts short revisions**: the 12 characters the plain `mtsync history` listing prints (or any 7 or more, any case), not only all 40 from `-json`. mtsync finds the revision in the file's history (its newest 1,000 changes) and refuses a prefix that matches two changes. A revision from the file's history is read at the path the file had then, so the file's current name works for revisions from before a rename; a delete entry says it has no text. Given a name the file no longer has (history's `file`), a short revision is refused with a hint and all 40 characters work as before.
+- Tests: short, 7-character, upper-case and full revisions by the current name across a rename, the move itself, a short revision with the old name, one not in the history, and a full revision the path didn't exist at.
+
 ## 0.51.0 - Quizzes cover several policies (2026-10-24)
 
 No schema, grant or configuration change. Deploy the binary only. mtsync 0.51.0 reads the new `policies` shape; Slate Viewer 0.18.0 needs both.

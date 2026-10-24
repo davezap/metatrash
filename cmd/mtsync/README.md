@@ -169,9 +169,12 @@ that revision's path maps to) and `nextOffset` (null at the end). The file has
 to have synced once, since its ID comes from the folder's `.mtsync/state.json`.
 
 `mtsync show FILE REVISION` prints the file's text at a revision from
-`history`, exactly as stored. For a revision from before a rename, give the
-path it had then (the entry's `file`). A `delete` entry has no text; show the
-one before it. In a folder with a published version (metatrash 0.48.0),
+`history`, exactly as stored. REVISION may be shortened as the plain listing
+prints it (7 or more characters; metatrash 0.51.1's mtsync): mtsync finds it
+in the file's newest 1,000 changes and reads the path the file had then, so
+the file's current name works for revisions from before a rename. For a file
+no longer in the folder, give the path it had then (the entry's `file`) and
+all 40 characters. A `delete` entry has no text; show the one before it. In a folder with a published version (metatrash 0.48.0),
 `history` marks each entry that is the text of a published version
 (`[published v3]`; `published` in `-json`).
 
@@ -234,7 +237,7 @@ All commands:
 | `log [N]` | the last N lines of the service log |
 | `export SPACE [FILE]` | save the space as it is now to a zip, for backups |
 | `history FILE` | a synced file's changes, newest first (`-limit`, `-offset`, `-json`) |
-| `show FILE REVISION` | print a synced file's text at a revision |
+| `show FILE REVISION` | print a synced file's text at a revision (short or full, as `history` prints it) |
 | `policies PLACE` | published folders and files, and what you still have to read (`-json`) |
 | `ack FILE VERSION` | confirm you read FILE as published in VERSION |
 | `readers PLACE` | who has read what (read-write access; `-json`) |

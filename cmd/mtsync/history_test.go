@@ -88,6 +88,19 @@ func TestHistoryAndShow(t *testing.T) {
 		t.Fatalf("show old name: %v %q", err, out.String())
 	}
 
+	// The short revisions the plain listing prints work too, and the current
+	// name finds a revision from before the rename.
+	for _, rev := range []string{all.Entries[1].Revision[:12], all.Entries[1].Revision[:7], strings.ToUpper(all.Entries[1].Revision[:12]), all.Entries[1].Revision} {
+		out.Reset()
+		if err := showRevision(ctx, renamed, rev, &out); err != nil || out.String() != "three\n" {
+			t.Fatalf("show %s by current name: %v %q", rev, err, out.String())
+		}
+	}
+	out.Reset()
+	if err := showRevision(ctx, renamed, all.Entries[0].Revision[:12], &out); err != nil || out.String() != "three\n" {
+		t.Fatalf("show the move: %v %q", err, out.String())
+	}
+
 	// The plain listing names the next page.
 	out.Reset()
 	if err := showHistory(ctx, renamed, 1, 0, false, &out); err != nil || !strings.Contains(out.String(), "move") || !strings.Contains(out.String(), "-offset 1 history") {
@@ -108,7 +121,13 @@ func TestHistoryAndShow(t *testing.T) {
 	if err := showRevision(ctx, renamed, "abc", &out); err == nil || !strings.Contains(err.Error(), "not a revision") {
 		t.Fatalf("short revision: %v", err)
 	}
-	if err := showRevision(ctx, renamed, first.Entries[0].Revision, &out); err == nil || !strings.Contains(err.Error(), "did not exist") {
+	if err := showRevision(ctx, file, first.Entries[0].Revision[:12], &out); err == nil || !strings.Contains(err.Error(), "current name") {
+		t.Fatalf("short revision with the old name: %v", err)
+	}
+	if err := showRevision(ctx, renamed, "0000000", &out); err == nil || !strings.Contains(err.Error(), "not in the last") {
+		t.Fatalf("short revision not in history: %v", err)
+	}
+	if err := showRevision(ctx, file, strings.Repeat("0", 40), &out); err == nil || !strings.Contains(err.Error(), "did not exist") {
 		t.Fatalf("path not there at revision: %v", err)
 	}
 }
