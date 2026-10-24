@@ -75,7 +75,12 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	if res.Code != 403 || !strings.Contains(res.Body.String(), "Confirm it’s you first") {
 		t.Fatalf("add without confirming: %d %s", res.Code, res.Body)
 	}
-	res = oauthCall(w.h, "POST", "/account/confirm/send", url.Values{"csrf": {"0" + sendCSRF[1:]}}, session)
+	// Change the token's first character (one that starts with 0 gets a 1).
+	tampered := "0" + sendCSRF[1:]
+	if tampered == sendCSRF {
+		tampered = "1" + sendCSRF[1:]
+	}
+	res = oauthCall(w.h, "POST", "/account/confirm/send", url.Values{"csrf": {tampered}}, session)
 	if res.Code != 403 {
 		t.Fatalf("bad CSRF: %d", res.Code)
 	}
