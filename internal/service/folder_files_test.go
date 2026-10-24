@@ -283,6 +283,8 @@ func TestReadOnlyFiles(t *testing.T) {
 	// Agents can't change, rename, move or delete them, or create one.
 	do(agent, "write", Input{Path: "docs/spec.md", Text: text("changed\n")}, "read_only_file")
 	do(agent, "edit", Input{Path: "docs/spec.md", Edits: []Edit{{OldText: "spec", NewText: "x"}}}, "read_only_file")
+	do(agent, "append", Input{Path: "docs/spec.md", Text: text("more")}, "read_only_file")
+	do(agent, "append", Input{Path: "docs/new.pdf", Text: text("x")}, "read_only_file")
 	do(agent, "delete", Input{Path: "docs/spec.md"}, "read_only_file")
 	do(agent, "move", Input{From: "docs/spec.md", To: "docs/spec2.md"}, "read_only_file")
 	do(agent, "move", Input{From: "docs/notes.md", To: "docs/old/notes.md"}, "read_only_file")

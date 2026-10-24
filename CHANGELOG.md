@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.52.2 - Document pages fill the window (2026-10-24)
+
+No database, grant or configuration change. Deploy the binary only. tool-schema.json is unchanged (0.14.0); mtsync and Slate Viewer are unchanged.
+
+- **The page no longer scrolls on document pages** (`/docs/`, owned spaces, the public explorer; Dave): the page is exactly the window's height, so the browser shows no page scroll bar. Header, space bar and footer keep their height and stay in view, and the document (its tab and heading, then Slate's toolbar, text and status bar, or the plain-text view) takes all the height between, scrolling inside itself. Slate's status bar now sits on the footer instead of part way down with empty space below it.
+- **The explorer tree scrolls on its own** when it is taller than the space between header and footer, and the open file's entry is scrolled into view when the page loads. On phone widths the tree sits above the document and takes at most a quarter of the window.
+- The home, About and account pages are unchanged (the layout applies only to pages with the explorer, marked `class="viewer"` on `body`).
+- Checked in Chromium at 1400×720, 760×900 and 390×780 with a long Markdown file, a JSON file and a tree longer than the window: no page scroll, wheel scrolling moves only the document or only the tree. The service tests pass.
+
+## 0.52.1 - Clearer append refusals (2026-10-24)
+
+No database, grant or configuration change. Deploy the binary only. tool-schema.json is unchanged (0.14.0).
+
+- **append checked live** on 0.52.0 through Claude Code: a new file, adding at the end of a file without a final line break, before line 1 and line 2, one past the last line, several lines with and without a final break, `ifBlob` before and after, `list since`, history (`write`, by the agent), a new folder (its AGENTS.md and .metatrash.json came with it and went with its last file), a bad `.metatrash.json` and a `readOnly` file refused. All behaved as documented; the blob matched `git hash-object`.
+- **Refusals say more**: `line` for a missing file now says the file does not exist and to leave `line` out to create it (was the generic "File or revision not found."); a `line` past the end of a one-line file says "1 line"; the `read_only_file` refusal lists append among what agents (or nobody) can do to the file.
+- Tests: append to a read-only file and to a new name a `readOnly` pattern covers; the one-line wording.
+
 ## 0.52.0 - Fewer tokens per change: append, unchanged reads (2026-10-24)
 
 No database, grant or configuration change. No new Go modules. Deploy the binary only. tool-schema.json is 0.14.0; mtsync and Slate Viewer are unchanged and keep working (results gain a `blob` field they ignore). Agents that connected before should reconnect, or remove and re-add the connector, to see the new tool and arguments.

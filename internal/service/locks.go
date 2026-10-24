@@ -146,9 +146,9 @@ func fileLock(rules map[string]lockMap, p string) string {
 
 // readOnlyFile is the refusal of a change to a locked file.
 func readOnlyFile(p, level string) *Error {
-	who := "Agents cannot write, edit, move, rename or delete it, or create a file of that name; only a person can, through Metatrash Sync or Slate Viewer."
+	who := "Agents cannot write, edit, append to, move, rename or delete it, or create a file of that name; only a person can, through Metatrash Sync or Slate Viewer."
 	if level == lockEveryone {
-		who = "Nobody can write, edit, move, rename or delete it, or create a file of that name, until a person lifts the lock in " + folderConfigName + "."
+		who = "Nobody can write, edit, append to, move, rename or delete it, or create a file of that name, until a person lifts the lock in " + folderConfigName + "."
 	}
 	return problem(403, "read_only_file", p+" is read-only (\""+level+"\"): a readOnly entry in its folder's "+folderConfigName+" names it. "+who)
 }

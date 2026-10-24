@@ -334,7 +334,7 @@ func TestInsertText(t *testing.T) {
 			t.Errorf("insertText(%q, %q, %d) = %q, %v; want %q", c.text, c.add, c.line, got, err, c.want)
 		}
 	}
-	if _, err := insertText("one\n", "x", 3); err == nil {
-		t.Error("line past the end accepted")
+	if _, err := insertText("one\n", "x", 3); err == nil || !strings.Contains(err.Error(), "which has 1 line;") {
+		t.Errorf("line past the end: %v", err)
 	}
 }

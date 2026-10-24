@@ -1,11 +1,14 @@
 # Roadmap
 
-Open work as of 0.52.0 (2026-10-24). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.52.2 (2026-10-24). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
 `append`, blobs with `ifBlob` reads, MCP `list since` and shorter tool
-descriptions shipped in 0.52.0. What is left needs measuring first:
+descriptions shipped in 0.52.0. All were checked live through Claude Code on
+2026-10-24 (append's cases are listed under 0.52.1 in CHANGELOG.md) and work as
+documented; 0.52.1 only made append's refusals clearer. What is left needs
+measuring first:
 
 - **Which result copy the model reads.** Every MCP result is sent as
   `structuredContent` and again as JSON text, as the MCP spec asks. If a
@@ -211,25 +214,6 @@ the `review` push mode, which needs a review screen.
 - Deferred with Dave 2026-10-12: bulk first download, on-demand files like
   OneDrive, automatic three-way merge of conflicts.
 
-## Website document viewer layout
-
-Dave, 2026-10-24: on a document page (owned spaces, `/docs/`, the public
-explorer) the outer page scrolls and the document doesn't fill the window:
-Slate's status bar sits part way down with empty space below it, and the
-browser shows a second scroll bar for the whole page. Wanted:
-
-- The outer page never has a vertical scroll bar. Header and footer stay put.
-- The document (Slate's toolbar, document and status bar) uses all the
-  height between the header and the footer, and scrolls inside itself.
-- The space navigation (the explorer tree) has its own scroll bar when it
-  overflows, independent of the document.
-
-Likely a flex column on the page body (`height: 100dvh`, header and footer
-`flex: none`, the main row `flex: 1; min-height: 0`), with the tree and
-Slate's container each `overflow: auto; min-height: 0`. Check
-`internal/service/web/style.css` and `page.html`, and narrow screens, where
-the tree may stack above the document.
-
 ## Maintenance
 
 - **Old READMEs**: spaces made before 0.45.0 still hold the old agent
@@ -246,6 +230,15 @@ the tree may stack above the document.
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.52.2 (2026-10-24):
+
+- **Document viewer layout:** on a long document in `/docs/`, an owned space
+  and the public explorer, the browser shows no page scroll bar at any window
+  height; header and footer stay put; Slate's status bar sits on the footer;
+  the document and the explorer tree each scroll on their own; a file deep in
+  a long tree is scrolled into view on load. Check a phone width too (tree
+  above the document, at most a quarter of the height).
 
 From 0.30.0 (2026-10-09):
 

@@ -180,7 +180,7 @@ func (s *Service) appendText(ctx context.Context, r *repository, space string, i
 		}
 		text = string(b)
 	} else if in.Line > 0 {
-		return nil, missing()
+		return nil, problem(404, "not_found", fmt.Sprintf("%s does not exist, so it has no line %d; leave line out to create it.", in.Path, in.Line))
 	}
 	text, err = insertText(text, *in.Text, in.Line)
 	if err != nil {
@@ -207,7 +207,11 @@ func insertText(text, add string, line int) (string, error) {
 	}
 	lines := splitLines(text)
 	if line > len(lines)+1 {
-		return "", invalid(fmt.Sprintf("line %d is past the end of the file, which has %d lines; leave line out to add at the end.", line, len(lines)))
+		has := fmt.Sprintf("%d lines", len(lines))
+		if len(lines) == 1 {
+			has = "1 line"
+		}
+		return "", invalid(fmt.Sprintf("line %d is past the end of the file, which has %s; leave line out to add at the end.", line, has))
 	}
 	if line == 0 || line == len(lines)+1 {
 		if text != "" && !strings.HasSuffix(text, "\n") {

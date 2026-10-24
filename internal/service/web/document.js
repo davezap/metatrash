@@ -225,6 +225,10 @@
     }
   });
 
+  // The tree scrolls on its own: show the open file's entry in a long tree.
+  const current = tree && tree.querySelector("a[aria-current]");
+  if (current) current.scrollIntoView({ block: "nearest" });
+
   if (!tree || !window.fetch || !window.DOMParser || !window.history.pushState) return;
 
   function openAncestors(link) {

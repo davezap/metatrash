@@ -9,7 +9,7 @@
 {{if not (or .Home .About)}}<script src="{{.BasePath}}/assets/slate.js" defer></script><script src="{{.BasePath}}/assets/document.js" defer></script>{{end}}
 {{if .Home}}<script src="{{.BasePath}}/assets/activity.js" defer></script><script src="{{.BasePath}}/assets/copy.js" defer></script>{{end}}
 </head>
-<body data-base-path="{{.BasePath}}">
+<body data-base-path="{{.BasePath}}"{{if not (or .Home .About)}} class="viewer"{{end}}>
 <a class="skip" href="#main">Skip to content</a>
 <header><a class="brand" href="{{.BasePath}}/">metatrash<span>.</span></a><nav aria-label="Main navigation">{{if .AccountsEnabled}}<a href="{{.BasePath}}/account">Your account</a>{{end}}{{if or (not .Private) .Web}}<a href="{{.BasePath}}/spaces/public/">Public space ↗</a>{{end}}</nav></header>
 {{if .Home}}
