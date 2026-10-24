@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.51.0 - Quizzes cover several policies (2026-10-24)
+
+No schema, grant or configuration change. Deploy the binary only. mtsync 0.51.0 reads the new `policies` shape; Slate Viewer 0.18.0 needs both.
+
+- **A quiz covers several policies**: `covers` is a comma-separated list of files (`wfh-policy.md`), patterns (`TG-ISG-*.md`, one folder level) and folders (`firmware/`, all of it), from the quiz's folder or, starting with `/`, the top of the space, in any published folder. Without `covers` a quiz covers the Markdown files of its folder.
+- **Passing a quiz is separate from reading** (Dave): the quiz is now a tracked item of its own, outstanding until passed (`quiz` on the quiz file, with `covers`; covered files list it in `quizzes`). Covered files are confirmed with I Have Read This again; acknowledging a quiz itself is `quiz_required`. A new version of a policy asks to read it again, not for the quiz.
+- **`readFirst`** (default `true`): the quiz is refused with `read_first` (409) until the person has confirmed reading every file it covers; `readFirst: false` allows it any time. The quiz's `toRead` lists what is left.
+- mtsync `policies` prints a quiz's state, how many files it covers and how many to read first.
+- Tests: covers entries, patterns, folders and `/`; against MariaDB, read-first, a quiz and its policy done separately, a policy republish (read again, quiz still passed), a changed quiz, and a quiz covering another published folder with `readFirst: false`.
+
 ## 0.50.0 - Reviews and quizzes (2026-10-23)
 
 **Database schema v14** (`deploy/account-schema-v14.sql`, then `deploy/account-grants.sql`): apply both before the new binary starts; it refuses to start on v13. No configuration change. No new Go modules. Tool schema unchanged. mtsync 0.50.0 adds `review` and `submit -published N`, and `policies -json` passes on `covers` and `quiz`; Slate Viewer 0.17.0 uses them. **CI**: `.github/workflows/ci.yml` must apply schema v1–v14 and set `schema_version = 14`.

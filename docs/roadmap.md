@@ -161,8 +161,13 @@ use it.
   `passMark` the copy is `approved`, under it `declined`; with free text
   still to tick it stays `submitted` and the server marks it when the
   reviewer chooses Reviewed.
-- **Passing confirms the policy.** A quiz is never a file to read itself
-  (no red dot). The file it `covers` counts as read while the person has an
+- **Changed in 0.51.0 (Dave, 2026-10-24):** a quiz covers several
+  policies (`covers` list with patterns and folders), is its own item to
+  pass with its own red dot, and passing it is separate from reading;
+  `readFirst` (default on) makes people read the covered policies first.
+  The rest of this paragraph is how 0.50.0 worked.
+- **Passing confirms the policy (0.50.0).** A quiz is never a file to read
+  itself (no red dot). The file it `covers` counts as read while the person has an
   approved copy of the quiz as published now: a new published version asks
   again only if the quiz changed, not the policy (Dave). I Have Read This
   is refused for a covered file.

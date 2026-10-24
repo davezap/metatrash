@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -40,20 +41,46 @@ func TestQuizKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !tpl.Quiz || tpl.Covers != "wfh.md" || tpl.PassMark != 100 || tpl.RetryAfter != time.Hour || tpl.coveredPath("policies/wfh-quiz.md") != "policies/wfh.md" {
+	if !tpl.Quiz || mustJSON(tpl.Covers) != `["wfh.md"]` || !tpl.ReadFirst || tpl.PassMark != 100 || tpl.RetryAfter != time.Hour || mustJSON(tpl.coverPatterns("policies/wfh-quiz.md")) != `["policies/wfh.md"]` {
 		t.Fatalf("quiz: %+v", tpl)
 	}
 	for _, bad := range []string{
-		"quiz: yes", "quiz: true\ncovers: ../other.md", "quiz: true\ncovers: notes.txt", "quiz: true",
-		"quiz: true\ncovers: a.md\npassMark: 0", "quiz: true\ncovers: a.md\nretryAfter: 1w", "covers: a.md",
+		"quiz: yes", "quiz: true\ncovers: ../other.md", "quiz: true\ncovers: notes.txt", "quiz: true\ncovers: a.md, sub/../b.md",
+		"quiz: true\ncovers: ,", "quiz: true\ncovers: **/a.md", "quiz: true\nreadFirst: maybe",
+		"quiz: true\ncovers: a.md\npassMark: 0", "quiz: true\ncovers: a.md\nretryAfter: 1w", "covers: a.md", "readFirst: false",
 	} {
 		text := "---\nform: q\nsubmitTo: dave/r/\n" + bad + "\n---\n{{yesno name=a}}\n"
 		if _, err := parseFormTemplate(text); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
 	}
-	if tpl, err := parseFormTemplate("---\nform: q\nsubmitTo: dave/r/\nquiz: true\ncovers: sub/a.md\npassMark: 80%\nretryAfter: 0\n---\n{{yesno name=a}}\n"); err != nil || tpl.PassMark != 80 || tpl.RetryAfter != 0 {
+	if tpl, err := parseFormTemplate("---\nform: q\nsubmitTo: dave/r/\nquiz: true\ncovers: sub/a.md\npassMark: 80%\nretryAfter: 0\nreadFirst: false\n---\n{{yesno name=a}}\n"); err != nil || tpl.PassMark != 80 || tpl.RetryAfter != 0 || tpl.ReadFirst {
 		t.Fatalf("passMark 80%%: %+v %v", tpl, err)
+	}
+
+	// covers: files, patterns and folders, from the quiz's folder or the top.
+	many, err := parseFormTemplate("---\nform: q\nsubmitTo: dave/r/\nquiz: true\ncovers: wfh.md, TG-ISG-*.md, firmware/, /hr/leave.md\n---\n{{yesno name=a}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patterns := many.coverPatterns("policies/isg/quiz.md")
+	if mustJSON(patterns) != `["policies/isg/wfh.md","policies/isg/TG-ISG-*.md","policies/isg/firmware/","hr/leave.md"]` {
+		t.Fatalf("patterns: %v", patterns)
+	}
+	for p, want := range map[string]bool{
+		"policies/isg/wfh.md": true, "policies/isg/TG-ISG-010-Backup.md": true, "policies/isg/firmware/a/b.md": true, "hr/leave.md": true,
+		"policies/isg/sub/TG-ISG-1.md": false, "policies/wfh.md": false, "hr/other.md": false,
+	} {
+		if covered(patterns, p) != want {
+			t.Errorf("covered(%s) = %v", p, !want)
+		}
+	}
+	whole, _ := parseFormTemplate("---\nform: q\nsubmitTo: dave/r/\nquiz: true\n---\n{{yesno name=a}}\n")
+	if mustJSON(whole.coverPatterns("policies/q.md")) != `["policies/*.md"]` || !covered(whole.coverPatterns("q.md"), "a.md") {
+		t.Fatalf("default covers: %v", whole.Covers)
+	}
+	if all, _ := parseFormTemplate("---\nform: q\nsubmitTo: dave/r/\nquiz: true\ncovers: /\n---\n{{yesno name=a}}\n"); !covered(all.coverPatterns("x/q.md"), "any/where.md") {
+		t.Fatalf("covers /: %v", all.Covers)
 	}
 
 	// Marking: the key's blank answers are not marked; free text waits.
@@ -135,32 +162,51 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	}
 	right := map[string]any{"name": "Dave", "where": "Home", "locked": "Yes", "kit": []string{"Laptop"}, "why": "Theft"}
 	wrong := map[string]any{"name": "Pat", "where": "Cafe", "locked": "Yes", "kit": []string{"Laptop"}, "why": "No idea"}
-	policy := func() (map[string]any, float64) {
+	// policy is the person's state: the policy, the quiz (its own state)
+	// and how many things are still to do.
+	policy := func() (map[string]any, map[string]any, float64) {
 		t.Helper()
 		got := call(person, "GET", base+"acknowledgements", "", 200)
+		var file, quizFile map[string]any
 		for _, f := range got["folders"].([]any)[0].(map[string]any)["files"].([]any) {
-			file := f.(map[string]any)
-			if file["path"] == "policies/wfh-quiz.md" && (file["tracked"] != false || file["covers"] != "policies/wfh.md") {
-				t.Fatalf("quiz file: %v", file)
-			}
-			if file["path"] == "policies/wfh.md" {
-				return file, got["outstanding"].(float64)
+			switch f.(map[string]any)["path"] {
+			case "policies/wfh.md":
+				file = f.(map[string]any)
+			case "policies/wfh-quiz.md":
+				quizFile = f.(map[string]any)
 			}
 		}
-		t.Fatalf("no policy: %v", got)
-		return nil, 0
+		if file == nil || quizFile == nil || quizFile["tracked"] != true || mustJSON(quizFile["covers"]) != `["policies/wfh.md"]` || mustJSON(file["quizzes"]) != `["policies/wfh-quiz.md"]` {
+			t.Fatalf("policy and quiz: %v", mustJSON(got))
+		}
+		return file, quizFile["quiz"].(map[string]any), got["outstanding"].(float64)
 	}
-	if file, outstanding := policy(); outstanding != 1 || file["quiz"].(map[string]any)["status"] != "new" || file["quiz"].(map[string]any)["path"] != "policies/wfh-quiz.md" {
-		t.Fatalf("before: %v %v", file, outstanding)
+	ack := func(token string, version int) {
+		t.Helper()
+		call(token, "POST", base+"acknowledgements", fmt.Sprintf(`{"path":"policies/wfh.md","version":%d}`, version), 200)
 	}
-	if got := code(call(person, "POST", base+"acknowledgements", `{"path":"policies/wfh.md","version":1}`, 409)); got != "quiz_required" {
+	if file, q, outstanding := policy(); outstanding != 2 || file["outstanding"] != true || q["status"] != "new" || q["readFirst"] != true || mustJSON(q["toRead"]) != `["policies/wfh.md"]` {
+		t.Fatalf("before: %v %v %v", file, q, outstanding)
+	}
+	if got := code(call(person, "POST", base+"acknowledgements", `{"path":"policies/wfh-quiz.md","version":1}`, 409)); got != "quiz_required" {
 		t.Fatal(got)
+	}
+
+	// Read first (readFirst is the default), then the quiz; reading is
+	// confirmed on its own.
+	if got := code(send(person, right, 409)); got != "read_first" {
+		t.Fatal(got)
+	}
+	ack(person, 1)
+	if file, q, outstanding := policy(); outstanding != 1 || file["outstanding"] != false || q["toRead"] != nil {
+		t.Fatalf("read: %v %v %v", file, q, outstanding)
 	}
 
 	// No key yet: only a reviewer may send it, to make one.
 	if got := code(send(person, right, 409)); got != "no_answer_key" {
 		t.Fatal(got)
 	}
+	ack(author, 1)
 	mine := send(author, right, 201)
 	if mine["status"] != "submitted" || mine["quiz"] != true || mine["marks"] != nil {
 		t.Fatalf("reviewer's copy: %v", mine)
@@ -177,8 +223,8 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	if !strings.Contains(first["text"].(string), "Where may you work? ✗") {
 		t.Fatalf("first copy:\n%s", first["text"])
 	}
-	if file, outstanding := policy(); outstanding != 1 || file["quiz"].(map[string]any)["status"] != "waiting" {
-		t.Fatalf("waiting: %v", file)
+	if _, q, outstanding := policy(); outstanding != 1 || q["status"] != "waiting" {
+		t.Fatalf("waiting: %v", q)
 	}
 	if got := code(send(person, right, 409)); got != "quiz_waiting" {
 		t.Fatal(got)
@@ -202,12 +248,11 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	if string(b) != reviewed["text"] || !strings.Contains(string(b), "Why lock it? **No idea** ✓") {
 		t.Fatalf("filed copy:\n%s", b)
 	}
-	file, _ := policy()
-	if q := file["quiz"].(map[string]any); q["status"] != "failed" || q["retryAt"] != "2026-10-23T10:00:00Z" {
+	if _, q, _ := policy(); q["status"] != "failed" || q["retryAt"] != "2026-10-23T10:00:00Z" {
 		t.Fatalf("failed: %v", q)
 	}
 
-	// Retry after an hour; passing confirms the policy.
+	// Retry after an hour; passing is the last thing to do.
 	if got := code(send(person, right, 409)); got != "retry_later" {
 		t.Fatal(got)
 	}
@@ -217,8 +262,8 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	if passed := call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": copyPath, "marks": map[string]any{"why": true}}), 200); passed["status"] != "approved" || passed["score"] != float64(100) {
 		t.Fatalf("passed: %v", passed)
 	}
-	if file, outstanding := policy(); outstanding != 0 || file["outstanding"] != false || file["quiz"].(map[string]any)["status"] != "passed" {
-		t.Fatalf("passed policy: %v %v", file, outstanding)
+	if _, q, outstanding := policy(); outstanding != 0 || q["status"] != "passed" {
+		t.Fatalf("passed: %v %v", q, outstanding)
 	}
 	if got := code(send(person, right, 409)); got != "quiz_passed" {
 		t.Fatal(got)
@@ -228,23 +273,50 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 		t.Fatalf("report: %v", mustJSON(report))
 	}
 
-	// A new version of the policy alone does not ask for the quiz again;
-	// a changed quiz does, and needs a new key.
+	// A new version of the policy asks to read it again, not for the quiz;
+	// a changed quiz asks for the quiz again, and needs a new key.
 	put(author, base, "policies/wfh.md", "# Working from home\n\nNew rules.\n")
 	put(author, base, "policies/.metatrash.json", `{"services":[{"type":"acknowledge"}],"publishedVersion":2}`)
-	if _, outstanding := policy(); outstanding != 0 {
-		t.Fatalf("policy changed: %v", outstanding)
+	if file, q, outstanding := policy(); outstanding != 1 || file["outstanding"] != true || q["status"] != "passed" {
+		t.Fatalf("policy changed: %v %v %v", file, q, outstanding)
 	}
 	put(author, base, "policies/wfh-quiz.md", quiz+"\nOne more: {{yesno name=more}}\n")
 	put(author, base, "policies/.metatrash.json", `{"services":[{"type":"acknowledge"}],"publishedVersion":3}`)
-	if file, outstanding := policy(); outstanding != 1 || file["quiz"].(map[string]any)["status"] != "new" || file["quiz"].(map[string]any)["older"] != true {
-		t.Fatalf("quiz changed: %v %v", file, outstanding)
+	if _, q, outstanding := policy(); outstanding != 2 || q["status"] != "new" || q["older"] != true {
+		t.Fatalf("quiz changed: %v %v", q, outstanding)
 	}
 	if got := code(call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "policies/wfh-quiz.md", "answers": right, "version": 2}), 409)); got != "template_changed" {
 		t.Fatal(got)
 	}
+	ack(person, 3)
 	if got := code(call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "policies/wfh-quiz.md", "answers": right, "version": 3}), 409)); got != "no_answer_key" {
 		t.Fatal(got)
+	}
+
+	// A quiz can cover files of another published folder; readFirst: false
+	// lets it be taken before they are read.
+	put(author, base, "other/rules.md", "# Rules\n")
+	put(author, base, "other/.metatrash.json", `{"services":[{"type":"acknowledge"}],"publishedVersion":1}`)
+	rulesText := strings.Replace(strings.Replace(quiz, "form: wfh-quiz", "form: rules-quiz", 1), "covers: wfh.md", "covers: /other/\nreadFirst: false", 1)
+	put(author, base, "policies/rules-quiz.md", rulesText)
+	put(author, base, "policies/.metatrash.json", `{"services":[{"type":"acknowledge"}],"publishedVersion":4}`)
+	got := call(person, "GET", base+"acknowledgements", "", 200)
+	var rulesQuiz, rules map[string]any
+	for _, folder := range got["folders"].([]any) {
+		for _, f := range folder.(map[string]any)["files"].([]any) {
+			switch f.(map[string]any)["path"] {
+			case "policies/rules-quiz.md":
+				rulesQuiz = f.(map[string]any)
+			case "other/rules.md":
+				rules = f.(map[string]any)
+			}
+		}
+	}
+	if rulesQuiz == nil || rules == nil || mustJSON(rulesQuiz["covers"]) != `["other/rules.md"]` || mustJSON(rules["quizzes"]) != `["policies/rules-quiz.md"]` || rulesQuiz["quiz"].(map[string]any)["readFirst"] != false {
+		t.Fatalf("across folders: %v", mustJSON(got))
+	}
+	if got := code(call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "policies/rules-quiz.md", "answers": right, "version": 4}), 409)); got != "no_answer_key" {
+		t.Fatalf("readFirst false: %s", got)
 	}
 
 	// A plain form is approved or declined by a reviewer.

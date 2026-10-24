@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -332,12 +333,13 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 		if folder == nil {
 			return Receipt{}, problem(409, "not_published", "A quiz can be taken once its folder publishes it; publish a new version first.")
 		}
-		covered := false
-		for _, pf := range folder.Files {
-			covered = covered || pf.Tracked && pf.PublishedPath == t.coveredPath(published.PublishedPath)
+		if published.Quiz == nil {
+			return Receipt{}, formError("a quiz goes in a folder whose acknowledge service asks people to read its files (Ask everyone to confirm they've read the published files, in Slate Viewer), and that takes in the quiz.")
 		}
-		if !covered {
-			return Receipt{}, formError("covers must name a file in this folder that its acknowledge service asks people to read, such as covers: wfh-policy.md.")
+		if t.ReadFirst {
+			if err := s.readFirst(ctx, repo, userID, folders, published.Covers); err != nil {
+				return Receipt{}, err
+			}
 		}
 	}
 	now := s.now().UTC()
@@ -405,13 +407,47 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	}
 	// Sending a form shows it was read: in a folder that asks people to read
 	// its files, it counts as confirming the published version. A quiz is
-	// not a file to read; passing it confirms the file it covers.
-	if version, err := s.acknowledgeSent(ctx, repo, state, files, in.Path, userID, now); err != nil {
-		log.Printf("form submission %s filed without confirming %s as read: %v", receipt.ID, in.Path, err)
-	} else {
-		receipt.Acknowledged = version
+	// not read but passed (its receipt says how it went).
+	if !t.Quiz {
+		if version, err := s.acknowledgeSent(ctx, repo, state, files, in.Path, userID, now); err != nil {
+			log.Printf("form submission %s filed without confirming %s as read: %v", receipt.ID, in.Path, err)
+		} else {
+			receipt.Acknowledged = version
+		}
 	}
 	return receipt, nil
+}
+
+// readFirst refuses a quiz while the person has not confirmed reading every
+// file it covers, as published now (readFirst: true, 0.51.0).
+func (s *Service) readFirst(ctx context.Context, repo *repository, userID string, folders []policyFolder, covers []string) error {
+	if len(covers) == 0 {
+		return nil
+	}
+	rows, err := s.ownedDB.acknowledgements(ctx, repo.id, userID)
+	if err != nil {
+		return err
+	}
+	idx := indexAcks(rows)
+	want := map[string]bool{}
+	for _, c := range covers {
+		want[c] = true
+	}
+	var unread []string
+	for _, folder := range folders {
+		for _, f := range folder.Files {
+			if want[f.Path] {
+				if ack := idx.status(userID, f); ack == nil || !ack.Current {
+					unread = append(unread, f.Path)
+				}
+			}
+		}
+	}
+	if len(unread) == 0 {
+		return nil
+	}
+	sort.Strings(unread)
+	return problem(409, "read_first", "Read what this quiz covers first, then take it: "+strings.Join(unread, ", ")+".")
 }
 
 // quizAllowed refuses a quiz the person passed, has waiting for a reviewer,

@@ -179,7 +179,8 @@ one before it. In a folder with a published version (metatrash 0.48.0),
 lists the space's published folders under it: each folder's version, when
 and by whom it was published, and its files, marked "to read" when its
 acknowledge service asks you to read a file you haven't confirmed, "read",
-and "draft changes" when the file changed since it was published. `-json`
+a quiz's state ("quiz to pass", "quiz passed", how many files it covers and
+how many to read first; metatrash 0.51.0), and "draft changes" when the file changed since it was published. `-json`
 answers for editors with the server's fields (see the API contract,
 Acknowledgements) plus `file` and `publishedFile`, the local paths; show a
 published text with `mtsync show <publishedFile> <revision>`. `mtsync ack FILE

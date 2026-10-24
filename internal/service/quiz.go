@@ -14,21 +14,30 @@ import (
 )
 
 // Quizzes (0.50.0). A quiz is a form template (forms.go) with quiz: true in
-// a folder whose acknowledge service asks people to read its files. It
-// covers one of them: that file counts as read while the person has an
+// a folder whose acknowledge service asks people to read its files. It is
+// one more thing for them to do there: it is done once the person has an
 // approved copy of the quiz as published now (policies in
-// acknowledgements.go), instead of I Have Read This.
+// acknowledgements.go). Since 0.51.0 passing it is separate from reading:
+// covers lists the policies it tests, each still confirmed with I Have Read
+// This, and with readFirst (the default) the quiz can't be sent until they
+// are all read.
 //
 //	---
 //	form: wfh-quiz
 //	title: Working from home quiz
 //	submitTo: dave/hr-review/quizzes/
 //	quiz: true
-//	covers: wfh-policy.md
+//	covers: wfh-policy.md, TG-ISG-*.md, firmware/, /hr/leave.md
+//	readFirst: true
 //	passMark: 80
 //	retryAfter: 1h
 //	unmarked: name
 //	---
+//
+// A covers entry is a file, a pattern with * (one folder level), or a
+// folder ending in / (all of it, below too), from the quiz's folder or,
+// starting with /, the top of the space. Without covers a quiz covers the
+// Markdown files of its own folder (*.md).
 //
 // The answer key is a filled-in copy of the quiz in the review space, in its
 // submitTo folder, named <space slug>-<form>-answers.md: a reviewer sends the
@@ -49,7 +58,7 @@ var retryPattern = regexp.MustCompile(`^(\d{1,6})([mhd])$`)
 // freeText are the field types a reviewer marks; the server marks the rest.
 var freeText = map[string]bool{"text": true, "textarea": true, "email": true, "phone": true}
 
-// readQuizKeys reads quiz, covers, passMark and retryAfter.
+// readQuizKeys reads quiz, covers, readFirst, passMark and retryAfter.
 func (t *formTemplate) readQuizKeys(keys map[string]string) error {
 	switch keys["quiz"] {
 	case "", "false":
@@ -60,19 +69,35 @@ func (t *formTemplate) readQuizKeys(keys map[string]string) error {
 	}
 	t.PassMark, t.RetryAfter = defaultPassMark, defaultRetryAfter
 	if !t.Quiz {
-		for _, key := range []string{"covers", "passMark", "retryAfter", "unmarked"} {
+		for _, key := range []string{"covers", "readFirst", "passMark", "retryAfter", "unmarked"} {
 			if _, ok := keys[key]; ok {
 				return formError(key + " is only for quizzes; add quiz: true.")
 			}
 		}
 		return nil
 	}
-	t.Covers = keys["covers"]
-	if t.Covers == "" || strings.HasPrefix(t.Covers, "/") || strings.Contains(t.Covers, "\\") || !strings.HasSuffix(strings.ToLower(t.Covers), ".md") || !validPath(path.Clean("x/"+t.Covers)) {
-		return formError("a quiz needs covers: the policy file it tests, next to the quiz or below it, such as covers: wfh-policy.md.")
+	covers, ok := keys["covers"]
+	if !ok {
+		covers = "*.md"
 	}
-	if strings.HasPrefix(path.Clean(t.Covers), "..") {
-		return formError("covers must name a file in the quiz's folder or below it.")
+	t.Covers = nil
+	for _, entry := range strings.Split(covers, ",") {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			if !validCover(entry) {
+				return formError("covers lists the policies the quiz tests, separated by commas: files (wfh-policy.md), patterns (TG-ISG-*.md) or folders (firmware/), from the quiz's folder or, starting with /, the top of the space. " + entry + " is not one.")
+			}
+			t.Covers = append(t.Covers, entry)
+		}
+	}
+	if len(t.Covers) == 0 {
+		return formError("covers names at least one policy, such as covers: wfh-policy.md; leave it out to cover the quiz's folder.")
+	}
+	switch keys["readFirst"] {
+	case "", "true":
+		t.ReadFirst = true
+	case "false":
+	default:
+		return formError("readFirst is true (read the policies it covers before taking the quiz; the default) or false.")
 	}
 	if v, ok := keys["passMark"]; ok {
 		n, err := strconv.Atoi(strings.TrimSuffix(v, "%"))
@@ -116,9 +141,63 @@ func parseRetryAfter(v string) (time.Duration, error) {
 	return d, nil
 }
 
-// coveredPath is the path of the file a quiz at quizPath covers.
-func (t formTemplate) coveredPath(quizPath string) string {
-	return path.Join(path.Dir(quizPath), t.Covers)
+// validCover checks one covers entry: a .md file or pattern, or a folder
+// ending in /, with no .. and no backslashes.
+func validCover(entry string) bool {
+	if strings.Contains(entry, "\\") || strings.Contains(entry, "**") {
+		return false
+	}
+	folder := strings.HasSuffix(entry, "/")
+	rel := strings.TrimSuffix(strings.TrimPrefix(entry, "/"), "/")
+	if rel == "" {
+		return folder // "/" is the whole space
+	}
+	if !folder && !strings.HasSuffix(strings.ToLower(rel), ".md") {
+		return false
+	}
+	for _, part := range strings.Split(rel, "/") {
+		if part == "." || part == ".." {
+			return false
+		}
+	}
+	return validPath(strings.ReplaceAll(rel, "*", "x"))
+}
+
+// coverPatterns are a quiz's covers entries as patterns from the top of the
+// space, for the quiz at quizPath. A folder keeps its trailing /.
+func (t formTemplate) coverPatterns(quizPath string) []string {
+	dir := path.Dir(quizPath)
+	if dir == "." {
+		dir = ""
+	}
+	out := make([]string, 0, len(t.Covers))
+	for _, entry := range t.Covers {
+		p := strings.TrimPrefix(entry, "/")
+		if !strings.HasPrefix(entry, "/") && dir != "" {
+			p = dir + "/" + p
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// covered reports whether one of a quiz's cover patterns takes in p.
+func covered(patterns []string, p string) bool {
+	for _, pattern := range patterns {
+		switch {
+		case pattern == "" || strings.HasSuffix(pattern, "/"):
+			if strings.HasPrefix(p, pattern) {
+				return true
+			}
+		case strings.Contains(pattern, "*"):
+			if ok, _ := path.Match(pattern, p); ok {
+				return true
+			}
+		case pattern == p:
+			return true
+		}
+	}
+	return false
 }
 
 // filedCopy is what a filed copy's front matter says.
@@ -304,10 +383,11 @@ func (s *Service) quizKey(ctx context.Context, target submitTarget, slug string,
 }
 
 // quizMeta is what a published Markdown file's front matter says about
-// quizzes: whether it is one, and the path of the file it covers.
+// quizzes: whether it is one, and the patterns of the files it covers.
 type quizMeta struct {
 	quiz       bool
-	covers     string
+	covers     []string
+	readFirst  bool
 	retryAfter time.Duration
 }
 
@@ -323,7 +403,7 @@ func (r *repository) quizMeta(ctx context.Context, blob, quizPath string) quizMe
 	if b, err := r.blob(ctx, blob); err == nil {
 		if keys, _ := splitFrontMatter(string(b)); isFormKeys(keys) && keys["quiz"] == "true" {
 			if t, err := parseFormTemplate(string(b)); err == nil && t.Quiz {
-				meta = quizMeta{quiz: true, covers: t.coveredPath(quizPath), retryAfter: t.RetryAfter}
+				meta = quizMeta{quiz: true, covers: t.coverPatterns(quizPath), readFirst: t.ReadFirst, retryAfter: t.RetryAfter}
 			}
 		}
 	}

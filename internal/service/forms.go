@@ -95,11 +95,13 @@ type formTemplate struct {
 	Form, Title, SubmitTo string
 	Fields                []formField
 	body                  []string
-	// A quiz (0.50.0) covers one file of its folder, which counts as read
-	// once the person scores PassMark percent; after a fail they may send it
-	// again after RetryAfter. See quiz.go.
+	// A quiz (0.50.0) is passed at PassMark percent; after a fail the person
+	// may send it again after RetryAfter. Covers lists the policies it tests
+	// (0.51.0), which ReadFirst asks people to read before taking it. See
+	// quiz.go.
 	Quiz       bool
-	Covers     string
+	Covers     []string
+	ReadFirst  bool
 	PassMark   int
 	RetryAfter time.Duration
 	// Unmarked names fields that are not questions, such as a name.

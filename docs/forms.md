@@ -180,9 +180,11 @@ earlier review. Copies sent before 0.50.0 can't be reviewed.
 
 ## Quizzes
 
-0.50.0. A quiz is a form in a folder whose `acknowledge` service asks people
-to read its files. Instead of I Have Read This, the file it covers counts as
-read once the person passes the quiz.
+0.50.0, changed in 0.51.0. A quiz is a form in a folder whose `acknowledge`
+service asks people to read its files. It is one more thing for them to do
+there, with its own red dot until they pass it. Passing it is separate from
+reading: the policies it covers are still confirmed with I Have Read This,
+and by default the quiz can't be taken until they are all read.
 
 ```markdown
 ---
@@ -190,7 +192,8 @@ form: wfh-quiz
 title: Working from home quiz
 submitTo: dave/hr-review/quizzes/
 quiz: true
-covers: wfh-policy.md
+covers: wfh-policy.md, TG-ISG-*.md
+readFirst: true
 passMark: 80
 retryAfter: 1h
 unmarked: name
@@ -210,10 +213,23 @@ Why? {{textarea name=why required}}
 | Key | Meaning |
 | --- | --- |
 | `quiz` | `true` makes the form a quiz |
-| `covers` | the file it tests: next to the quiz or below it, tracked by the folder's `acknowledge` service |
+| `covers` | the policies it tests, comma-separated (default `*.md`, the Markdown files of the quiz's folder); see below |
+| `readFirst` | `true` (default): the quiz can be sent once every policy it covers is read; `false`: any time |
 | `passMark` | the percentage to pass, 1 to 100 (default 100) |
 | `retryAfter` | how long to wait after a fail before trying again: `30m`, `1h`, `2d`, or `0` (default `1h`) |
 | `unmarked` | fields that are not questions, such as a name, comma-separated |
+
+**covers** entries are read from the quiz's folder, or from the top of the
+space when they start with `/`, and take in files that an `acknowledge`
+service asks people to read, in any published folder:
+
+| Entry | Covers |
+| --- | --- |
+| `wfh-policy.md` | that file |
+| `TG-ISG-*.md` | files matching the pattern in that folder (`*` stays within one folder) |
+| `firmware/` | every file in that folder and below |
+| `/hr/leave.md` | a file elsewhere in the space |
+| `/` | every file the space asks people to read |
 
 **The answer key** is a filled-in copy of the quiz in the review space's
 `submitTo` folder, named `<space slug>-<form>-answers.md` (for a quiz in
@@ -232,14 +248,14 @@ reviewer, who ticks or crosses each answer and chooses Reviewed. Fields in
 `unmarked`, fields the key leaves blank, and signatures are not marked. The
 copy shows ✓ or ✗ after each marked answer, with `marks` and `score` in its
 front matter; the score is the share of marked answers that are right. At or
-over `passMark` the copy is approved, and the file the quiz covers counts as
-read; under it, declined. The person sees their ticks and crosses and the
+over `passMark` the copy is approved and the quiz is passed; under it,
+declined. The person sees their ticks and crosses and the
 score in My Submissions, never the key.
 
 **Again.** After a fail the person can fix their answers and send them again,
 or start again, once `retryAfter` has passed. While a copy waits for a
 reviewer, and after a pass, the quiz can't be sent again. A new published
-version of the policy alone doesn't ask for the quiz again; a changed quiz
-does.
+version of a policy asks people to read it again, not to take the quiz again;
+a changed quiz asks for the quiz again.
 
 Agents can't take quizzes, just as they can't send forms.

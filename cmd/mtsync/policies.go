@@ -37,22 +37,23 @@ type policyFile struct {
 	// the folder's revision.
 	File          string `json:"file,omitempty"`
 	PublishedFile string `json:"publishedFile,omitempty"`
-	// A quiz (0.50.0) names the file it Covers; that file names its Quiz.
-	Covers string      `json:"covers,omitempty"`
-	Quiz   *policyQuiz `json:"quiz,omitempty"`
+	// A quiz (metatrash 0.50.0) has the person's state in Quiz, and since
+	// 0.51.0 lists the files it Covers; each of those names it in Quizzes.
+	Quiz    *policyQuiz `json:"quiz,omitempty"`
+	Covers  []string    `json:"covers,omitempty"`
+	Quizzes []string    `json:"quizzes,omitempty"`
 }
 
-// policyQuiz is the quiz that covers a file, and the person's state in it:
-// status is new, waiting (for a reviewer), failed or passed.
+// policyQuiz is the person's state in a quiz: status is new, waiting (for a
+// reviewer), failed or passed. With readFirst, ToRead lists the files it
+// covers that they still have to read before taking it.
 type policyQuiz struct {
-	Path          string `json:"path"`
-	PublishedPath string `json:"publishedPath"`
-	Status        string `json:"status"`
-	Score         *int   `json:"score,omitempty"`
-	RetryAt       string `json:"retryAt,omitempty"`
-	Older         bool   `json:"older,omitempty"`
-	File          string `json:"file,omitempty"`
-	PublishedFile string `json:"publishedFile,omitempty"`
+	Status    string   `json:"status"`
+	Score     *int     `json:"score,omitempty"`
+	RetryAt   string   `json:"retryAt,omitempty"`
+	Older     bool     `json:"older,omitempty"`
+	ReadFirst bool     `json:"readFirst"`
+	ToRead    []string `json:"toRead,omitempty"`
 }
 
 type policyFolder struct {
@@ -192,10 +193,6 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 			f := &answer.Folders[i].Files[j]
 			f.File = filepath.Join(e.Folder, filepath.FromSlash(f.Path))
 			f.PublishedFile = filepath.Join(e.Folder, filepath.FromSlash(f.PublishedPath))
-			if q := f.Quiz; q != nil {
-				q.File = filepath.Join(e.Folder, filepath.FromSlash(q.Path))
-				q.PublishedFile = filepath.Join(e.Folder, filepath.FromSlash(q.PublishedPath))
-			}
 		}
 	}
 	if asJSON {
@@ -218,23 +215,8 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 		for _, file := range f.Files {
 			state := ""
 			switch {
-			case file.Covers != "":
-				state = "quiz for " + file.Covers
-			case file.Outstanding && file.Quiz != nil:
-				state = "to read, then pass " + file.Quiz.Path
-				switch file.Quiz.Status {
-				case "waiting":
-					state += " (waiting for a reviewer)"
-				case "failed":
-					state += " (not passed"
-					if file.Quiz.Score != nil {
-						state += fmt.Sprintf(", %d%%", *file.Quiz.Score)
-					}
-					if file.Quiz.RetryAt != "" {
-						state += "; try again from " + localTime(file.Quiz.RetryAt)
-					}
-					state += ")"
-				}
+			case file.Quiz != nil:
+				state = quizLine(*file.Quiz, len(file.Covers))
 			case file.Outstanding:
 				state = "to read"
 			case file.Tracked:
@@ -246,8 +228,39 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 			fmt.Fprintf(out, "  %-40s %s\n", file.Path, state)
 		}
 	}
-	fmt.Fprintf(out, "%d to read. Confirm one: mtsync ack FILE VERSION\n", answer.Outstanding)
+	fmt.Fprintf(out, "%d to do. Confirm reading one: mtsync ack FILE VERSION; take a quiz in Slate Viewer or with mtsync submit\n", answer.Outstanding)
 	return nil
+}
+
+// quizLine says where the person is with a quiz covering n files.
+func quizLine(q policyQuiz, n int) string {
+	var state string
+	switch q.Status {
+	case "passed":
+		state = "quiz passed"
+	case "waiting":
+		state = "quiz, waiting for a reviewer"
+	case "failed":
+		state = "quiz to pass (not passed"
+		if q.Score != nil {
+			state += fmt.Sprintf(", %d%%", *q.Score)
+		}
+		if q.RetryAt != "" {
+			state += "; try again from " + localTime(q.RetryAt)
+		}
+		state += ")"
+	default:
+		state = "quiz to pass"
+	}
+	if n == 1 {
+		state += ", covers 1 file"
+	} else {
+		state += fmt.Sprintf(", covers %d files", n)
+	}
+	if q.ReadFirst && len(q.ToRead) > 0 && q.Status != "passed" {
+		state += fmt.Sprintf("; read %d first", len(q.ToRead))
+	}
+	return state
 }
 
 // acknowledgeFile confirms the person read file's published text, version.

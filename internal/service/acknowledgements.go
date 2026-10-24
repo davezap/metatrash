@@ -159,18 +159,20 @@ type policyFile struct {
 	Tracked      bool       `json:"tracked"`
 	Outstanding  bool       `json:"outstanding"`
 	Acknowledged *policyAck `json:"acknowledged,omitempty"`
-	// A quiz (0.50.0) is never a file to read: Covers names the file it
-	// tests. That file names its Quiz instead, and counts as read once the
-	// person passes the quiz as published now (quiz.go).
-	Covers string      `json:"covers,omitempty"`
-	Quiz   *policyQuiz `json:"quiz,omitempty"`
+	// A quiz (0.50.0) is not read but passed: Quiz is the person's state
+	// in it, Covers the tracked files it tests (0.51.0, where they are now).
+	// Each of those names it in Quizzes; reading them is separate (quiz.go).
+	Quiz    *policyQuiz `json:"quiz,omitempty"`
+	Covers  []string    `json:"covers,omitempty"`
+	Quizzes []string    `json:"quizzes,omitempty"`
 }
 
-// policyQuiz is the quiz that covers a file, and the person's state in it.
+// policyQuiz is a person's state in a quiz. With ReadFirst the quiz can be
+// sent once the files it covers are read; ToRead lists those still unread.
 type policyQuiz struct {
-	Path          string `json:"path"`
-	PublishedPath string `json:"publishedPath"`
 	quizState
+	ReadFirst  bool     `json:"readFirst"`
+	ToRead     []string `json:"toRead,omitempty"`
 	id, blob   string
 	retryAfter time.Duration
 }
@@ -257,37 +259,44 @@ func (r *repository) publishedFolders(ctx context.Context, state string, files m
 			}
 			pf.Files = append(pf.Files, policyFile{ID: f.ID, Path: now, PublishedPath: p, Blob: f.Blob, Draft: files[now].Blob != f.Blob, Tracked: ack && svc.tracked(folder, now)})
 		}
-		if ack {
-			r.linkQuizzes(ctx, pf.Files)
-		}
 		folders = append(folders, pf)
 	}
+	r.linkQuizzes(ctx, folders)
 	return folders, nil
 }
 
-// linkQuizzes finds the quizzes among a folder's published files: they are
-// not files to read, and each names the tracked file it covers.
-func (r *repository) linkQuizzes(ctx context.Context, files []policyFile) {
-	byPublished := map[string]int{}
-	for i, f := range files {
-		byPublished[f.PublishedPath] = i
+// linkQuizzes finds the quizzes among the tracked published files: each is
+// one more thing to do, passed rather than read, and names the other tracked
+// files it covers, in any published folder of the space (0.51.0).
+func (r *repository) linkQuizzes(ctx context.Context, folders []policyFolder) {
+	type quizAt struct {
+		folder, file int
+		meta         quizMeta
 	}
-	for i := range files {
-		f := &files[i]
-		if !strings.HasSuffix(strings.ToLower(f.PublishedPath), ".md") {
-			continue
+	var quizzes []quizAt
+	for i := range folders {
+		for j := range folders[i].Files {
+			f := &folders[i].Files[j]
+			if !f.Tracked || !strings.HasSuffix(strings.ToLower(f.PublishedPath), ".md") {
+				continue
+			}
+			if meta := r.quizMeta(ctx, f.Blob, f.PublishedPath); meta.quiz {
+				f.Quiz = &policyQuiz{quizState: quizState{Status: "new"}, ReadFirst: meta.readFirst, id: f.ID, blob: f.Blob, retryAfter: meta.retryAfter}
+				quizzes = append(quizzes, quizAt{i, j, meta})
+			}
 		}
-		meta := r.quizMeta(ctx, f.Blob, f.PublishedPath)
-		if !meta.quiz {
-			continue
+	}
+	for _, q := range quizzes {
+		quiz := &folders[q.folder].Files[q.file]
+		for i := range folders {
+			for j := range folders[i].Files {
+				f := &folders[i].Files[j]
+				if f.Tracked && f.Quiz == nil && covered(q.meta.covers, f.Path) {
+					quiz.Covers = append(quiz.Covers, f.Path)
+					f.Quizzes = append(f.Quizzes, quiz.Path)
+				}
+			}
 		}
-		f.Tracked = false
-		j, ok := byPublished[meta.covers]
-		if !ok || !files[j].Tracked || files[j].Quiz != nil {
-			continue
-		}
-		f.Covers = files[j].Path
-		files[j].Quiz = &policyQuiz{Path: f.Path, PublishedPath: f.PublishedPath, quizState: quizState{Status: "new"}, id: f.ID, blob: f.Blob, retryAfter: meta.retryAfter}
 	}
 }
 
@@ -347,6 +356,19 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 			}
 		}
 	}
+	// Files to read first, so each quiz can list what is still unread.
+	unread := map[string]bool{}
+	for i := range result.Folders {
+		for j := range result.Folders[i].Files {
+			f := &result.Folders[i].Files[j]
+			if !f.Tracked || f.Quiz != nil {
+				continue
+			}
+			f.Acknowledged = idx.status(userID, *f)
+			f.Outstanding = f.Acknowledged == nil || !f.Acknowledged.Current
+			unread[f.Path] = f.Outstanding
+		}
+	}
 	for i := range result.Folders {
 		for j := range result.Folders[i].Files {
 			f := &result.Folders[i].Files[j]
@@ -356,13 +378,12 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 			if q := f.Quiz; q != nil {
 				q.quizState = quizStateOf(quizzes, userID, q.id, q.blob, q.retryAfter)
 				f.Outstanding = q.Status != "passed"
-				if f.Outstanding {
-					result.Outstanding++
+				for _, c := range f.Covers {
+					if unread[c] {
+						q.ToRead = append(q.ToRead, c)
+					}
 				}
-				continue
 			}
-			f.Acknowledged = idx.status(userID, *f)
-			f.Outstanding = f.Acknowledged == nil || !f.Acknowledged.Current
 			if f.Outstanding {
 				result.Outstanding++
 			}
@@ -389,7 +410,7 @@ type reportStatus struct {
 	// Status is "read" (this text), "older" (an earlier text) or "unread".
 	Status       string     `json:"status"`
 	Acknowledged *policyAck `json:"acknowledged,omitempty"`
-	// Quiz is the person's state in the quiz that covers the file.
+	// Quiz is the person's state in a quiz: read means passed.
 	Quiz *quizState `json:"quiz,omitempty"`
 }
 
@@ -440,7 +461,7 @@ func (s *Service) policyReport(ctx context.Context, r *repository, space string)
 		row := reportPerson{Name: person.Name, Files: []reportStatus{}}
 		for _, f := range tracked {
 			if q := f.Quiz; q != nil {
-				// A covered file is read once its quiz is passed.
+				// A quiz is done once it is passed.
 				st := quizStateOf(quizzes, person.UserID, q.id, q.blob, q.retryAfter)
 				status := reportStatus{Status: "unread", Quiz: &st}
 				switch {
@@ -494,7 +515,7 @@ func (s *Service) acknowledge(ctx context.Context, r *repository, space, userID,
 				return policyFile{}, invalid(path + " is not a file its folder asks people to read (an acknowledge service in " + folder.Folder + folderConfigName + ").")
 			}
 			if f.Quiz != nil {
-				return policyFile{}, problem(409, "quiz_required", path+" is confirmed by passing its quiz, "+f.Quiz.Path+".")
+				return policyFile{}, problem(409, "quiz_required", path+" is a quiz: it is done by passing it, not by confirming you read it.")
 			}
 			if version != folder.Version {
 				return policyFile{}, problem(409, "conflict", fmt.Sprintf("%s is now at version %d, not %d; read the new version, then confirm it.", folder.Folder, folder.Version, version))
