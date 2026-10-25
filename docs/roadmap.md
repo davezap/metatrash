@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.54.0 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.54.2 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -203,15 +203,62 @@ the `review` push mode, which needs a review screen.
 
 0.54.0 has the runner and text-file triggers (`actions` in `.metatrash.json`,
 results in `runner.md`; [api-contract.md](api-contract.md#folder-actions)).
-Tested with a fake model and against MariaDB; **not yet run against MiniMax**:
-Dave to set up schema v15, the API key and `agents` in `accounts.json`, then
-try the tidy-draft example. Still to build, in order:
+Ran end to end on the live server on 2026-10-25 up to MiniMax's "insufficient
+balance"; a successful tidy-draft run is still to see. Stopgaps until user
+agents exist: 0.54.1 runs actions only for `agents.owners` on the server's
+key; 0.54.2 lets only the owner, as a person, change `actions`, and caps each
+space at 2M tokens a day by default.
 
-1. **0.55.0**: web tools (Brave `web_search`, `web_fetch`, downloads cached in
+### User agents and who pays (agreed with Dave 2026-10-25)
+
+Users set up their own agents and keys; the server key in `accounts.json`
+goes away. An owner can build an action as a service that other people use
+with their own money.
+
+- **Agents table.** One row per agent a user adds: owner, name ("MiniMax
+  main"), provider, endpoint URL, model, most tokens per reply, the user's own
+  daily token cap, and the API key, encrypted with a server key file (like
+  `totp-key`), never shown again after saving, replaceable. Set up on the
+  account page: Add agent, Test (one tiny call), Delete. Endpoints must be
+  https and may not point into the server's own network. One agent is the
+  user's default.
+- **The owner controls the action**: instructions, provider and model
+  (`"model": "minimax/MiniMax-M3"`, or the owner's default agent), steps, web.
+  Nobody else can change them; the model never changes by who brings a file,
+  so output stays the same.
+- **Who pays, per action, set by the owner:**
+  - `owner` (default): the owner's agent pays for every file.
+  - bring your own key: whoever's file arrives pays, only once they have
+    opted in to that action. Opting in means adding a key for the provider
+    and model the action names (the notice says where to get one, e.g.
+    MiniMax: platform.minimax.io → API keys) and setting their own daily
+    cap. They see the action's settings but cannot change them.
+  - Never silent: no fallback to another key or model. A file from someone
+    not opted in runs nothing; they get a notice and `runner.md` records it.
+  - A file brought by a GitHub pull has no clear contributor: the owner pays.
+- **Members' own actions.** A member of a shared space can create an action
+  backed by their own agent; it runs only for that member's files, on their
+  key. The owner sees it as proposed and can delete it, adopt it (it becomes
+  the owner's and the owner picks who pays), or leave it.
+- **Identity.** A member's key only pays for the model; the agent still works
+  within the owner's folder rules and locks, and changes are signed
+  "MiniMax (agent) for <member>".
+- `accounts.json` keeps only the on/off switch, the key-encryption file and
+  server limits; `agents.owners` is removed. Dave's MiniMax key moves to his
+  account.
+
+### Build order
+
+1. **0.55.0**: user agents (table, account page, encrypted keys), the action
+   `model` field, owner pays.
+2. **0.56.0**: bring your own key and members' own actions (opt-in,
+   notices, adopt).
+3. **0.57.0**: web tools (Brave `web_search`, `web_fetch`, downloads cached in
    B2 as `web/<id>`) and `every` schedules.
-2. **0.56.0**: PDF and Word files as triggers and input.
-3. **Slate Viewer**: an Automation page for a folder's actions and its
-   `runner.md`.
+4. **0.58.0**: PDF and Word files as triggers and input.
+5. **Slate Viewer**: an Automation page for a folder's actions and its
+   `runner.md`, opting in, and agents; make a refused `.metatrash.json` save
+   obvious (an invalid file silently stayed local on 2026-10-25).
 
 ## mtsync and Slate Viewer
 

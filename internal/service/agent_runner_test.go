@@ -176,12 +176,12 @@ func newRunnerWorld(t *testing.T) *runnerWorld {
 	s.ownedMu.Unlock()
 	model, store := &fakeModel{}, &memoryJobStore{jobs: map[string]agentJob{}}
 	zone, _ := time.LoadLocation("Pacific/Auckland")
-	settings := &agentSettings{provider: "minimax", app: "MiniMax", model: "MiniMax-M3", maxTokens: 4096, zone: zone}
+	settings := &agentSettings{provider: "minimax", app: "MiniMax", model: "MiniMax-M3", maxTokens: 4096, zone: zone, owners: []string{"dave"}}
 	runner, err := newAgentRunner(s, settings, model, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.ownerName = func(context.Context, string) string { return "dave" }
+	runner.owner = func(context.Context, string) (string, string) { return "dave", "dave@example.com" }
 	runner.retryWait = func(int) time.Duration { return time.Millisecond }
 	s.agents.Store(runner)
 	runner.start()
@@ -208,7 +208,11 @@ func newRunnerWorld(t *testing.T) *runnerWorld {
 
 func (w *runnerWorld) write(path, text string) {
 	w.t.Helper()
-	w.do(context.Background(), "write", Input{Path: path, Text: &text}, "")
+	ctx := context.Background()
+	if isFolderConfig(path) {
+		ctx = asOwner(ctx, w.repo)
+	}
+	w.do(ctx, "write", Input{Path: path, Text: &text}, "")
 }
 
 func (w *runnerWorld) read(path string) string {
@@ -447,7 +451,7 @@ func TestMessagesClient(t *testing.T) {
 	defer server.Close()
 	key := filepath.Join(t.TempDir(), "key")
 	_ = os.WriteFile(key, []byte("secret-key\n"), 0600)
-	settings, err := (&agentsConfig{Provider: "minimax", BaseURL: server.URL + "/anthropic", APIKeyFile: key}).settings()
+	settings, err := (&agentsConfig{Provider: "minimax", Owners: []string{"dave"}, BaseURL: server.URL + "/anthropic", APIKeyFile: key}).settings()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,10 +474,61 @@ func TestMessagesClient(t *testing.T) {
 	if _, err = c.send(context.Background(), agentRequest{}); !errors.As(err, &p) || p.retry {
 		t.Errorf("400: %v", err)
 	}
-	for _, bad := range []agentsConfig{{Provider: "openai", APIKeyFile: key}, {Provider: "minimax"}, {Provider: "minimax", APIKeyFile: key, BaseURL: "http://example.com"},
-		{Provider: "anthropic", APIKeyFile: key, Timezone: "Mars/Olympus"}, {Provider: "anthropic", APIKeyFile: key, MaxTokens: 10}, {Provider: "anthropic", APIKeyFile: key, DailyTokenCap: -1}} {
+	minus := int64(-1)
+	o := []string{"dave"}
+	for _, bad := range []agentsConfig{{Provider: "openai", Owners: o, APIKeyFile: key}, {Provider: "minimax", Owners: o}, {Provider: "minimax", Owners: o, APIKeyFile: key, BaseURL: "http://example.com"},
+		{Provider: "anthropic", Owners: o, APIKeyFile: key, Timezone: "Mars/Olympus"}, {Provider: "anthropic", Owners: o, APIKeyFile: key, MaxTokens: 10}, {Provider: "anthropic", Owners: o, APIKeyFile: key, DailyTokenCap: &minus}} {
 		if _, err := bad.settings(); err == nil {
 			t.Errorf("accepted %+v", bad)
+		}
+	}
+}
+
+// The key pays only for the spaces of agents.owners: other owners' actions
+// queue nothing, and an owner without a username never matches.
+func TestRunnerOtherOwners(t *testing.T) {
+	for _, owner := range [][2]string{{"mallory", "mallory@example.com"}, {"", "dave@example.com"}} {
+		w := newRunnerWorld(t)
+		w.runner.owner = func(context.Context, string) (string, string) { return owner[0], owner[1] }
+		w.write("hr/.metatrash.json", tidyConfig)
+		w.write("hr/inbound/a.md", "a\n")
+		time.Sleep(200 * time.Millisecond)
+		if jobs := len(w.store.list("")); jobs != 0 || len(w.model.requests) != 0 || w.exists("hr/runner.md") {
+			t.Errorf("owner %v: %d jobs, %d model calls", owner, jobs, len(w.model.requests))
+		}
+	}
+	// A job queued before the owner left agents.owners is skipped unrun.
+	w := newRunnerWorld(t)
+	w.write("hr/.metatrash.json", tidyConfig)
+	w.runner.owner = func(context.Context, string) (string, string) { return "mallory", "" }
+	w.write("hr/inbound/a.md", "a\n")
+	_ = w.store.add(context.Background(), agentJob{ID: strings.Repeat("c", 32), SpaceID: w.repo.id, Folder: "hr/", Action: "tidy-draft", File: "hr/inbound/a.md", Status: jobQueued, QueuedAt: time.Now()})
+	w.runner.poke()
+	if jobs := w.wait(1); jobs[0].Status != jobSkipped || !strings.Contains(jobs[0].Error, "not enabled for this space's owner") || len(w.model.requests) != 0 {
+		t.Errorf("jobs %+v", jobs)
+	}
+}
+
+func TestAgentsSettings(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(key, []byte("sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := (&agentsConfig{Enabled: true, Provider: " MiniMax", Owners: []string{"dave-zap"}, APIKeyFile: key}).settings()
+	if err != nil || s.provider != "minimax" || s.app != "MiniMax" || !s.allows("dave-zap") || s.allows("dave") || s.allows("") || s.dailyCap != 2000000 {
+		t.Fatalf("%+v %v", s, err)
+	}
+	none := int64(0)
+	if s, err := (&agentsConfig{Provider: "minimax", Owners: []string{"dave"}, APIKeyFile: key, DailyTokenCap: &none}).settings(); err != nil || s.dailyCap != 0 {
+		t.Errorf("no cap: %+v %v", s, err)
+	}
+	for c, want := range map[*agentsConfig]string{
+		{Provider: "openai", Owners: []string{"dave"}, APIKeyFile: key}:  `not "openai"`,
+		{Provider: "minimax", APIKeyFile: key}:                           "owners must list",
+		{Provider: "minimax", Owners: []string{"Dave"}, APIKeyFile: key}: `"Dave" is not a username`,
+	} {
+		if _, err := c.settings(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%+v: %v, want %q", c, err, want)
 		}
 	}
 }

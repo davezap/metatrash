@@ -27,10 +27,11 @@
   },
   "agents": {
     "enabled": false,
+    "owners": ["dave"],
     "provider": "minimax",
     "apiKeyFile": "/etc/metatrash/agents-api-key",
     "model": "MiniMax-M3",
     "timezone": "Pacific/Auckland",
-    "dailyTokenCap": 0
+    "dailyTokenCap": 2000000
   }
 }

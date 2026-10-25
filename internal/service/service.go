@@ -403,6 +403,9 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if err := r.checkLocks(ctx, files, in.Path, *in.Text, personWrite(ctx)); err != nil {
 			return nil, err
 		}
+		if err := s.checkActionsWriter(ctx, r, files, in.Path, *in.Text); err != nil {
+			return nil, err
+		}
 	}
 	if op == "write" {
 		configPath := ""

@@ -78,7 +78,7 @@ func TestActionsFolderRules(t *testing.T) {
 	s, owned, do := folderFilesHarness(t)
 	ctx := context.Background()
 	config := `{"actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}]}`
-	do(ctx, "write", Input{Path: "hr/.metatrash.json", Text: &config}, "")
+	do(asOwner(ctx, owned), "write", Input{Path: "hr/.metatrash.json", Text: &config}, "")
 	child := "{\"inherit\": true}\n"
 	do(ctx, "write", Input{Path: "hr/inbound/.metatrash.json", Text: &child}, "")
 	_, files, err := owned.snapshot(ctx, "")
@@ -97,7 +97,7 @@ func TestActionsFolderRules(t *testing.T) {
 		t.Errorf("configured space took actions: %v", err)
 	}
 	locked := `{"actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}],"locked":{"actions":"agents"}}`
-	do(context.WithValue(ctx, personWriteKey{}, true), "write", Input{Path: "hr/.metatrash.json", Text: &locked}, "")
+	do(asOwner(ctx, owned), "write", Input{Path: "hr/.metatrash.json", Text: &locked}, "")
 	changed := `{"actions":[],"locked":{"actions":"agents"}}`
 	do(ctx, "write", Input{Path: "hr/.metatrash.json", Text: &changed}, "locked_setting")
 }
@@ -106,7 +106,7 @@ func TestTriggersBetween(t *testing.T) {
 	_, owned, do := folderFilesHarness(t)
 	ctx := context.Background()
 	config := `{"actions":[{"name":"new","on":"inbound/*.md","do":"x"},{"name":"edits","on":"*.md","when":"change","do":"y"}]}`
-	do(ctx, "write", Input{Path: "hr/.metatrash.json", Text: &config}, "")
+	do(asOwner(ctx, owned), "write", Input{Path: "hr/.metatrash.json", Text: &config}, "")
 	text := "draft\n"
 	do(ctx, "write", Input{Path: "hr/policy.md", Text: &text}, "")
 	before, _ := owned.head(ctx)
@@ -138,4 +138,37 @@ func TestTriggersBetween(t *testing.T) {
 	if err != nil || len(triggers) != 1 || triggers[0].File != "hr/inbound/x.md" || triggers[0].Action != "new" {
 		t.Errorf("move: %v %v", triggers, err)
 	}
+}
+
+// asOwner is a context writing as the space owner through Metatrash Sync,
+// the only writer that may change actions.
+func asOwner(ctx context.Context, r *repository) context.Context {
+	if r.owner == "" {
+		r.owner = strings.Repeat("e", 32)
+	}
+	ctx = context.WithValue(ctx, personWriteKey{}, true)
+	return context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: r.owner}})
+}
+
+// Only the owner, as a person, can add, change or remove actions.
+func TestActionsOwnerOnly(t *testing.T) {
+	_, owned, do := folderFilesHarness(t)
+	ctx := context.Background()
+	owner := asOwner(ctx, owned)
+	config := `{"actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}]}`
+	member := context.WithValue(context.WithValue(ctx, personWriteKey{}, true), mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: strings.Repeat("f", 32)}})
+	ownersAgent := context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: owned.owner}})
+	for _, c := range []context.Context{ctx, member, ownersAgent} {
+		do(c, "write", Input{Path: "hr/.metatrash.json", Text: &config}, "forbidden")
+	}
+	do(owner, "write", Input{Path: "hr/.metatrash.json", Text: &config}, "")
+	// Others may change the rest of the file, but not the actions.
+	purpose := `{"purpose":"HR","actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}]}`
+	do(member, "write", Input{Path: "hr/.metatrash.json", Text: &purpose}, "")
+	for _, text := range []string{`{"purpose":"HR"}`, `{"purpose":"HR","actions":[{"name":"tidy","on":"*.md","do":"Tidy it."}]}`} {
+		do(member, "write", Input{Path: "hr/.metatrash.json", Text: &text}, "forbidden")
+	}
+	do(ownersAgent, "edit", Input{Path: "hr/.metatrash.json", Edits: []Edit{{OldText: `"inbound/*.md"`, NewText: `"*.md"`}}}, "forbidden")
+	empty := `{"purpose":"HR"}`
+	do(owner, "write", Input{Path: "hr/.metatrash.json", Text: &empty}, "")
 }

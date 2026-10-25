@@ -53,8 +53,8 @@ type agentRunner struct {
 	wake     chan struct{}
 	mu       sync.Mutex
 	running  map[string]bool
-	// ownerName returns the username History shows for an owner.
-	ownerName func(ctx context.Context, userID string) string
+	// owner returns a space owner's username (empty when none) and email.
+	owner func(ctx context.Context, userID string) (username, email string)
 	// retryWait is the pause before retry n (1, 2); tests shorten it.
 	retryWait func(n int) time.Duration
 	clock     func() time.Time
@@ -129,22 +129,35 @@ func newAgentRunner(s *Service, settings *agentSettings, provider agentProvider,
 	a := &agentRunner{s: s, settings: settings, provider: provider, store: store, tools: tools, schemas: schemas, ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), running: map[string]bool{}, clock: time.Now,
 		retryWait: func(n int) time.Duration { return time.Duration(n*n) * 5 * time.Second }}
-	a.ownerName = func(ctx context.Context, userID string) string {
+	a.owner = func(ctx context.Context, userID string) (string, string) {
 		if s.ownedDB == nil {
-			return ""
+			return "", ""
 		}
 		lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		var username, email string
 		if err := s.ownedDB.db.QueryRowContext(lookup, "SELECT COALESCE(username, ''), email FROM metatrash_users WHERE user_id = ?", userID).Scan(&username, &email); err != nil {
-			return ""
+			return "", ""
 		}
-		if username == "" {
-			return emailName(email)
-		}
-		return username
+		return username, email
 	}
 	return a, nil
+}
+
+// ownerName is the name History shows for a space's owner.
+func (a *agentRunner) ownerName(ctx context.Context, r *repository) string {
+	username, email := a.owner(ctx, a.s.repositoryOwner(r))
+	if username == "" {
+		return emailName(email)
+	}
+	return username
+}
+
+// allowed reports whether agents.owners lists the space's owner: the API key
+// pays only for their jobs.
+func (a *agentRunner) allowed(ctx context.Context, r *repository) bool {
+	username, _ := a.owner(ctx, a.s.repositoryOwner(r))
+	return a.settings.allows(username)
 }
 
 // start fails jobs a restart interrupted, then runs the queue.
@@ -254,6 +267,14 @@ func (a *agentRunner) enqueue(r *repository, old, state string) {
 		log.Printf("agent runner: space %s: %v", r.id, err)
 		return
 	}
+	if len(triggers) == 0 {
+		return
+	}
+	if !a.allowed(ctx, r) {
+		// Not queued or recorded: nothing runs on the key for other owners.
+		log.Printf("agent runner: space %s: owner not in agents.owners, %d action jobs not queued", r.id, len(triggers))
+		return
+	}
 	queued := false
 	for _, t := range triggers {
 		now := a.clock()
@@ -334,7 +355,7 @@ func (a *agentRunner) record(j agentJob, out jobOutcome) {
 		return
 	}
 	ctx = context.WithValue(ctx, runnerWriteKey{}, true)
-	name := a.ownerName(ctx, a.s.repositoryOwner(r))
+	name := a.ownerName(ctx, r)
 	ctx = withAuthor(ctx, func() changeAuthor { return changeAuthor{Name: name, App: runnerApp, Kind: "agent"} })
 	text := runnerEntry(j, out, a.settings, strings.TrimPrefix(j.File, j.Folder))
 	if _, err := a.s.dispatchRepository(ctx, r, j.SpaceID, "append", Input{Path: j.Folder + runnerLogName, Text: &text}); err != nil {
@@ -391,6 +412,11 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	if r == nil {
 		return out, fmt.Errorf("the space no longer exists")
 	}
+	if !a.allowed(ctx, r) {
+		// The space changed hands, or agents.owners changed, after queueing.
+		j.Status, j.Error = jobSkipped, "skipped: folder actions are not enabled for this space's owner"
+		return out, nil
+	}
 	_, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return out, err
@@ -438,7 +464,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		}
 		instructions = string(b)
 	}
-	owner := a.ownerName(ctx, a.s.repositoryOwner(r))
+	owner := a.ownerName(ctx, r)
 	folderName := j.Folder
 	if folderName == "" {
 		folderName = "(the space root)"

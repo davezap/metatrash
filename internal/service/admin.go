@@ -553,6 +553,13 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	add("accounts config", nil, o.AccountsConfig+": SMTP"+accountFeatures(a))
+	if a.agents != nil {
+		ok, err := readableBy(a.agents.keyFile, serviceAccount)
+		if err == nil && !ok {
+			err = fmt.Errorf("the %s account cannot read %s, so the service will not start; run: sudo chown root:%s %s && sudo chmod 0640 %s", serviceAccount, a.agents.keyFile, serviceAccount, a.agents.keyFile, a.agents.keyFile)
+		}
+		add("agents key", err, a.agents.keyFile+" readable by the service")
+	}
 	store, err := openAccountDatabase(ctx, a.config.DatabaseConfigFile)
 	if !add("database", err, "connected") {
 		return results
@@ -599,6 +606,9 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 	return results
 }
 
+// serviceAccount is the system account deploy/metatrash.service runs as.
+const serviceAccount = "metatrash"
+
 func accountFeatures(a *accounts) string {
 	s := ""
 	if a.oauth != nil {
@@ -611,7 +621,7 @@ func accountFeatures(a *accounts) string {
 		s += ", authenticator app"
 	}
 	if a.agents != nil {
-		s += ", folder actions (" + a.agents.app + " " + a.agents.model + ")"
+		s += ", folder actions (" + a.agents.app + " " + a.agents.model + " for " + strings.Join(a.agents.owners, ", ") + ")"
 	}
 	return s
 }

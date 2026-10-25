@@ -349,34 +349,45 @@ actions are checked and stored either way, and run only while it is on.
 ```json
 "agents": {
   "enabled": true,
+  "owners": ["dave"],
   "provider": "minimax",
   "apiKeyFile": "/etc/metatrash/agents-api-key",
   "model": "MiniMax-M3",
   "timezone": "Pacific/Auckland",
-  "dailyTokenCap": 0
+  "dailyTokenCap": 2000000
 }
 ```
 
+- `owners` (required): the usernames whose own spaces may run actions. The
+  key pays for every job, so nobody else's actions run: in other owners'
+  spaces actions are stored but no job is queued, and a job queued before its
+  space changed hands is recorded as skipped. Members' files in a listed
+  owner's space do run, on that owner's key. The configured spaces (the public
+  space among them) refuse actions altogether.
 - `provider`: `minimax` (MiniMax's Anthropic-compatible API,
   `https://api.minimax.io/anthropic`, default model `MiniMax-M3`) or
   `anthropic` (`https://api.anthropic.com`, default model
   `claude-sonnet-5-5`). Both speak the Anthropic Messages API, so switching is
   a config change. `baseURL` overrides the address (https only), `model` the
   model.
-- `apiKeyFile`: one line holding the provider's API key (root:metatrash,
-  0640). The key is sent as `x-api-key`; it never goes in `accounts.json` or
-  Git.
+- `apiKeyFile`: one line holding the provider's API key. The service runs
+  as `metatrash`, so it must be able to read it:
+  `sudo chown root:metatrash /etc/metatrash/agents-api-key` and
+  `sudo chmod 0640 /etc/metatrash/agents-api-key`. The key is sent as
+  `x-api-key`; it never goes in `accounts.json` or Git.
 - `maxTokens`: most output tokens per model reply (1,024 to 128,000; default
   16,384). Long rewrites need room: a whole policy written in one `write`
   call is one reply.
 - `timezone`: IANA zone for `runner.md` times and the daily cap (default
   `Pacific/Auckland`).
-- `dailyTokenCap`: tokens (in and out) a space's jobs may use per day; 0 (the
-  default) is no limit. Set it, for example to `2000000`, once testing shows
-  what a job costs; jobs over it are recorded as skipped.
+- `dailyTokenCap`: tokens (in and out) a space's jobs may use per day;
+  2,000,000 when left out, `0` for no limit. Jobs over it are recorded as
+  skipped. Raise it once testing shows what a job costs.
 
 `metatrash check` validates the section and reads the key file, and lists
-"folder actions (MiniMax MiniMax-M3)" among the account features. Jobs are
+"folder actions (MiniMax MiniMax-M3 for dave)" among the account features.
+Run as root (`sudo`), it also checks that the `metatrash` account can read
+the key ("agents key"); otherwise the service exits at start. Jobs are
 rows in `metatrash_agent_jobs` (schema v15):
 
 ```sql

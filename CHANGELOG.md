@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.54.2 - Only the owner sets folder actions (2026-10-25)
+
+No database, grant or configuration change; tool-schema.json is unchanged (0.15.0). A missing `agents.dailyTokenCap` now means 2,000,000 tokens a day per space; set `0` to keep no limit.
+
+- **A member could spend the owner's tokens** (Dave): anyone with write access could add an action to a folder's `.metatrash.json`, and an everyone-level lock could be lifted by any person, members included. Now only the space owner, writing as a person through Metatrash Sync or Slate Viewer, can add, change or remove `actions`. Members and every agent (the owner's own too, so a document cannot talk an agent into adding one) get `forbidden`; they can still change the file's other settings, and members' files still run the owner's actions.
+- **Daily token cap by default**: 2,000,000 tokens (in and out) per space per day unless `dailyTokenCap` says otherwise, so a runaway action costs a known amount.
+- Roadmap: the agreed design for user-owned agents, who pays, bring your own key and members' own actions (docs/roadmap.md, Folder agent tasks), replacing `agents.owners` later.
+- Tested: owner as a person can set and clear actions; a member, the owner's agent and an anonymous write cannot, by write or edit; a member can change `purpose` while the actions stay; the default and zero caps.
+
+## 0.54.1 - Folder actions run only for listed owners (2026-10-25)
+
+No database or grant change. **`accounts.json` must gain `agents.owners`** (for example `"owners": ["dave-zap"]`) before this binary starts while `agents` is enabled. tool-schema.json is unchanged (0.15.0).
+
+- **The provider key paid for every owned space** (Dave): any account's own space with an action would queue jobs on the server's key. `agents.owners` now lists the usernames whose spaces run actions, and is required. Other owners' actions are stored but queue no job (the service log says so), a job queued before a space changed hands is recorded as skipped, and an owner without a username never matches. Members' files in a listed owner's space still run on that owner's key, as designed. The configured spaces, the public space among them, already refused actions and still do.
+- **`metatrash check` run with sudo checks the key file** ("agents key"): it fails when the `metatrash` account cannot read `apiKeyFile`, and prints the `chown`/`chmod` to fix it. Before, the check passed as root while the service exited at start (Dave). docs/deployment.md gives the commands.
+- **`provider` ignores case and surrounding spaces**, and the error for a wrong value names the value it got.
+- The account features line names the owners: "folder actions (MiniMax MiniMax-M3 for dave-zap)".
+- Tested: other owners and owners without a username queue nothing and call no model; a queued job for an unlisted owner is skipped; settings validation; the key check as root against `nobody`. Live: 0.54.0 ran end to end on the server (trigger, queue, provider call, runner.md) and stopped at MiniMax's 402 insufficient balance.
+
 ## 0.54.0 - Folder actions: runner and text-file triggers (2026-10-25)
 
 Needs account schema v15 (`deploy/account-schema-v15.sql`) and the new grants in `deploy/account-grants.sql` before the binary starts. tool-schema.json is 0.15.0 (the write description mentions `actions`). The runner is off until `agents` is enabled in `accounts.json`. Setup: docs/deployment.md, Folder actions (agents); rules: docs/api-contract.md, Folder actions.

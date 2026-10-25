@@ -99,7 +99,7 @@ func checkActions(actions []folderAction) error {
 		case len(a.On) > 0 && a.Every != "":
 			return actionError(a.Name, `use either "on" (files) or "every" (a schedule), not both.`)
 		case a.Every != "":
-			return actionError(a.Name, `"every" schedules are not supported yet (Metatrash 0.55.0); use "on" with file patterns.`)
+			return actionError(a.Name, `"every" schedules are not supported yet; use "on" with file patterns.`)
 		}
 		if len(a.On) > maxActionPatterns {
 			return actionError(a.Name, fmt.Sprintf("on is limited to %d patterns.", maxActionPatterns))
@@ -181,7 +181,7 @@ func (a folderAction) steps() int {
 	return a.Steps
 }
 
-// webEnabled reports whether the action may use the web tools (0.55.0).
+// webEnabled reports whether the action may use the web tools (to come).
 func (a folderAction) webEnabled() bool { return a.Web == nil || *a.Web }
 
 // doFile returns the instructions file the action names, relative to its
@@ -248,4 +248,24 @@ func (r *repository) triggersBetween(ctx context.Context, old, state string) ([]
 		}
 	}
 	return triggers, nil
+}
+
+// checkActionsWriter refuses a write to path that adds, changes or removes
+// actions unless the space owner makes it as a person (Metatrash Sync or
+// Slate Viewer). Actions spend the owner's tokens, so neither members nor any
+// agent, the owner's own included, may set them.
+func (s *Service) checkActionsWriter(ctx context.Context, r *repository, files map[string]record, path, text string) error {
+	old, err := r.configText(ctx, files, configFolder(path))
+	if err != nil {
+		return err
+	}
+	if configKeys(old)["actions"] == configKeys(text)["actions"] {
+		return nil
+	}
+	identity, _ := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
+	owner := s.repositoryOwner(r)
+	if personWrite(ctx) && identity.oauth != nil && owner != "" && identity.oauth.UserID == owner {
+		return nil
+	}
+	return problem(403, "forbidden", path+": only the space owner can add, change or remove actions, writing as themselves through Metatrash Sync or Slate Viewer; agents and members cannot, because actions run on the owner's tokens.")
 }

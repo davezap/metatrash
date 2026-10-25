@@ -21,7 +21,7 @@ func TestDatabaseAgentJobs(t *testing.T) {
 		},
 	}}
 	zone, _ := time.LoadLocation("Pacific/Auckland")
-	runner, err := newAgentRunner(w.s, &agentSettings{provider: "minimax", app: "MiniMax", model: "MiniMax-M3", maxTokens: 4096, zone: zone, dailyCap: 1000000}, model, store)
+	runner, err := newAgentRunner(w.s, &agentSettings{provider: "minimax", app: "MiniMax", model: "MiniMax-M3", maxTokens: 4096, zone: zone, dailyCap: 1000000, owners: []string{w.owner.Username}}, model, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,11 @@ func TestDatabaseAgentJobs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := w.s.dispatchRepository(ctx, repo, w.ownedName, "write", Input{Path: path, Text: &text, IfInState: head}); err != nil {
+		c := ctx
+		if isFolderConfig(path) {
+			c = asOwner(ctx, repo)
+		}
+		if _, err := w.s.dispatchRepository(c, repo, w.ownedName, "write", Input{Path: path, Text: &text, IfInState: head}); err != nil {
 			t.Fatal(err)
 		}
 	}
