@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.53.2 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.54.0 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -74,7 +74,8 @@ Agreed with Dave 2026-10-18.
 - **Folder configurator and folder selection in Slate Viewer:** done. The
   tree selects folders, and a folder's Properties (right-click, or Alt+Enter)
   writes its `.metatrash.json`: locks, read-only files, publishing and the
-  acknowledge service. Still to add there: triggers (GitHub, folder actions).
+  acknowledge service. Still to add there: triggers (GitHub, and folder
+  actions under Folder agent tasks).
 
 ## Forms and quizzes
 
@@ -189,14 +190,28 @@ open, from the 2026-10-03 design session:
 3. **GitHub → space**: repo changes appear in the folder (`pull` auto),
    triggered by the push webhooks the app already receives (today they are
    acknowledged and ignored).
-4. **One folder action**: a write into an action folder triggers one process;
-   the result lands as a file. Enables the reserved `actions` key.
+4. **One folder action**: done in 0.54.0 as folder actions (see Folder agent
+   tasks below).
 
 Later: letting push send `.github/workflows/` changes (needs the app's
 `workflows` permission; refused for now because workflows can reach CI
 secrets); a member permission "write but not push", so a supervising agent
 reviews `pending` and pushes; possibly a GitHub service on the space root;
 the `review` push mode, which needs a review screen.
+
+## Folder agent tasks
+
+0.54.0 has the runner and text-file triggers (`actions` in `.metatrash.json`,
+results in `runner.md`; [api-contract.md](api-contract.md#folder-actions)).
+Tested with a fake model and against MariaDB; **not yet run against MiniMax**:
+Dave to set up schema v15, the API key and `agents` in `accounts.json`, then
+try the tidy-draft example. Still to build, in order:
+
+1. **0.55.0**: web tools (Brave `web_search`, `web_fetch`, downloads cached in
+   B2 as `web/<id>`) and `every` schedules.
+2. **0.56.0**: PDF and Word files as triggers and input.
+3. **Slate Viewer**: an Automation page for a folder's actions and its
+   `runner.md`.
 
 ## mtsync and Slate Viewer
 

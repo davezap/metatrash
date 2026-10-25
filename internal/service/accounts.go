@@ -35,6 +35,8 @@ type accountConfig struct {
 	DatabaseConfigFile string        `json:"databaseConfigFile"`
 	OAuth              *oauthConfig  `json:"oauth"`
 	GitHub             *githubConfig `json:"github"`
+	// Agents is the model provider that runs folder actions (agent_config.go).
+	Agents *agentsConfig `json:"agents"`
 	// DocsSpace, when set, is the owner/slug of a space shown as the site's
 	// documentation under /docs/ while its owner keeps it readable on the web.
 	DocsSpace string `json:"docsSpace"`
@@ -105,6 +107,8 @@ type accounts struct {
 	oauth *oauthSettings
 	// github is nil unless the account configuration enables the GitHub App.
 	github *githubSettings
+	// agents is nil unless the account configuration enables folder actions.
+	agents *agentSettings
 	// totpKey seals authenticator-app secrets; nil without totpKeyFile.
 	totpKey cipher.AEAD
 	// recoveryReveals holds new recovery codes until their page shows them
@@ -187,6 +191,14 @@ func (s *Service) EnableAccounts(configPath string) error {
 		return sendMail(ctx, cfg, passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
 	}
 	s.accounts = a
+	if a.agents != nil {
+		runner, err := newAgentRunner(s, a.agents, newMessagesClient(a.agents), dbJobStore{store.db})
+		if err != nil {
+			return err
+		}
+		s.agents.Store(runner)
+		runner.start()
+	}
 	return nil
 }
 
@@ -237,6 +249,11 @@ func loadAccountSettings(configPath string) (*accounts, string, error) {
 	}
 	if cfg.GitHub != nil && cfg.GitHub.Enabled {
 		if a.github, err = cfg.GitHub.settings(); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.Agents != nil && cfg.Agents.Enabled {
+		if a.agents, err = cfg.Agents.settings(); err != nil {
 			return nil, "", err
 		}
 	}

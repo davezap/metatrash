@@ -41,6 +41,9 @@ type repository struct {
 	// configBlobs caches .metatrash.json texts parsed, by blob hash (see
 	// cachedConfig).
 	configBlobs sync.Map
+	// committed, when set, hears of every commit (old and new state), so
+	// folder actions can queue jobs (Service.agentCommitted).
+	committed func(ctx context.Context, old, state string)
 }
 
 // watch returns a channel that is closed at the next branch update.
@@ -372,6 +375,9 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 		return "", err
 	}
 	r.notify()
+	if r.committed != nil {
+		r.committed(ctx, old, commit)
+	}
 	return commit, nil
 }
 

@@ -24,5 +24,13 @@
     "clientSecretFile": "/etc/metatrash/github-client-secret",
     "webhookSecretFile": "/etc/metatrash/github-webhook-secret",
     "privateKeyFile": "/etc/metatrash/github-app.pem"
+  },
+  "agents": {
+    "enabled": false,
+    "provider": "minimax",
+    "apiKeyFile": "/etc/metatrash/agents-api-key",
+    "model": "MiniMax-M3",
+    "timezone": "Pacific/Auckland",
+    "dailyTokenCap": 0
   }
 }

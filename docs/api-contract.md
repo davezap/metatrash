@@ -118,9 +118,9 @@ A policy folder (0.48.0):
 }
 ```
 
-- `inherit: true` takes every setting from the parent folder's settings (themselves inherited when that folder inherits), except `services` (a repository attaches to one folder), `readOnly`, `publishedVersion` and `inherit` itself; the folder's own keys override. Refused on the space root. A read of a `.metatrash.json` that inherits also returns `effective`: the settings with the inherited ones filled in.
+- `inherit: true` takes every setting from the parent folder's settings (themselves inherited when that folder inherits), except `services` (a repository attaches to one folder), `readOnly`, `publishedVersion`, `actions` and `inherit` itself; the folder's own keys override. Refused on the space root. A read of a `.metatrash.json` that inherits also returns `effective`: the settings with the inherited ones filled in.
 - **Locks.** A lock has one of two levels: `"agents"` (agents can't change the thing; people can) or `"everyone"` (nobody can, people included, until a person lifts the lock). Anything not locked is read-write for everyone. A person is a write through Metatrash Sync (mtsync and Slate Viewer, the built-in OAuth client), by the owner or a member with write access; everything else (MCP, other apps, space keys, the anonymous `/mcp`) is an agent. `locked` and `readOnly` are maps of name to level; a list, as 0.45.0 wrote `locked`, locks each name for agents.
-- `locked` locks keys of this file: `purpose`, `children`, `services`, `inherit`, `readOnly`, `publishedVersion`, `locked`. Every write (or edit) is compared with the file as it was, and refused with `locked_setting` (403) when a key locked against the writer would change its value as the folder sees it with inherited settings. The locks are the folder's before the write, inherited ones included, so a child folder cannot override an inherited locked value. `locked` itself is always locked for agents and can't be locked for everyone, so a person can always lift a lock (lifting an `"everyone"` lock and changing the key take two writes). `inherit` is locked for agents while any lock applies, so a folder cannot shed its parent's locks. A new file counts as the one the folder would start with (`{"inherit": true}`), so new folders under a locked folder are locked too.
+- `locked` locks keys of this file: `purpose`, `children`, `services`, `inherit`, `readOnly`, `publishedVersion`, `actions`, `locked`. Every write (or edit) is compared with the file as it was, and refused with `locked_setting` (403) when a key locked against the writer would change its value as the folder sees it with inherited settings. The locks are the folder's before the write, inherited ones included, so a child folder cannot override an inherited locked value. `locked` itself is always locked for agents and can't be locked for everyone, so a person can always lift a lock (lifting an `"everyone"` lock and changing the key take two writes). `inherit` is locked for agents while any lock applies, so a folder cannot shed its parent's locks. A new file counts as the one the folder would start with (`{"inherit": true}`), so new folders under a locked folder are locked too.
 - `readOnly` locks files of this folder (up to 200 entries): a file name or `path.Match` pattern (`spec.md`, `*.pdf`, `n[0-9].md`) for files directly in the folder, or a subfolder name or pattern ending in `/` (`archive/`) for every file under it at any depth. A file locked against the writer can't be written, edited, moved (from or to), renamed or deleted, and a file can't be created under a locked name: `read_only_file` (403). It is never inherited (names are relative to the folder). A `.metatrash.json` is locked at most for agents, so its locks can be lifted. A change never removes a folder file locked against its writer along with an emptied folder. List, read and write results carry `readOnly: "agents"` or `"everyone"` on locked files. `readOnly` is an ordinary key: agents may change it unless `locked` locks it. GitHub pulls and pushes are not affected: a GitHub folder's files follow its repository. mtsync 0.46.0 handles a refused change to a file locked for everyone by keeping the local version as a conflict copy and putting the space's version back.
 - `purpose` (up to 2,000 characters) and `children` (up to 200 entries, each key one file name or folder name ending in `/`, each text up to 1,000 characters) describe the folder; new descriptions belong in `AGENTS.md`.
 - Every key optional; unknown keys and duplicate keys refused.
@@ -128,10 +128,55 @@ A policy folder (0.48.0):
 - `services` up to 8, at most one per type, each type with its own fields (`serviceKinds` in `folder_config.go`). `acknowledge` (0.48.0) takes only `files`: names, patterns or `sub/` like `readOnly` (up to 50), by default every `.md` file in the folder and below it other than `AGENTS.md`; it asks everyone in the space to read the folder's published files (Acknowledgements, below), may sit on the space root and inside another acknowledge folder, and does nothing until the folder has a `publishedVersion`. `github`: `repo` is `owner/name`; `branch` defaults to `main`; `push` is `agent` (default: only the `push` tool sends), `auto` (accepted; behaves as `agent` until automatic pushing exists) or `review` (accepted; `push` is refused until a review screen exists); `pull` is `auto` (default). The `pull`, `pending` and `push` tools work on the folder (above).
 - Services are allowed only in account-owned spaces. A `github` service never sits on the space root, and a folder may not have a `github` service when a folder above or below it already has one (no GitHub folder inside or around another). Different types may nest. The refusal names the clashing folder and suggests putting the repo beside it (for example under `dependencies/`).
 - Files under a GitHub folder belong to that repository; files outside it are space-only and never synced.
-- `actions` is reserved and refused until folder actions exist.
+- `actions` (0.54.0, up to 20) runs an agent when files arrive in the folder (Folder actions, below). Owned spaces only, never inherited, lockable like any key.
 - `.metatrash.json` files cannot be moved (move source or destination). To remove a setting, rewrite the file.
 
 Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in each repository. Commit metadata and file changes together. This small index preserves identity and history through moves without depending on Git rename guesses or a separate database. Exclude it from user listings, but include it in repository storage accounting. Other service files under `.metatrash/` (so far `github.json`, the GitHub baselines) are carried forward by every commit and are never visible to agents.
+
+## Folder actions
+
+0.54.0. A folder's `.metatrash.json` can list actions. When one fires, the server runs an agent loop against the model provider in `accounts.json` (`agents`, deployment.md); the agent can use only this space's file tools and is pinned to the folder.
+
+```json
+{
+  "actions": [
+    {
+      "name": "tidy-draft",
+      "on": "inbound/*.md",
+      "do": "Rewrite this draft so it complies with current New Zealand employment law and sits well with the existing policies in this folder. Put the result in for-review/ under the same name, then move the draft to completed/."
+    }
+  ]
+}
+```
+
+- `name` (required): a slug (`a-z`, `0-9`, `-`, up to 40), unique in the folder. Shown in `runner.md`.
+- `on`: file patterns relative to the folder, as a list or one comma-separated string. Each segment is a name or `path.Match` pattern (`*.md`, `inbound/*.pdf`); a pattern ending in `/` (`drafts/`) matches every file under that subfolder. The action fires once for each matching file that arrives: created, or moved in (a move keeps the file's ID, but its new path is new to the folder). With `"when": "change"` it also fires for each edit of a matching file already there; the default is `"arrive"`. A folder's `AGENTS.md`, `.metatrash.json` and its `runner.md` never fire it.
+- `every` (a schedule such as `day 06:00`) is refused until 0.55.0; an action has `on` or `every`, not both.
+- `do` (required, up to 4,000 characters): the instructions in plain words, or the name of a `.md` file in the folder that holds them (no spaces, ends in `.md`).
+- `web` (`false` turns off the web tools, which arrive in 0.55.0) and `steps` (most tool calls per job, 1 to 200, default 40).
+- Owned spaces only: a configured space refuses `actions` (`invalid_request`). Actions are checked and stored while `agents` is off; they run when it is on.
+
+**How a job runs.** After every commit to an owned space (MCP, REST, mtsync, GitHub pull), the files it added or changed are matched against the actions of the folders holding them, and one job per matching file and action is queued (`metatrash_agent_jobs`, schema v15). Commits the runner makes never queue jobs, so an agent writing into `for-review/` cannot set itself off. At most 20 jobs per folder per hour: the 21st is recorded as skipped in `runner.md`, later ones in that hour are dropped. Jobs run one at a time per space and at most two at once; queued jobs survive a restart, and a job a restart interrupted is recorded as failed.
+
+- **Prompt.** A short runner preamble (unattended, no questions, paths are relative, reply with a summary), the folder's `AGENTS.md`, the action's `do`, and which file arrived or changed.
+- **Tools.** `read`, `write`, `edit`, `append`, `search`, `list`, `move`, `delete` and `history`, with the descriptions and input schemas of `api/tool-schema.json` minus `space`. Each call goes to `dispatchRepository`, so ifInState, locks, `readOnly` files and size limits apply as for any agent. No `spaces`, `pull` or `push`, no shell, no other tools.
+- **Pinning.** The runner adds the folder to every `path`, `from`, `to` and `prefix` the agent sends and removes it from results (and drops `space`); list and search are limited to the folder, history shows only entries inside it, and `..` is refused as everywhere. The agent cannot change any `.metatrash.json` or the folder's `runner.md` (`protected_file`). A result over 100,000 bytes is refused with a hint to read by line range.
+- **Identity.** Changes are commits with `Metatrash-By: <owner>`, `Metatrash-App: MiniMax` (or `Claude`) and `Metatrash-Kind: agent`, so History shows "MiniMax (agent) for dave" and agent-level locks apply. Jobs run on the owner's provider account, whoever brought the file.
+- **Limits.** `steps`; 400,000 input tokens and 10 minutes per job; an optional daily token cap per space (`agents.dailyTokenCap`, 0 = none). A provider error worth retrying (429, 5xx, network) is retried twice, then the job fails.
+- **Model replies.** Thinking blocks are passed back unchanged (MiniMax requires it), `pause_turn` is resumed, and the model's last text is the job's summary.
+- **runner.md.** When a job ends the runner appends an entry to `runner.md` in the folder (creating it), signed `Metatrash runner`:
+
+```markdown
+## 2026-10-25 14:03 · tidy-draft · done
+
+- File: inbound/leave-draft.md
+- Changed: for-review/leave-draft.md (write), inbound/leave-draft.md → completed/leave-draft.md (moved)
+- Steps: 12 · tokens: 48210 in, 3120 out · MiniMax-M3
+
+Rewrote the draft ... (the model's closing summary)
+```
+
+The status is `done`, `failed` (with `- Error:`) or `skipped` (the file was gone before the job started, the folder's hourly limit, or the daily cap). Times are in `agents.timezone`.
 
 ## Acknowledgements (policy reads)
 

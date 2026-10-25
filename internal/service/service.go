@@ -61,6 +61,8 @@ type Service struct {
 	rootAgents []byte
 	// clock replaces time.Now in tests.
 	clock func() time.Time
+	// agents runs folder actions; nil unless accounts.json enables agents.
+	agents atomic.Pointer[agentRunner]
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -128,6 +130,9 @@ func (s *Service) worker() {
 
 // Close is called once, after the HTTP server has stopped accepting requests.
 func (s *Service) Close() {
+	if a := s.agents.Load(); a != nil {
+		a.stop()
+	}
 	close(s.stop)
 	<-s.done
 	if s.accounts != nil {

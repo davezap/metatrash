@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.54.0 - Folder actions: runner and text-file triggers (2026-10-25)
+
+Needs account schema v15 (`deploy/account-schema-v15.sql`) and the new grants in `deploy/account-grants.sql` before the binary starts. tool-schema.json is 0.15.0 (the write description mentions `actions`). The runner is off until `agents` is enabled in `accounts.json`. Setup: docs/deployment.md, Folder actions (agents); rules: docs/api-contract.md, Folder actions.
+
+- **`actions` in `.metatrash.json`** (Dave, design 2026-10-25): each action has a `name`, `on` (patterns relative to the folder; a trailing `/` matches a subfolder at any depth), optional `when` (`arrive`, the default, or `change`), `do` (instructions, or the path of a `.md` file holding them) and optional `steps` (default 40, up to 200) and `web`. Actions work only in your own spaces (connected through `/mcp/account`), are never inherited, and can be locked like other keys. `every` is reserved for 0.55.0 and refused for now.
+- **The runner**: after each commit that is not its own, every file that arrived (or changed, for `when: change`) and matches an action queues one job. A job runs an agent pinned to the folder: it sees only the folder's files, through the same tools as MCP, cannot change `.metatrash.json` or `runner.md`, and reads the folder's `AGENTS.md` first. Its changes are signed by the space owner with App MiniMax or Claude. The outcome (status, file, what changed, steps, tokens, the agent's summary or the error) is appended to the folder's `runner.md`, signed "Metatrash runner".
+- **Providers**: anything that speaks the Anthropic Messages API; `minimax` (https://api.minimax.io/anthropic, default model MiniMax-M3) and `anthropic` (default claude-sonnet-5-5). Retries twice on 408, 409, 429 and 5xx.
+- **Limits**: one job per space at a time and two at once; 20 jobs per folder per hour (the 21st is recorded as skipped); 400k input tokens and 10 minutes per job; tool results cut at 100,000 bytes; optional `dailyTokenCap` per space. Jobs left running when the service stops are marked failed on the next start.
+- **Account schema v15**: `metatrash_agent_jobs` holds the queue and every job's outcome. `metatrash check` reports v15.
+- Tested with a fake model (tidy-draft example, limits and failures, the hourly cap, unpinning of results, the HTTP client against a TLS test server) and against MariaDB with the runtime grants (queue, claim, finish, restart). **Not yet run against MiniMax.**
+
 ## 0.53.2 - Emailed configuration works on Amazon Linux (2026-10-25)
 
 No database, grant or configuration change, and the binary is unchanged apart from its version.

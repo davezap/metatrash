@@ -53,8 +53,9 @@ type folderConfig struct {
 	// PublishedVersion is the folder's official version: its files as they
 	// were when the version was set (see publish.go). Never inherited.
 	PublishedVersion *int `json:"publishedVersion,omitempty"`
-	// Reserved for folder actions; refused until they are implemented.
-	Actions json.RawMessage `json:"actions,omitempty"`
+	// Actions run an agent when files arrive (see actions.go). Never
+	// inherited; owned spaces only.
+	Actions []folderAction `json:"actions,omitempty"`
 }
 
 // folderService is one entry of services. Each type uses its own fields
@@ -149,8 +150,8 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	if err := strictJSON(trimmed, &c); err != nil {
 		return c, folderConfigError("unknown key or wrong value type (" + jsonProblem(err) + ").")
 	}
-	if c.Actions != nil {
-		return c, folderConfigError("actions are not supported yet.")
+	if err := checkActions(c.Actions); err != nil {
+		return c, err
 	}
 	if c.Purpose != nil && utf8.RuneCountInString(*c.Purpose) > maxFolderPurpose {
 		return c, folderConfigError(fmt.Sprintf("purpose is limited to %d characters.", maxFolderPurpose))
@@ -171,7 +172,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion or locked, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion, actions or locked, not %q.", key))
 		}
 	}
 	if c.Locked["locked"] == lockEveryone {
@@ -263,6 +264,9 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 		if old, err := parseFolderConfig(string(b)); err == nil && old.PublishedVersion != nil && *c.PublishedVersion < *old.PublishedVersion {
 			return folderConfigError(fmt.Sprintf("publishedVersion only goes up: it is %d, so publish the next version as %d.", *old.PublishedVersion, *old.PublishedVersion+1))
 		}
+	}
+	if len(c.Actions) > 0 && !r.owned {
+		return folderConfigError("actions are available only in your own spaces (connected through /mcp/account).")
 	}
 	if len(c.Services) == 0 {
 		return nil
@@ -469,7 +473,7 @@ func markServiceFolders(nodes []*browserNode, prefix string, configs map[string]
 }
 
 // lockableKeys are the keys locked may name.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "locked": true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "locked": true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.
@@ -522,8 +526,8 @@ func parentFolder(folder string) string {
 
 // effectiveSettings returns folder's settings with inherited ones filled in,
 // as top-level keys like configKeys. text, when set, stands for the folder's
-// own file. Services, readOnly, publishedVersion and inherit itself are never
-// inherited.
+// own file. Services, readOnly, publishedVersion, actions and inherit itself
+// are never inherited.
 func (r *repository) effectiveSettings(ctx context.Context, files map[string]record, folder string, text *string) (map[string]string, error) {
 	own := ""
 	if text != nil {
@@ -543,7 +547,7 @@ func (r *repository) effectiveSettings(ctx context.Context, files map[string]rec
 		return nil, err
 	}
 	for k, v := range parent {
-		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "publishedVersion" && k != "inherit" {
+		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "publishedVersion" && k != "actions" && k != "inherit" {
 			keys[k] = v
 		}
 	}

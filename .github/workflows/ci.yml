@@ -50,9 +50,9 @@ jobs:
           sql() { docker exec -i "$DB" mariadb -uroot -pci-root "$@"; }
           sql -e "CREATE DATABASE metatrash CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
                   CREATE USER 'metatrash_accounts'@'%' IDENTIFIED BY 'ci-only-password';"
-          for v in $(seq 1 14); do sql metatrash < deploy/account-schema-v$v.sql; done
+          for v in $(seq 1 15); do sql metatrash < deploy/account-schema-v$v.sql; done
           sed "s/'metatrash_accounts'@'localhost'/'metatrash_accounts'@'%'/g" deploy/account-grants.sql | sql > /dev/null
-          sql metatrash -e "UPDATE metatrash_account_meta SET schema_version = 14, migration_source = 'empty'"
+          sql metatrash -e "UPDATE metatrash_account_meta SET schema_version = 15, migration_source = 'empty'"
           echo ci-only-password > "$RUNNER_TEMP/database-password"
           jq -n --arg pw "$RUNNER_TEMP/database-password" \
             '{network: "tcp", address: "127.0.0.1:3306", database: "metatrash", username: "metatrash_accounts", passwordFile: $pw}' \
