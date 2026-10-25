@@ -18,6 +18,8 @@ type accountSpace struct {
 	Ready               bool
 	// Web is set when anyone may read the space in the website's explorer.
 	Web bool
+	// Timezone is the space's own time zone; "" uses the server's.
+	Timezone string
 }
 
 func (h *httpAdapter) sessionCookieName() string {
@@ -38,6 +40,10 @@ func (h *httpAdapter) accountSpaces(ctx context.Context, user userAccount) ([]ac
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	zones, err := h.service.ownedDB.spaceTimezones(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := h.service.ownedDB.db.QueryContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? ORDER BY created_at, space_id", user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list owned spaces")
@@ -49,7 +55,7 @@ func (h *httpAdapter) accountSpaces(ctx context.Context, user userAccount) ([]ac
 		if err != nil {
 			return nil, err
 		}
-		item := accountSpace{ID: space.ID, Name: space.Name, Slug: space.Slug, Ready: space.State == "ready" && h.service.ownedRepository(space.ID) != nil, Web: space.Visibility == spaceWeb}
+		item := accountSpace{ID: space.ID, Name: space.Name, Slug: space.Slug, Ready: space.State == "ready" && h.service.ownedRepository(space.ID) != nil, Web: space.Visibility == spaceWeb, Timezone: zones[space.ID]}
 		if item.Ready && user.Username != "" {
 			item.URL = h.ownedSpaceURL(user.Username, space.Slug)
 		}

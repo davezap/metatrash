@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -342,6 +344,54 @@ func (s *Service) loadOwnedSpaces(ctx context.Context, db *accountDatabase) erro
 		}
 	}
 	return nil
+}
+
+var timezonePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$`)
+
+// validTimezone reports whether name is an IANA time zone the server knows.
+func validTimezone(name string) bool {
+	if len(name) > 64 || name == "Local" || !timezonePattern.MatchString(name) {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
+}
+
+// setSpaceTimezone sets the time zone of an owner's space ("" for the
+// server's).
+func (db *accountDatabase) setSpaceTimezone(ctx context.Context, ownerID, spaceID, zone string) error {
+	if !idPattern.MatchString(ownerID) || !idPattern.MatchString(spaceID) || (zone != "" && !validTimezone(zone)) {
+		return missing()
+	}
+	var found string
+	if err := db.db.QueryRowContext(ctx, "SELECT space_id FROM metatrash_spaces WHERE space_id = ? AND owner_user_id = ?", spaceID, ownerID).Scan(&found); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return missing()
+		}
+		return fmt.Errorf("cannot update the space's time zone")
+	}
+	if _, err := db.db.ExecContext(ctx, "UPDATE metatrash_spaces SET timezone = ? WHERE space_id = ? AND owner_user_id = ?", nullText(zone), spaceID, ownerID); err != nil {
+		return fmt.Errorf("cannot update the space's time zone")
+	}
+	return nil
+}
+
+// spaceTimezones maps an owner's spaces to their own time zones.
+func (db *accountDatabase) spaceTimezones(ctx context.Context, ownerID string) (map[string]string, error) {
+	out := map[string]string{}
+	err := eachRow(ctx, db.db, func(scan func(...any) error) error {
+		var id string
+		var zone sql.NullString
+		if err := scan(&id, &zone); err != nil {
+			return err
+		}
+		out[id] = zone.String
+		return nil
+	}, "SELECT space_id, timezone FROM metatrash_spaces WHERE owner_user_id = ?", ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read time zones")
+	}
+	return out, nil
 }
 
 // setSpaceVisibility lets an owner make a ready space readable on the web, or

@@ -28,6 +28,13 @@
   "agents": {
     "enabled": false,
     "keyFile": "/etc/metatrash/agents-key",
-    "timezone": "Pacific/Auckland"
+    "timezone": "Pacific/Auckland",
+    "search": {"provider": "brave", "keyFile": "/etc/metatrash/brave-key"},
+    "downloads": {
+      "endpoint": "https://s3.us-west-004.backblazeb2.com",
+      "bucket": "metatrash-web",
+      "keyID": "",
+      "keyFile": "/etc/metatrash/web-bucket-key"
+    }
   }
 }

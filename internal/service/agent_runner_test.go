@@ -22,6 +22,63 @@ import (
 type memoryJobStore struct {
 	mu   sync.Mutex
 	jobs map[string]agentJob
+	rows map[string]actionSchedule
+}
+
+func scheduleKey(s actionSchedule) string { return s.SpaceID + "/" + s.Folder + "/" + s.Action }
+
+func (m *memoryJobStore) scheduleList(spaceID string, due time.Time) []actionSchedule {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []actionSchedule
+	for _, s := range m.rows {
+		if (spaceID == "" || s.SpaceID == spaceID) && (due.IsZero() || !s.NextRun.After(due)) {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return scheduleKey(out[a]) < scheduleKey(out[b]) })
+	return out
+}
+
+func (m *memoryJobStore) schedules(_ context.Context, spaceID string) ([]actionSchedule, error) {
+	return m.scheduleList(spaceID, time.Time{}), nil
+}
+
+func (m *memoryJobStore) dueSchedules(_ context.Context, now time.Time, _ int) ([]actionSchedule, error) {
+	return m.scheduleList("", now), nil
+}
+
+func (m *memoryJobStore) addSchedule(_ context.Context, s actionSchedule) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.rows == nil {
+		m.rows = map[string]actionSchedule{}
+	}
+	m.rows[scheduleKey(s)] = s
+	return nil
+}
+
+func (m *memoryJobStore) setSchedule(ctx context.Context, s actionSchedule) error {
+	return m.addSchedule(ctx, s)
+}
+
+func (m *memoryJobStore) removeSchedule(_ context.Context, s actionSchedule) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.rows, scheduleKey(s))
+	return nil
+}
+
+func (m *memoryJobStore) advanceSchedule(_ context.Context, s actionSchedule, next, ran time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.rows[scheduleKey(s)]
+	if !ok || !cur.NextRun.Equal(s.NextRun) {
+		return false, nil
+	}
+	cur.NextRun, cur.LastRun = next, ran
+	m.rows[scheduleKey(s)] = cur
+	return true, nil
 }
 
 func (m *memoryJobStore) add(_ context.Context, j agentJob) error {
@@ -174,6 +231,8 @@ type runnerWorld struct {
 	// notices records the notices sent, as "user: why".
 	optIns  map[string]string
 	notices []string
+	// zones are the spaces' own time zones.
+	zones map[string]string
 }
 
 // alice is a member of the test space, who brings files of her own.
@@ -234,7 +293,12 @@ func newRunnerWorld(t *testing.T) *runnerWorld {
 	}
 	agent := testUserAgent(t, runner.settings, repo.owner, "MiniMax main", "minimax", "MiniMax-M3")
 	agent.Default = true
-	w := &runnerWorld{t: t, s: s, repo: repo, model: model, store: store, runner: runner, agents: []userAgent{agent}, optIns: map[string]string{}}
+	w := &runnerWorld{t: t, s: s, repo: repo, model: model, store: store, runner: runner, agents: []userAgent{agent}, optIns: map[string]string{}, zones: map[string]string{}}
+	runner.spaceZone = func(_ context.Context, spaceID string) string {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return w.zones[spaceID]
+	}
 	runner.agentsOf = func(_ context.Context, userID string) ([]userAgent, error) {
 		w.mu.Lock()
 		defer w.mu.Unlock()

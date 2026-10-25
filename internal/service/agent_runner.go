@@ -28,8 +28,9 @@ import (
 // who brought the file when the action says "pays": "contributor" and they
 // opted in (agent_optins.go), or the member whose own action it is. Changes
 // are commits by "<provider> (agent) for <payer>". The runner's commits
-// never queue jobs. When a job ends the runner appends its outcome to
-// runner.md in the folder.
+// never queue jobs. Actions with "every" run on a schedule instead
+// (schedules.go), and jobs may use the web (web_tools.go). When a job ends
+// the runner appends its outcome to runner.md in the folder.
 
 const (
 	maxParallelJobs      = 2
@@ -60,12 +61,21 @@ type agentRunner struct {
 	origin  string
 	tools   []json.RawMessage
 	schemas map[string]*jsonschema.Resolved
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	wake    chan struct{}
-	mu      sync.Mutex
-	running map[string]bool
+	// webTools and webSchemas add the web tools that are set up (nil when
+	// none); webRefs keeps references and fetcher downloads. Tests replace
+	// them.
+	webTools   []json.RawMessage
+	webSchemas map[string]*jsonschema.Resolved
+	webRefs    webRefStore
+	fetcher    webFetcher
+	// spaceZone returns a space's own time zone, "" for none (dbSpaceZone).
+	spaceZone func(ctx context.Context, spaceID string) string
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	wake      chan struct{}
+	mu        sync.Mutex
+	running   map[string]bool
 	// owner returns a user's username (empty when none) and email: a space
 	// owner's, or another payer's.
 	owner func(ctx context.Context, userID string) (username, email string)
@@ -173,7 +183,29 @@ func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*
 		a.origin = s.accounts.config.Origin
 	}
 	a.notice = a.mailNotice
+	a.spaceZone = func(ctx context.Context, spaceID string) string { return s.dbSpaceZone(ctx, spaceID) }
+	a.fetcher = newWebFetcher(false)
+	if s.ownedDB != nil {
+		a.webRefs = dbWebStore{s.ownedDB.db}
+	}
+	if err := a.setWebTools(settings.search != nil, settings.downloads != nil); err != nil {
+		return nil, err
+	}
 	return a, nil
+}
+
+// setWebTools prepares the tool list of jobs that may use the web.
+func (a *agentRunner) setWebTools(search, fetch bool) error {
+	a.webTools, a.webSchemas = nil, nil
+	if !search && !fetch {
+		return nil
+	}
+	tools, schemas, err := webToolSet(a.tools, a.schemas, search, fetch)
+	if err != nil {
+		return fmt.Errorf("web tools: %w", err)
+	}
+	a.webTools, a.webSchemas = tools, schemas
+	return nil
 }
 
 // mailNotice emails a user that a job of theirs did not run, at most once a
@@ -273,7 +305,22 @@ func (a *agentRunner) loop() {
 	defer a.wg.Done()
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
+	var housekeeping time.Time
 	for {
+		if now := a.clock(); now.Sub(housekeeping) >= time.Hour {
+			// On start and then hourly: catch up schedules with every space's
+			// settings, and forget expired downloads.
+			housekeeping = now
+			a.syncAllSchedules()
+			if a.webRefs != nil {
+				ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
+				if err := a.webRefs.expire(ctx, now); err != nil {
+					log.Printf("agent runner: %v", err)
+				}
+				cancel()
+			}
+		}
+		a.runSchedules()
 		a.startReady()
 		select {
 		case <-a.ctx.Done():
@@ -363,6 +410,13 @@ func (s *Service) agentCommitted(ctx context.Context, r *repository, old, state 
 func (a *agentRunner) enqueue(r *repository, old, state, contributor string) {
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
+	if changed, err := r.configsChanged(ctx, old, state); err != nil {
+		log.Printf("agent runner: space %s: %v", r.id, err)
+	} else if changed {
+		if err := a.syncSchedules(ctx, r, false); err != nil {
+			log.Printf("agent runner: space %s schedules: %v", r.id, err)
+		}
+	}
 	triggers, err := r.triggersBetween(ctx, old, state)
 	if err != nil {
 		log.Printf("agent runner: space %s: %v", r.id, err)
@@ -382,41 +436,72 @@ func (a *agentRunner) enqueue(r *repository, old, state, contributor string) {
 				continue
 			}
 		}
-		now := a.clock()
-		n, err := a.store.queuedSince(ctx, r.id, t.Folder, now.Add(-time.Hour))
+		ok, err := a.queue(ctx, r.id, t, state, contributor)
 		if err != nil {
 			log.Printf("agent runner: %v", err)
 			return
 		}
-		id, err := randomHex(16)
-		if err != nil {
-			return
-		}
-		j := agentJob{ID: id, SpaceID: r.id, Folder: t.Folder, Action: t.Action, File: t.File, Commit: state, Status: jobQueued, QueuedAt: now, Contributor: contributor}
-		if n >= maxJobsPerFolderHour {
-			// One skipped job is recorded, so runner.md says why the rest
-			// did not run; further ones are dropped until the hour passes.
-			if n > maxJobsPerFolderHour {
-				log.Printf("agent runner: space %s folder %q: job limit reached, %s not run", r.id, t.Folder, t.File)
-				continue
-			}
-			j.Status, j.Error, j.StartedAt, j.FinishedAt = jobSkipped, fmt.Sprintf("skipped: this folder already ran %d jobs in the last hour, the most allowed; later files in this hour are not run either", maxJobsPerFolderHour), now, now
-			if err := a.store.add(ctx, j); err != nil {
-				log.Printf("agent runner: %v", err)
-				return
-			}
-			a.record(j, jobOutcome{})
-			continue
-		}
-		if err := a.store.add(ctx, j); err != nil {
-			log.Printf("agent runner: %v", err)
-			return
-		}
-		queued = true
+		queued = queued || ok
 	}
 	if queued {
 		a.poke()
 	}
+}
+
+// queue adds a job for a trigger (File is "" for a scheduled run), unless
+// the folder ran the most jobs allowed in the last hour: then one skipped job
+// is recorded, so runner.md says why the rest did not run, and further ones
+// are dropped until the hour passes. It reports whether a job was queued.
+func (a *agentRunner) queue(ctx context.Context, spaceID string, t actionTrigger, commit, contributor string) (bool, error) {
+	now := a.clock()
+	n, err := a.store.queuedSince(ctx, spaceID, t.Folder, now.Add(-time.Hour))
+	if err != nil {
+		return false, err
+	}
+	id, err := randomHex(16)
+	if err != nil {
+		return false, err
+	}
+	j := agentJob{ID: id, SpaceID: spaceID, Folder: t.Folder, Action: t.Action, File: t.File, Commit: commit, Status: jobQueued, QueuedAt: now, Contributor: contributor}
+	if n >= maxJobsPerFolderHour {
+		if n > maxJobsPerFolderHour {
+			log.Printf("agent runner: space %s folder %q: job limit reached, %s %s not run", spaceID, t.Folder, t.Action, t.File)
+			return false, nil
+		}
+		j.Status, j.Error, j.StartedAt, j.FinishedAt = jobSkipped, fmt.Sprintf("skipped: this folder already ran %d jobs in the last hour, the most allowed; later ones in this hour are not run either", maxJobsPerFolderHour), now, now
+		if err := a.store.add(ctx, j); err != nil {
+			return false, err
+		}
+		a.record(j, jobOutcome{})
+		return false, nil
+	}
+	if err := a.store.add(ctx, j); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// configsChanged reports whether a change touched any .metatrash.json.
+func (r *repository) configsChanged(ctx context.Context, old, state string) (bool, error) {
+	_, before, err := r.snapshot(ctx, old)
+	if err != nil {
+		return false, err
+	}
+	_, after, err := r.snapshot(ctx, state)
+	if err != nil {
+		return false, err
+	}
+	for p, f := range after {
+		if isFolderConfig(p) && before[p].Blob != f.Blob {
+			return true, nil
+		}
+	}
+	for p := range before {
+		if _, ok := after[p]; isFolderConfig(p) && !ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // requeue runs a job's file again, as after its contributor opted in.
@@ -460,6 +545,8 @@ type jobOutcome struct {
 	model string
 	// paidBy names who paid, when it was not the space owner.
 	paidBy string
+	// every is the schedule of a scheduled run.
+	every string
 }
 
 func (a *agentRunner) run(j agentJob) {
@@ -499,7 +586,7 @@ func (a *agentRunner) record(j agentJob, out jobOutcome) {
 	ctx = context.WithValue(ctx, runnerWriteKey{}, true)
 	name := a.ownerName(ctx, r)
 	ctx = withAuthor(ctx, func() changeAuthor { return changeAuthor{Name: name, App: runnerApp, Kind: "agent"} })
-	text := runnerEntry(j, out, a.settings.zone, strings.TrimPrefix(j.File, j.Folder))
+	text := runnerEntry(j, out, a.zoneOf(ctx, j.SpaceID), strings.TrimPrefix(j.File, j.Folder))
 	if _, err := a.s.dispatchRepository(ctx, r, j.SpaceID, "append", Input{Path: j.Folder + runnerLogName, Text: &text}); err != nil {
 		log.Printf("agent runner: job %s: %s not written: %v", j.ID, j.Folder+runnerLogName, err)
 	}
@@ -513,7 +600,15 @@ func runnerEntry(j agentJob, out jobOutcome, zone *time.Location, file string) s
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n## %s · %s · %s\n\n", when.Format("2006-01-02 15:04"), j.Action, j.Status)
-	fmt.Fprintf(&b, "- File: %s\n", file)
+	if j.File == "" {
+		every := ""
+		if out.every != "" {
+			every = " (every " + out.every + ")"
+		}
+		fmt.Fprintf(&b, "- Run: scheduled%s\n", every)
+	} else {
+		fmt.Fprintf(&b, "- File: %s\n", file)
+	}
 	if len(out.changed) > 0 {
 		fmt.Fprintf(&b, "- Changed: %s\n", strings.Join(out.changed, ", "))
 	}
@@ -578,7 +673,8 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	if action == nil {
 		return out, fmt.Errorf("the action %q is no longer in %s%s", j.Action, j.Folder, folderConfigName)
 	}
-	if _, ok := files[j.File]; !ok {
+	out.every = action.Every
+	if _, ok := files[j.File]; !ok && j.File != "" {
 		j.Status, j.Error = jobSkipped, "skipped: the file was moved or deleted before the job started"
 		return out, nil
 	}
@@ -642,6 +738,13 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		behalf = ", on behalf of " + out.paidBy + ", who brought the file and pays for this job"
 	}
 	system := fmt.Sprintf(runnerPreamble, j.Action, folderName, orSomeone(owner), behalf, runnerLogName, runnerLogName, runnerLogName)
+	tools := a.tools
+	var web *webSession
+	if action.webEnabled() && a.webTools != nil && a.webRefs != nil {
+		web = a.newWebSession(payer.userID, a.settings.search != nil, a.settings.downloads != nil)
+		tools = a.webTools
+		system += webPreamble(web.search, web.fetch)
+	}
 	if f, ok := files[j.Folder+agentsFileName]; ok {
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
@@ -654,7 +757,10 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	}
 	rel := strings.TrimPrefix(j.File, j.Folder)
 	trigger := "The file " + rel + " arrived (it was created or moved into the folder)."
-	if before, err := r.commitParent(ctx, j.Commit); err == nil {
+	if j.File == "" {
+		zone := a.zoneOf(ctx, j.SpaceID)
+		trigger = fmt.Sprintf("This is a scheduled run (every %s, %s time; now %s). No file arrived.", action.Every, zone, a.clock().In(zone).Format("Monday 2 January 2006 15:04"))
+	} else if before, err := r.commitParent(ctx, j.Commit); err == nil {
 		if _, old, err := r.snapshot(ctx, before); err == nil {
 			if _, existed := old[j.File]; existed {
 				trigger = "The file " + rel + " was changed."
@@ -662,6 +768,10 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		}
 	}
 	user := "## Instructions\n\n" + strings.TrimSpace(instructions) + "\n\n## Why you are running\n\n" + trigger
+	if web != nil {
+		web.see(system)
+		web.see(user)
+	}
 	toolCtx := context.WithValue(ctx, runnerWriteKey{}, true)
 	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: payerName, App: m.app, Kind: "agent"} })
 	cache := m.provider == "anthropic"
@@ -669,7 +779,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	if cache {
 		systemBlock.CacheControl = &cacheControl{Type: "ephemeral"}
 	}
-	req := agentRequest{Model: m.model, MaxTokens: m.maxTokens, System: []json.RawMessage{rawBlock(systemBlock)}, Tools: a.tools,
+	req := agentRequest{Model: m.model, MaxTokens: m.maxTokens, System: []json.RawMessage{rawBlock(systemBlock)}, Tools: tools,
 		Messages: []agentMessage{{Role: "user", Content: []json.RawMessage{textBlock(user)}}}}
 	pin := pinnedFolder(j.Folder)
 	limit := action.steps()
@@ -730,11 +840,23 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 				continue
 			}
 			j.Steps++
-			text, isError, change := a.callTool(toolCtx, r, j.SpaceID, pin, use.Name, use.Input)
+			var result json.RawMessage
+			var change string
+			if web != nil && web.handles(use.Name, use.Input) {
+				result, change = web.call(toolCtx, r, j.SpaceID, pin, use)
+			} else {
+				var text string
+				var isError bool
+				text, isError, change = a.callTool(toolCtx, r, j.SpaceID, pin, use.Name, use.Input)
+				if web != nil {
+					web.see(text)
+				}
+				result = rawBlock(contentBlock{Type: "tool_result", ToolUseID: use.ID, Content: text, IsError: isError})
+			}
 			if change != "" {
 				out.changed = append(out.changed, change)
 			}
-			results = append(results, rawBlock(contentBlock{Type: "tool_result", ToolUseID: use.ID, Content: text, IsError: isError}))
+			results = append(results, result)
 		}
 		req.Messages = append(req.Messages, agentMessage{Role: "user", Content: results})
 	}

@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v16 (from 0.55.0); 0.56.0 needs v17.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v17 (from 0.56.0); 0.57.0 needs v18.
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -147,7 +147,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v17 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v18 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -350,7 +350,14 @@ either way, and run only while it is on.
 "agents": {
   "enabled": true,
   "keyFile": "/etc/metatrash/agents-key",
-  "timezone": "Pacific/Auckland"
+  "timezone": "Pacific/Auckland",
+  "search": {"provider": "brave", "keyFile": "/etc/metatrash/brave-key"},
+  "downloads": {
+    "endpoint": "https://s3.us-west-004.backblazeb2.com",
+    "bucket": "metatrash-web",
+    "keyID": "004…",
+    "keyFile": "/etc/metatrash/web-bucket-key"
+  }
 }
 ```
 
@@ -380,8 +387,44 @@ public space among them) refuse actions altogether.
   sudo chmod 0640 /etc/metatrash/agents-key
   ```
 
-- `timezone`: IANA zone for `runner.md` times and when daily caps reset
-  (default `Pacific/Auckland`).
+- `timezone`: IANA zone of spaces that have not chosen their own (their
+  `every` schedules and `runner.md` times; owners set a space's zone with the
+  clock icon on Your account, and a new space takes its creator's browser
+  zone), and when daily caps reset (default `Pacific/Auckland`).
+- `search` (0.57.0, optional): turns on `web_search` for actions.
+  `provider` is `brave`; `keyFile` holds a Brave Search API key (sign up at
+  https://api-dashboard.search.brave.com, subscribe to a Search plan, create
+  a key; about US$5 per 1,000 searches). `dailyLimit` is the most searches
+  each payer's jobs make in a day (default 200).
+- `downloads` (0.57.0, optional): turns on `web_fetch`, which keeps what it
+  downloads in an S3-compatible bucket of its own, never in Git. `endpoint`
+  is the bucket's S3 address and `region` its region (worked out from a
+  Backblaze B2 endpoint); `bucket`, `keyID` and `keyFile` (the application
+  key) name and open it. `dailyLimit` is the most fetches each payer's jobs
+  make in a day (default 500). The server needs outbound HTTPS (and HTTP) to
+  the public internet; it never fetches private or loopback addresses.
+
+  Set up the bucket in Backblaze B2 (separate from the restic backup bucket):
+
+  1. Buckets → Create a Bucket: a name such as `metatrash-web`, Private,
+     no Object Lock, default encryption on if you like.
+  2. On the bucket, Lifecycle Settings → Use custom lifecycle rules: file
+     path `web/`, days till hide `30`, days till delete `1`. Metatrash
+     counts on files going 30 days after upload: references expire a day
+     before.
+  3. Application Keys → Add a New Application Key: access to that bucket
+     only, Read and Write. Put its `keyID` in `accounts.json` and the
+     `applicationKey` in the key file. The bucket page shows the endpoint
+     (`s3.<region>.backblazeb2.com`).
+
+  ```sh
+  sudo install -m 0640 -o root -g metatrash /dev/null /etc/metatrash/brave-key
+  sudoedit /etc/metatrash/brave-key             # the Brave key, one line
+  sudo install -m 0640 -o root -g metatrash /dev/null /etc/metatrash/web-bucket-key
+  sudoedit /etc/metatrash/web-bucket-key        # the applicationKey, one line
+  ```
+
+  Without `search` and `downloads`, actions run without the web tools.
 
 The 0.54.x settings `owners`, `provider`, `baseURL`, `model`, `apiKeyFile`,
 `maxTokens` and `dailyTokenCap` are refused with a message saying so; remove
@@ -395,9 +438,12 @@ last four characters.
 `metatrash check` validates the section and the key file, and lists
 "folder actions (users' agents)" among the account features. Run as root
 (`sudo`), it also checks that the `metatrash` account can read the key file
-("agents key"); otherwise the service exits at start. Agents are rows in
-`metatrash_agents`, jobs in `metatrash_agent_jobs` (schema v16) and opt-ins
-in `metatrash_action_optins` (schema v17). Notices to people who have not
+("agents key", and "web search key" and "web downloads key" when set);
+otherwise the service exits at start. Agents are rows in
+`metatrash_agents`, jobs in `metatrash_agent_jobs` (schema v16), opt-ins
+in `metatrash_action_optins` (schema v17), and schedules, downloads and
+web references in `metatrash_action_schedules`, `metatrash_web_objects` and
+`metatrash_web_refs` (schema v18). Notices to people who have not
 opted in go out through the account SMTP settings, at most once a day per
 person and action, within the site-wide 100 emails a day.
 
@@ -675,7 +721,7 @@ roadmap.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v17 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v18 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -698,6 +744,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.54.0 | schema v15 (`metatrash_agent_jobs`) and grants (`SELECT, INSERT` and `UPDATE (status, started_at, finished_at, steps, input_tokens, output_tokens, error)` on it) | 14, after removing `actions` from every `.metatrash.json`: older releases treat a file with `actions` as invalid, so that folder's locks and `readOnly` would be ignored. Jobs stay in the table |
 | 0.55.0 | schema v16 (`metatrash_agents`, `agent_id` on jobs) and grants (`SELECT, INSERT, DELETE` and `UPDATE (is_default)` on `metatrash_agents`, `UPDATE (agent_id)` on jobs); in `accounts.json` replace the agents settings with `keyFile` (Folder actions) | 15, after putting the 0.54.x agents settings back in `accounts.json`; agents stay in the table, unused |
 | 0.56.0 | schema v17 (`metatrash_action_optins`, `contributor_id` on jobs) and grants (`SELECT, INSERT, DELETE` on `metatrash_action_optins`) | 16, after removing `pays` and `member` from every action: 0.55 treats a file with them as invalid. Opt-ins stay in the table, unused |
+| 0.57.0 | schema v18 (`metatrash_action_schedules`, `metatrash_web_objects`, `metatrash_web_refs`, `timezone` on spaces) and grants (`SELECT, INSERT, DELETE` on the three tables, `UPDATE (every, next_run_at, last_run_at)` on schedules, `UPDATE (uploaded_at)` on web objects, `UPDATE (timezone)` on spaces); optional `agents.search` and `agents.downloads` (Folder actions) | 17, after removing `every` from every action: 0.56 refuses it. Schedules, downloads and time zones stay, unused |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer
@@ -754,7 +801,7 @@ addresses are only in the notice emails.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v17 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v18 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - CI runs both on every push (see Automated builds and releases).
 

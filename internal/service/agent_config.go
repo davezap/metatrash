@@ -4,6 +4,8 @@ import (
 	"crypto/cipher"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,12 +21,16 @@ import (
 // stored either way; they run only while enabled is true.
 //
 // keyFile holds 64 hex digits (openssl rand -hex 32) that seal the users' API
-// keys in the database. timezone sets runner.md times and when the daily
-// caps reset.
+// keys in the database. timezone is the time zone of spaces that have not
+// chosen one (schedules, runner.md times) and sets when the daily caps reset.
+// search and downloads turn on the web tools (0.57.0, web_tools.go); without
+// them actions run without web search or fetch.
 type agentsConfig struct {
-	Enabled  bool   `json:"enabled"`
-	KeyFile  string `json:"keyFile"`
-	Timezone string `json:"timezone"`
+	Enabled   bool                `json:"enabled"`
+	KeyFile   string              `json:"keyFile"`
+	Timezone  string              `json:"timezone"`
+	Search    *webSearchConfig    `json:"search"`
+	Downloads *webDownloadsConfig `json:"downloads"`
 	// Settings of 0.54.x, when the server held one API key. They are refused
 	// with a pointer to the account page rather than silently ignored.
 	Owners        json.RawMessage `json:"owners"`
@@ -36,12 +42,53 @@ type agentsConfig struct {
 	DailyTokenCap json.RawMessage `json:"dailyTokenCap"`
 }
 
+// webSearchConfig is agents.search: the web search provider for
+// web_search. Brave is the only one so far.
+type webSearchConfig struct {
+	Provider string `json:"provider"`
+	KeyFile  string `json:"keyFile"`
+	// DailyLimit is the most searches each payer's jobs may make in a day
+	// (default 200).
+	DailyLimit int `json:"dailyLimit"`
+}
+
+// webDownloadsConfig is agents.downloads: the S3-compatible bucket (a
+// Backblaze B2 bucket of its own, with a lifecycle rule that deletes files
+// 30 days after upload) where web_fetch keeps what it downloads.
+type webDownloadsConfig struct {
+	Endpoint string `json:"endpoint"`
+	Region   string `json:"region"`
+	Bucket   string `json:"bucket"`
+	KeyID    string `json:"keyID"`
+	KeyFile  string `json:"keyFile"`
+	// DailyLimit is the most fetches each payer's jobs may make in a day
+	// (default 500).
+	DailyLimit int `json:"dailyLimit"`
+}
+
 // agentSettings are the loaded, validated settings.
 type agentSettings struct {
 	zone    *time.Location
 	seal    cipher.AEAD
 	keyFile string
+	// search and downloads are nil when the web tools are not set up.
+	search                  webSearcher
+	downloads               objectStore
+	searchLimit, fetchLimit int
+	// The key files, for metatrash check.
+	searchKeyFile, downloadsKeyFile string
 }
+
+const (
+	defaultSearchDailyLimit = 200
+	defaultFetchDailyLimit  = 500
+)
+
+var (
+	bucketPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+	regionPattern = regexp.MustCompile(`^[a-z0-9-]{2,40}$`)
+	b2HostPattern = regexp.MustCompile(`^s3\.([a-z0-9-]+)\.backblazeb2\.com$`)
+)
 
 // agentProviderInfo describes a model provider: how History names its agent
 // ("MiniMax (agent) for dave"), its Messages API address and its usual model.
@@ -90,7 +137,55 @@ func (c *agentsConfig) settings() (*agentSettings, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agents timezone must be an IANA time zone such as %s", defaultAgentTimezone)
 	}
-	return &agentSettings{zone: zone, seal: seal, keyFile: c.KeyFile}, nil
+	settings := &agentSettings{zone: zone, seal: seal, keyFile: c.KeyFile}
+	if c.Search != nil {
+		if c.Search.Provider != "brave" {
+			return nil, fmt.Errorf(`agents search provider must be "brave"`)
+		}
+		key, err := readLimitedFile(c.Search.KeyFile, 4096)
+		if err != nil || strings.TrimSpace(string(key)) == "" {
+			return nil, fmt.Errorf("agents search keyFile must hold the Brave Search API key")
+		}
+		settings.search, settings.searchKeyFile = newBraveSearch(strings.TrimSpace(string(key))), c.Search.KeyFile
+		if settings.searchLimit = c.Search.DailyLimit; settings.searchLimit == 0 {
+			settings.searchLimit = defaultSearchDailyLimit
+		}
+		if settings.searchLimit < 1 || settings.searchLimit > 100000 {
+			return nil, fmt.Errorf("agents search dailyLimit must be 1 to 100000")
+		}
+	}
+	if d := c.Downloads; d != nil {
+		u, err := url.Parse(d.Endpoint)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+			return nil, fmt.Errorf("agents downloads endpoint must be the bucket's S3 address, such as https://s3.us-west-004.backblazeb2.com")
+		}
+		region := d.Region
+		if m := b2HostPattern.FindStringSubmatch(u.Host); region == "" && m != nil {
+			region = m[1]
+		}
+		if !regionPattern.MatchString(region) {
+			return nil, fmt.Errorf("agents downloads region is required (such as us-west-004) unless the endpoint is a Backblaze B2 address")
+		}
+		if !bucketPattern.MatchString(d.Bucket) {
+			return nil, fmt.Errorf("agents downloads bucket must be a bucket name")
+		}
+		if d.KeyID == "" || len(d.KeyID) > 128 || strings.ContainsAny(d.KeyID, " /\t\n") {
+			return nil, fmt.Errorf("agents downloads keyID must be the application key's ID")
+		}
+		secret, err := readLimitedFile(d.KeyFile, 4096)
+		if err != nil || strings.TrimSpace(string(secret)) == "" {
+			return nil, fmt.Errorf("agents downloads keyFile must hold the application key")
+		}
+		settings.downloadsKeyFile = d.KeyFile
+		settings.downloads = &s3Store{endpoint: "https://" + u.Host, region: region, bucket: d.Bucket, keyID: d.KeyID, secret: strings.TrimSpace(string(secret)), http: s3HTTPClient()}
+		if settings.fetchLimit = d.DailyLimit; settings.fetchLimit == 0 {
+			settings.fetchLimit = defaultFetchDailyLimit
+		}
+		if settings.fetchLimit < 1 || settings.fetchLimit > 100000 {
+			return nil, fmt.Errorf("agents downloads dailyLimit must be 1 to 100000")
+		}
+	}
+	return settings, nil
 }
 
 // agentModel is everything one job needs to call its agent's provider.

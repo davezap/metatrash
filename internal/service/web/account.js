@@ -21,3 +21,20 @@
     }
   });
 })();
+
+// Time zones: a new space takes the browser's, and the time zone fields
+// suggest every zone the browser knows.
+(() => {
+  let zone = "";
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {}
+  for (const input of document.querySelectorAll("input[data-browser-zone]")) input.value = zone;
+  const list = document.getElementById("timezones");
+  if (!list || typeof Intl.supportedValuesOf !== "function") return;
+  for (const name of Intl.supportedValuesOf("timeZone")) {
+    const option = document.createElement("option");
+    option.value = name;
+    list.append(option);
+  }
+})();

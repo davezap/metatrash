@@ -16,6 +16,7 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"purpose":"Notes between agents","children":{"notes/":"working notes","plan.md":"the plan"}}`,
 		`{"services":[{"type":"github","repo":"dave-zap/site"}]}`,
 		`{"services":[{"type":"github","repo":"dave-zap/site.io","branch":"release/1.0","push":"auto","pull":"auto"}]}`,
+		`{"actions":[{"name":"x","every":"Monday 08:00","do":"y","web":false},{"name":"z","every":"hour :30","do":"y","member":"alice"}]}`,
 	}
 	for _, text := range good {
 		if _, err := parseFolderConfig(text); err != nil {
@@ -28,7 +29,10 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"purpose":1}`:                 "wrong value type",
 		`{"service":[]}`:                "unknown",
 		`{"purpose":"a","purpose":"b"}`: "duplicate",
-		`{"actions":[{"name":"x","every":"day 06:00","do":"y"}]}`:                      "not supported yet",
+		`{"actions":[{"name":"x","every":"day 6am","do":"y"}]}`:                                                "every is a schedule",
+		`{"actions":[{"name":"x","every":"month 31 09:00","do":"y"}]}`:                                         "days 1 to 28",
+		`{"actions":[{"name":"x","every":"day 06:00","when":"change","do":"y"}]}`:                              "when goes with",
+		`{"actions":[{"name":"x","every":"hour","model":"minimax/MiniMax-M3","pays":"contributor","do":"y"}]}`: "scheduled run has no file",
 		`{"children":{"a/b":"x"}}`:                                                     "one file or folder name",
 		`{"children":{".git/":"x"}}`:                                                   "one file or folder name",
 		`{"services":[{"type":"s3"}]}`:                                                 "unknown service type",

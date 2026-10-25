@@ -220,6 +220,7 @@ var accountNotices = map[string]string{
 	"invite-daily":            "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
 	"space-web":               "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
 	"space-private":           "The space is private again: only you and its members can browse it.",
+	"space-timezone":          "The space's time zone is saved. Its schedules run on it from now on.",
 	"transfer-offered":        "Ownership offered. We’ve emailed them; they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-offered-unsent": "Ownership offered, but the email could not be sent, so let them know: they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-cancelled":      "Ownership offer cancelled. You still own the space.",

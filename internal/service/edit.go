@@ -260,37 +260,12 @@ func applyEdits(path, text string, edits []Edit) (string, error) {
 // search finds lines matching in.Query in the files under in.Prefix at the
 // space's head (or in.Revision).
 func (s *Service) search(ctx context.Context, r *repository, space string, in Input) (any, error) {
-	if in.Query == "" || len(in.Query) > maxSearchQuery || strings.ContainsAny(in.Query, "\n\x00") {
-		return nil, invalid(fmt.Sprintf("query takes 1 to %d characters on one line.", maxSearchQuery))
-	}
 	if in.Prefix != "" && (!strings.HasSuffix(in.Prefix, "/") || !validPath(strings.TrimSuffix(in.Prefix, "/")) || strings.Count(in.Prefix, "/") > 7) {
 		return nil, invalid("Invalid folder prefix.")
 	}
-	if in.Context < 0 || in.Context > maxSearchContext {
-		return nil, invalid(fmt.Sprintf("context must be 0..%d.", maxSearchContext))
-	}
-	if in.Limit == 0 {
-		in.Limit = 50
-	}
-	if in.Limit < 1 || in.Limit > maxSearchLimit {
-		return nil, invalid(fmt.Sprintf("limit must be 1..%d.", maxSearchLimit))
-	}
-	var match func(string) bool
-	if in.Regex {
-		pattern := in.Query
-		if in.IgnoreCase {
-			pattern = "(?i)" + pattern
-		}
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, invalid("query is not a valid regular expression (RE2 syntax): " + err.Error())
-		}
-		match = re.MatchString
-	} else if in.IgnoreCase {
-		query := strings.ToLower(in.Query)
-		match = func(line string) bool { return strings.Contains(strings.ToLower(line), query) }
-	} else {
-		match = func(line string) bool { return strings.Contains(line, in.Query) }
+	match, err := searchMatcher(&in)
+	if err != nil {
+		return nil, err
 	}
 	state, files, err := r.snapshot(ctx, in.Revision)
 	if err != nil {
@@ -313,27 +288,69 @@ func (s *Service) search(ctx context.Context, r *repository, space string, in In
 	}
 	result := SearchResult{Space: space, State: state, Matches: []SearchMatch{}}
 	for _, p := range paths {
-		lines := splitLines(string(texts[files[p].Blob]))
-		for i, line := range lines {
-			line = trimLineEnd(line)
-			if !match(line) {
-				continue
-			}
-			if len(result.Matches) == in.Limit {
-				result.Truncated = true
-				return result, nil
-			}
-			m := SearchMatch{Path: p, ID: files[p].ID, Line: i + 1, Text: clipLine(line)}
-			for j := max(0, i-in.Context); j < i; j++ {
-				m.Before = append(m.Before, clipLine(trimLineEnd(lines[j])))
-			}
-			for j := i + 1; j < len(lines) && j <= i+in.Context; j++ {
-				m.After = append(m.After, clipLine(trimLineEnd(lines[j])))
-			}
-			result.Matches = append(result.Matches, m)
+		if !searchLines(&result, p, files[p].ID, string(texts[files[p].Blob]), match, in) {
+			break
 		}
 	}
 	return result, nil
+}
+
+// searchMatcher checks a search's query, context and limit (setting the
+// default limit) and returns the line matcher it asks for.
+func searchMatcher(in *Input) (func(string) bool, error) {
+	if in.Query == "" || len(in.Query) > maxSearchQuery || strings.ContainsAny(in.Query, "\n\x00") {
+		return nil, invalid(fmt.Sprintf("query takes 1 to %d characters on one line.", maxSearchQuery))
+	}
+	if in.Context < 0 || in.Context > maxSearchContext {
+		return nil, invalid(fmt.Sprintf("context must be 0..%d.", maxSearchContext))
+	}
+	if in.Limit == 0 {
+		in.Limit = 50
+	}
+	if in.Limit < 1 || in.Limit > maxSearchLimit {
+		return nil, invalid(fmt.Sprintf("limit must be 1..%d.", maxSearchLimit))
+	}
+	if in.Regex {
+		pattern := in.Query
+		if in.IgnoreCase {
+			pattern = "(?i)" + pattern
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, invalid("query is not a valid regular expression (RE2 syntax): " + err.Error())
+		}
+		return re.MatchString, nil
+	}
+	if in.IgnoreCase {
+		query := strings.ToLower(in.Query)
+		return func(line string) bool { return strings.Contains(strings.ToLower(line), query) }, nil
+	}
+	return func(line string) bool { return strings.Contains(line, in.Query) }, nil
+}
+
+// searchLines adds one file's matching lines to result. It returns false once
+// the limit is reached (result is then truncated).
+func searchLines(result *SearchResult, path, id, text string, match func(string) bool, in Input) bool {
+	lines := splitLines(text)
+	for i, line := range lines {
+		line = trimLineEnd(line)
+		if !match(line) {
+			continue
+		}
+		if len(result.Matches) == in.Limit {
+			result.Truncated = true
+			return false
+		}
+		m := SearchMatch{Path: path, ID: id, Line: i + 1, Text: clipLine(line)}
+		for j := max(0, i-in.Context); j < i; j++ {
+			m.Before = append(m.Before, clipLine(trimLineEnd(lines[j])))
+		}
+		for j := i + 1; j < len(lines) && j <= i+in.Context; j++ {
+			m.After = append(m.After, clipLine(trimLineEnd(lines[j])))
+		}
+		result.Matches = append(result.Matches, m)
+	}
+	return true
 }
 
 func trimLineEnd(line string) string {

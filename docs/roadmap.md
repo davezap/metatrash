@@ -211,7 +211,9 @@ for every job, and each agent has its own daily cap. It also tells the agent
 to change only the files its instructions call for (the first live run
 renamed `README.md`). 0.56.0 adds who pays per action (`"pays":
 "contributor"`, with opting in on `/account/actions/<job>` and a notice
-email) and members' own actions (`"member"`), schema v17.
+email) and members' own actions (`"member"`), schema v17. 0.57.0 adds the web
+tools (`web_search` through Brave, `web_fetch` into a B2 downloads cache) and
+`every` schedules in each space's own time zone, schema v18.
 
 ### User agents and who pays (agreed with Dave 2026-10-25)
 
@@ -265,8 +267,18 @@ with their own money.
    action names them by username (`"member"`), so if an admin renames the
    account, its actions stop running until the name is fixed; files with no clear contributor
    (GitHub pull, space key) run on the owner's agent.
-3. **0.57.0**: web tools (Brave `web_search`, `web_fetch`, downloads cached in
-   B2 as `web/<id>`) and `every` schedules.
+3. ~~**0.57.0**: web tools (Brave `web_search`, `web_fetch`, downloads cached in
+   B2 as `web/<id>`) and `every` schedules.~~ Done. Choices made while
+   building it: references are `web/<16 hex>.md` (a page's Markdown) and
+   `web/<16 hex>.<ext>` (the original), belong to whoever paid for the job
+   and last 29 days against the bucket's 30-day lifecycle rule; only URLs
+   already in the conversation can be fetched; each payer gets 200 searches
+   and 500 fetches a day by default; keeping a download copies its text into
+   the folder and, like every runner change, starts no actions (the design
+   doc said it would); text that is not UTF-8 is read as Windows-1252;
+   schedules are `hour`, `hour :MM`, `day`, `weekday`, a day's name or
+   `month D` (1 to 28) with a time, and cannot use `"pays": "contributor"`;
+   each space's time zone is set with the clock icon on Your account.
 4. **0.58.0**: PDF and Word files as triggers and input.
 5. **Slate Viewer**: an Automation page for a folder's actions and its
    `runner.md`, opting in, and agents; make a refused `.metatrash.json` save
@@ -316,6 +328,22 @@ with their own money.
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.57.0 (2026-10-25):
+
+- **Web tools:** set up the Brave key and the B2 bucket (docs/deployment.md,
+  Folder actions), add `agents.search` and `agents.downloads`, and see
+  `metatrash check` list "web search, web downloads" and both key files as
+  readable. Give an action instructions with a real question and a URL (or
+  none, so it searches): `runner.md` lists the steps, the summary uses the
+  page, and a kept page lands in the folder as Markdown. Check the bucket
+  holds `web/<hash>` files and its lifecycle rule. A fetch of a URL the
+  agent made up should come back `url_not_seen`.
+- **Schedules:** set a test action to `"every": "hour"` (or a time a few
+  minutes ahead with `day HH:MM`), check it runs at that time in the space's
+  zone, with `- Run: scheduled` in `runner.md`. Change the space's zone on
+  Your account and see the next run move; restart the service across a
+  run time and see it run once, not twice.
 
 From 0.56.0 (2026-10-25):
 

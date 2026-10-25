@@ -50,6 +50,15 @@ type agentJobStore interface {
 	running(ctx context.Context) ([]agentJob, error)
 	// get returns one job; false when there is none.
 	get(ctx context.Context, id string) (agentJob, bool, error)
+	// Schedules of actions with "every" (schedules.go): a space's rows, the
+	// rows due by now, and changes to them. advanceSchedule moves a due row
+	// on to its next run; false when another took it.
+	schedules(ctx context.Context, spaceID string) ([]actionSchedule, error)
+	dueSchedules(ctx context.Context, now time.Time, limit int) ([]actionSchedule, error)
+	addSchedule(ctx context.Context, s actionSchedule) error
+	setSchedule(ctx context.Context, s actionSchedule) error
+	removeSchedule(ctx context.Context, s actionSchedule) error
+	advanceSchedule(ctx context.Context, s actionSchedule, next, ran time.Time) (bool, error)
 }
 
 func (db *accountDatabase) checkAgentJobSchema(ctx context.Context) error {

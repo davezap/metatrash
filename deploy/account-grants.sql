@@ -1,5 +1,5 @@
--- Runtime permissions for the service's database login, schema v1-v17
--- (0.56.0 and later; v11 needs no new grants).
+-- Runtime permissions for the service's database login, schema v1-v18
+-- (0.57.0 and later; v11 needs no new grants).
 -- Run as database administrator after the schema scripts. Safe to repeat.
 -- For loopback TCP use 'metatrash_accounts'@'127.0.0.1' throughout instead.
 -- The login needs no DDL, FILE or administration privileges.
@@ -69,5 +69,12 @@ GRANT UPDATE (is_default) ON metatrash.metatrash_agents TO 'metatrash_accounts'@
 GRANT UPDATE (agent_id) ON metatrash.metatrash_agent_jobs TO 'metatrash_accounts'@'localhost';
 -- v17 bring your own key and members' own actions
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_action_optins TO 'metatrash_accounts'@'localhost';
+-- v18 web tools and schedules
+GRANT UPDATE (timezone) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
+GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_action_schedules TO 'metatrash_accounts'@'localhost';
+GRANT UPDATE (every, next_run_at, last_run_at) ON metatrash.metatrash_action_schedules TO 'metatrash_accounts'@'localhost';
+GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_web_objects TO 'metatrash_accounts'@'localhost';
+GRANT UPDATE (uploaded_at) ON metatrash.metatrash_web_objects TO 'metatrash_accounts'@'localhost';
+GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_web_refs TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

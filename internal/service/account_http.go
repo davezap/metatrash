@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"errors"
 	"html/template"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -27,40 +28,43 @@ type accountPage struct {
 	// Section is the account page shown: spaces, security, services or
 	// profile (accountSection). Filter is which spaces Spaces lists: all,
 	// mine or shared (accountSpaceFilters).
-	Section                    string
-	Filter                     string
-	InvitationCount            int
-	OAuthEnabled               bool
-	AppConnectURL, AppsCSRF    string
-	AppSpacesCSRF              string
-	Apps                       []connectedApp
-	AppSpaces                  *appSpacesPage
-	AppsUnavailable            bool
-	GitHubEnabled              bool
-	GitHubConnectCSRF          string
-	GitHubLinkCSRF             string
-	GitHubDisconnectCSRF       string
-	GitHub                     []githubInstallationView
-	GitHubUnavailable          bool
-	Sharing                    *humanSharingPage
-	Invitations                []humanInvitation
-	TransferOffers             []spaceTransferOffer
-	TransferCSRF               map[string]string
-	Joined                     []joinedHumanSpace
-	MembershipUnavailable      bool
-	MembershipCSRF             map[string]string
-	SpaceCSRF, SpaceName       string
-	VisibilityCSRF             string
-	SpaceNameError             string
-	Spaces                     []accountSpace
-	SpacesUnavailable          bool
-	CanCreate                  bool
-	BasePath                   string
-	Legal                      bool
-	Disabled, Verify, SignedIn bool
-	CSRF, Email, Message       string
-	Pow                        string // login proof-of-work challenge
-	LoginPasskey               string // WebAuthn request options for passkey sign-in
+	Section                 string
+	Filter                  string
+	InvitationCount         int
+	OAuthEnabled            bool
+	AppConnectURL, AppsCSRF string
+	AppSpacesCSRF           string
+	Apps                    []connectedApp
+	AppSpaces               *appSpacesPage
+	AppsUnavailable         bool
+	GitHubEnabled           bool
+	GitHubConnectCSRF       string
+	GitHubLinkCSRF          string
+	GitHubDisconnectCSRF    string
+	GitHub                  []githubInstallationView
+	GitHubUnavailable       bool
+	Sharing                 *humanSharingPage
+	Invitations             []humanInvitation
+	TransferOffers          []spaceTransferOffer
+	TransferCSRF            map[string]string
+	Joined                  []joinedHumanSpace
+	MembershipUnavailable   bool
+	MembershipCSRF          map[string]string
+	SpaceCSRF, SpaceName    string
+	VisibilityCSRF          string
+	// TimezoneCSRF guards each space's time zone form; DefaultTimezone is
+	// the zone of spaces without their own.
+	TimezoneCSRF, DefaultTimezone string
+	SpaceNameError                string
+	Spaces                        []accountSpace
+	SpacesUnavailable             bool
+	CanCreate                     bool
+	BasePath                      string
+	Legal                         bool
+	Disabled, Verify, SignedIn    bool
+	CSRF, Email, Message          string
+	Pow                           string // login proof-of-work challenge
+	LoginPasskey                  string // WebAuthn request options for passkey sign-in
 	// TOTPLogin offers sign-in with an authenticator app; TOTPOpen and
 	// TOTPEmail show that form again after it failed.
 	TOTPLogin, TOTPOpen bool
@@ -243,6 +247,11 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		}
 		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
 		page.VisibilityCSRF = h.service.accounts.mac("space-visibility:" + cookieToken(r, h.sessionCookieName()))
+		page.TimezoneCSRF = h.service.accounts.mac("space-timezone:" + cookieToken(r, h.sessionCookieName()))
+		page.DefaultTimezone = defaultAgentTimezone
+		if a := h.service.agents.Load(); a != nil {
+			page.DefaultTimezone = a.settings.zone.String()
+		}
 		var err error
 		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
 		if err != nil {
@@ -297,7 +306,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/spaces/timezone" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -461,10 +470,13 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		}
 	}
 	if path == "/account/spaces" {
-		allowed["name"], allowed["slug"] = true, true
+		allowed["name"], allowed["slug"], allowed["timezone"] = true, true, true
 	}
 	if path == "/account/spaces/visibility" {
 		allowed["space"], allowed["visibility"] = true, true
+	}
+	if path == "/account/spaces/timezone" {
+		allowed["space"], allowed["timezone"] = true, true
 	}
 	if transferRoute {
 		allowed["space"] = true
@@ -510,7 +522,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || transferRoute || githubRoute || agentRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if membershipRoute || transferRoute || githubRoute || agentRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/spaces/timezone" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -530,6 +542,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		}
 		if path == "/account/spaces/visibility" {
 			csrf = a.mac("space-visibility:" + session)
+		}
+		if path == "/account/spaces/timezone" {
+			csrf = a.mac("space-timezone:" + session)
 		}
 		if path == "/account/apps/revoke" {
 			csrf = a.mac("apps-revoke:" + session)
@@ -577,6 +592,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if path == "/account/spaces/visibility" {
 		h.submitSpaceVisibility(w, r, session)
+		return true
+	}
+	if path == "/account/spaces/timezone" {
+		h.submitSpaceTimezone(w, r, session)
 		return true
 	}
 	if path == "/account/apps/revoke" {
@@ -656,6 +675,13 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			}
 			h.renderAccount(w, r, status, page)
 			return true
+		}
+		// A new space takes the creator's browser time zone (sent by
+		// account.js); without one it uses the server's.
+		if zone := r.PostForm.Get("timezone"); zone != "" && validTimezone(zone) {
+			if err := h.service.ownedDB.setSpaceTimezone(r.Context(), user.ID, space.ID, zone); err != nil {
+				log.Printf("space %s: time zone not saved: %v", space.ID, err)
+			}
 		}
 		http.Redirect(w, r, h.ownedSpaceURL(user.Username, space.Slug), http.StatusSeeOther)
 		return true
@@ -920,6 +946,50 @@ func (h *httpAdapter) deriveNewSpaceSlug(ctx context.Context, user userAccount, 
 		}
 	}
 	return slug, nil
+}
+
+// submitSpaceTimezone handles POST /account/spaces/timezone: the owner sets
+// the time zone of a space's schedules and runner.md times, or clears it to
+// use the server's.
+func (h *httpAdapter) submitSpaceTimezone(w http.ResponseWriter, r *http.Request, session string) {
+	a := h.service.accounts
+	user, signedIn, err := a.currentUser(r.Context(), session)
+	if err != nil {
+		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
+		return
+	}
+	if !signedIn {
+		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+		return
+	}
+	if h.service.ownedDB == nil {
+		sendError(w, problem(503, "unavailable", "Your spaces are temporarily unavailable."))
+		return
+	}
+	zone, spaceID := strings.TrimSpace(r.PostForm.Get("timezone")), r.PostForm.Get("space")
+	err = h.service.rates.take(allowance{"space-timezone:user:" + user.ID, 30, 600})
+	if err == nil && zone != "" && !validTimezone(zone) {
+		err = invalid(zone + " is not a time zone. Use a name such as Pacific/Auckland or Australia/Sydney, or leave it empty for the server's (" + defaultAgentTimezone + ").")
+	}
+	if err == nil {
+		err = h.service.ownedDB.setSpaceTimezone(r.Context(), user.ID, spaceID, zone)
+	}
+	if err != nil {
+		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The space setting could not be saved. Reload before retrying."}
+		status := http.StatusServiceUnavailable
+		var p *Error
+		if errors.As(err, &p) {
+			status, page.Message = p.Status, p.Message
+			if p.RetryAfterSeconds > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+			}
+		}
+		h.renderAccount(w, r, status, page)
+		return
+	}
+	h.service.spaceZoneChanged(spaceID)
+	accountCookie(w, h.noticeCookieName(), "space-timezone", 60)
+	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 }
 
 // submitSpaceVisibility handles POST /account/spaces/visibility: the owner

@@ -19,10 +19,11 @@ import (
 //	              "do": "Rewrite this draft ... then move it to completed/."}]}
 //
 // on fires once for each file that arrives (created, or moved in) and, with
-// "when": "change", also for each edit of a file already there. every (a
-// schedule) and web (the web tools) are accepted in the shape they will have
-// but not run yet. Actions are never inherited, so a subfolder never runs its
-// parent's actions twice, and they are allowed only in owned spaces.
+// "when": "change", also for each edit of a file already there. every runs
+// the action on a schedule instead (schedules.go). Jobs may use the web
+// tools unless "web": false (web_tools.go). Actions are never inherited, so
+// a subfolder never runs its parent's actions twice, and they are allowed
+// only in owned spaces.
 //
 // Who pays (0.56.0): an owner's action runs on the owner's agent, or with
 // "pays": "contributor" on the agent of whoever brought the file, once they
@@ -110,11 +111,19 @@ func checkActions(actions []folderAction) error {
 		names[a.Name] = true
 		switch {
 		case len(a.On) == 0 && a.Every == "":
-			return actionError(a.Name, `say when it runs: "on" with file patterns, such as "inbound/*.md".`)
+			return actionError(a.Name, `say when it runs: "on" with file patterns, such as "inbound/*.md", or "every" with a schedule, such as "day 06:00".`)
 		case len(a.On) > 0 && a.Every != "":
 			return actionError(a.Name, `use either "on" (files) or "every" (a schedule), not both.`)
 		case a.Every != "":
-			return actionError(a.Name, `"every" schedules are not supported yet; use "on" with file patterns.`)
+			if _, err := parseEvery(a.Every); err != nil {
+				return actionError(a.Name, err.Error())
+			}
+			if a.When != "" {
+				return actionError(a.Name, `when goes with "on"; a scheduled action runs at its times whatever changed.`)
+			}
+			if a.Pays == actionPaysContributor {
+				return actionError(a.Name, `a scheduled run has no file and so nobody who brought one; leave out "pays" (the owner pays) or use "on".`)
+			}
 		}
 		if len(a.On) > maxActionPatterns {
 			return actionError(a.Name, fmt.Sprintf("on is limited to %d patterns.", maxActionPatterns))
@@ -221,7 +230,7 @@ func (a folderAction) steps() int {
 	return a.Steps
 }
 
-// webEnabled reports whether the action may use the web tools (to come).
+// webEnabled reports whether the action may use the web tools.
 func (a folderAction) webEnabled() bool { return a.Web == nil || *a.Web }
 
 // doFile returns the instructions file the action names, relative to its

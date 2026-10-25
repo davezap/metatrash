@@ -117,7 +117,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v17.
+// a notice is sent, its SMTP settings) and checks the schema is v18.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -139,9 +139,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 17 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 18 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v17 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v18 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -554,18 +554,23 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 	}
 	add("accounts config", nil, o.AccountsConfig+": SMTP"+accountFeatures(a))
 	if a.agents != nil {
-		ok, err := readableBy(a.agents.keyFile, serviceAccount)
-		if err == nil && !ok {
-			err = fmt.Errorf("the %s account cannot read %s, so the service will not start; run: sudo chown root:%s %s && sudo chmod 0640 %s", serviceAccount, a.agents.keyFile, serviceAccount, a.agents.keyFile, a.agents.keyFile)
+		for _, file := range []struct{ name, path string }{{"agents key", a.agents.keyFile}, {"web search key", a.agents.searchKeyFile}, {"web downloads key", a.agents.downloadsKeyFile}} {
+			if file.path == "" {
+				continue
+			}
+			ok, err := readableBy(file.path, serviceAccount)
+			if err == nil && !ok {
+				err = fmt.Errorf("the %s account cannot read %s, so the service will not start; run: sudo chown root:%s %s && sudo chmod 0640 %s", serviceAccount, file.path, serviceAccount, file.path, file.path)
+			}
+			add(file.name, err, file.path+" readable by the service")
 		}
-		add("agents key", err, a.agents.keyFile+" readable by the service")
 	}
 	store, err := openAccountDatabase(ctx, a.config.DatabaseConfigFile)
 	if !add("database", err, "connected") {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v17 ready") {
+	if !add("schema", store.ready(ctx), "v18 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -622,6 +627,12 @@ func accountFeatures(a *accounts) string {
 	}
 	if a.agents != nil {
 		s += ", folder actions (users' agents)"
+		if a.agents.search != nil {
+			s += ", web search"
+		}
+		if a.agents.downloads != nil {
+			s += ", web downloads"
+		}
 	}
 	return s
 }
@@ -660,6 +671,11 @@ var accountGrants = []string{
 	"metatrash_agent_jobs UPDATE (status)", "metatrash_agent_jobs UPDATE (started_at)", "metatrash_agent_jobs UPDATE (finished_at)", "metatrash_agent_jobs UPDATE (steps)", "metatrash_agent_jobs UPDATE (input_tokens)", "metatrash_agent_jobs UPDATE (output_tokens)", "metatrash_agent_jobs UPDATE (error)", "metatrash_agent_jobs UPDATE (agent_id)",
 	"metatrash_agents SELECT", "metatrash_agents INSERT", "metatrash_agents DELETE", "metatrash_agents UPDATE (is_default)",
 	"metatrash_action_optins SELECT", "metatrash_action_optins INSERT", "metatrash_action_optins DELETE",
+	"metatrash_spaces UPDATE (timezone)",
+	"metatrash_action_schedules SELECT", "metatrash_action_schedules INSERT", "metatrash_action_schedules DELETE",
+	"metatrash_action_schedules UPDATE (every)", "metatrash_action_schedules UPDATE (next_run_at)", "metatrash_action_schedules UPDATE (last_run_at)",
+	"metatrash_web_objects SELECT", "metatrash_web_objects INSERT", "metatrash_web_objects DELETE", "metatrash_web_objects UPDATE (uploaded_at)",
+	"metatrash_web_refs SELECT", "metatrash_web_refs INSERT", "metatrash_web_refs DELETE",
 }
 
 // checkPrivileges compares the login's privileges in this database with
