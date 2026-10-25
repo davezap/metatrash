@@ -33,13 +33,13 @@ const (
 	maxWebSearchResults = 20
 	maxWebImageBytes    = 5 << 20
 	maxWebCacheBytes    = 64 << 20
-	maxWebPreview       = 1800
+	maxWebPreview       = 1000
 	maxSeenURLs         = 20000
 )
 
 var webRefPattern = regexp.MustCompile(`^web/([0-9a-f]{16})\.([a-z0-9]{1,5})$`)
 
-const webSearchToolDef = `{"name":"web_search","description":"Search the web. Returns titles, URLs and snippets; fetch a result with web_fetch to read it.","input_schema":{"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":400,"description":"What to search for."},"count":{"type":"integer","minimum":1,"maximum":20,"default":8,"description":"Most results to return."}},"required":["query"],"additionalProperties":false}}`
+const webSearchToolDef = `{"name":"web_search","description":"Search the web. Returns titles, URLs and snippets; fetch a result with web_fetch to read it.","input_schema":{"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":400,"description":"What to search for."},"count":{"type":"integer","minimum":1,"maximum":20,"default":5,"description":"Most results to return."}},"required":["query"],"additionalProperties":false}}`
 
 const webFetchToolDef = `{"name":"web_fetch","description":"Download a web page, text file, image, PDF or Word file into a reference you use like a file: path (web/….md, a page's text as Markdown) and original (what the site sent). Read it by line range, search it with search's path, or move it into the folder to keep it. Only URLs already in this conversation can be fetched.","input_schema":{"type":"object","properties":{"url":{"type":"string","minLength":1,"maxLength":2048,"description":"A full http or https address from your instructions, a file, search results or a fetched page."}},"required":["url"],"additionalProperties":false}}`
 
@@ -318,7 +318,7 @@ func rawImageResult(id, meta string, image imageResult) json.RawMessage {
 
 func (w *webSession) webSearch(ctx context.Context, query string, count int) (any, error) {
 	if count == 0 {
-		count = 8
+		count = 5
 	}
 	if count < 1 || count > maxWebSearchResults || strings.TrimSpace(query) == "" {
 		return nil, invalid("query is required, and count is 1 to 20.")

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.57.1 - Fewer tokens per folder-action job (2026-10-25)
+
+No schema, grant or configuration change. tool-schema.json is unchanged (0.15.0).
+
+- **Old tool results are shortened**: every step of a job sends the whole conversation again, so the first live scheduled web run (26 steps) used 341,000 input tokens, close to the 400,000 cap. Now, once a result is older than the newest two turns of results and over 600 bytes, the runner replaces it with its small fields (paths, states, blobs, titles, URLs, numbers, and how many items a list held) and a note that the agent can call the tool again for the rest. Long text, lists and images go. The model's own turns are never changed, and URLs the agent has seen stay fetchable.
+- **Smaller web defaults**: `web_search` returns 5 results unless the agent asks for more (was 8), and a fetched page's preview is about 1,000 characters (was 1,800).
+- Tested: shortening keeps a read's state, path and blob and a fetch's reference, drops an image, leaves small results, the instructions and the newest two turns alone, and never shortens twice.
+
 ## 0.57.0 - Web tools and schedules for folder actions (2026-10-25)
 
 **Schema v18 and grants** (`deploy/account-schema-v18.sql`, then `deploy/account-grants.sql`) before this binary starts. **Optional `accounts.json` additions** for the web tools: `agents.search` (a Brave Search API key file) and `agents.downloads` (a Backblaze B2 bucket of its own with a 30-day lifecycle rule; docs/deployment.md, Folder actions). Without them actions run as before, without the web. tool-schema.json is unchanged (0.15.0). CI applies v1–v18: move the new `ci.yml` from the repository root into `.github/workflows/`. New dependency: `golang.org/x/net` (HTML parsing).

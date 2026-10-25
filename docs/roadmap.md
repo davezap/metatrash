@@ -282,7 +282,10 @@ with their own money.
 4. **0.58.0**: PDF and Word files as triggers and input.
 5. **Slate Viewer**: an Automation page for a folder's actions and its
    `runner.md`, opting in, and agents; make a refused `.metatrash.json` save
-   obvious (an invalid file silently stayed local on 2026-10-25).
+   obvious in both Slate Viewer and mtsync (on 2026-10-25 an invalid file
+   stayed local while `mtsync list` still said "in sync"); and open
+   the folder's settings when someone names a new file `.metatrash.json`
+   (on 2026-10-25 that made `metatrash.json.md` instead).
 
 ### Ideas (not scheduled)
 
@@ -295,6 +298,44 @@ with their own money.
   who may reply (the owner only, or whoever pays), whether a reply can go
   beyond the action's instructions, and how a thread of replies shows in
   `runner.md`.
+- **Show running jobs in Slate Viewer** (Dave, 2026-10-25): while an action
+  is queued or running for a folder, show it (a small animation on the
+  folder, and on the file that started it) so people can see it's working,
+  and clear it when the `runner.md` entry lands. Needs the server to expose
+  a folder's queued and running jobs (REST, alongside the long-poll list).
+- **Fewer tokens per web job**: the first live news run (2026-10-25) took
+  26 steps and 341,000 input tokens, close to the 400,000 cap, because every
+  step resends the whole conversation. 0.57.1 shortens old tool results and
+  lowers the web defaults (5 results, 1,000-character previews); compare a
+  rerun. Still open: prompt caching for MiniMax (check what its
+  Anthropic-compatible API supports; Anthropic agents already mark cache
+  breakpoints, though shortening a result changes the cached prefix from
+  that point).
+
+## Hidden system files (Dave, 2026-10-25)
+
+Metatrash's own files should be hidden files with an `.mt.` prefix, as other
+tools do (`.gitignore`, `.vscode/`), so a folder shows the person's files
+first: `.metatrash.json` becomes `.mt.json`, `runner.md` becomes
+`.mt.runner.md`, and later system files follow the same pattern. Not
+scheduled yet. To settle when it is:
+
+- **AGENTS.md** stays visible: it is the shared convention agents look for.
+- **Dot names.** Today names starting with a dot are allowed only inside
+  GitHub folders. `.mt.*` must be allowed everywhere and stay reserved to
+  Metatrash (protected as `.metatrash.json` and `runner.md` are now), while
+  other dot names keep today's rule. Space exports and the root-level dot
+  refusal need the same exception.
+- **Migration.** Existing spaces hold `.metatrash.json` and `runner.md` in
+  every folder: a one-off rename on upgrade (one commit per space, file IDs
+  kept, so history follows), with the server reading the old names for a
+  release while mtsync and Slate Viewer catch up.
+- **Clients.** mtsync, Slate Viewer, Slate and the website explorer read
+  `.metatrash.json` by name and need the new name; decide whether they hide
+  `.mt.*` by default with a "show system files" switch. The MCP tool
+  descriptions, the agent preamble, docs and the docs space change with it.
+- **GitHub folders.** Whether `.mt.*` files are pushed to the repository or
+  kept on the Metatrash side only.
 
 ## mtsync and Slate Viewer
 
@@ -309,6 +350,18 @@ with their own money.
   website uses Slate 0.19.0 since Metatrash 0.49.3.)
 - **Slate Viewer as the space manager**: the desktop companion for managing
   Metatrash spaces (agreed direction 2026-10-17, not yet planned in detail).
+- **Create folder** (Dave, 2026-10-25): a folder only exists in Git once it
+  holds a file, so a new empty folder has no `.metatrash.json` or `AGENTS.md`
+  until a file arrives, and people make them by hand (one became
+  `metatrash.json.md`). Add a create-folder operation (REST and MCP) that
+  commits the starter `AGENTS.md` and `.metatrash.json` at once; Slate
+  Viewer's New Folder calls it, and mtsync calls it when it finds a new empty
+  local folder. Folders stay paths, not objects.
+- **Slate Viewer folder tree is hard to read** (Dave, 2026-10-25): with
+  hidden files shown, the indentation doesn't make clear which folder a
+  `.metatrash.json` belongs to. Stronger indent guides (a line per level),
+  folders' own files grouped first, and perhaps the folder's settings shown
+  as an icon on the folder row instead of a separate file.
 - Deferred with Dave 2026-10-12: bulk first download, on-demand files like
   OneDrive, automatic three-way merge of conflicts.
 

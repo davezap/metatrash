@@ -785,6 +785,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	limit := action.steps()
 	lastCall := false
 	for {
+		trimOldResults(req.Messages)
 		if cache {
 			markLastBlock(req.Messages)
 		}
