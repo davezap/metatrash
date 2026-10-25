@@ -23,10 +23,11 @@ import (
 // time per space (at most maxParallelJobs at once): an agent loop against
 // the model provider whose only tools are the space's own file tools, pinned
 // to the action's folder, run in-process through dispatchRepository so every
-// rule (ifInState, locks, readOnly files, size limits) applies. Changes are
-// commits by "<provider> (agent) for <owner>". The runner's commits never
-// queue jobs. When a job ends the runner appends its outcome to runner.md in
-// the folder.
+// rule (ifInState, locks, readOnly files, size limits) applies. A job runs on
+// one of the space owner's agents (agent_store.go), so the owner pays.
+// Changes are commits by "<provider> (agent) for <owner>". The runner's
+// commits never queue jobs. When a job ends the runner appends its outcome
+// to runner.md in the folder.
 
 const (
 	maxParallelJobs      = 2
@@ -43,16 +44,19 @@ const (
 type agentRunner struct {
 	s        *Service
 	settings *agentSettings
-	provider agentProvider
 	store    agentJobStore
-	tools    []json.RawMessage
-	schemas  map[string]*jsonschema.Resolved
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	wake     chan struct{}
-	mu       sync.Mutex
-	running  map[string]bool
+	// agentsOf lists a user's agents (userAgents); providerFor calls one.
+	// Tests replace both.
+	agentsOf    func(ctx context.Context, userID string) ([]userAgent, error)
+	providerFor func(agentModel) agentProvider
+	tools       []json.RawMessage
+	schemas     map[string]*jsonschema.Resolved
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	wake        chan struct{}
+	mu          sync.Mutex
+	running     map[string]bool
 	// owner returns a space owner's username (empty when none) and email.
 	owner func(ctx context.Context, userID string) (username, email string)
 	// retryWait is the pause before retry n (1, 2); tests shorten it.
@@ -120,13 +124,13 @@ func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolv
 	return tools, schemas, nil
 }
 
-func newAgentRunner(s *Service, settings *agentSettings, provider agentProvider, store agentJobStore) (*agentRunner, error) {
+func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*agentRunner, error) {
 	tools, schemas, err := agentTools(metatrash.ToolSchema)
 	if err != nil {
 		return nil, fmt.Errorf("agent tools: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &agentRunner{s: s, settings: settings, provider: provider, store: store, tools: tools, schemas: schemas, ctx: ctx, cancel: cancel,
+	a := &agentRunner{s: s, settings: settings, store: store, tools: tools, schemas: schemas, ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), running: map[string]bool{}, clock: time.Now,
 		retryWait: func(n int) time.Duration { return time.Duration(n*n) * 5 * time.Second }}
 	a.owner = func(ctx context.Context, userID string) (string, string) {
@@ -141,6 +145,13 @@ func newAgentRunner(s *Service, settings *agentSettings, provider agentProvider,
 		}
 		return username, email
 	}
+	a.agentsOf = func(ctx context.Context, userID string) ([]userAgent, error) {
+		if s.ownedDB == nil {
+			return nil, fmt.Errorf("the account database is not available")
+		}
+		return s.ownedDB.userAgents(ctx, userID)
+	}
+	a.providerFor = func(m agentModel) agentProvider { return newMessagesClient(m, false) }
 	return a, nil
 }
 
@@ -151,13 +162,6 @@ func (a *agentRunner) ownerName(ctx context.Context, r *repository) string {
 		return emailName(email)
 	}
 	return username
-}
-
-// allowed reports whether agents.owners lists the space's owner: the API key
-// pays only for their jobs.
-func (a *agentRunner) allowed(ctx context.Context, r *repository) bool {
-	username, _ := a.owner(ctx, a.s.repositoryOwner(r))
-	return a.settings.allows(username)
 }
 
 // start fails jobs a restart interrupted, then runs the queue.
@@ -267,14 +271,6 @@ func (a *agentRunner) enqueue(r *repository, old, state string) {
 		log.Printf("agent runner: space %s: %v", r.id, err)
 		return
 	}
-	if len(triggers) == 0 {
-		return
-	}
-	if !a.allowed(ctx, r) {
-		// Not queued or recorded: nothing runs on the key for other owners.
-		log.Printf("agent runner: space %s: owner not in agents.owners, %d action jobs not queued", r.id, len(triggers))
-		return
-	}
 	queued := false
 	for _, t := range triggers {
 		now := a.clock()
@@ -318,6 +314,8 @@ func (a *agentRunner) enqueue(r *repository, old, state string) {
 type jobOutcome struct {
 	summary string
 	changed []string
+	// model is the agent's model, for the Steps line.
+	model string
 }
 
 func (a *agentRunner) run(j agentJob) {
@@ -357,17 +355,17 @@ func (a *agentRunner) record(j agentJob, out jobOutcome) {
 	ctx = context.WithValue(ctx, runnerWriteKey{}, true)
 	name := a.ownerName(ctx, r)
 	ctx = withAuthor(ctx, func() changeAuthor { return changeAuthor{Name: name, App: runnerApp, Kind: "agent"} })
-	text := runnerEntry(j, out, a.settings, strings.TrimPrefix(j.File, j.Folder))
+	text := runnerEntry(j, out, a.settings.zone, strings.TrimPrefix(j.File, j.Folder))
 	if _, err := a.s.dispatchRepository(ctx, r, j.SpaceID, "append", Input{Path: j.Folder + runnerLogName, Text: &text}); err != nil {
 		log.Printf("agent runner: job %s: %s not written: %v", j.ID, j.Folder+runnerLogName, err)
 	}
 }
 
 // runnerEntry is a job's entry in runner.md.
-func runnerEntry(j agentJob, out jobOutcome, settings *agentSettings, file string) string {
+func runnerEntry(j agentJob, out jobOutcome, zone *time.Location, file string) string {
 	when := j.FinishedAt
-	if settings != nil && settings.zone != nil {
-		when = when.In(settings.zone)
+	if zone != nil {
+		when = when.In(zone)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n## %s · %s · %s\n\n", when.Format("2006-01-02 15:04"), j.Action, j.Status)
@@ -375,10 +373,10 @@ func runnerEntry(j agentJob, out jobOutcome, settings *agentSettings, file strin
 	if len(out.changed) > 0 {
 		fmt.Fprintf(&b, "- Changed: %s\n", strings.Join(out.changed, ", "))
 	}
-	if j.Steps > 0 || j.InputTokens > 0 {
+	if j.Steps > 0 || j.InputTokens > 0 || out.model != "" {
 		model := ""
-		if settings != nil {
-			model = " · " + settings.model
+		if out.model != "" {
+			model = " · " + out.model
 		}
 		fmt.Fprintf(&b, "- Steps: %d · tokens: %d in, %d out%s\n", j.Steps, j.InputTokens, j.OutputTokens, model)
 	}
@@ -402,7 +400,9 @@ const runnerPreamble = `You are an unattended agent that Metatrash, a file servi
 
 Your tools work on this folder only: paths are relative to it, and an empty prefix means the whole folder. Each change is saved as you make it; there is nothing to push. Write, move and delete need ifInState from a read, list or search. Prefer edit and append to rewriting a whole file, and read long files by line range. You cannot change .metatrash.json files or %s; Metatrash adds your result to %s itself.
 
-When you are done, reply with a short summary (a few sentences) of what you did and anything a person should check. That reply is recorded in %s.`
+Change only the files your instructions call for. Do not edit, tidy or create any other file, AGENTS.md included, unless the instructions say so; note anything else that needs attention in your summary instead.
+
+When you are done, reply with a short summary of three to five sentences: what you did and anything a person should check. That reply is recorded in %s.`
 
 // execute runs one job's agent loop. It returns what the job did; a nil
 // error with j.Status still running means done.
@@ -411,11 +411,6 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	r := a.s.ownedRepository(j.SpaceID)
 	if r == nil {
 		return out, fmt.Errorf("the space no longer exists")
-	}
-	if !a.allowed(ctx, r) {
-		// The space changed hands, or agents.owners changed, after queueing.
-		j.Status, j.Error = jobSkipped, "skipped: folder actions are not enabled for this space's owner"
-		return out, nil
 	}
 	_, files, err := r.snapshot(ctx, "")
 	if err != nil {
@@ -440,18 +435,29 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		j.Status, j.Error = jobSkipped, "skipped: the file was moved or deleted before the job started"
 		return out, nil
 	}
-	if cap := a.settings.dailyCap; cap > 0 {
+	owner := a.ownerName(ctx, r)
+	m, skip, err := a.agentFor(ctx, r, action, owner)
+	if err != nil {
+		return out, err
+	}
+	if skip != "" {
+		j.Status, j.Error = jobSkipped, skip
+		return out, nil
+	}
+	j.AgentID, out.model = m.agentID, m.model
+	if m.dailyCap > 0 {
 		now := a.clock().In(a.settings.zone)
 		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, a.settings.zone)
-		used, err := a.store.tokensSince(ctx, j.SpaceID, midnight)
+		used, err := a.store.tokensSince(ctx, m.agentID, midnight)
 		if err != nil {
 			return out, err
 		}
-		if used >= cap {
-			j.Status, j.Error = jobSkipped, fmt.Sprintf("skipped: the space's jobs used %d tokens today, over the daily cap of %d", used, cap)
+		if used >= m.dailyCap {
+			j.Status, j.Error = jobSkipped, fmt.Sprintf("skipped: the agent %s used %d tokens today, its daily cap is %d (Your account → Services → Agents)", m.name, used, m.dailyCap)
 			return out, nil
 		}
 	}
+	provider := a.providerFor(m)
 	instructions := action.Do
 	if name := action.doFile(); name != "" {
 		f, ok := files[j.Folder+name]
@@ -464,7 +470,6 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		}
 		instructions = string(b)
 	}
-	owner := a.ownerName(ctx, r)
 	folderName := j.Folder
 	if folderName == "" {
 		folderName = "(the space root)"
@@ -491,13 +496,13 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	}
 	user := "## Instructions\n\n" + strings.TrimSpace(instructions) + "\n\n## Why you are running\n\n" + trigger
 	toolCtx := context.WithValue(ctx, runnerWriteKey{}, true)
-	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: owner, App: a.settings.app, Kind: "agent"} })
-	cache := a.settings.provider == "anthropic"
+	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: owner, App: m.app, Kind: "agent"} })
+	cache := m.provider == "anthropic"
 	systemBlock := contentBlock{Type: "text", Text: system}
 	if cache {
 		systemBlock.CacheControl = &cacheControl{Type: "ephemeral"}
 	}
-	req := agentRequest{Model: a.settings.model, MaxTokens: a.settings.maxTokens, System: []json.RawMessage{rawBlock(systemBlock)}, Tools: a.tools,
+	req := agentRequest{Model: m.model, MaxTokens: m.maxTokens, System: []json.RawMessage{rawBlock(systemBlock)}, Tools: a.tools,
 		Messages: []agentMessage{{Role: "user", Content: []json.RawMessage{textBlock(user)}}}}
 	pin := pinnedFolder(j.Folder)
 	limit := action.steps()
@@ -506,7 +511,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		if cache {
 			markLastBlock(req.Messages)
 		}
-		resp, err := a.send(ctx, req)
+		resp, err := a.send(ctx, provider, req)
 		if err != nil {
 			return out, err
 		}
@@ -542,7 +547,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 			case "refusal":
 				return out, fmt.Errorf("the model refused the task")
 			case "max_tokens":
-				return out, fmt.Errorf("stopped: the model's reply reached maxTokens (%d)", a.settings.maxTokens)
+				return out, fmt.Errorf("stopped: the model's reply reached its limit of %d tokens", m.maxTokens)
 			}
 			return out, nil
 		}
@@ -601,9 +606,9 @@ func markLastBlock(messages []agentMessage) {
 }
 
 // send calls the provider, retrying failures worth retrying.
-func (a *agentRunner) send(ctx context.Context, req agentRequest) (agentResponse, error) {
+func (a *agentRunner) send(ctx context.Context, provider agentProvider, req agentRequest) (agentResponse, error) {
 	for attempt := 0; ; attempt++ {
-		resp, err := a.provider.send(ctx, req)
+		resp, err := provider.send(ctx, req)
 		var p *providerError
 		if err == nil || !errors.As(err, &p) || !p.retry || attempt == providerRetries {
 			return resp, err
@@ -614,6 +619,29 @@ func (a *agentRunner) send(ctx context.Context, req agentRequest) (agentResponse
 		case <-time.After(a.retryWait(attempt + 1)):
 		}
 	}
+}
+
+// agentFor chooses the owner's agent for an action and opens its key. A
+// non-empty skip says why the job does not run.
+func (a *agentRunner) agentFor(ctx context.Context, r *repository, action *folderAction, owner string) (m agentModel, skip string, err error) {
+	agents, err := a.agentsOf(ctx, a.s.repositoryOwner(r))
+	if err != nil {
+		return m, "", err
+	}
+	u, ok := pickAgent(agents, action.Model)
+	if !ok {
+		needs := "an agent"
+		if provider, model, ok := actionModel(action.Model); ok {
+			needs = "a " + agentProviders[provider].name + " " + model + " agent"
+		}
+		return m, fmt.Sprintf("skipped: %s has no agent for this action: it needs %s. The space owner adds one in Your account → Services → Agents.", orSomeone(owner), needs), nil
+	}
+	key, err := openAgentKey(a.settings.seal, u.UserID, u.ID, u.Sealed)
+	if err != nil {
+		return m, "", err
+	}
+	return agentModel{agentID: u.ID, name: u.Name, provider: u.Provider, app: u.App(), endpoint: strings.TrimSuffix(u.Endpoint(), "/") + "/v1/messages",
+		model: u.Model, apiKey: key, maxTokens: u.MaxTokens, dailyCap: u.DailyCap}, "", nil
 }
 
 // commitParent returns a commit's first parent.

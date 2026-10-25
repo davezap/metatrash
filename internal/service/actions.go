@@ -33,7 +33,10 @@ type folderAction struct {
 	When string `json:"when,omitempty"`
 	// Do is the instructions, or the name of a .md file in the folder that
 	// holds them.
-	Do    string `json:"do"`
+	Do string `json:"do"`
+	// Model picks which of the owner's agents runs it, as provider/model
+	// ("minimax/MiniMax-M3"); without it, the owner's default agent.
+	Model string `json:"model,omitempty"`
 	Web   *bool  `json:"web,omitempty"`
 	Steps int    `json:"steps,omitempty"`
 }
@@ -117,6 +120,11 @@ func checkActions(actions []folderAction) error {
 		}
 		if utf8.RuneCountInString(a.Do) > maxActionDo {
 			return actionError(a.Name, fmt.Sprintf("do is limited to %d characters; put longer instructions in a .md file in this folder and give its name.", maxActionDo))
+		}
+		if a.Model != "" {
+			if _, _, ok := actionModel(a.Model); !ok {
+				return actionError(a.Name, fmt.Sprintf(`model is a provider and model, such as "minimax/MiniMax-M3" or "anthropic/claude-sonnet-5-5" (got %q); leave it out to use the owner's default agent.`, a.Model))
+			}
 		}
 		if a.Steps != 0 && (a.Steps < 1 || a.Steps > maxActionSteps) {
 			return actionError(a.Name, fmt.Sprintf("steps (most tool calls per job) is 1 to %d; the default is %d.", maxActionSteps, defaultActionSteps))

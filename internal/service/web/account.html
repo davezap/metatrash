@@ -138,7 +138,7 @@
 
 {{else if eq .Section "services"}}
 <div class="acct-head"><h1>Services</h1></div>
-<p class="lede">AI apps that use your spaces, and outside services that folders in your spaces can connect to.</p>
+<p class="lede">AI apps that use your spaces, the agents your folder actions run on, and outside services that folders in your spaces can connect to.</p>
 {{if .OAuthEnabled}}<section id="connected-apps"><h2>Connected apps</h2>
 <p class="hint">To let Claude, ChatGPT or another MCP app use your spaces, add this address as a custom connector. The app sends you here to sign in and choose which spaces it may use. No keys to copy. The public space is always included.</p>
 <code class="endpoint" data-copy="{{.AppConnectURL}}">{{.AppConnectURL}}</code>
@@ -149,6 +149,26 @@
 <details class="pop"><summary class="icon" title="Revoke access" aria-label="Revoke access for {{.Name}}">{{template "i-revoke"}}</summary><div class="pop-panel"><p>Revoking signs {{.Name}} out immediately and forgets its choices. Connecting again asks you to choose spaces again.</p><form method="post" action="{{$.BasePath}}/account/apps/revoke"><input type="hidden" name="csrf" value="{{$.AppsCSRF}}"><input type="hidden" name="grant" value="{{.ID}}"><button class="button button-small" type="submit">Revoke access</button></form></div></details></span></li>
 {{else}}<li class="row row-empty">No apps are connected.</li>{{end}}</ul>
 <p class="hint">Change spaces adds or removes spaces without the app reconnecting. Unused connections expire after a period of inactivity.</p>{{end}}</section>{{end}}
+{{with .Agents}}<section id="agents"><h2>Agents</h2>
+<p class="hint">Folder actions in your spaces run on your own agent: a model provider and your API key, so you pay the provider directly. Actions use your default agent unless they name a model, such as <code>"model": "minimax/MiniMax-M3"</code>. Members’ files in your spaces run on your agent too.</p>
+{{if .Unavailable}}<p class="form-error" role="alert">Agents are temporarily unavailable. Reload shortly.</p>{{else}}
+<ul class="rows rows-agents"><li class="row row-head" aria-hidden="true"><span>Agent</span><span>Daily cap</span><span>Added</span><span></span></li>
+{{range .Agents}}<li class="row"><span class="cell-main"><strong>{{.Name}}</strong>{{if .Default}} <span class="pill pill-ok">default</span>{{end}}<span class="cell-sub">{{.ProviderName}} · {{.Model}} · key ending {{.KeyHint}}{{if .BaseURL}} · {{.BaseURL}}{{end}}</span></span>
+<span class="cell-muted">{{if .DailyCap}}{{.UsedToday}} of {{.DailyCap}} tokens today{{else}}No cap · {{.UsedToday}} tokens today{{end}}</span><span class="cell-muted">{{.Created.Format "2 Jan 2006"}}</span>
+<span class="actions"><form method="post" action="{{$.BasePath}}/account/agents/test"><input type="hidden" name="csrf" value="{{index $.Agents.CSRF "test"}}"><input type="hidden" name="agent" value="{{.ID}}"><button class="button button-quiet button-small" type="submit" title="Make one tiny call to check the key">Test</button></form>
+{{if not .Default}}<form method="post" action="{{$.BasePath}}/account/agents/default"><input type="hidden" name="csrf" value="{{index $.Agents.CSRF "default"}}"><input type="hidden" name="agent" value="{{.ID}}"><button class="icon" type="submit" title="Make default" aria-label="Make {{.Name}} your default agent">{{template "i-star"}}</button></form>{{end}}
+<details class="pop"><summary class="icon" title="Remove" aria-label="Remove {{.Name}}">{{template "i-trash"}}</summary><div class="pop-panel"><p>Metatrash deletes its key. Folder actions that need it are skipped until you add another agent{{if .Default}}; your oldest other agent becomes the default{{end}}.</p><form method="post" action="{{$.BasePath}}/account/agents/remove"><input type="hidden" name="csrf" value="{{index $.Agents.CSRF "remove"}}"><input type="hidden" name="agent" value="{{.ID}}"><button class="button button-small" type="submit">Remove this agent</button></form></div></details></span></li>
+{{else}}<li class="row row-empty">No agents yet. Add one to run folder actions in your spaces.</li>{{end}}</ul>
+{{if .Full}}<p class="hint">You have the most agents allowed. Remove one to add another.</p>
+{{else}}<h3>Add an agent</h3>
+<form class="agent-form" method="post" action="{{$.BasePath}}/account/agents/add"><input type="hidden" name="csrf" value="{{index .CSRF "add"}}">
+<div><label for="agent-name">Name</label><input id="agent-name" name="name" type="text" maxlength="64" value="{{.Form.Name}}" placeholder="MiniMax main" required></div>
+<div><label for="agent-provider">Provider</label><select id="agent-provider" name="provider">{{range .Providers}}<option value="{{.Value}}"{{if eq .Value $.Agents.Form.Provider}} selected{{end}}>{{.Name}}</option>{{end}}</select></div>
+<div><label for="agent-model">Model</label><input id="agent-model" name="model" type="text" maxlength="100" value="{{.Form.Model}}" placeholder="The provider’s usual model" autocapitalize="none" spellcheck="false"><p class="hint">Empty means {{range $i, $p := .Providers}}{{if $i}}, {{end}}{{$p.Model}} for {{$p.Name}}{{end}}.</p></div>
+<div><label for="agent-key">API key</label><input id="agent-key" name="key" type="password" maxlength="512" autocomplete="off" required><p class="hint">From {{range $i, $p := .Providers}}{{if $i}} or {{end}}{{$p.KeysURL}}{{end}}. Stored encrypted and never shown again.</p></div>
+<div><label for="agent-cap">Daily token cap</label><input id="agent-cap" name="cap" type="text" inputmode="numeric" maxlength="16" value="{{if .Form.Cap}}{{.Form.Cap}}{{else}}2000000{{end}}"><p class="hint">Tokens in and out per day across your jobs; 0 means no limit. Jobs over it are skipped.</p></div>
+<div><label for="agent-endpoint">Endpoint <span class="cell-muted">(optional)</span></label><input id="agent-endpoint" name="endpoint" type="url" maxlength="255" value="{{.Form.Endpoint}}" placeholder="Leave empty for the provider’s own"><p class="hint">An https address on the public internet that speaks the Anthropic Messages API.</p></div>
+<div class="button-row"><button class="button" type="submit">{{template "i-plus"}}Add agent</button></div></form>{{end}}{{end}}</section>{{end}}
 {{if .GitHubEnabled}}<section id="github"><h2>Folder services</h2>
 <div class="service-grid"><section class="card"><h3>GitHub {{if .GitHub}}<span class="pill pill-ok">{{len .GitHub}} connected</span>{{end}}</h3>
 <p>Mirror a folder in a space to a GitHub repository. You install the Metatrash app on GitHub and choose which repositories it may use.</p>
@@ -160,7 +180,7 @@
 <div class="button-row"><form method="post" action="{{.BasePath}}/account/github/connect"><input type="hidden" name="csrf" value="{{.GitHubConnectCSRF}}"><button class="button button-small" type="submit">{{if .GitHub}}Connect another GitHub account{{else}}Connect GitHub{{end}} →</button></form>
 <form method="post" action="{{.BasePath}}/account/github/link"><input type="hidden" name="csrf" value="{{.GitHubLinkCSRF}}"><button class="button button-quiet button-small" type="submit">Link an existing installation</button></form></div>
 <p class="hint">Already installed the app from its GitHub page? Use Link an existing installation: GitHub only asks you to sign in, and every installation your GitHub account can see is connected.</p></section></div></section>{{end}}
-{{if not (or .OAuthEnabled .GitHubEnabled)}}<p class="hint">No services are available on this server yet.</p>{{end}}
+{{if not (or .OAuthEnabled .GitHubEnabled .Agents)}}<p class="hint">No services are available on this server yet.</p>{{end}}
 
 {{else if eq .Section "profile"}}
 <div class="acct-head"><h1>Profile</h1></div>
@@ -244,6 +264,7 @@
 {{define "i-revoke"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg>{{end}}
 {{define "i-pause"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg>{{end}}
 {{define "i-play"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/></svg>{{end}}
+{{define "i-star"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>{{end}}
 {{define "i-plus"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>{{end}}
 {{define "n-spaces"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>{{end}}
 {{define "n-shared"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg>{{end}}

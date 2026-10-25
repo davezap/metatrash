@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // The runner talks to the model through the Anthropic Messages API, which
@@ -72,8 +71,10 @@ type messagesClient struct {
 	http             *http.Client
 }
 
-func newMessagesClient(s *agentSettings) *messagesClient {
-	return &messagesClient{endpoint: s.endpoint, apiKey: s.apiKey, http: &http.Client{Timeout: 5 * time.Minute}}
+// newMessagesClient calls one agent's provider. private allows addresses
+// that are not public, for tests only.
+func newMessagesClient(m agentModel, private bool) *messagesClient {
+	return &messagesClient{endpoint: m.endpoint, apiKey: m.apiKey, http: agentHTTPClient(private)}
 }
 
 func (c *messagesClient) send(ctx context.Context, req agentRequest) (agentResponse, error) {

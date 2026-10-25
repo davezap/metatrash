@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.55.0 - Users' own agents for folder actions (2026-10-25)
+
+**Schema v16 and grants** (`deploy/account-schema-v16.sql`, then `deploy/account-grants.sql`) before this binary starts. **`accounts.json` changes**: the `agents` section keeps only `enabled`, `timezone` and the new `keyFile` (64 hex digits, `openssl rand -hex 32`, root:metatrash 0640); `owners`, `provider`, `baseURL`, `model`, `apiKeyFile`, `maxTokens` and `dailyTokenCap` are refused with a message. Until the owner adds an agent, their actions are recorded as skipped. tool-schema.json is unchanged (0.15.0).
+
+- **Agents in Your account → Services** (Dave's design, docs/roadmap.md): each person adds their own agents, each with a name, provider (MiniMax or Anthropic), model, API key, optional https endpoint and daily token cap (2,000,000 by default, 0 for none). They can have up to 10 and make one the default. Test makes one tiny call and shows the reply. The key is encrypted in the database (AES-256-GCM, bound to the user and the agent) and never shown again; the list shows only its last four characters and today's use.
+- **The owner pays**: a job runs on the space owner's agent, whoever brought the file. This replaces the server's single key and `agents.owners`. Other people's spaces now run actions on their own agents, and an owner with none gets "skipped: … has no agent for this action" in `runner.md`.
+- **Action `model`** (optional): `"model": "minimax/MiniMax-M3"` picks the owner's agent with that provider and model; left out, the default agent runs it. The model in `runner.md` comes from the agent.
+- **Daily cap per agent** instead of per space, counted over all that agent's jobs; jobs record which agent ran them (`agent_id`).
+- **Endpoints are checked against reaching the server's own network**: https only, public addresses only, checked when added and again on every connection, and redirects are not followed.
+- **The agent changes only what it is asked to** (Dave's first live run renamed `README.md`): the runner preamble now says to change only the files the instructions call for, never `AGENTS.md` unless told, to put anything else in the summary, and to keep the summary to three to five sentences.
+- Tested: sealing and opening keys (a key copied to another agent does not open), form validation, endpoint checks (loopback, private, http refused; a non-test client refuses loopback), adding, listing, default and remove against MariaDB (first is default, removing it promotes the next, at most 10, names unique per user), the Agents page and its forms, agent choice by `model` and default, skipped without an agent, the per-agent cap, refusal of the old settings.
+
 ## 0.54.2 - Only the owner sets folder actions (2026-10-25)
 
 No database, grant or configuration change; tool-schema.json is unchanged (0.15.0). A missing `agents.dailyTokenCap` now means 2,000,000 tokens a day per space; set `0` to keep no limit.

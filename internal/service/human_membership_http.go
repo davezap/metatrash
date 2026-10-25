@@ -239,6 +239,9 @@ var accountNotices = map[string]string{
 	"passkey-renamed":         "Passkey renamed.",
 	"sessions-ended":          "Signed out everywhere else. This browser is still signed in.",
 	"session-ended":           "That device is signed out.",
+	"agent-added":             "Agent added. Use Test to check the key works. Your folder actions run on your default agent unless an action names a model.",
+	"agent-default":           "Default agent changed. Folder actions in your spaces use it from their next job.",
+	"agent-removed":           "Agent removed and its key deleted. Delete the key at the provider too if you no longer use it.",
 	"passkey-removed":         "Passkey removed and your other sessions signed out. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.54.2 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.55.0 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -203,11 +203,13 @@ the `review` push mode, which needs a review screen.
 
 0.54.0 has the runner and text-file triggers (`actions` in `.metatrash.json`,
 results in `runner.md`; [api-contract.md](api-contract.md#folder-actions)).
-Ran end to end on the live server on 2026-10-25 up to MiniMax's "insufficient
-balance"; a successful tidy-draft run is still to see. Stopgaps until user
-agents exist: 0.54.1 runs actions only for `agents.owners` on the server's
-key; 0.54.2 lets only the owner, as a person, change `actions`, and caps each
-space at 2M tokens a day by default.
+A tidy-draft run succeeded on the live server on 2026-10-25 (15 steps, about
+95k tokens in). 0.54.2 lets only the owner, as a person, change `actions`.
+0.55.0 replaces the server key with users' own agents (Your account →
+Services → Agents, schema v16) and the action `model` field; the owner pays
+for every job, and each agent has its own daily cap. It also tells the agent
+to change only the files its instructions call for (the first live run
+renamed `README.md`).
 
 ### User agents and who pays (agreed with Dave 2026-10-25)
 
@@ -249,8 +251,9 @@ with their own money.
 
 ### Build order
 
-1. **0.55.0**: user agents (table, account page, encrypted keys), the action
-   `model` field, owner pays.
+1. ~~**0.55.0**: user agents (table, account page, encrypted keys), the action
+   `model` field, owner pays.~~ Done; replacing a saved agent's key means
+   removing and adding it again for now.
 2. **0.56.0**: bring your own key and members' own actions (opt-in,
    notices, adopt).
 3. **0.57.0**: web tools (Brave `web_search`, `web_fetch`, downloads cached in

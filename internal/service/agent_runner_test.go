@@ -43,12 +43,12 @@ func (m *memoryJobStore) queuedSince(_ context.Context, space, folder string, si
 	return n, nil
 }
 
-func (m *memoryJobStore) tokensSince(_ context.Context, space string, since time.Time) (int64, error) {
+func (m *memoryJobStore) tokensSince(_ context.Context, agent string, since time.Time) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var n int64
 	for _, j := range m.jobs {
-		if j.SpaceID == space && !j.FinishedAt.IsZero() && !j.FinishedAt.Before(since) {
+		if j.AgentID == agent && !j.FinishedAt.IsZero() && !j.FinishedAt.Before(since) {
 			n += j.InputTokens + j.OutputTokens
 		}
 	}
@@ -159,6 +159,34 @@ type runnerWorld struct {
 	store  *memoryJobStore
 	runner *agentRunner
 	do     func(ctx context.Context, op string, in Input, code string) any
+	mu     sync.Mutex
+	// agents are the owner's agents; models records each job's agent.
+	agents []userAgent
+	models []agentModel
+}
+
+// testAgentSettings are runner settings with a fresh sealing key.
+func testAgentSettings(t *testing.T) *agentSettings {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "agents-key")
+	if err := os.WriteFile(path, []byte(strings.Repeat("ab", 32)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seal, err := loadSealKey(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zone, _ := time.LoadLocation("Pacific/Auckland")
+	return &agentSettings{zone: zone, seal: seal, keyFile: path}
+}
+
+func testUserAgent(t *testing.T, settings *agentSettings, userID, name, provider, model string) userAgent {
+	t.Helper()
+	u, err := newUserAgent(settings.seal, userID, agentForm{Name: name, Provider: provider, Model: model, Key: "sk-" + name[:3] + "-1234"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
 }
 
 func newRunnerWorld(t *testing.T) *runnerWorld {
@@ -175,17 +203,28 @@ func newRunnerWorld(t *testing.T) *runnerWorld {
 	s.ownedRepos[repo.id] = repo
 	s.ownedMu.Unlock()
 	model, store := &fakeModel{}, &memoryJobStore{jobs: map[string]agentJob{}}
-	zone, _ := time.LoadLocation("Pacific/Auckland")
-	settings := &agentSettings{provider: "minimax", app: "MiniMax", model: "MiniMax-M3", maxTokens: 4096, zone: zone, owners: []string{"dave"}}
-	runner, err := newAgentRunner(s, settings, model, store)
+	runner, err := newAgentRunner(s, testAgentSettings(t), store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runner.owner = func(context.Context, string) (string, string) { return "dave", "dave@example.com" }
+	agent := testUserAgent(t, runner.settings, repo.owner, "MiniMax main", "minimax", "MiniMax-M3")
+	agent.Default = true
+	w := &runnerWorld{t: t, s: s, repo: repo, model: model, store: store, runner: runner, agents: []userAgent{agent}}
+	runner.agentsOf = func(context.Context, string) ([]userAgent, error) {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return append([]userAgent(nil), w.agents...), nil
+	}
+	runner.providerFor = func(m agentModel) agentProvider {
+		w.mu.Lock()
+		w.models = append(w.models, m)
+		w.mu.Unlock()
+		return model
+	}
 	runner.retryWait = func(int) time.Duration { return time.Millisecond }
 	s.agents.Store(runner)
 	runner.start()
-	w := &runnerWorld{t: t, s: s, repo: repo, model: model, store: store, runner: runner}
 	w.do = func(ctx context.Context, op string, in Input, code string) any {
 		t.Helper()
 		head, err := repo.head(ctx)
@@ -449,18 +488,10 @@ func TestMessagesClient(t *testing.T) {
 		_, _ = w.Write([]byte(`{"content":[{"type":"thinking","thinking":"t","signature":"s"},{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":5}}`))
 	}))
 	defer server.Close()
-	key := filepath.Join(t.TempDir(), "key")
-	_ = os.WriteFile(key, []byte("secret-key\n"), 0600)
-	settings, err := (&agentsConfig{Provider: "minimax", Owners: []string{"dave"}, BaseURL: server.URL + "/anthropic", APIKeyFile: key}).settings()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if settings.model != "MiniMax-M3" || settings.app != "MiniMax" || settings.maxTokens != defaultAgentMaxTokens || settings.zone.String() != "Pacific/Auckland" {
-		t.Errorf("defaults %+v", settings)
-	}
-	c := newMessagesClient(settings)
-	c.http = server.Client()
-	resp, err := c.send(context.Background(), agentRequest{Model: settings.model, MaxTokens: 100, Messages: []agentMessage{{Role: "user", Content: []json.RawMessage{textBlock("hello")}}}})
+	m := agentModel{endpoint: server.URL + "/anthropic/v1/messages", apiKey: "secret-key", model: "MiniMax-M3"}
+	c := newMessagesClient(m, true)
+	c.http.Transport.(*http.Transport).TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig
+	resp, err := c.send(context.Background(), agentRequest{Model: m.model, MaxTokens: 100, Messages: []agentMessage{{Role: "user", Content: []json.RawMessage{textBlock("hello")}}}})
 	if err != nil || len(resp.Content) != 2 || resp.Usage.input() != 15 || got.key != "secret-key" || got.version != "2023-06-01" || got.body.Model != "MiniMax-M3" {
 		t.Errorf("resp %+v err %v got %+v", resp, err, got)
 	}
@@ -474,61 +505,137 @@ func TestMessagesClient(t *testing.T) {
 	if _, err = c.send(context.Background(), agentRequest{}); !errors.As(err, &p) || p.retry {
 		t.Errorf("400: %v", err)
 	}
-	minus := int64(-1)
-	o := []string{"dave"}
-	for _, bad := range []agentsConfig{{Provider: "openai", Owners: o, APIKeyFile: key}, {Provider: "minimax", Owners: o}, {Provider: "minimax", Owners: o, APIKeyFile: key, BaseURL: "http://example.com"},
-		{Provider: "anthropic", Owners: o, APIKeyFile: key, Timezone: "Mars/Olympus"}, {Provider: "anthropic", Owners: o, APIKeyFile: key, MaxTokens: 10}, {Provider: "anthropic", Owners: o, APIKeyFile: key, DailyTokenCap: &minus}} {
-		if _, err := bad.settings(); err == nil {
-			t.Errorf("accepted %+v", bad)
-		}
+	// Without the test switch, the client refuses addresses that are not public.
+	if _, err := newMessagesClient(m, false).send(context.Background(), agentRequest{}); err == nil {
+		t.Error("reached a loopback endpoint")
 	}
 }
 
-// The key pays only for the spaces of agents.owners: other owners' actions
-// queue nothing, and an owner without a username never matches.
-func TestRunnerOtherOwners(t *testing.T) {
-	for _, owner := range [][2]string{{"mallory", "mallory@example.com"}, {"", "dave@example.com"}} {
-		w := newRunnerWorld(t)
-		w.runner.owner = func(context.Context, string) (string, string) { return owner[0], owner[1] }
-		w.write("hr/.metatrash.json", tidyConfig)
-		w.write("hr/inbound/a.md", "a\n")
-		time.Sleep(200 * time.Millisecond)
-		if jobs := len(w.store.list("")); jobs != 0 || len(w.model.requests) != 0 || w.exists("hr/runner.md") {
-			t.Errorf("owner %v: %d jobs, %d model calls", owner, jobs, len(w.model.requests))
-		}
-	}
-	// A job queued before the owner left agents.owners is skipped unrun.
+// A job runs on the owner's default agent, or on the agent for the model an
+// action names; without one it is skipped, and the daily cap is per agent.
+func TestRunnerChoosesAgent(t *testing.T) {
 	w := newRunnerWorld(t)
-	w.write("hr/.metatrash.json", tidyConfig)
-	w.runner.owner = func(context.Context, string) (string, string) { return "mallory", "" }
-	w.write("hr/inbound/a.md", "a\n")
-	_ = w.store.add(context.Background(), agentJob{ID: strings.Repeat("c", 32), SpaceID: w.repo.id, Folder: "hr/", Action: "tidy-draft", File: "hr/inbound/a.md", Status: jobQueued, QueuedAt: time.Now()})
-	w.runner.poke()
-	if jobs := w.wait(1); jobs[0].Status != jobSkipped || !strings.Contains(jobs[0].Error, "not enabled for this space's owner") || len(w.model.requests) != 0 {
+	claude := testUserAgent(t, w.runner.settings, w.repo.owner, "Claude review", "anthropic", "claude-sonnet-5-5")
+	w.agents = append(w.agents, claude)
+	w.write("hr/.metatrash.json", `{"actions":[{"name":"tidy","on":"a/*.md","do":"Tidy."},{"name":"review","on":"b/*.md","do":"Review.","model":"anthropic/claude-sonnet-5-5"},{"name":"other","on":"c/*.md","do":"Go.","model":"minimax/MiniMax-M3.1-Flash"}]}`)
+	w.write("hr/a/1.md", "x\n")
+	w.wait(1)
+	w.write("hr/b/1.md", "x\n")
+	w.wait(2)
+	w.write("hr/c/1.md", "x\n")
+	jobs := w.wait(3)
+	if len(w.models) != 2 || w.models[0].name != "MiniMax main" || w.models[0].apiKey != "sk-Min-1234" || w.models[0].endpoint != "https://api.minimax.io/anthropic/v1/messages" ||
+		w.models[1].name != "Claude review" || w.models[1].app != "Claude" || w.models[1].model != "claude-sonnet-5-5" {
+		t.Errorf("models %+v", w.models)
+	}
+	if jobs[0].AgentID != w.agents[0].ID || jobs[1].AgentID != claude.ID || jobs[2].Status != jobSkipped || !strings.Contains(jobs[2].Error, "needs a MiniMax MiniMax-M3.1-Flash agent") {
 		t.Errorf("jobs %+v", jobs)
 	}
+	if log := w.read("hr/runner.md"); !strings.Contains(log, "· claude-sonnet-5-5") || !strings.Contains(log, "Your account → Services → Agents") {
+		t.Errorf("runner.md:\n%s", log)
+	}
+	// Over the agent's daily cap: skipped before any call.
+	w.mu.Lock()
+	w.agents[0].DailyCap = 100
+	w.mu.Unlock()
+	_ = w.store.add(context.Background(), agentJob{ID: strings.Repeat("d", 32), SpaceID: w.repo.id, Folder: "hr/", Action: "tidy", File: "hr/a/old.md", AgentID: w.agents[0].ID, Status: jobDone, QueuedAt: time.Now(), FinishedAt: time.Now(), InputTokens: 90, OutputTokens: 10})
+	w.write("hr/a/2.md", "x\n")
+	if j := w.job(5, "hr/a/2.md"); j.Status != jobSkipped || !strings.Contains(j.Error, "used 100 tokens today, its daily cap is 100") || len(w.models) != 2 {
+		t.Errorf("cap: %+v", j)
+	}
+	// No agents at all.
+	w.mu.Lock()
+	w.agents = nil
+	w.mu.Unlock()
+	w.write("hr/a/3.md", "x\n")
+	if j := w.job(6, "hr/a/3.md"); j.Status != jobSkipped || !strings.Contains(j.Error, "dave has no agent for this action: it needs an agent") {
+		t.Errorf("no agent: %+v", j)
+	}
+}
+
+// job waits for n jobs and returns the one for file.
+func (w *runnerWorld) job(n int, file string) agentJob {
+	w.t.Helper()
+	for _, j := range w.wait(n) {
+		if j.File == file {
+			return j
+		}
+	}
+	w.t.Fatalf("no job for %s", file)
+	return agentJob{}
 }
 
 func TestAgentsSettings(t *testing.T) {
 	key := filepath.Join(t.TempDir(), "key")
-	if err := os.WriteFile(key, []byte("sk-test\n"), 0o600); err != nil {
+	if err := os.WriteFile(key, []byte(strings.Repeat("0f", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := (&agentsConfig{Enabled: true, Provider: " MiniMax", Owners: []string{"dave-zap"}, APIKeyFile: key}).settings()
-	if err != nil || s.provider != "minimax" || s.app != "MiniMax" || !s.allows("dave-zap") || s.allows("dave") || s.allows("") || s.dailyCap != 2000000 {
+	s, err := (&agentsConfig{Enabled: true, KeyFile: key}).settings()
+	if err != nil || s.seal == nil || s.zone.String() != "Pacific/Auckland" {
 		t.Fatalf("%+v %v", s, err)
 	}
-	none := int64(0)
-	if s, err := (&agentsConfig{Provider: "minimax", Owners: []string{"dave"}, APIKeyFile: key, DailyTokenCap: &none}).settings(); err != nil || s.dailyCap != 0 {
-		t.Errorf("no cap: %+v %v", s, err)
-	}
+	short := filepath.Join(t.TempDir(), "short")
+	_ = os.WriteFile(short, []byte("abcd"), 0o600)
 	for c, want := range map[*agentsConfig]string{
-		{Provider: "openai", Owners: []string{"dave"}, APIKeyFile: key}:  `not "openai"`,
-		{Provider: "minimax", APIKeyFile: key}:                           "owners must list",
-		{Provider: "minimax", Owners: []string{"Dave"}, APIKeyFile: key}: `"Dave" is not a username`,
+		{}:                                       "keyFile is required",
+		{KeyFile: short}:                         "64 hex digits",
+		{KeyFile: key, Timezone: "Mars/Olympus"}: "IANA",
+		{KeyFile: key, Provider: json.RawMessage(`"minimax"`)}:  "provider is no longer a server setting",
+		{KeyFile: key, Owners: json.RawMessage(`["dave-zap"]`)}: "owners is no longer a server setting",
+		{KeyFile: key, APIKeyFile: json.RawMessage(`"/etc/x"`)}: "apiKeyFile is no longer",
 	} {
 		if _, err := c.settings(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%+v: %v, want %q", c, err, want)
 		}
+	}
+}
+
+// Agents from the Add agent form: checks, defaults, sealing and choosing.
+func TestUserAgents(t *testing.T) {
+	settings := testAgentSettings(t)
+	u, err := newUserAgent(settings.seal, "u1", agentForm{Name: " MiniMax main ", Provider: "MiniMax", Key: " sk-abc-9876 ", Cap: "1,000,000"}, time.Now())
+	if err != nil || u.Name != "MiniMax main" || u.Provider != "minimax" || u.Model != "MiniMax-M3" || u.DailyCap != 1000000 || u.KeyHint != "9876" || u.BaseURL != "" || u.Ref() != "minimax/MiniMax-M3" {
+		t.Fatalf("%+v %v", u, err)
+	}
+	if key, err := openAgentKey(settings.seal, "u1", u.ID, u.Sealed); err != nil || key != "sk-abc-9876" {
+		t.Errorf("open: %q %v", key, err)
+	}
+	if _, err := openAgentKey(settings.seal, "u2", u.ID, u.Sealed); err == nil {
+		t.Error("a key opened for another user")
+	}
+	for f, want := range map[agentForm]string{
+		{Name: "", Provider: "minimax", Key: "k"}:                                           "name",
+		{Name: "a", Provider: "openai", Key: "k"}:                                           "MiniMax or Anthropic",
+		{Name: "a", Provider: "minimax", Model: "bad model", Key: "k"}:                      "model name",
+		{Name: "a", Provider: "minimax", Key: "two words"}:                                  "one line",
+		{Name: "a", Provider: "minimax", Key: "k", Cap: "-5"}:                               "whole number",
+		{Name: "a", Provider: "minimax", Key: "k", Endpoint: "http://api.example.com"}:      "https",
+		{Name: "a", Provider: "minimax", Key: "k", Endpoint: "https://127.0.0.1/anthropic"}: "public internet",
+		{Name: "a", Provider: "minimax", Key: "k", Endpoint: "https://10.1.2.3/x"}:          "public internet",
+		{Name: "a", Provider: "minimax", Key: "k", Endpoint: "https://localhost/x"}:         "public internet",
+		{Name: "a", Provider: "minimax", Key: "k", Endpoint: "https://metadata.internal/x"}: "public internet",
+		{Name: "a", Provider: "minimax", Key: "k", Endpoint: "https://[::1]/x"}:             "public internet",
+		{Name: "a", Provider: "minimax", Key: "k", Endpoint: "https://169.254.169.254/x"}:   "public internet",
+	} {
+		if _, err := newUserAgent(settings.seal, "u1", f, time.Now()); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%+v: %v, want %q", f, err, want)
+		}
+	}
+	if u, err := newUserAgent(settings.seal, "u1", agentForm{Name: "Own", Provider: "anthropic", Key: "k", Endpoint: "https://llm.example.com/v1/", Cap: "0"}, time.Now()); err != nil || u.BaseURL != "https://llm.example.com/v1" || u.DailyCap != 0 || u.Model != "claude-sonnet-5-5" {
+		t.Errorf("own endpoint: %+v %v", u, err)
+	}
+	a := userAgent{ID: "a", Provider: "minimax", Model: "MiniMax-M3"}
+	b := userAgent{ID: "b", Provider: "minimax", Model: "MiniMax-M3", Default: true}
+	c := userAgent{ID: "c", Provider: "anthropic", Model: "claude-sonnet-5-5"}
+	for want, cases := range map[string][]string{"b": {"", "minimax/MiniMax-M3"}, "c": {"anthropic/claude-sonnet-5-5"}, "": {"anthropic/claude-opus-5-5"}} {
+		for _, ref := range cases {
+			got, ok := pickAgent([]userAgent{a, b, c}, ref)
+			if ok != (want != "") || got.ID != want {
+				t.Errorf("pickAgent(%q) = %q, want %q", ref, got.ID, want)
+			}
+		}
+	}
+	if err := checkActions([]folderAction{{Name: "x", On: actionPatterns{"*.md"}, Do: "y", Model: "openai/gpt"}}); err == nil {
+		t.Error("accepted an unknown provider")
 	}
 }

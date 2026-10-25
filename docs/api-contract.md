@@ -135,7 +135,7 @@ Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in eac
 
 ## Folder actions
 
-0.54.0. A folder's `.metatrash.json` can list actions. When one fires, the server runs an agent loop against the model provider in `accounts.json` (`agents`, deployment.md); the agent can use only this space's file tools and is pinned to the folder.
+0.54.0. A folder's `.metatrash.json` can list actions. When one fires, the server runs an agent loop on one of the space owner's agents (Your account → Services → Agents, 0.55.0); the agent can use only this space's file tools and is pinned to the folder. Folder actions must be on for the server (`agents` in `accounts.json`, deployment.md).
 
 ```json
 {
@@ -153,17 +153,18 @@ Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in eac
 - `on`: file patterns relative to the folder, as a list or one comma-separated string. Each segment is a name or `path.Match` pattern (`*.md`, `inbound/*.pdf`); a pattern ending in `/` (`drafts/`) matches every file under that subfolder. The action fires once for each matching file that arrives: created, or moved in (a move keeps the file's ID, but its new path is new to the folder). With `"when": "change"` it also fires for each edit of a matching file already there; the default is `"arrive"`. A folder's `AGENTS.md`, `.metatrash.json` and its `runner.md` never fire it.
 - `every` (a schedule such as `day 06:00`) is refused for now (schedules come with the web tools); an action has `on` or `every`, not both.
 - `do` (required, up to 4,000 characters): the instructions in plain words, or the name of a `.md` file in the folder that holds them (no spaces, ends in `.md`).
+- `model` (0.55.0, optional): `provider/model`, such as `minimax/MiniMax-M3` or `anthropic/claude-sonnet-5-5`. The job runs on the owner's agent with that provider and model (their default one if several match). Left out, it runs on the owner's default agent.
 - `web` (`false` turns off the web tools, which come later) and `steps` (most tool calls per job, 1 to 200, default 40).
-- Owned spaces only: a configured space refuses `actions` (`invalid_request`). Actions are checked and stored while `agents` is off; they run when it is on, and only in the spaces of the owners `agents.owners` lists (the provider key pays for every job). In other owners' spaces they are stored but queue nothing.
+- Owned spaces only: a configured space refuses `actions` (`invalid_request`). Actions are checked and stored while `agents` is off; they run when it is on. The space owner pays: every job runs on the owner's agent, whoever brought the file (choosing to pay with your own key comes in 0.56.0). An owner with no agent, or none matching `model`, gets the job recorded as skipped, with a pointer to Your account → Services → Agents.
 - Only the space owner, writing as a person (Metatrash Sync or Slate Viewer), can add, change or remove a folder's `actions` (0.54.2): actions spend the owner's tokens. Members and every agent, the owner's own included, get `forbidden` for a write or edit that touches `actions`; they can still change the file's other settings, and members' files still trigger the owner's actions.
 
-**How a job runs.** After every commit to an owned space (MCP, REST, mtsync, GitHub pull), the files it added or changed are matched against the actions of the folders holding them, and one job per matching file and action is queued (`metatrash_agent_jobs`, schema v15). Commits the runner makes never queue jobs, so an agent writing into `for-review/` cannot set itself off. At most 20 jobs per folder per hour: the 21st is recorded as skipped in `runner.md`, later ones in that hour are dropped. Jobs run one at a time per space and at most two at once; queued jobs survive a restart, and a job a restart interrupted is recorded as failed.
+**How a job runs.** After every commit to an owned space (MCP, REST, mtsync, GitHub pull), the files it added or changed are matched against the actions of the folders holding them, and one job per matching file and action is queued (`metatrash_agent_jobs`, schema v16). Commits the runner makes never queue jobs, so an agent writing into `for-review/` cannot set itself off. At most 20 jobs per folder per hour: the 21st is recorded as skipped in `runner.md`, later ones in that hour are dropped. Jobs run one at a time per space and at most two at once; queued jobs survive a restart, and a job a restart interrupted is recorded as failed.
 
-- **Prompt.** A short runner preamble (unattended, no questions, paths are relative, reply with a summary), the folder's `AGENTS.md`, the action's `do`, and which file arrived or changed.
+- **Prompt.** A short runner preamble (unattended, no questions, paths are relative, change only the files the instructions call for and not `AGENTS.md`, reply with a summary of three to five sentences), the folder's `AGENTS.md`, the action's `do`, and which file arrived or changed.
 - **Tools.** `read`, `write`, `edit`, `append`, `search`, `list`, `move`, `delete` and `history`, with the descriptions and input schemas of `api/tool-schema.json` minus `space`. Each call goes to `dispatchRepository`, so ifInState, locks, `readOnly` files and size limits apply as for any agent. No `spaces`, `pull` or `push`, no shell, no other tools.
 - **Pinning.** The runner adds the folder to every `path`, `from`, `to` and `prefix` the agent sends and removes it from results (and drops `space`); list and search are limited to the folder, history shows only entries inside it, and `..` is refused as everywhere. The agent cannot change any `.metatrash.json` or the folder's `runner.md` (`protected_file`). A result over 100,000 bytes is refused with a hint to read by line range.
-- **Identity.** Changes are commits with `Metatrash-By: <owner>`, `Metatrash-App: MiniMax` (or `Claude`) and `Metatrash-Kind: agent`, so History shows "MiniMax (agent) for dave" and agent-level locks apply. Jobs run on the server's provider key, for owners in `agents.owners` only, whoever brought the file.
-- **Limits.** `steps`; 400,000 input tokens and 10 minutes per job; a daily token cap per space (`agents.dailyTokenCap`, 2,000,000 unless set; 0 = none). A provider error worth retrying (429, 5xx, network) is retried twice, then the job fails.
+- **Identity.** Changes are commits with `Metatrash-By: <owner>`, `Metatrash-App: MiniMax` (or `Claude`, after the agent's provider) and `Metatrash-Kind: agent`, so History shows "MiniMax (agent) for dave" and agent-level locks apply.
+- **Limits.** `steps`; 400,000 input tokens and 10 minutes per job; a daily token cap per agent, set on the account page (2,000,000 unless set; 0 = none), counted over every job that agent ran that day. A provider error worth retrying (429, 5xx, network) is retried twice, then the job fails.
 - **Model replies.** Thinking blocks are passed back unchanged (MiniMax requires it), `pause_turn` is resumed, and the model's last text is the job's summary.
 - **runner.md.** When a job ends the runner appends an entry to `runner.md` in the folder (creating it), signed `Metatrash runner`:
 
@@ -177,7 +178,7 @@ Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in eac
 Rewrote the draft ... (the model's closing summary)
 ```
 
-The status is `done`, `failed` (with `- Error:`) or `skipped` (the file was gone before the job started, the folder's hourly limit, or the daily cap). Times are in `agents.timezone`.
+The status is `done`, `failed` (with `- Error:`) or `skipped` (the file was gone before the job started, the folder's hourly limit, the owner has no agent for the action, or the agent's daily cap). The last part of the Steps line is the model. Times, and the daily caps' reset, are in `agents.timezone`.
 
 ## Acknowledgements (policy reads)
 

@@ -147,6 +147,8 @@ body.viewer pre{min-height:0}
 .rows-apps .row{grid-template-columns:minmax(0,1.2fr) minmax(0,1.6fr) minmax(0,.9fr) 90px}
 .rows-consent .row{grid-template-columns:minmax(0,1.2fr) minmax(0,1.2fr) minmax(0,1fr)}
 .rows-github .row{grid-template-columns:minmax(0,1fr) auto}
+.rows-agents .row{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,.7fr) 120px}
+.agent-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px 18px;max-width:760px;margin-top:10px}.agent-form>div{min-width:0}.agent-form input:not([type=hidden]),.agent-form select{width:100%}.agent-form .hint{margin:6px 0 0}.agent-form .button-row{grid-column:1/-1;margin-top:4px}
 .rows-invited .actions .button,.rows-spaces .actions .button{white-space:normal;text-align:center}
 .cell-main{font-size:15px}.cell-main strong{font-weight:600}
 .cell-mono{font:13px ui-monospace,Consolas,monospace;color:var(--muted)}

@@ -192,7 +192,7 @@ func (s *Service) EnableAccounts(configPath string) error {
 	}
 	s.accounts = a
 	if a.agents != nil {
-		runner, err := newAgentRunner(s, a.agents, newMessagesClient(a.agents), dbJobStore{store.db})
+		runner, err := newAgentRunner(s, a.agents, dbJobStore{store.db})
 		if err != nil {
 			return err
 		}

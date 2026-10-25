@@ -80,6 +80,10 @@ type accountPage struct {
 	Notice                 string
 	UsernameCSRF, Username string
 	User                   userAccount
+	// Agents is the Agents part of Services, while folder actions are on;
+	// AgentForm refills the Add agent form after it failed.
+	Agents    *agentsSection
+	AgentForm *agentForm
 }
 
 // SpaceTotal counts the spaces Spaces lists under All: owned and joined.
@@ -145,7 +149,7 @@ func accountSection(path string) string {
 		return "spaces"
 	case signInRoutes[path]:
 		return "security"
-	case strings.HasPrefix(path, "/account/apps/"), strings.HasPrefix(path, "/account/github/"):
+	case strings.HasPrefix(path, "/account/apps/"), strings.HasPrefix(path, "/account/github/"), agentRoutes[path]:
 		return "services"
 	case path == "/account/username":
 		return "profile"
@@ -220,6 +224,15 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 				}
 			}
 		}
+		if overview && page.Section == "services" && h.agentsEnabled() {
+			var ok bool
+			if page.Agents, ok = h.agentsPage(r, page.User); !ok {
+				status = http.StatusServiceUnavailable
+			}
+			if page.AgentForm != nil {
+				page.Agents.Form = *page.AgentForm
+			}
+		}
 		if overview && page.Section == "security" && h.service.ownedDB != nil {
 			var ok bool
 			if page.SignIn, ok = h.signInSection(r, page.User); !ok {
@@ -272,6 +285,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	appID := strings.TrimPrefix(path, "/account/apps/")
 	appRoute := strings.HasPrefix(path, "/account/apps/") && idPattern.MatchString(appID)
 	githubRoute := path == "/account/github/connect" || path == "/account/github/link" || path == "/account/github/disconnect"
+	agentRoute := agentRoutes[path]
 	transferAction, transferRoute := parseTransferRoute(path)
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
@@ -279,7 +293,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !githubRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -465,6 +479,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	for _, field := range signInFormFields[path] {
 		allowed[field] = true
 	}
+	for _, field := range agentFormFields[path] {
+		allowed[field] = true
+	}
 	for key, values := range r.PostForm {
 		if !(allowed[key] || (path == "/account/apps/spaces" && spaceFieldPattern.MatchString(key))) || len(values) != 1 {
 			sendError(w, invalid("Unknown or duplicate form field."))
@@ -482,7 +499,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || transferRoute || githubRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if membershipRoute || transferRoute || githubRoute || agentRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -515,6 +532,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if signInRoutes[path] {
 			csrf = a.signInCSRF(path, session)
 		}
+		if agentRoute {
+			csrf = a.agentCSRF(path, session)
+		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
@@ -534,6 +554,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if path == "/account/apps/spaces" {
 		h.submitAppSpaces(w, r, session)
+		return true
+	}
+	if agentRoute {
+		h.submitAgent(w, r, session, path)
 		return true
 	}
 	if githubRoute {

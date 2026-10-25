@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v14 (from 0.50.0); 0.54.0 needs v15.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v15 (from 0.54.0); 0.55.0 needs v16.
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -21,7 +21,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
 | Configuration | `/etc/metatrash/` (root:metatrash, 0750; files 0640) |
 | Spaces, keys | `spaces.json`, `keys.json` |
 | Accounts | `accounts.json`, `account-database.json`, `smtp-password`, `database-password`, `totp-key` |
-| Folder actions (optional) | `agents-api-key` (the model provider's API key) |
+| Folder actions (optional) | `agents-key` (seals users' agent API keys) |
 | GitHub App (optional) | `github-app.pem`, `github-client-secret`, `github-webhook-secret` |
 | Data | `/var/lib/metatrash` (metatrash, 0700): `repos/`, `owned-repos/`, `.service-lock` |
 | Backups (0.53.0) | `/usr/local/sbin/metatrash-backup`, settings in `/etc/metatrash-backup/` (root, 0700), staging in `/var/backups/metatrash`; see Backups |
@@ -147,7 +147,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v15 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v16 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -342,56 +342,61 @@ are in [github.md](github.md).
 
 ### Folder actions (agents)
 
-Optional `"agents"` section (0.54.0): the model provider that runs folder
-actions (api-contract.md, Folder actions). Off until `"enabled": true`;
-actions are checked and stored either way, and run only while it is on.
+Optional `"agents"` section: turns folder actions on (api-contract.md,
+Folder actions). Off until `"enabled": true`; actions are checked and stored
+either way, and run only while it is on.
 
 ```json
 "agents": {
   "enabled": true,
-  "owners": ["dave"],
-  "provider": "minimax",
-  "apiKeyFile": "/etc/metatrash/agents-api-key",
-  "model": "MiniMax-M3",
-  "timezone": "Pacific/Auckland",
-  "dailyTokenCap": 2000000
+  "keyFile": "/etc/metatrash/agents-key",
+  "timezone": "Pacific/Auckland"
 }
 ```
 
-- `owners` (required): the usernames whose own spaces may run actions. The
-  key pays for every job, so nobody else's actions run: in other owners'
-  spaces actions are stored but no job is queued, and a job queued before its
-  space changed hands is recorded as skipped. Members' files in a listed
-  owner's space do run, on that owner's key. The configured spaces (the public
-  space among them) refuse actions altogether.
-- `provider`: `minimax` (MiniMax's Anthropic-compatible API,
-  `https://api.minimax.io/anthropic`, default model `MiniMax-M3`) or
-  `anthropic` (`https://api.anthropic.com`, default model
-  `claude-sonnet-5-5`). Both speak the Anthropic Messages API, so switching is
-  a config change. `baseURL` overrides the address (https only), `model` the
-  model.
-- `apiKeyFile`: one line holding the provider's API key. The service runs
-  as `metatrash`, so it must be able to read it:
-  `sudo chown root:metatrash /etc/metatrash/agents-api-key` and
-  `sudo chmod 0640 /etc/metatrash/agents-api-key`. The key is sent as
-  `x-api-key`; it never goes in `accounts.json` or Git.
-- `maxTokens`: most output tokens per model reply (1,024 to 128,000; default
-  16,384). Long rewrites need room: a whole policy written in one `write`
-  call is one reply.
-- `timezone`: IANA zone for `runner.md` times and the daily cap (default
-  `Pacific/Auckland`).
-- `dailyTokenCap`: tokens (in and out) a space's jobs may use per day;
-  2,000,000 when left out, `0` for no limit. Jobs over it are recorded as
-  skipped. Raise it once testing shows what a job costs.
+From 0.55.0 the server holds no API key. Each person adds their own agents in
+Your account → Services → Agents: a name, the provider (`minimax`, MiniMax's
+Anthropic-compatible API at `https://api.minimax.io/anthropic`, usual model
+`MiniMax-M3`; or `anthropic`, `https://api.anthropic.com`, usual model
+`claude-sonnet-5-5`), the model, their API key, an optional https endpoint
+and a daily token cap (2,000,000 unless they set another; `0` for none).
+Up to 10 agents each; the first is the default, and Test makes one tiny call
+to check the key. An action runs on the space owner's agent, so the owner
+pays for every job in their spaces, members' files included. An owner with
+no agent queues jobs that are recorded as skipped. The configured spaces (the
+public space among them) refuse actions altogether.
 
-`metatrash check` validates the section and reads the key file, and lists
-"folder actions (MiniMax MiniMax-M3 for dave)" among the account features.
-Run as root (`sudo`), it also checks that the `metatrash` account can read
-the key ("agents key"); otherwise the service exits at start. Jobs are
-rows in `metatrash_agent_jobs` (schema v15):
+- `keyFile` (required): 64 hex digits that encrypt the API keys in the
+  database (AES-256-GCM, bound to each user and agent). Create it once and
+  back it up with `/etc/metatrash`; losing or changing it makes every stored
+  key unreadable, and people must add their agents again.
+
+  ```sh
+  openssl rand -hex 32 | sudo tee /etc/metatrash/agents-key >/dev/null
+  sudo chown root:metatrash /etc/metatrash/agents-key
+  sudo chmod 0640 /etc/metatrash/agents-key
+  ```
+
+- `timezone`: IANA zone for `runner.md` times and when daily caps reset
+  (default `Pacific/Auckland`).
+
+The 0.54.x settings `owners`, `provider`, `baseURL`, `model`, `apiKeyFile`,
+`maxTokens` and `dailyTokenCap` are refused with a message saying so; remove
+them (and the old `agents-api-key` file, once its key is added as an agent).
+
+Endpoints must be https and resolve only to public addresses, checked when
+the agent is added and again on every connection; redirects are not
+followed. Keys never appear on pages, in logs or in Git; the page shows the
+last four characters.
+
+`metatrash check` validates the section and the key file, and lists
+"folder actions (users' agents)" among the account features. Run as root
+(`sudo`), it also checks that the `metatrash` account can read the key file
+("agents key"); otherwise the service exits at start. Agents are rows in
+`metatrash_agents` and jobs in `metatrash_agent_jobs` (schema v16):
 
 ```sql
-SELECT FROM_UNIXTIME(queued_at), folder, action, file, status, steps, input_tokens, output_tokens, error
+SELECT FROM_UNIXTIME(queued_at), folder, action, file, agent_id, status, steps, input_tokens, output_tokens, error
 FROM metatrash_agent_jobs ORDER BY queued_at DESC LIMIT 20;
 ```
 
@@ -664,7 +669,7 @@ roadmap.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v15 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v16 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -685,6 +690,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.49.0 | schema v13 (`metatrash_form_submissions`) and grants (`SELECT, INSERT` on it) | 12; receipts stay in the table, filed copies stay in their spaces |
 | 0.50.0 | schema v14 (review and quiz columns on `metatrash_form_submissions`) and grants (`UPDATE (status, score, marks, reviewed_by, reviewed_at, note, text)` on it) | 13; reviews stay in the table, but 0.49 cannot show them |
 | 0.54.0 | schema v15 (`metatrash_agent_jobs`) and grants (`SELECT, INSERT` and `UPDATE (status, started_at, finished_at, steps, input_tokens, output_tokens, error)` on it) | 14, after removing `actions` from every `.metatrash.json`: older releases treat a file with `actions` as invalid, so that folder's locks and `readOnly` would be ignored. Jobs stay in the table |
+| 0.55.0 | schema v16 (`metatrash_agents`, `agent_id` on jobs) and grants (`SELECT, INSERT, DELETE` and `UPDATE (is_default)` on `metatrash_agents`, `UPDATE (agent_id)` on jobs); in `accounts.json` replace the agents settings with `keyFile` (Folder actions) | 15, after putting the 0.54.x agents settings back in `accounts.json`; agents stay in the table, unused |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer
@@ -741,7 +747,7 @@ addresses are only in the notice emails.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v15 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v16 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - CI runs both on every push (see Automated builds and releases).
 
