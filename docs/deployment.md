@@ -429,7 +429,10 @@ two, the backups cannot be read.
 
 - **restic password** (`/etc/metatrash-backup/restic-password`).
 - **`totp-key`**: it unlocks the authenticator secrets in the database, so it
-  is left out of the backups on purpose.
+  is left out of the B2 backups on purpose (the emailed configuration below
+  carries it, encrypted).
+- **Configuration passphrase** (`/etc/metatrash-backup/config-passphrase`),
+  which opens the emailed configuration.
 - The B2 account sign-in and the application key.
 
 ### One-time setup
@@ -484,6 +487,41 @@ two, the backups cannot be read.
 
 Then do a test restore (below) once, and after that every few months.
 
+### Emailed configuration
+
+`deploy/backup-config.sh` (from 0.53.1; `upgrade.sh` installs it as
+`/usr/local/sbin/metatrash-backup-config`) emails the configuration every day
+at about 05:00, separately from B2: `/etc/metatrash` (with `totp-key`),
+`/etc/metatrash-backup` (B2 key and restic password; not the passphrase
+itself) and the service's unit and override, as one tar archive encrypted
+with gpg (AES-256) under its own passphrase. It is sent to `CONFIG_MAIL_TO` in
+`backup.env` through the SMTP settings in `accounts.json` (the Gmail account
+that sends sign-in codes); the body also shows how the last B2 backup run
+ended, so the daily email doubles as a check that backups run. Anyone with
+the mailbox *and* the passphrase has every secret of the server, so keep the
+passphrase only in the password manager.
+
+Setup, after the B2 setup above:
+
+```sh
+sudo sh -c 'umask 077; openssl rand -base64 24 > /etc/metatrash-backup/config-passphrase'
+sudo cat /etc/metatrash-backup/config-passphrase   # into the password manager now
+sudoedit /etc/metatrash-backup/backup.env          # CONFIG_MAIL_TO=david@metatrash.com
+sudo install -o root -g root -m 0755 deploy/backup-config.sh /usr/local/sbin/metatrash-backup-config
+sudo metatrash-backup-config                       # ends "sent … to david@metatrash.com"
+sudo install -o root -g root -m 0644 deploy/metatrash-backup-config.service deploy/metatrash-backup-config.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now metatrash-backup-config.timer
+```
+
+Test it: save the attachment, then in Git Bash on Windows (or any shell with
+gpg) run `gpg -d metatrash-config-<host>-<date>.tar.gz.gpg | tar -xz` and
+enter the passphrase. It unpacks into `etc/…`; check `etc/metatrash/totp-key`
+and `etc/metatrash-backup/restic-password` match the password manager. If
+the email doesn't arrive, look in spam and in
+`journalctl -u metatrash-backup-config`; Gmail refuses a `From` that is not
+the SMTP account or one of its aliases.
+
 ### Look at backups
 
 ```sh
@@ -524,7 +562,7 @@ and with the same binary version as `MANIFEST.txt`, service stopped):
 
 1. Configuration: copy `$B/config/metatrash/` to `/etc/metatrash/`
    (root:metatrash, 0750, files 0640), put `totp-key` back from the password
-   manager, and copy `$B/config/metatrash.service.d` to
+   manager or the emailed archive, and copy `$B/config/metatrash.service.d` to
    `/etc/systemd/system/` if it is there.
 2. Database: create the login as in Accounts → Database step 1, then
    ```sh

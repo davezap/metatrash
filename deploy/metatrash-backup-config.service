@@ -1,0 +1,9 @@
+[Unit]
+Description=Emailed encrypted copy of the Metatrash configuration
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/metatrash-backup-config
+UMask=0077

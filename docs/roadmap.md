@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.53.0 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.53.1 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -240,6 +240,10 @@ From 0.53.0 (2026-10-25):
   check that `forget --prune` worked with Object Lock on (old versions hidden,
   not refused). Do one test restore (rebuild a space from its bundle, load the
   dump into a scratch MariaDB) and note the date here.
+- **Emailed configuration (0.53.1):** set up and run
+  `sudo metatrash-backup-config`; the email reaches david@metatrash.com (not
+  spam), the attachment opens with `gpg -d … | tar -xz` in Git Bash, and its
+  `totp-key` and restic password match the password manager.
 
 From 0.52.2 (2026-10-24):
 

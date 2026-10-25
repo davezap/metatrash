@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.53.1 - Emailed configuration (2026-10-25)
+
+No database, grant or configuration change, and the binary is unchanged apart from its version. tool-schema.json is unchanged (0.14.0). Setup: docs/deployment.md, Backups → Emailed configuration.
+
+- **`deploy/backup-config.sh`** (installed by `upgrade.sh` as `/usr/local/sbin/metatrash-backup-config`) emails the server's configuration every day to `CONFIG_MAIL_TO` (david@metatrash.com) (Dave): `/etc/metatrash` with `totp-key`, `/etc/metatrash-backup` without the passphrase file, and the service's unit and override, as one tar archive encrypted with gpg (AES-256) under the passphrase in `/etc/metatrash-backup/config-passphrase`. It sends through the SMTP settings in `accounts.json` with curl (STARTTLS on 587, TLS on 465); the password goes to curl on stdin, never on the command line. The body says how to open it and how the last B2 backup run ended.
+- **`deploy/metatrash-backup-config.service` and `.timer`** run it daily at about 05:00, separately from the B2 backup so either keeps working without the other. `deploy/backup.env.example` gains `CONFIG_MAIL_TO`, `CONFIG_PASSPHRASE_FILE` and `CONFIG_MAIL_PATHS`.
+- Checked in a scratch copy with curl replaced by a stub: the message parses as MIME with the attachment, the archive decrypts with the passphrase and lists `accounts.json`, `smtp-password`, `totp-key` and the backup settings without the passphrase file, and a password with `"` and `\` reaches curl's config intact. Not sent through Gmail yet.
+
 ## 0.53.0 - Off-site backups (2026-10-25)
 
 No database, grant or configuration change, and the binary is unchanged apart from its version. tool-schema.json is unchanged (0.14.0); mtsync and Slate Viewer are unchanged. The backup needs a one-time setup (B2 bucket, restic, settings, timer): docs/deployment.md, Backups.
