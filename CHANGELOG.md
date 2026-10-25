@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.57.4 - A run cut off at its step limit is failed (2026-10-26)
+
+No schema, grant or configuration change.
+
+- **A job that used up its `steps` is recorded as failed**, even when the model then replies with a summary: its calls were refused, so it did not finish. A live news run ended "done" in `runner.md` with nothing written ("the write did not go through — the job hit its tool-call limit"). The model's summary is still recorded under the error.
+- Tested: a job refused at its limit that then replies is failed, with its summary in `runner.md`.
+
 ## 0.57.3 - Tighter folder-action prompts (2026-10-25)
 
 No schema, grant or configuration change. tool-schema.json is unchanged (0.15.0).

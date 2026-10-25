@@ -131,3 +131,22 @@ func TestActionToolsChecked(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnerStepLimitFails(t *testing.T) {
+	w := newRunnerWorld(t)
+	w.write("hr/.metatrash.json", `{"actions":[{"name":"news","on":"inbound/*.md","steps":1,"do":"Write news.md."}]}`)
+	w.model.turns = []func(agentRequest) (agentResponse, error){
+		useTools(toolUse("t1", "list", map[string]any{}), toolUse("t2", "list", map[string]any{})),
+		func(agentRequest) (agentResponse, error) {
+			return agentResponse{Content: []json.RawMessage{textBlock("Out of calls; news.md was not written.")}, StopReason: "end_turn"}, nil
+		},
+	}
+	w.write("hr/inbound/a.md", "x")
+	jobs := w.wait(1)
+	if jobs[0].Status != jobFailed || !strings.Contains(jobs[0].Error, "limit of 1 tool calls before it finished") {
+		t.Fatalf("job %+v", jobs[0])
+	}
+	if log := w.read("hr/runner.md"); !strings.Contains(log, "· news · failed") || !strings.Contains(log, "news.md was not written") {
+		t.Errorf("runner.md:\n%s", log)
+	}
+}

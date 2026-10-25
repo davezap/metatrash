@@ -841,6 +841,11 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 			case "max_tokens":
 				return out, fmt.Errorf("stopped: the model's reply reached its limit of %d tokens", m.maxTokens)
 			}
+			if lastCall {
+				// Calls were refused at the limit, so the job did not finish
+				// what it set out to do, whatever its summary says.
+				return out, fmt.Errorf("stopped: the job reached its limit of %d tool calls before it finished", limit)
+			}
 			return out, nil
 		}
 		if lastCall {
