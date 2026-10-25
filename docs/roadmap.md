@@ -307,7 +307,10 @@ with their own money.
   26 steps and 341,000 input tokens, close to the 400,000 cap, because every
   step resends the whole conversation. 0.57.1 shortens old tool results and
   lowers the web defaults (5 results, 1,000-character previews); compare a
-  rerun. Still open: prompt caching for MiniMax (check what its
+  rerun (it used 195,000 tokens over 34 steps, against 341,000 over 26).
+  0.57.2 sends jobs short tool definitions (4.9 KB instead of 11.2 KB per
+  step), lets an action list its `tools`, and warns the agent with 3 calls
+  left. Still open: prompt caching for MiniMax (check what its
   Anthropic-compatible API supports; Anthropic agents already mark cache
   breakpoints, though shortening a result changes the cached prefix from
   that point).

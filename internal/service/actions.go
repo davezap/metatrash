@@ -46,6 +46,9 @@ type folderAction struct {
 	Model string `json:"model,omitempty"`
 	Web   *bool  `json:"web,omitempty"`
 	Steps int    `json:"steps,omitempty"`
+	// Tools narrows the agent's tools to these names (runner_tools.go);
+	// left out, it gets all of them.
+	Tools []string `json:"tools,omitempty"`
 	// Pays is "owner" (the default) or "contributor".
 	Pays string `json:"pays,omitempty"`
 	// Member is the username of the member whose own action this is.
@@ -147,6 +150,9 @@ func checkActions(actions []folderAction) error {
 				return actionError(a.Name, fmt.Sprintf(`model is a provider and model, such as "minimax/MiniMax-M3" or "anthropic/claude-sonnet-5-5" (got %q); leave it out to use the owner's default agent.`, a.Model))
 			}
 		}
+		if why := checkActionTools(a.Tools); why != "" {
+			return actionError(a.Name, why)
+		}
 		if a.Steps != 0 && (a.Steps < 1 || a.Steps > maxActionSteps) {
 			return actionError(a.Name, fmt.Sprintf("steps (most tool calls per job) is 1 to %d; the default is %d.", maxActionSteps, defaultActionSteps))
 		}
@@ -232,6 +238,20 @@ func (a folderAction) steps() int {
 
 // webEnabled reports whether the action may use the web tools.
 func (a folderAction) webEnabled() bool { return a.Web == nil || *a.Web }
+
+// allows reports whether the action's agent may use a tool: any tool when
+// the action lists none.
+func (a folderAction) allows(tool string) bool {
+	if len(a.Tools) == 0 {
+		return true
+	}
+	for _, name := range a.Tools {
+		if name == tool {
+			return true
+		}
+	}
+	return false
+}
 
 // doFile returns the instructions file the action names, relative to its
 // folder, or "" when do holds the instructions themselves.

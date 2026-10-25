@@ -34,6 +34,7 @@ import (
 
 const (
 	maxParallelJobs      = 2
+	stepsWarning         = 3 // tool calls left when the runner says to finish
 	maxJobsPerFolderHour = 20
 	maxJobInputTokens    = 400000
 	maxJobTime           = 10 * time.Minute
@@ -61,6 +62,7 @@ type agentRunner struct {
 	origin  string
 	tools   []json.RawMessage
 	schemas map[string]*jsonschema.Resolved
+	inputs  map[string]json.RawMessage
 	// webTools and webSchemas add the web tools that are set up (nil when
 	// none); webRefs keeps references and fetcher downloads. Tests replace
 	// them.
@@ -93,8 +95,10 @@ func runnerWrite(ctx context.Context) bool {
 }
 
 // agentTools are the space tools an agent job gets: the MCP tools without
-// the space argument. spaces, pull and push are left out.
-func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolved, error) {
+// the space argument. spaces, pull and push are left out. It returns the
+// slim definitions the model sees (runner_tools.go), the full schemas calls
+// are checked against, and those full input schemas as JSON.
+func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolved, map[string]json.RawMessage, error) {
 	var catalog struct {
 		Tools []struct {
 			Name        string                     `json:"name"`
@@ -103,22 +107,23 @@ func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolv
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal(schema, &catalog); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var tools []json.RawMessage
 	schemas := map[string]*jsonschema.Resolved{}
+	inputs := map[string]json.RawMessage{}
 	for _, tool := range catalog.Tools {
 		input := tool.InputSchema
 		var properties map[string]json.RawMessage
 		if err := json.Unmarshal(input["properties"], &properties); err != nil {
-			return nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
+			return nil, nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
 		}
 		delete(properties, "space")
 		input["properties"], _ = json.Marshal(properties)
 		var required []string
 		if raw, ok := input["required"]; ok {
 			if err := json.Unmarshal(raw, &required); err != nil {
-				return nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
+				return nil, nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
 			}
 		}
 		kept := []string{}
@@ -131,26 +136,29 @@ func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolv
 		b, _ := json.Marshal(input)
 		var s jsonschema.Schema
 		if err := json.Unmarshal(b, &s); err != nil {
-			return nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
+			return nil, nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
 		}
 		resolved, err := s.Resolve(nil)
 		if err != nil {
-			return nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
+			return nil, nil, nil, fmt.Errorf("tool %s: %w", tool.Name, err)
 		}
-		schemas[tool.Name] = resolved
-		def, _ := json.Marshal(map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": json.RawMessage(b)})
+		schemas[tool.Name], inputs[tool.Name] = resolved, b
+		def, err := runnerToolDef(tool.Name, b)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		tools = append(tools, def)
 	}
-	return tools, schemas, nil
+	return tools, schemas, inputs, nil
 }
 
 func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*agentRunner, error) {
-	tools, schemas, err := agentTools(metatrash.ToolSchema)
+	tools, schemas, inputs, err := agentTools(metatrash.ToolSchema)
 	if err != nil {
 		return nil, fmt.Errorf("agent tools: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &agentRunner{s: s, settings: settings, store: store, tools: tools, schemas: schemas, ctx: ctx, cancel: cancel,
+	a := &agentRunner{s: s, settings: settings, store: store, tools: tools, schemas: schemas, inputs: inputs, ctx: ctx, cancel: cancel,
 		wake: make(chan struct{}, 1), running: map[string]bool{}, clock: time.Now,
 		retryWait: func(n int) time.Duration { return time.Duration(n*n) * 5 * time.Second }}
 	a.owner = func(ctx context.Context, userID string) (string, string) {
@@ -200,7 +208,7 @@ func (a *agentRunner) setWebTools(search, fetch bool) error {
 	if !search && !fetch {
 		return nil
 	}
-	tools, schemas, err := webToolSet(a.tools, a.schemas, search, fetch)
+	tools, schemas, err := webToolSet(a.tools, a.schemas, a.inputs, search, fetch)
 	if err != nil {
 		return fmt.Errorf("web tools: %w", err)
 	}
@@ -741,10 +749,14 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	tools := a.tools
 	var web *webSession
 	if action.webEnabled() && a.webTools != nil && a.webRefs != nil {
-		web = a.newWebSession(payer.userID, a.settings.search != nil, a.settings.downloads != nil)
-		tools = a.webTools
-		system += webPreamble(web.search, web.fetch)
+		search, fetch := a.settings.search != nil && action.allows("web_search"), a.settings.downloads != nil && action.allows("web_fetch")
+		if search || fetch {
+			web = a.newWebSession(payer.userID, search, fetch)
+			tools = a.webTools
+			system += webPreamble(web.search, web.fetch)
+		}
 	}
+	tools = toolsFor(tools, action.Tools)
 	if f, ok := files[j.Folder+agentsFileName]; ok {
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
@@ -783,7 +795,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		Messages: []agentMessage{{Role: "user", Content: []json.RawMessage{textBlock(user)}}}}
 	pin := pinnedFolder(j.Folder)
 	limit := action.steps()
-	lastCall := false
+	lastCall, warned := false, false
 	for {
 		trimOldResults(req.Messages)
 		if cache {
@@ -841,6 +853,11 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 				continue
 			}
 			j.Steps++
+			if !action.allows(use.Name) {
+				results = append(results, rawBlock(contentBlock{Type: "tool_result", ToolUseID: use.ID, IsError: true,
+					Content: fmt.Sprintf(`{"error":{"code":"invalid_request","message":"This action's agent may use only %s."}}`, strings.Join(action.Tools, ", "))}))
+				continue
+			}
 			var result json.RawMessage
 			var change string
 			if web != nil && web.handles(use.Name, use.Input) {
@@ -858,6 +875,16 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 				out.changed = append(out.changed, change)
 			}
 			results = append(results, result)
+		}
+		if left := limit - j.Steps; left > 0 && left <= stepsWarning && !warned {
+			// Say so while there is room to save the work, rather than
+			// stopping a job that found what it needed but wrote nothing.
+			warned = true
+			calls := "tool calls"
+			if left == 1 {
+				calls = "tool call"
+			}
+			results = append(results, textBlock(fmt.Sprintf("Note from the runner: you have %d %s left in this job. Write your result now, then reply with your summary.", left, calls)))
 		}
 		req.Messages = append(req.Messages, agentMessage{Role: "user", Content: results})
 	}

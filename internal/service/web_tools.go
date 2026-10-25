@@ -46,41 +46,42 @@ const webFetchToolDef = `{"name":"web_fetch","description":"Download a web page,
 // webToolSet adds the web tools to the space tools: web_search when search
 // is set up, web_fetch (and search's path, for references) when downloads
 // are.
-func webToolSet(tools []json.RawMessage, schemas map[string]*jsonschema.Resolved, search, fetch bool) ([]json.RawMessage, map[string]*jsonschema.Resolved, error) {
+func webToolSet(tools []json.RawMessage, schemas map[string]*jsonschema.Resolved, inputs map[string]json.RawMessage, search, fetch bool) ([]json.RawMessage, map[string]*jsonschema.Resolved, error) {
 	outTools := []json.RawMessage{}
 	outSchemas := map[string]*jsonschema.Resolved{}
 	for name, s := range schemas {
 		outSchemas[name] = s
 	}
-	add := func(def string) error {
-		var tool struct {
-			Name        string          `json:"name"`
-			InputSchema json.RawMessage `json:"input_schema"`
-		}
-		if err := json.Unmarshal([]byte(def), &tool); err != nil {
-			return err
-		}
+	// add checks calls against the full input schema and offers the model
+	// the slim definition.
+	add := func(name string, input json.RawMessage) error {
 		var s jsonschema.Schema
-		if err := json.Unmarshal(tool.InputSchema, &s); err != nil {
-			return fmt.Errorf("tool %s: %w", tool.Name, err)
+		if err := json.Unmarshal(input, &s); err != nil {
+			return fmt.Errorf("tool %s: %w", name, err)
 		}
 		resolved, err := s.Resolve(nil)
 		if err != nil {
-			return fmt.Errorf("tool %s: %w", tool.Name, err)
+			return fmt.Errorf("tool %s: %w", name, err)
 		}
-		outSchemas[tool.Name] = resolved
-		outTools = append(outTools, json.RawMessage(def))
+		def, err := runnerToolDef(name, input)
+		if err != nil {
+			return err
+		}
+		outSchemas[name] = resolved
+		outTools = append(outTools, def)
 		return nil
 	}
 	for _, raw := range tools {
-		var tool map[string]json.RawMessage
+		var tool struct {
+			Name string `json:"name"`
+		}
 		if err := json.Unmarshal(raw, &tool); err != nil {
 			return nil, nil, err
 		}
-		if fetch && string(tool["name"]) == `"search"` {
+		if fetch && tool.Name == "search" {
 			var input map[string]json.RawMessage
 			var properties map[string]json.RawMessage
-			if err := json.Unmarshal(tool["input_schema"], &input); err != nil {
+			if err := json.Unmarshal(inputs["search"], &input); err != nil {
 				return nil, nil, err
 			}
 			if err := json.Unmarshal(input["properties"], &properties); err != nil {
@@ -88,22 +89,29 @@ func webToolSet(tools []json.RawMessage, schemas map[string]*jsonschema.Resolved
 			}
 			properties["path"] = json.RawMessage(`{"type":"string","pattern":"^web/[0-9a-f]{16}\\.[a-z0-9]{1,5}$","description":"A web/… reference from web_fetch to search instead of the folder."}`)
 			input["properties"], _ = json.Marshal(properties)
-			tool["input_schema"], _ = json.Marshal(input)
-			def, _ := json.Marshal(tool)
-			if err := add(string(def)); err != nil {
+			full, _ := json.Marshal(input)
+			if err := add("search", full); err != nil {
 				return nil, nil, err
 			}
 			continue
 		}
 		outTools = append(outTools, raw)
 	}
-	if search {
-		if err := add(webSearchToolDef); err != nil {
+	for _, def := range []struct {
+		on  bool
+		def string
+	}{{search, webSearchToolDef}, {fetch, webFetchToolDef}} {
+		if !def.on {
+			continue
+		}
+		var tool struct {
+			Name        string          `json:"name"`
+			InputSchema json.RawMessage `json:"input_schema"`
+		}
+		if err := json.Unmarshal([]byte(def.def), &tool); err != nil {
 			return nil, nil, err
 		}
-	}
-	if fetch {
-		if err := add(webFetchToolDef); err != nil {
+		if err := add(tool.Name, tool.InputSchema); err != nil {
 			return nil, nil, err
 		}
 	}

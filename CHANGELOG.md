@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.57.2 - Leaner tools for folder actions (2026-10-25)
+
+No schema, grant or configuration change. tool-schema.json is unchanged (0.15.0); MCP apps see the same tools as before.
+
+- **Shorter tool definitions for jobs**: every step resends the tool definitions, about 3,000 tokens of the MCP descriptions and schemas, which was most of a 40-step job's 225,000 tokens. Jobs now get a one-line description per tool and argument, without `space`, `strict`, search's `revision` or the length and pattern limits: 4.2 KB for the file tools instead of 10 KB, 4.9 KB with the web tools instead of 11.2 KB. Every call is still checked against the full schema, so a refusal still says what was wrong.
+- **`tools` on an action** lists the only tools its agent gets, such as `["read", "write", "web_search", "web_fetch"]` for a news digest. Unknown or repeated names are refused when the settings are saved, and a call to an unlisted tool is refused. Left out, the agent gets every tool as before.
+- **A warning before the step limit**: with 3 tool calls left, the runner tells the agent to write its result now. A live scheduled run used all 40 calls looking for a fresher story and ended with nothing written.
+- Tested: the definitions' size and content, the full schema still enforcing limits (including a web reference in search), an action's tool list (the model sees only those, the web preamble follows it, a delete is refused), the warning once at 3 calls left and the write after it, and the `tools` checks.
+
 ## 0.57.1 - Fewer tokens per folder-action job (2026-10-25)
 
 No schema, grant or configuration change. tool-schema.json is unchanged (0.15.0).
