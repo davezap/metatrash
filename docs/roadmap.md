@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.53.1 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.53.2 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 

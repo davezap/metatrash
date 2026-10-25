@@ -2,7 +2,7 @@
 # Daily emailed copy of the Metatrash configuration: /etc/metatrash (totp-key
 # included), the backup settings and the service's unit, as one tar archive
 # encrypted with gpg (AES-256, passphrase in CONFIG_PASSPHRASE_FILE) and sent
-# through the service's own SMTP settings in accounts.json.
+# through the service's own SMTP settings in accounts.json (python3 smtplib).
 # upgrade.sh installs it as /usr/local/sbin/metatrash-backup-config; it runs as
 # root from metatrash-backup-config.timer. See docs/deployment.md, Backups.
 set -euo pipefail
@@ -23,22 +23,16 @@ CONFIG_MAIL_PATHS=${CONFIG_MAIL_PATHS-/etc/metatrash-backup /etc/systemd/system/
 
 log() { echo "metatrash-backup-config: $*"; }
 
+# gpg needs its agent even for a passphrase; Amazon Linux's default
+# gnupg2-minimal lacks it.
+if ! command -v gpg-agent >/dev/null; then
+	log "gpg-agent not installed (Amazon Linux: sudo dnf swap -y gnupg2-minimal gnupg2-full)"
+	exit 1
+fi
 if [ ! -s "$CONFIG_PASSPHRASE_FILE" ]; then
 	log "$CONFIG_PASSPHRASE_FILE missing or empty"
 	exit 1
 fi
-
-# SMTP settings from accounts.json, as the service sends sign-in codes.
-smtp=$(python3 -c '
-import json, sys
-c = json.load(open(sys.argv[1]))
-for k in ("smtpHost", "smtpPort", "smtpUsername", "smtpFrom", "smtpPasswordFile"):
-    v = c.get(k)
-    if not v:
-        sys.exit("accounts.json has no " + k)
-    print(v)
-' "$ACCOUNTS_CONFIG")
-{ read -r smtp_host; read -r smtp_port; read -r smtp_user; read -r smtp_from; read -r smtp_password_file; } <<<"$smtp"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -59,52 +53,47 @@ gpg --homedir "$work/gnupg" --batch --quiet --yes --no-symkey-cache --pinentry-m
 	-o "$work/$name" "$work/config.tar.gz"
 gpgconf --homedir "$work/gnupg" --kill all >/dev/null 2>&1 || true
 
-# The message: a short note and the archive.
-boundary="metatrash-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+# Send through the SMTP settings in accounts.json, as the service sends
+# sign-in codes (Python's smtplib: Amazon Linux's curl-minimal has no SMTP).
 last_backup=$(systemctl show metatrash-backup.service -p Result -p ExecMainExitTimestamp 2>/dev/null | tr '\n' ' ' || true)
-{
-	echo "From: Metatrash <$smtp_from>"
-	echo "To: $CONFIG_MAIL_TO"
-	echo "Subject: Metatrash configuration $(hostname -s) $day"
-	echo "Date: $(date -R)"
-	echo "Message-ID: <$boundary@$(hostname -f 2>/dev/null || hostname)>"
-	echo "MIME-Version: 1.0"
-	echo "Content-Type: multipart/mixed; boundary=\"$boundary\""
-	echo
-	echo "--$boundary"
-	echo "Content-Type: text/plain; charset=utf-8"
-	echo
-	echo "The Metatrash configuration from $(hostname -s), encrypted with the"
-	echo "configuration passphrase (not in this email). To open it:"
-	echo
-	echo "  gpg -d $name | tar -xz"
-	echo
-	echo "(Windows: Git Bash has gpg and tar.) It holds: ${paths[*]}"
-	echo
-	echo "Last off-site backup run: ${last_backup:-unknown}"
-	echo
-	echo "--$boundary"
-	echo "Content-Type: application/octet-stream; name=\"$name\""
-	echo "Content-Disposition: attachment; filename=\"$name\""
-	echo "Content-Transfer-Encoding: base64"
-	echo
-	base64 -w 76 "$work/$name"
-	echo "--$boundary--"
-} >"$work/message.eml"
+ATTACHMENT="$work/$name" DAY="$day" PATHS="${paths[*]}" LAST_BACKUP="${last_backup:-unknown}" \
+	python3 -I - "$ACCOUNTS_CONFIG" <<'PY'
+import json, os, smtplib, socket, ssl, sys
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 
-# Send with curl; the password goes through a config on stdin, never argv.
-password=$(tr -d '\r\n' <"$smtp_password_file")
-password=${password//\\/\\\\}
-password=${password//\"/\\\"}
-user=${smtp_user//\\/\\\\}
-user=${user//\"/\\\"}
-scheme=smtp
-if [ "$smtp_port" = 465 ]; then
-	scheme=smtps
-fi
-printf 'user = "%s:%s"\n' "$user" "$password" |
-	curl -sS --config - --ssl-reqd --crlf -m 60 --retry 3 \
-		--url "$scheme://$smtp_host:$smtp_port" \
-		--mail-from "$smtp_from" --mail-rcpt "$CONFIG_MAIL_TO" \
-		--upload-file "$work/message.eml"
+c = json.load(open(sys.argv[1]))
+for k in ("smtpHost", "smtpPort", "smtpUsername", "smtpFrom", "smtpPasswordFile"):
+    if not c.get(k):
+        sys.exit("metatrash-backup-config: accounts.json has no " + k)
+password = open(c["smtpPasswordFile"]).read().strip()
+path = os.environ["ATTACHMENT"]
+name = os.path.basename(path)
+host = socket.gethostname().split(".")[0]
+
+m = EmailMessage()
+m["From"] = "Metatrash <%s>" % c["smtpFrom"]
+m["To"] = os.environ["CONFIG_MAIL_TO"]
+m["Subject"] = "Metatrash configuration %s %s" % (host, os.environ["DAY"])
+m["Date"] = formatdate(localtime=True)
+m["Message-ID"] = make_msgid(domain=socket.getfqdn())
+m.set_content(
+    "The Metatrash configuration from %s, encrypted with the\n"
+    "configuration passphrase (not in this email). To open it:\n\n"
+    "  gpg -d %s | tar -xz\n\n"
+    "(Windows: Git Bash has gpg and tar.) It holds: %s\n\n"
+    "Last off-site backup run: %s\n" % (host, name, os.environ["PATHS"], os.environ["LAST_BACKUP"]))
+m.add_attachment(open(path, "rb").read(), maintype="application", subtype="octet-stream", filename=name)
+
+port = int(c["smtpPort"])
+context = ssl.create_default_context()
+if port == 465:
+    s = smtplib.SMTP_SSL(c["smtpHost"], port, timeout=60, context=context)
+else:
+    s = smtplib.SMTP(c["smtpHost"], port, timeout=60)
+    s.starttls(context=context)
+with s:
+    s.login(c["smtpUsername"], password)
+    s.send_message(m)
+PY
 log "sent $name ($(du -h "$work/$name" | cut -f1)) to $CONFIG_MAIL_TO"

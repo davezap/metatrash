@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.53.2 - Emailed configuration works on Amazon Linux (2026-10-25)
+
+No database, grant or configuration change, and the binary is unchanged apart from its version.
+
+- **`metatrash-backup-config` failed on the live server** with "error running '/usr/bin/gpg-agent': probably not installed" (Dave): Amazon Linux 2023 ships `gnupg2-minimal`, whose gpg needs an agent it doesn't include, even to encrypt with a passphrase. The setup in docs/deployment.md (Backups → Emailed configuration) now starts with `sudo dnf swap -y gnupg2-minimal gnupg2-full`, and the script stops at once with that command when `gpg-agent` is missing.
+- **Sending failed next** with curl's "Protocol "smtp" is disabled" (Dave): Amazon Linux's `curl-minimal` has no SMTP. The script now sends with Python's `smtplib` (STARTTLS on 587, TLS on 465, run as `python3 -I`), which needs nothing installed; the password is read from `smtpPasswordFile` inside Python. Checked with `smtplib` replaced by a stub: STARTTLS then login with a password holding `"` and `\`, the message parses with the attachment, and the archive decrypts.
+
 ## 0.53.1 - Emailed configuration (2026-10-25)
 
 No database, grant or configuration change, and the binary is unchanged apart from its version. tool-schema.json is unchanged (0.14.0). Setup: docs/deployment.md, Backups → Emailed configuration.

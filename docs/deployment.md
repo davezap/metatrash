@@ -501,9 +501,12 @@ ended, so the daily email doubles as a check that backups run. Anyone with
 the mailbox *and* the passphrase has every secret of the server, so keep the
 passphrase only in the password manager.
 
-Setup, after the B2 setup above:
+Setup, after the B2 setup above. Amazon Linux comes with `gnupg2-minimal`,
+which has no `gpg-agent` (gpg then fails with "error running
+'/usr/bin/gpg-agent'"), so swap in the full package first:
 
 ```sh
+sudo dnf swap -y gnupg2-minimal gnupg2-full
 sudo sh -c 'umask 077; openssl rand -base64 24 > /etc/metatrash-backup/config-passphrase'
 sudo cat /etc/metatrash-backup/config-passphrase   # into the password manager now
 sudoedit /etc/metatrash-backup/backup.env          # CONFIG_MAIL_TO=david@metatrash.com
