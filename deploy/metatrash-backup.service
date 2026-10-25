@@ -1,0 +1,11 @@
+[Unit]
+Description=Metatrash off-site backup (database, spaces, configuration)
+Wants=network-online.target
+After=network-online.target mariadb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/metatrash-backup
+Nice=10
+IOSchedulingClass=idle
+UMask=0077

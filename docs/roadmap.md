@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.52.2 (2026-10-24). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.53.0 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -46,7 +46,7 @@ Still to build, in this order:
    `dave-zap/metatrash-com` space) once deletion exists: what sign-in methods
    store (passkey public keys, sealed authenticator secrets, hashed recovery
    codes), how account deletion and the grace period work, and concrete
-   retention for logs and backups.
+   retention for logs and backups (backups: 12 monthly snapshots, from 0.53.0).
 
 ## Sign-in
 
@@ -230,6 +230,16 @@ the `review` push mode, which needs a review screen.
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.53.0 (2026-10-25):
+
+- **Off-site backups:** do the one-time setup in docs/deployment.md, Backups
+  (B2 bucket with Object Lock, restic, settings, timer), run
+  `sudo metatrash-backup` once and see it end `done`, then check the next
+  nightly run in `journalctl -u metatrash-backup`. After the first Sunday,
+  check that `forget --prune` worked with Object Lock on (old versions hidden,
+  not refused). Do one test restore (rebuild a space from its bundle, load the
+  dump into a scratch MariaDB) and note the date here.
 
 From 0.52.2 (2026-10-24):
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.53.0 - Off-site backups (2026-10-25)
+
+No database, grant or configuration change, and the binary is unchanged apart from its version. tool-schema.json is unchanged (0.14.0); mtsync and Slate Viewer are unchanged. The backup needs a one-time setup (B2 bucket, restic, settings, timer): docs/deployment.md, Backups.
+
+- **`deploy/backup.sh`** (installed by `upgrade.sh` as `/usr/local/sbin/metatrash-backup`) backs up everything needed to rebuild the server to an encrypted restic repository on Backblaze B2 (Dave). Each run dumps the account database (`mariadb-dump --single-transaction`), then makes a full `git bundle` of `main` for each space that changed since its last bundle (unchanged ones keep theirs, so every snapshot holds every space), copies `/etc/metatrash` without `totp-key` plus the service's unit and override, writes a `MANIFEST.txt` (time, version, schema, each space's commit) and uploads with `restic backup`. Dumping first means every space the dump lists as ready is in the same backup. Nothing writes to the live repositories and the service keeps running.
+- **Retention**: 14 daily, 8 weekly and 12 monthly snapshots, forgotten, pruned and checked (5% of the data read back) on Sundays. B2 Object Lock (30 days) keeps old versions even if the server's key is used to delete them.
+- **`deploy/metatrash-backup.service` and `.timer`** run it nightly at about 03:30; `deploy/backup.env.example` holds the settings (repository, B2 key, optional health-check URL, overrides).
+- A space that fails to bundle is reported and the others still upload; the run then exits 1, and the optional `HEALTHCHECK_URL` is pinged at `/fail`.
+- docs/deployment.md: Backups (what a run does, what to keep off the server, setup, EBS snapshots as a second layer, looking at backups, restoring one space or a whole server, signing everyone out after a restore, test restores); the export, upgrade and recovery notes point at it.
+- Checked in a scratch copy with a stub `mariadb-dump`, restic 0.16 and a local repository: first run bundles every space, a second run bundles none, a changed space alone is bundled again, a removed repository's bundle leaves the staging folder, a repository without `main` is reported and the run exits 1; a space rebuilt from the restored snapshot has the same `main` and passes `git fsck --strict`. Not run against MariaDB or B2.
+
 ## 0.52.2 - Document pages fill the window (2026-10-24)
 
 No database, grant or configuration change. Deploy the binary only. tool-schema.json is unchanged (0.14.0); mtsync and Slate Viewer are unchanged.

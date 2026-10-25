@@ -23,6 +23,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
 | Accounts | `accounts.json`, `account-database.json`, `smtp-password`, `database-password`, `totp-key` |
 | GitHub App (optional) | `github-app.pem`, `github-client-secret`, `github-webhook-secret` |
 | Data | `/var/lib/metatrash` (metatrash, 0700): `repos/`, `owned-repos/`, `.service-lock` |
+| Backups (0.53.0) | `/usr/local/sbin/metatrash-backup`, settings in `/etc/metatrash-backup/` (root, 0700), staging in `/var/backups/metatrash`; see Backups |
 | Unit | `/etc/systemd/system/metatrash.service` |
 
 Command line: `metatrash [-listen 127.0.0.1:8080] [-data DIR] [-config spaces.json]
@@ -104,8 +105,8 @@ limits from the database on each request).
   nightly backup, run it from cron as the service user and prune old files
   yourself, for example
   `mt spaces export -all /srv/backup/metatrash && find /srv/backup/metatrash -name '*.zip' -mtime +30 -delete`.
-  An export holds current files only, not history, so keep backing up the
-  data directory as well.
+  An export holds current files only, not history; the nightly backup
+  (Backups below) keeps whole repositories.
 - **`spaces readme`** was removed in 0.45.0: README.md is an ordinary file
   now. At startup the service gives every folder of every space the
   `AGENTS.md` and `.metatrash.json` it lacks (one commit per space; owned
@@ -388,10 +389,181 @@ Use the console commands above (`mt users set-limit`, `mt users rename`,
 ownership moves only through Transfer ownership on Manage sharing, which also
 moves memberships and app connections and keeps the old address.
 
+## Backups
+
+`deploy/backup.sh` (from 0.53.0) copies everything needed to rebuild the
+server to an encrypted [restic](https://restic.net) repository on Backblaze
+B2, every night. `upgrade.sh` installs it as `/usr/local/sbin/metatrash-backup`;
+`deploy/metatrash-backup.timer` runs it as root at about 03:30 server time.
+Each run:
+
+1. **Dumps the account database** with `mariadb-dump --single-transaction`:
+   one consistent snapshot, no locks, the service keeps running. File writes
+   never touch the database, so nothing needs pausing.
+2. **Bundles each space** (`git bundle create … refs/heads/main`, read-only)
+   whose `main` moved since its last bundle, into
+   `/var/backups/metatrash/spaces/{repos,owned-repos}/<name>.bundle`. A bundle
+   is the whole repository, history included, in one file. Unchanged spaces
+   keep their bundle, so every snapshot holds every space. The database is
+   dumped first, so each space it lists as ready is in the same backup with at
+   least the commits it had then; a space created in between is in the backup
+   without its row (harmless; see Restore). Nothing is written to the live
+   repositories.
+3. **Copies the configuration**: `/etc/metatrash` without `totp-key`, and the
+   service's unit and override.
+4. **Writes `MANIFEST.txt`**: time, binary version, schema version and each
+   bundle's `main` commit.
+5. **Uploads** `/var/backups/metatrash` with `restic backup`. restic encrypts
+   on the server and sends only data it has not stored before. On Sundays it
+   also forgets snapshots past the retention (14 daily, 8 weekly, 12 monthly),
+   prunes, and checks the repository, reading back 5% of it.
+
+A space that fails to bundle is reported and the rest still run; the run then
+exits 1. Read a run with `journalctl -u metatrash-backup`; see when it next
+runs with `systemctl list-timers metatrash-backup.timer`.
+
+### Keep these off the server
+
+Store them in a password manager, not only on the server. Without the first
+two, the backups cannot be read.
+
+- **restic password** (`/etc/metatrash-backup/restic-password`).
+- **`totp-key`**: it unlocks the authenticator secrets in the database, so it
+  is left out of the backups on purpose.
+- The B2 account sign-in and the application key.
+
+### One-time setup
+
+1. **B2 bucket.** In Backblaze B2: Buckets → Create a Bucket, private, with
+   **Object Lock** on and a default retention of 30 days (Governance mode).
+   Locked file versions can't be deleted until the lock runs out, even with
+   the server's key, so someone who takes over the server can hide backups but
+   not destroy them for 30 days. Under Lifecycle Settings choose "Keep prior
+   versions for this number of days: 30". Note the bucket's S3 endpoint.
+2. **Application key.** Application Keys → Add a New Application Key, limited
+   to that bucket, Read and Write. Note `keyID` and `applicationKey` (shown
+   once).
+3. **restic** (Amazon Linux has no package): download the newest
+   `restic_<version>_linux_arm64.bz2` from
+   https://github.com/restic/restic/releases, then
+   ```sh
+   bunzip2 restic_*_linux_arm64.bz2
+   sudo install -o root -g root -m 0755 restic_*_linux_arm64 /usr/local/bin/restic
+   restic version
+   ```
+   Later updates: `sudo restic self-update`.
+4. **Settings and password.**
+   ```sh
+   sudo install -d -o root -g root -m 0700 /etc/metatrash-backup
+   sudo install -o root -g root -m 0600 deploy/backup.env.example /etc/metatrash-backup/backup.env
+   sudo sh -c 'umask 077; openssl rand -base64 33 > /etc/metatrash-backup/restic-password'
+   sudo cat /etc/metatrash-backup/restic-password   # into the password manager now
+   sudoedit /etc/metatrash-backup/backup.env        # repository, keyID, applicationKey
+   ```
+5. **Create the repository and run once.**
+   ```sh
+   sudo bash -c 'set -a; . /etc/metatrash-backup/backup.env; restic init'
+   sudo install -o root -g root -m 0755 deploy/backup.sh /usr/local/sbin/metatrash-backup
+   sudo metatrash-backup
+   ```
+   It should end `metatrash-backup: done`.
+6. **Timer.**
+   ```sh
+   sudo install -o root -g root -m 0644 deploy/metatrash-backup.service deploy/metatrash-backup.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now metatrash-backup.timer
+   ```
+7. **Optional alert.** Set `HEALTHCHECK_URL` in `backup.env` to a
+   healthchecks.io check (daily, with a grace period of a few hours). It is
+   pinged after each good run and at `/fail` after a failed one, and emails
+   when a run fails or doesn't happen.
+8. **EBS snapshots (optional, second layer).** In EC2 → Lifecycle Manager,
+   create a policy for the instance's volume: daily, keep 7, optionally copy to
+   another region. That gives a quick whole-server restore; B2 covers losing
+   the AWS account or region.
+
+Then do a test restore (below) once, and after that every few months.
+
+### Look at backups
+
+```sh
+sudo bash -c 'set -a; . /etc/metatrash-backup/backup.env; restic snapshots'
+sudo bash -c 'set -a; . /etc/metatrash-backup/backup.env; restic dump latest /var/backups/metatrash/MANIFEST.txt'
+```
+
+The same commands work from any computer with restic, the password and the
+B2 key, which is how to restore if the server is gone.
+
+### Restore
+
+Load the settings (`set -a; . /etc/metatrash-backup/backup.env; set +a` as
+root, or the same variables on another machine) and fetch a snapshot
+(`latest`, or an ID from `restic snapshots`):
+
+```sh
+restic restore latest --target /root/restore
+B=/root/restore/var/backups/metatrash
+cat $B/MANIFEST.txt
+```
+
+**One space** (for example a missing ready repository, which stops startup):
+
+```sh
+sudo systemctl stop metatrash
+repo=/var/lib/metatrash/owned-repos/<space_id>.git      # or repos/<name>.git
+git init -q --bare --object-format=sha1 --initial-branch=main "$repo"
+git -C "$repo" fetch -q $B/spaces/owned-repos/<space_id>.bundle refs/heads/main:refs/heads/main
+chown -R metatrash:metatrash "$repo"
+mt check && sudo systemctl start metatrash
+```
+
+Move an existing broken repository aside first; never fetch into a live one.
+
+**A whole server** (new instance, after the first-installation steps above
+and with the same binary version as `MANIFEST.txt`, service stopped):
+
+1. Configuration: copy `$B/config/metatrash/` to `/etc/metatrash/`
+   (root:metatrash, 0750, files 0640), put `totp-key` back from the password
+   manager, and copy `$B/config/metatrash.service.d` to
+   `/etc/systemd/system/` if it is there.
+2. Database: create the login as in Accounts → Database step 1, then
+   ```sh
+   sudo mariadb < $B/db/metatrash.sql          # creates the metatrash database
+   sudo mariadb < deploy/account-grants.sql
+   ```
+3. Spaces:
+   ```sh
+   for b in $B/spaces/*/*.bundle; do
+     kind=$(basename "$(dirname "$b")"); name=$(basename "$b" .bundle)
+     repo=/var/lib/metatrash/$kind/$name.git
+     sudo install -d -o metatrash -g metatrash -m 0700 /var/lib/metatrash/$kind
+     git init -q --bare --object-format=sha1 --initial-branch=main "$repo"
+     git -C "$repo" fetch -q "$b" refs/heads/main:refs/heads/main
+   done
+   sudo chown -R metatrash:metatrash /var/lib/metatrash
+   ```
+4. **Sign everyone out and end app connections**: the backup may hold
+   sessions and tokens revoked after it was taken. People sign in again and
+   apps reconnect.
+   ```sh
+   sudo mariadb metatrash -e 'DELETE FROM metatrash_sessions; DELETE FROM metatrash_oauth_tokens;'
+   ```
+5. `mt check` (it fails on any ready space whose repository is missing),
+   then start the service and check a few spaces, a sign-in and an app. A
+   space created after the dump has a repository but no row: nothing refers
+   to it, and it can be left or removed.
+
+**Test restore**: on a spare machine or a throwaway instance, restore
+`latest`, run `git bundle verify` on each bundle (inside any Git repository),
+rebuild one space as above and compare its `git log` with the live one, and
+load the dump into a scratch MariaDB. Note the date in "Owner checks" on the
+roadmap.
+
 ## Upgrades, backups and rollback
 
-1. Stop the service. Back up the database (normal InnoDB procedure),
-   `/etc/metatrash`, the data directory and the installed binary.
+1. Stop the service. Back up the database, `/etc/metatrash`, the data
+   directory (`sudo metatrash-backup` does all three, see Backups) and the
+   installed binary.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
@@ -439,7 +611,7 @@ accounts, spaces or memberships created since that backup.
   `.objects-*` leftovers under `owned-repos/`, then delete that row to release the
   allowance. Never delete a `ready` row.
 - **A ready repository missing** stops startup on purpose: restore it from
-  backup.
+  backup (Backups → Restore, one space).
 - **`.service-lock`** prevents two processes using one data directory. Remove it
   only after confirming no service or migration is running.
 - **Public reset**: stop, move `repos/public.git` to a private backup, start; a
