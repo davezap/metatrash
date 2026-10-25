@@ -64,6 +64,20 @@
 {{if .AppSpaces.Kept}}<p class="hint">{{.AppSpaces.Kept}} other connected {{if eq .AppSpaces.Kept 1}}space is{{else}}spaces are{{end}} suspended by {{if eq .AppSpaces.Kept 1}}its owner{{else}}their owners{{end}} and will stay connected for when access is restored.</p>{{end}}
 <div class="button-row"><button class="button" type="submit">Save spaces</button><a class="button button-quiet" href="{{.BasePath}}/account/services">Cancel</a></div></form>
 
+{{else if .ActionOffer}}{{with .ActionOffer}}
+<p class="crumbs"><a href="{{$.BasePath}}/account/services">Services</a> / folder action</p>
+<div class="acct-head"><h1>{{.Action}}</h1></div>
+<p class="lede">A folder action in {{.Space}}, folder <code>{{.Folder}}</code>. Your file <code>{{.File}}</code> {{if eq .Status "skipped"}}did not run it: {{.Reason}}{{else}}ran it ({{.Status}}).{{end}}</p>
+<ul class="rows rows-agents"><li class="row"><span class="cell-main"><strong>Model</strong></span><span>{{if .Model}}{{.ModelName}}{{else}}The default agent of whoever pays{{end}}</span></li>
+<li class="row"><span class="cell-main"><strong>Most tool calls per job</strong></span><span>{{.Steps}}</span></li>
+<li class="row"><span class="cell-main"><strong>Instructions</strong></span><span>{{if .DoFile}}In <code>{{.DoFile}}</code> in that folder{{else}}{{.Do}}{{end}}</span></li></ul>
+{{if eq .Pays "contributor"}}<p>The space owner set this action so that whoever brings a file pays for it, with their own {{.ModelName}} agent. Only the owner can change what it does or which model it uses. Its jobs count toward the daily cap of the agent you choose.</p>
+{{if .Agents}}<form method="post" action="{{$.BasePath}}/account/agents/optin"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="job" value="{{.JobID}}"><label for="optin-agent">Pay with</label><div class="inline-form"><select id="optin-agent" name="agent">{{range .Agents}}<option value="{{.ID}}"{{if eq .ID $.ActionOffer.Current}} selected{{end}}>{{.Name}} · key ending {{.KeyHint}}</option>{{end}}</select><button class="button" type="submit">{{if .Current}}Change agent{{else}}Opt in{{if eq .Status "skipped"}} and run it{{end}}{{end}}</button></div></form>
+{{else}}<p class="hint">You have no {{.ModelName}} agent yet. <a class="text-link" href="{{$.BasePath}}/account/services#agents">Add one in Services</a>{{if .KeysURL}} with a key from {{.KeysURL}}{{end}}, then come back to this page.</p>{{end}}
+{{else if eq .Pays "member"}}<p>This is your own action: it runs only for your files, on your {{if .Model}}{{.ModelName}}{{else}}default{{end}} agent. {{if not .Agents}}<a class="text-link" href="{{$.BasePath}}/account/services#agents">Add an agent in Services</a> for it to run.{{end}}</p>
+{{else}}<p>The space owner pays for this action, so there is nothing for you to do.</p>{{end}}
+{{end}}
+
 {{else if eq .Section "security"}}
 <div class="acct-head"><h1>Security</h1></div>
 <p class="lede">A passkey lets you sign in with your fingerprint, face, device PIN or password manager instead of an emailed code. It is faster, and it only works on this site, so it can’t be phished.{{if and .SignIn .SignIn.TOTP}} An authenticator app on your phone is another option: it shows a new six-digit code every 30 seconds.{{end}}</p>
@@ -150,7 +164,7 @@
 {{else}}<li class="row row-empty">No apps are connected.</li>{{end}}</ul>
 <p class="hint">Change spaces adds or removes spaces without the app reconnecting. Unused connections expire after a period of inactivity.</p>{{end}}</section>{{end}}
 {{with .Agents}}<section id="agents"><h2>Agents</h2>
-<p class="hint">Folder actions in your spaces run on your own agent: a model provider and your API key, so you pay the provider directly. Actions use your default agent unless they name a model, such as <code>"model": "minimax/MiniMax-M3"</code>. Members’ files in your spaces run on your agent too.</p>
+<p class="hint">Folder actions in your spaces run on your own agent: a model provider and your API key, so you pay the provider directly. Actions use your default agent unless they name a model, such as <code>"model": "minimax/MiniMax-M3"</code>. Members’ files in your spaces run on your agent too, unless an action says <code>"pays": "contributor"</code>: then whoever brings a file pays, once they opt in.</p>
 {{if .Unavailable}}<p class="form-error" role="alert">Agents are temporarily unavailable. Reload shortly.</p>{{else}}
 <ul class="rows rows-agents"><li class="row row-head" aria-hidden="true"><span>Agent</span><span>Daily cap</span><span>Added</span><span></span></li>
 {{range .Agents}}<li class="row"><span class="cell-main"><strong>{{.Name}}</strong>{{if .Default}} <span class="pill pill-ok">default</span>{{end}}<span class="cell-sub">{{.ProviderName}} · {{.Model}} · key ending {{.KeyHint}}{{if .BaseURL}} · {{.BaseURL}}{{end}}</span></span>
@@ -159,6 +173,11 @@
 {{if not .Default}}<form method="post" action="{{$.BasePath}}/account/agents/default"><input type="hidden" name="csrf" value="{{index $.Agents.CSRF "default"}}"><input type="hidden" name="agent" value="{{.ID}}"><button class="icon" type="submit" title="Make default" aria-label="Make {{.Name}} your default agent">{{template "i-star"}}</button></form>{{end}}
 <details class="pop"><summary class="icon" title="Remove" aria-label="Remove {{.Name}}">{{template "i-trash"}}</summary><div class="pop-panel"><p>Metatrash deletes its key. Folder actions that need it are skipped until you add another agent{{if .Default}}; your oldest other agent becomes the default{{end}}.</p><form method="post" action="{{$.BasePath}}/account/agents/remove"><input type="hidden" name="csrf" value="{{index $.Agents.CSRF "remove"}}"><input type="hidden" name="agent" value="{{.ID}}"><button class="button button-small" type="submit">Remove this agent</button></form></div></details></span></li>
 {{else}}<li class="row row-empty">No agents yet. Add one to run folder actions in your spaces.</li>{{end}}</ul>
+<h3 id="paying">Actions you pay for</h3>
+<ul class="rows rows-agents"><li class="row row-head" aria-hidden="true"><span>Action</span><span>Paid by</span><span>Since</span><span></span></li>
+{{range .OptIns}}<li class="row"><span class="cell-main"><strong>{{.Action}}</strong><span class="cell-sub">{{.SpaceName}} · {{.Space}} · {{.FolderName}}</span></span><span class="cell-muted">{{.AgentName}}</span><span class="cell-muted">{{.Created.Format "2 Jan 2006"}}</span>
+<span class="actions"><details class="pop"><summary class="icon" title="Opt out" aria-label="Opt out of {{.Action}}">{{template "i-x"}}</summary><div class="pop-panel"><p>Your files in that folder no longer run this action. You can opt in again from the notice the next one brings.</p><form method="post" action="{{$.BasePath}}/account/agents/optout"><input type="hidden" name="csrf" value="{{index $.Agents.CSRF "optout"}}"><input type="hidden" name="optin" value="{{.ID}}"><button class="button button-small" type="submit">Opt out</button></form></div></details></span></li>
+{{else}}<li class="row row-empty">None. When a folder action in someone else’s space runs on the key of whoever brings the file, you are asked by email before your first file runs it.</li>{{end}}</ul>
 {{if .Full}}<p class="hint">You have the most agents allowed. Remove one to add another.</p>
 {{else}}<h3>Add an agent</h3>
 <form class="agent-form" method="post" action="{{$.BasePath}}/account/agents/add"><input type="hidden" name="csrf" value="{{index .CSRF "add"}}">

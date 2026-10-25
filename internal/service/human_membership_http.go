@@ -241,7 +241,10 @@ var accountNotices = map[string]string{
 	"session-ended":           "That device is signed out.",
 	"agent-added":             "Agent added. Use Test to check the key works. Your folder actions run on your default agent unless an action names a model.",
 	"agent-default":           "Default agent changed. Folder actions in your spaces use it from their next job.",
-	"agent-removed":           "Agent removed and its key deleted. Delete the key at the provider too if you no longer use it.",
+	"agent-removed":           "Agent removed and its key deleted, with any actions it paid for. Delete the key at the provider too if you no longer use it.",
+	"action-optin":            "Opted in. Your next file for that action runs on the agent you chose.",
+	"action-optin-run":        "Opted in. The file that was skipped is running now on the agent you chose; its result appears in the folder’s runner.md.",
+	"action-optout":           "Opted out. Your files no longer run that action.",
 	"passkey-removed":         "Passkey removed and your other sessions signed out. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }
 

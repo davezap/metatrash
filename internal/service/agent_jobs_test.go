@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -215,5 +216,151 @@ func TestDatabaseAgentsPage(t *testing.T) {
 	agents, _ = w.db.userAgents(ctx, user.ID)
 	if len(agents) != 1 || agents[0].Name != "MiniMax main" || !agents[0].Default {
 		t.Errorf("after removing the default: %+v", agents)
+	}
+}
+
+// Bring your own key through the account database with the runtime grants:
+// a member's file skips an action whose contributor pays, they open its page
+// from the notice, opt in with the right agent, the file runs on their key,
+// and removing that agent removes the opt-in.
+func TestDatabaseActionOptIn(t *testing.T) {
+	w := newOAuthWorld(t)
+	ctx := context.Background()
+	store := dbJobStore{w.db.db}
+	settings := testAgentSettings(t)
+	runner, err := newAgentRunner(w.s, settings, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var called []agentModel
+	var notices []string
+	runner.providerFor = func(m agentModel) agentProvider {
+		mu.Lock()
+		called = append(called, m)
+		mu.Unlock()
+		return &fakeModel{}
+	}
+	runner.notice = func(_ context.Context, userID string, _ agentJob, why string) {
+		mu.Lock()
+		notices = append(notices, userID+": "+why)
+		mu.Unlock()
+	}
+	// In the shared space, w.member owns it and w.owner is a member.
+	spaceOwner, contributor := w.member, w.owner
+	ownerAgent := testUserAgent(t, settings, spaceOwner.ID, "Owner MiniMax", "minimax", "MiniMax-M3")
+	theirs := testUserAgent(t, settings, contributor.ID, "Their MiniMax", "minimax", "MiniMax-M3")
+	other := testUserAgent(t, settings, contributor.ID, "Their Claude", "anthropic", "claude-sonnet-5-5")
+	for _, u := range []userAgent{ownerAgent, theirs, other} {
+		if err := w.db.addUserAgent(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.s.agents.Store(runner)
+	runner.start()
+	t.Cleanup(func() { w.s.agents.Store(nil); runner.stop() })
+	repo := w.s.ownedRepository(w.joinID)
+	write := func(c context.Context, path, text string) {
+		t.Helper()
+		head, err := repo.head(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.s.dispatchRepository(c, repo, w.joinName, "write", Input{Path: path, Text: &text, IfInState: head}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitJobs := func(n int) []agentJob {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			jobs, err := store.list(ctx, "WHERE space_id = ? ORDER BY queued_at, job_id", w.joinID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finished := 0
+			for _, j := range jobs {
+				if j.Status != jobQueued && j.Status != jobRunning {
+					finished++
+				}
+			}
+			if len(jobs) >= n && finished == len(jobs) {
+				time.Sleep(100 * time.Millisecond) // let runner.md land
+				return jobs
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("jobs did not finish")
+		return nil
+	}
+	write(asOwner(ctx, repo), "in/.metatrash.json", `{"actions":[{"name":"tidy","on":"*.md","do":"Tidy.","model":"minimax/MiniMax-M3","pays":"contributor"}]}`)
+	as := context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: contributor.ID}})
+	write(as, "in/a.md", "a\n")
+	jobs := waitJobs(1)
+	skipped := jobs[0]
+	if skipped.Status != jobSkipped || skipped.Contributor != contributor.ID || !strings.Contains(skipped.Error, "has not opted in") || len(called) != 0 || len(notices) != 1 {
+		t.Fatalf("not opted in: %+v %q", skipped, notices)
+	}
+	// The action's page: only for the person whose file it was.
+	session := w.session(contributor)
+	page := oauthCall(w.h, "GET", "/account/actions/"+skipped.ID, nil, session)
+	if body := page.Body.String(); page.Code != 200 || !strings.Contains(body, "Opt in and run it") || !strings.Contains(body, "Their MiniMax") || strings.Contains(body, "Their Claude") || strings.Contains(body, "They can opt in at") {
+		t.Fatalf("page: %d\n%s", page.Code, body)
+	}
+	if res := oauthCall(w.h, "GET", "/account/actions/"+skipped.ID, nil, w.session(spaceOwner)); res.Code != 404 {
+		t.Errorf("the space owner opened it: %d", res.Code)
+	}
+	csrf := func(action string) string { return w.s.accounts.agentCSRF("/account/agents/"+action, session.Value) }
+	if res := oauthCall(w.h, "POST", "/account/agents/optin", url.Values{"csrf": {csrf("optin")}, "job": {skipped.ID}, "agent": {other.ID}}, session); res.Code != 400 || !strings.Contains(res.Body.String(), "MiniMax MiniMax-M3 agents") {
+		t.Errorf("opt in with the wrong model: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "POST", "/account/agents/optin", url.Values{"csrf": {csrf("optin")}, "job": {skipped.ID}, "agent": {theirs.ID}}, session); res.Code != 303 {
+		t.Fatalf("opt in: %d %s", res.Code, res.Body.String())
+	}
+	// Jobs queued in the same second list in any order.
+	find := func(jobs []agentJob, match func(agentJob) bool) agentJob {
+		t.Helper()
+		for _, j := range jobs {
+			if match(j) {
+				return j
+			}
+		}
+		t.Fatalf("no such job in %+v", jobs)
+		return agentJob{}
+	}
+	rerun := find(waitJobs(2), func(j agentJob) bool { return j.ID != skipped.ID })
+	if rerun.Status != jobDone || rerun.AgentID != theirs.ID || rerun.File != "in/a.md" || len(called) != 1 || called[0].apiKey != "sk-The-1234" {
+		t.Fatalf("after opting in: %+v %+v", rerun, called)
+	}
+	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "Actions you pay for") || !strings.Contains(body, "<strong>tidy</strong>") || !strings.Contains(body, w.joinName) {
+		t.Errorf("services page:\n%s", body)
+	}
+	// The space owner's own file runs on the owner's agent.
+	write(context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: spaceOwner.ID}}), "in/b.md", "b\n")
+	if j := find(waitJobs(3), func(j agentJob) bool { return j.File == "in/b.md" }); j.AgentID != ownerAgent.ID {
+		t.Errorf("owner's file: %+v", j)
+	}
+	// Opting out, and removing the agent, end the opt-in.
+	optIns, err := w.db.userOptIns(ctx, contributor.ID)
+	if err != nil || len(optIns) != 1 || optIns[0].AgentName != "Their MiniMax" || optIns[0].Folder != "in/" {
+		t.Fatalf("opt-ins %+v %v", optIns, err)
+	}
+	if res := oauthCall(w.h, "POST", "/account/agents/optout", url.Values{"csrf": {csrf("optout")}, "optin": {optIns[0].ID}}, session); res.Code != 303 {
+		t.Fatalf("opt out: %d", res.Code)
+	}
+	if _, ok, err := w.db.optInFor(ctx, contributor.ID, w.joinID, "in/", "tidy"); ok || err != nil {
+		t.Errorf("still opted in: %v", err)
+	}
+	if err := w.db.saveOptIn(ctx, actionOptIn{ID: strings.Repeat("e", 32), UserID: contributor.ID, SpaceID: w.joinID, Folder: "in/", Action: "tidy", AgentID: theirs.ID, Created: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.db.saveOptIn(ctx, actionOptIn{ID: strings.Repeat("f", 32), UserID: contributor.ID, SpaceID: w.joinID, Folder: "in/", Action: "tidy", AgentID: ownerAgent.ID, Created: time.Now()}); err == nil {
+		t.Error("opted in with someone else's agent")
+	}
+	if err := w.db.removeUserAgent(ctx, contributor.ID, theirs.ID); err != nil {
+		t.Fatal(err)
+	}
+	if optIns, err := w.db.userOptIns(ctx, contributor.ID); err != nil || len(optIns) != 0 {
+		t.Errorf("opt-ins after removing the agent: %+v %v", optIns, err)
 	}
 }

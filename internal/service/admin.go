@@ -117,7 +117,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v16.
+// a notice is sent, its SMTP settings) and checks the schema is v17.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -139,9 +139,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 16 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 17 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v16 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v17 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -565,7 +565,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v16 ready") {
+	if !add("schema", store.ready(ctx), "v17 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -659,6 +659,7 @@ var accountGrants = []string{
 	"metatrash_agent_jobs SELECT", "metatrash_agent_jobs INSERT",
 	"metatrash_agent_jobs UPDATE (status)", "metatrash_agent_jobs UPDATE (started_at)", "metatrash_agent_jobs UPDATE (finished_at)", "metatrash_agent_jobs UPDATE (steps)", "metatrash_agent_jobs UPDATE (input_tokens)", "metatrash_agent_jobs UPDATE (output_tokens)", "metatrash_agent_jobs UPDATE (error)", "metatrash_agent_jobs UPDATE (agent_id)",
 	"metatrash_agents SELECT", "metatrash_agents INSERT", "metatrash_agents DELETE", "metatrash_agents UPDATE (is_default)",
+	"metatrash_action_optins SELECT", "metatrash_action_optins INSERT", "metatrash_action_optins DELETE",
 }
 
 // checkPrivileges compares the login's privileges in this database with

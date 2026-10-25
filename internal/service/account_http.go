@@ -84,6 +84,8 @@ type accountPage struct {
 	// AgentForm refills the Add agent form after it failed.
 	Agents    *agentsSection
 	AgentForm *agentForm
+	// ActionOffer is the page of an action that skipped the user's file.
+	ActionOffer *actionOffer
 }
 
 // SpaceTotal counts the spaces Spaces lists under All: owned and joined.
@@ -149,7 +151,7 @@ func accountSection(path string) string {
 		return "spaces"
 	case signInRoutes[path]:
 		return "security"
-	case strings.HasPrefix(path, "/account/apps/"), strings.HasPrefix(path, "/account/github/"), agentRoutes[path]:
+	case strings.HasPrefix(path, "/account/apps/"), strings.HasPrefix(path, "/account/github/"), strings.HasPrefix(path, "/account/actions/"), agentRoutes[path]:
 		return "services"
 	case path == "/account/username":
 		return "profile"
@@ -167,13 +169,13 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		if page.Filter = accountSpaceFilters[r.URL.Path]; page.Filter == "" {
 			page.Filter = "all"
 		}
-		if page.AppSpaces != nil {
+		if page.AppSpaces != nil || page.ActionOffer != nil {
 			page.Section = "services"
 		}
 		if page.Sharing != nil {
 			page.Section = "spaces"
 		}
-		overview := page.Sharing == nil && page.AppSpaces == nil
+		overview := page.Sharing == nil && page.AppSpaces == nil && page.ActionOffer == nil
 		page.MembershipCSRF = make(map[string]string)
 		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove", "agent"} {
 			page.MembershipCSRF[action] = h.service.accounts.mac("membership:" + action + ":" + cookieToken(r, h.sessionCookieName()))
@@ -284,6 +286,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove" || membershipAction == "agent")
 	appID := strings.TrimPrefix(path, "/account/apps/")
 	appRoute := strings.HasPrefix(path, "/account/apps/") && idPattern.MatchString(appID)
+	jobID := strings.TrimPrefix(path, "/account/actions/")
+	actionRoute := strings.HasPrefix(path, "/account/actions/") && idPattern.MatchString(jobID)
 	githubRoute := path == "/account/github/connect" || path == "/account/github/link" || path == "/account/github/disconnect"
 	agentRoute := agentRoutes[path]
 	transferAction, transferRoute := parseTransferRoute(path)
@@ -293,7 +297,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -322,7 +326,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, invalid("Account routes do not accept query parameters."))
 		return true
 	}
-	if path == "/login" || accountSectionPaths[path] != "" || sharingRoute || appRoute {
+	if path == "/login" || accountSectionPaths[path] != "" || sharingRoute || appRoute || actionRoute {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
@@ -343,7 +347,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
 			return true
 		}
-		if accountSectionPaths[path] != "" || sharingRoute || appRoute {
+		if accountSectionPaths[path] != "" || sharingRoute || appRoute || actionRoute {
 			if !signedIn {
 				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 				return true
@@ -362,6 +366,13 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			}
 			if appRoute {
 				page.AppSpaces, err = h.appSpaces(r.Context(), user, appID)
+				if err != nil {
+					sendError(w, err)
+					return true
+				}
+			}
+			if actionRoute {
+				page.ActionOffer, err = h.actionOfferPage(r, user, jobID)
 				if err != nil {
 					sendError(w, err)
 					return true

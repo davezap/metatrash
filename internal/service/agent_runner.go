@@ -24,10 +24,12 @@ import (
 // the model provider whose only tools are the space's own file tools, pinned
 // to the action's folder, run in-process through dispatchRepository so every
 // rule (ifInState, locks, readOnly files, size limits) applies. A job runs on
-// one of the space owner's agents (agent_store.go), so the owner pays.
-// Changes are commits by "<provider> (agent) for <owner>". The runner's
-// commits never queue jobs. When a job ends the runner appends its outcome
-// to runner.md in the folder.
+// the agent of whoever pays (agent_store.go): the space owner, the person
+// who brought the file when the action says "pays": "contributor" and they
+// opted in (agent_optins.go), or the member whose own action it is. Changes
+// are commits by "<provider> (agent) for <payer>". The runner's commits
+// never queue jobs. When a job ends the runner appends its outcome to
+// runner.md in the folder.
 
 const (
 	maxParallelJobs      = 2
@@ -45,19 +47,27 @@ type agentRunner struct {
 	s        *Service
 	settings *agentSettings
 	store    agentJobStore
-	// agentsOf lists a user's agents (userAgents); providerFor calls one.
-	// Tests replace both.
+	// agentsOf lists a user's agents (userAgents); providerFor calls one;
+	// optInOf returns the agent a user chose for an action (optInFor), or
+	// false. Tests replace them.
 	agentsOf    func(ctx context.Context, userID string) ([]userAgent, error)
 	providerFor func(agentModel) agentProvider
-	tools       []json.RawMessage
-	schemas     map[string]*jsonschema.Resolved
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	wake        chan struct{}
-	mu          sync.Mutex
-	running     map[string]bool
-	// owner returns a space owner's username (empty when none) and email.
+	optInOf     func(ctx context.Context, userID, spaceID, folder, action string) (agentID string, ok bool, err error)
+	// notice emails a user about a job of theirs that did not run (best
+	// effort, at most once a day per action); tests replace it.
+	notice func(ctx context.Context, userID string, j agentJob, why string)
+	// origin is the site address, for links in notices and runner.md.
+	origin  string
+	tools   []json.RawMessage
+	schemas map[string]*jsonschema.Resolved
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	wake    chan struct{}
+	mu      sync.Mutex
+	running map[string]bool
+	// owner returns a user's username (empty when none) and email: a space
+	// owner's, or another payer's.
 	owner func(ctx context.Context, userID string) (username, email string)
 	// retryWait is the pause before retry n (1, 2); tests shorten it.
 	retryWait func(n int) time.Duration
@@ -152,12 +162,78 @@ func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*
 		return s.ownedDB.userAgents(ctx, userID)
 	}
 	a.providerFor = func(m agentModel) agentProvider { return newMessagesClient(m, false) }
+	a.optInOf = func(ctx context.Context, userID, spaceID, folder, action string) (string, bool, error) {
+		if s.ownedDB == nil {
+			return "", false, fmt.Errorf("the account database is not available")
+		}
+		o, ok, err := s.ownedDB.optInFor(ctx, userID, spaceID, folder, action)
+		return o.AgentID, ok, err
+	}
+	if s.accounts != nil {
+		a.origin = s.accounts.config.Origin
+	}
+	a.notice = a.mailNotice
 	return a, nil
+}
+
+// mailNotice emails a user that a job of theirs did not run, at most once a
+// day for each action.
+func (a *agentRunner) mailNotice(ctx context.Context, userID string, j agentJob, why string) {
+	accounts := a.s.accounts
+	if accounts == nil || accounts.sendNotice == nil {
+		return
+	}
+	_, email := a.owner(ctx, userID)
+	if email == "" || a.s.rates.reserve(
+		allowance{"action-notice:" + userID + ":" + j.SpaceID + ":" + j.Folder + j.Action, 1, 86400},
+		allowance{"mail:global:day", 100, 86400},
+	) != nil {
+		return
+	}
+	body := actionNoticeMail(a.origin, a.spaceAddress(ctx, j.SpaceID), j, why)
+	go func() {
+		if err := accounts.sendNotice(context.WithoutCancel(ctx), email, "A Metatrash folder action did not run for your file", body); err != nil {
+			// SMTP responses may contain addresses; never log them.
+			log.Print("agent runner: action notice not sent")
+		}
+	}()
+}
+
+// actionNoticeMail tells someone why an action skipped their file.
+func actionNoticeMail(origin, space string, j agentJob, why string) string {
+	return "The folder action \"" + mailText(j.Action) + "\" in " + mailText(space) + " did not run for your file " + mailText(j.File) + ".\n\n" +
+		mailText(why) + "\n\n" +
+		"The action's page shows what it does and which model it needs: " + origin + "/account/actions/" + j.ID + "\n" +
+		"You get this email at most once a day for each action. Your files in that folder do not run it, and nothing is charged to you, until this is sorted out.\n"
+}
+
+// spaceAddress is a space's owner/slug, or its ID when it cannot be read.
+func (a *agentRunner) spaceAddress(ctx context.Context, spaceID string) string {
+	if a.s.ownedDB == nil {
+		return spaceID
+	}
+	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var owner, slug string
+	if err := a.s.ownedDB.db.QueryRowContext(lookup, "SELECT COALESCE(u.username, ''), s.slug FROM metatrash_spaces s JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE s.space_id = ?", spaceID).Scan(&owner, &slug); err != nil {
+		return spaceID
+	}
+	return owner + "/" + slug
+}
+
+// optInURL is the page where the person who brought a job's file opts in.
+func (a *agentRunner) optInURL(jobID string) string {
+	return a.origin + "/account/actions/" + jobID
 }
 
 // ownerName is the name History shows for a space's owner.
 func (a *agentRunner) ownerName(ctx context.Context, r *repository) string {
-	username, email := a.owner(ctx, a.s.repositoryOwner(r))
+	return a.userName(ctx, a.s.repositoryOwner(r))
+}
+
+// userName is the name History shows for a user.
+func (a *agentRunner) userName(ctx context.Context, userID string) string {
+	username, email := a.owner(ctx, userID)
 	if username == "" {
 		return emailName(email)
 	}
@@ -249,6 +325,26 @@ func (a *agentRunner) startReady() {
 	}
 }
 
+// githubPullKey marks a GitHub pull's commit, whose files nobody in
+// particular brought.
+type githubPullKey struct{}
+
+func githubPull(ctx context.Context) bool {
+	v, _ := ctx.Value(githubPullKey{}).(bool)
+	return v
+}
+
+// contributorOf is the user whose change ctx carries: the signed-in user
+// behind the app or Metatrash Sync, or "" for a GitHub pull, a space key or
+// none.
+func contributorOf(ctx context.Context) string {
+	identity, _ := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
+	if githubPull(ctx) || identity.oauth == nil {
+		return ""
+	}
+	return identity.oauth.UserID
+}
+
 // committed is called after every commit to an owned space (see
 // repository.committed). It queues the jobs the commit asks for.
 func (s *Service) agentCommitted(ctx context.Context, r *repository, old, state string) {
@@ -256,14 +352,15 @@ func (s *Service) agentCommitted(ctx context.Context, r *repository, old, state 
 	if a == nil || old == "" || r.id == "" || runnerWrite(ctx) || a.ctx.Err() != nil {
 		return
 	}
+	contributor := contributorOf(ctx)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		a.enqueue(r, old, state)
+		a.enqueue(r, old, state, contributor)
 	}()
 }
 
-func (a *agentRunner) enqueue(r *repository, old, state string) {
+func (a *agentRunner) enqueue(r *repository, old, state, contributor string) {
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
 	triggers, err := r.triggersBetween(ctx, old, state)
@@ -272,7 +369,19 @@ func (a *agentRunner) enqueue(r *repository, old, state string) {
 		return
 	}
 	queued := false
+	members := map[string]string{}
 	for _, t := range triggers {
+		// A member's own action runs only for that member's files.
+		if t.Member != "" {
+			id, ok := members[t.Member]
+			if !ok {
+				id = a.s.userIDOf(ctx, t.Member)
+				members[t.Member] = id
+			}
+			if id == "" || id != contributor {
+				continue
+			}
+		}
 		now := a.clock()
 		n, err := a.store.queuedSince(ctx, r.id, t.Folder, now.Add(-time.Hour))
 		if err != nil {
@@ -283,7 +392,7 @@ func (a *agentRunner) enqueue(r *repository, old, state string) {
 		if err != nil {
 			return
 		}
-		j := agentJob{ID: id, SpaceID: r.id, Folder: t.Folder, Action: t.Action, File: t.File, Commit: state, Status: jobQueued, QueuedAt: now}
+		j := agentJob{ID: id, SpaceID: r.id, Folder: t.Folder, Action: t.Action, File: t.File, Commit: state, Status: jobQueued, QueuedAt: now, Contributor: contributor}
 		if n >= maxJobsPerFolderHour {
 			// One skipped job is recorded, so runner.md says why the rest
 			// did not run; further ones are dropped until the hour passes.
@@ -310,12 +419,47 @@ func (a *agentRunner) enqueue(r *repository, old, state string) {
 	}
 }
 
+// requeue runs a job's file again, as after its contributor opted in.
+func (a *agentRunner) requeue(ctx context.Context, j agentJob) error {
+	r := a.s.ownedRepository(j.SpaceID)
+	if r == nil {
+		return missing()
+	}
+	_, files, err := r.snapshot(ctx, "")
+	if err != nil {
+		return err
+	}
+	if _, ok := files[j.File]; !ok {
+		return problem(409, "conflict", "The file was moved or deleted since, so there is nothing to run now; your next file will run.")
+	}
+	now := a.clock()
+	n, err := a.store.queuedSince(ctx, j.SpaceID, j.Folder, now.Add(-time.Hour))
+	if err != nil {
+		return err
+	}
+	if n >= maxJobsPerFolderHour {
+		return problem(429, "rate_limited", "This folder already ran the most jobs allowed in the last hour; your next file will run once the hour has passed.")
+	}
+	id, err := randomHex(16)
+	if err != nil {
+		return err
+	}
+	next := agentJob{ID: id, SpaceID: j.SpaceID, Folder: j.Folder, Action: j.Action, File: j.File, Commit: j.Commit, Status: jobQueued, QueuedAt: now, Contributor: j.Contributor}
+	if err := a.store.add(ctx, next); err != nil {
+		return err
+	}
+	a.poke()
+	return nil
+}
+
 // jobOutcome is what a job did, for runner.md.
 type jobOutcome struct {
 	summary string
 	changed []string
 	// model is the agent's model, for the Steps line.
 	model string
+	// paidBy names who paid, when it was not the space owner.
+	paidBy string
 }
 
 func (a *agentRunner) run(j agentJob) {
@@ -373,6 +517,9 @@ func runnerEntry(j agentJob, out jobOutcome, zone *time.Location, file string) s
 	if len(out.changed) > 0 {
 		fmt.Fprintf(&b, "- Changed: %s\n", strings.Join(out.changed, ", "))
 	}
+	if out.paidBy != "" {
+		fmt.Fprintf(&b, "- Paid by: %s\n", out.paidBy)
+	}
 	if j.Steps > 0 || j.InputTokens > 0 || out.model != "" {
 		model := ""
 		if out.model != "" {
@@ -396,7 +543,7 @@ func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-const runnerPreamble = `You are an unattended agent that Metatrash, a file service, runs for the action %q of the folder %s in a space owned by %s. No person is watching and nobody will answer questions, so do the whole task with your tools, then stop.
+const runnerPreamble = `You are an unattended agent that Metatrash, a file service, runs for the action %q of the folder %s in a space owned by %s%s. No person is watching and nobody will answer questions, so do the whole task with your tools, then stop.
 
 Your tools work on this folder only: paths are relative to it, and an empty prefix means the whole folder. Each change is saved as you make it; there is nothing to push. Write, move and delete need ifInState from a read, list or search. Prefer edit and append to rewriting a whole file, and read long files by line range. You cannot change .metatrash.json files or %s; Metatrash adds your result to %s itself.
 
@@ -436,12 +583,28 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		return out, nil
 	}
 	owner := a.ownerName(ctx, r)
-	m, skip, err := a.agentFor(ctx, r, action, owner)
+	payer, skip, err := a.payerFor(ctx, r, j, action)
 	if err != nil {
 		return out, err
 	}
 	if skip != "" {
 		j.Status, j.Error = jobSkipped, skip
+		return out, nil
+	}
+	payerName := owner
+	if payer.userID != a.s.repositoryOwner(r) {
+		payerName = a.userName(ctx, payer.userID)
+		out.paidBy = orSomeone(payerName)
+	}
+	m, skip, err := a.agentFor(ctx, payer, action, payerName)
+	if err != nil {
+		return out, err
+	}
+	if skip != "" {
+		j.Status, j.Error = jobSkipped, skip
+		if payer.notify {
+			a.notice(ctx, payer.userID, *j, skip)
+		}
 		return out, nil
 	}
 	j.AgentID, out.model = m.agentID, m.model
@@ -474,7 +637,11 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	if folderName == "" {
 		folderName = "(the space root)"
 	}
-	system := fmt.Sprintf(runnerPreamble, j.Action, folderName, orSomeone(owner), runnerLogName, runnerLogName, runnerLogName)
+	behalf := ""
+	if out.paidBy != "" {
+		behalf = ", on behalf of " + out.paidBy + ", who brought the file and pays for this job"
+	}
+	system := fmt.Sprintf(runnerPreamble, j.Action, folderName, orSomeone(owner), behalf, runnerLogName, runnerLogName, runnerLogName)
 	if f, ok := files[j.Folder+agentsFileName]; ok {
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
@@ -496,7 +663,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	}
 	user := "## Instructions\n\n" + strings.TrimSpace(instructions) + "\n\n## Why you are running\n\n" + trigger
 	toolCtx := context.WithValue(ctx, runnerWriteKey{}, true)
-	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: owner, App: m.app, Kind: "agent"} })
+	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: payerName, App: m.app, Kind: "agent"} })
 	cache := m.provider == "anthropic"
 	systemBlock := contentBlock{Type: "text", Text: system}
 	if cache {
@@ -621,20 +788,79 @@ func (a *agentRunner) send(ctx context.Context, provider agentProvider, req agen
 	}
 }
 
-// agentFor chooses the owner's agent for an action and opens its key. A
-// non-empty skip says why the job does not run.
-func (a *agentRunner) agentFor(ctx context.Context, r *repository, action *folderAction, owner string) (m agentModel, skip string, err error) {
-	agents, err := a.agentsOf(ctx, a.s.repositoryOwner(r))
+// jobPayer is whose agent a job runs on: agentID is the agent they chose
+// for the action when they opted in, or "" for their usual choice; notify
+// says they are not the space owner, so a skip is emailed to them.
+type jobPayer struct {
+	userID, agentID string
+	notify          bool
+}
+
+// payerFor decides who pays for a job. A non-empty skip says why the job
+// does not run; payerFor emails the person concerned itself.
+func (a *agentRunner) payerFor(ctx context.Context, r *repository, j *agentJob, action *folderAction) (jobPayer, string, error) {
+	owner := a.s.repositoryOwner(r)
+	switch {
+	case action.Member != "":
+		id := a.s.userIDOf(ctx, action.Member)
+		if id == "" || id != j.Contributor {
+			return jobPayer{}, fmt.Sprintf("skipped: %s's own action runs only for their files", action.Member), nil
+		}
+		return jobPayer{userID: id, notify: id != owner}, "", nil
+	case action.paysContributor() && j.Contributor != "" && j.Contributor != owner:
+		agentID, ok, err := a.optInOf(ctx, j.Contributor, j.SpaceID, j.Folder, j.Action)
+		if err != nil {
+			return jobPayer{}, "", err
+		}
+		if !ok {
+			who := orSomeone(a.userName(ctx, j.Contributor))
+			why := fmt.Sprintf("skipped: whoever brings a file pays for this action with their own %s agent, and %s has not opted in. They can opt in at %s", modelName(action.Model), who, a.optInURL(j.ID))
+			a.notice(ctx, j.Contributor, *j, why)
+			return jobPayer{}, why, nil
+		}
+		return jobPayer{userID: j.Contributor, agentID: agentID, notify: true}, "", nil
+	}
+	return jobPayer{userID: owner}, "", nil
+}
+
+// modelName is an action model for people: "MiniMax MiniMax-M3".
+func modelName(value string) string {
+	if provider, model, ok := actionModel(value); ok {
+		return agentProviders[provider].name + " " + model
+	}
+	return "default"
+}
+
+// agentFor chooses the payer's agent for an action and opens its key: the
+// agent they opted in with, or their default one (for the action's model, if
+// it names one). Nothing falls back to another agent or model. A non-empty
+// skip says why the job does not run.
+func (a *agentRunner) agentFor(ctx context.Context, payer jobPayer, action *folderAction, name string) (m agentModel, skip string, err error) {
+	agents, err := a.agentsOf(ctx, payer.userID)
 	if err != nil {
 		return m, "", err
 	}
-	u, ok := pickAgent(agents, action.Model)
-	if !ok {
+	var u userAgent
+	ok := false
+	if payer.agentID != "" {
+		for _, candidate := range agents {
+			if candidate.ID == payer.agentID && candidate.Ref() == action.Model {
+				u, ok = candidate, true
+			}
+		}
+		if !ok {
+			return m, fmt.Sprintf("skipped: the agent %s chose for this action no longer runs %s; they can choose another in Your account → Services → Agents", orSomeone(name), modelName(action.Model)), nil
+		}
+	} else if u, ok = pickAgent(agents, action.Model); !ok {
 		needs := "an agent"
 		if provider, model, ok := actionModel(action.Model); ok {
 			needs = "a " + agentProviders[provider].name + " " + model + " agent"
 		}
-		return m, fmt.Sprintf("skipped: %s has no agent for this action: it needs %s. The space owner adds one in Your account → Services → Agents.", orSomeone(owner), needs), nil
+		who := "The space owner adds"
+		if payer.notify {
+			who = "They add"
+		}
+		return m, fmt.Sprintf("skipped: %s has no agent for this action: it needs %s. %s one in Your account → Services → Agents.", orSomeone(name), needs, who), nil
 	}
 	key, err := openAgentKey(a.settings.seal, u.UserID, u.ID, u.Sealed)
 	if err != nil {

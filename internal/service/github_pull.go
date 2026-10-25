@@ -706,6 +706,9 @@ func (s *Service) applyPull(ctx context.Context, r *repository, plan pullPlan) (
 	if err != nil {
 		return nil, err
 	}
+	// Files from GitHub have no clear contributor: their folder actions run
+	// on the space owner's agent.
+	ctx = context.WithValue(ctx, githubPullKey{}, true)
 	state, err := r.commitFiles(ctx, head, files, texts, map[string][]byte{githubBaselinePath: stored}, changes, pullSummary(plan.svc.Repo, plan.svc.Branch, result.Commit, folder))
 	if err != nil {
 		return nil, err

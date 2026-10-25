@@ -7,6 +7,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -22,6 +23,11 @@ import (
 // schedule) and web (the web tools) are accepted in the shape they will have
 // but not run yet. Actions are never inherited, so a subfolder never runs its
 // parent's actions twice, and they are allowed only in owned spaces.
+//
+// Who pays (0.56.0): an owner's action runs on the owner's agent, or with
+// "pays": "contributor" on the agent of whoever brought the file, once they
+// opt in (agent_optins.go). An action with "member" is that member's own: it
+// runs only for their files, on their agent.
 type folderAction struct {
 	Name string `json:"name"`
 	// On holds file patterns relative to the folder, as a list or one
@@ -39,6 +45,10 @@ type folderAction struct {
 	Model string `json:"model,omitempty"`
 	Web   *bool  `json:"web,omitempty"`
 	Steps int    `json:"steps,omitempty"`
+	// Pays is "owner" (the default) or "contributor".
+	Pays string `json:"pays,omitempty"`
+	// Member is the username of the member whose own action this is.
+	Member string `json:"member,omitempty"`
 }
 
 type actionPatterns []string
@@ -61,13 +71,15 @@ func (p *actionPatterns) UnmarshalJSON(b []byte) error {
 }
 
 const (
-	maxFolderActions   = 20
-	maxActionPatterns  = 20
-	maxActionDo        = 4000
-	defaultActionSteps = 40
-	maxActionSteps     = 200
-	actionWhenArrive   = "arrive"
-	actionWhenChange   = "change"
+	maxFolderActions      = 20
+	maxActionPatterns     = 20
+	maxActionDo           = 4000
+	defaultActionSteps    = 40
+	maxActionSteps        = 200
+	actionWhenArrive      = "arrive"
+	actionWhenChange      = "change"
+	actionPaysOwner       = "owner"
+	actionPaysContributor = "contributor"
 	// runnerLogName is the file in an action folder where the runner records
 	// each job. Agents read it but never write it.
 	runnerLogName = "runner.md"
@@ -129,9 +141,29 @@ func checkActions(actions []folderAction) error {
 		if a.Steps != 0 && (a.Steps < 1 || a.Steps > maxActionSteps) {
 			return actionError(a.Name, fmt.Sprintf("steps (most tool calls per job) is 1 to %d; the default is %d.", maxActionSteps, defaultActionSteps))
 		}
+		switch a.Pays {
+		case "", actionPaysOwner:
+		case actionPaysContributor:
+			if a.Model == "" {
+				return actionError(a.Name, `"pays": "contributor" needs a model, such as "minimax/MiniMax-M3", so the model is the same whoever brings the file.`)
+			}
+		default:
+			return actionError(a.Name, `pays is "owner" (the default: the space owner's agent pays for every file) or "contributor" (whoever brings a file pays for it, once they opt in).`)
+		}
+		if a.Member != "" {
+			if len(a.Member) < 3 || len(a.Member) > 32 || !usernamePattern.MatchString(a.Member) {
+				return actionError(a.Name, fmt.Sprintf("member is the username of the member whose own action this is (got %q).", a.Member))
+			}
+			if a.Pays != "" {
+				return actionError(a.Name, "a member's own action always runs on that member's agent; leave out pays.")
+			}
+		}
 	}
 	return nil
 }
+
+// paysContributor reports whether whoever brings a file pays for its job.
+func (a folderAction) paysContributor() bool { return a.Pays == actionPaysContributor }
 
 // checkActionPattern validates one on pattern: a relative path whose
 // segments are names or path.Match patterns, or a subfolder ending in /.
@@ -203,9 +235,10 @@ func (a folderAction) doFile() string {
 }
 
 // actionTrigger is one job a commit asks for: an action of a folder, and the
-// file that set it off.
+// file that set it off. Member is the action's member, for a member's own
+// action, which runs only for that member's files.
 type actionTrigger struct {
-	Folder, Action, File string
+	Folder, Action, File, Member string
 }
 
 // triggersBetween compares two states of a space and returns the jobs the
@@ -250,7 +283,7 @@ func (r *repository) triggersBetween(ctx context.Context, old, state string) ([]
 			rel := p[len(folder):]
 			for _, a := range list {
 				if (!edited || a.When == actionWhenChange) && a.matches(rel) {
-					triggers = append(triggers, actionTrigger{Folder: folder, Action: a.Name, File: p})
+					triggers = append(triggers, actionTrigger{Folder: folder, Action: a.Name, File: p, Member: a.Member})
 				}
 			}
 		}
@@ -259,9 +292,12 @@ func (r *repository) triggersBetween(ctx context.Context, old, state string) ([]
 }
 
 // checkActionsWriter refuses a write to path that adds, changes or removes
-// actions unless the space owner makes it as a person (Metatrash Sync or
-// Slate Viewer). Actions spend the owner's tokens, so neither members nor any
-// agent, the owner's own included, may set them.
+// actions unless a person makes it as themselves (Metatrash Sync or Slate
+// Viewer), since actions spend someone's tokens. The space owner may change
+// their own actions, remove a member's, or adopt one by taking out "member",
+// but never write one in a member's name. A member may add, change or remove
+// only their own actions, marked "member" with their username. No agent, the
+// owner's own included, may change actions.
 func (s *Service) checkActionsWriter(ctx context.Context, r *repository, files map[string]record, path, text string) error {
 	old, err := r.configText(ctx, files, configFolder(path))
 	if err != nil {
@@ -272,8 +308,90 @@ func (s *Service) checkActionsWriter(ctx context.Context, r *repository, files m
 	}
 	identity, _ := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
 	owner := s.repositoryOwner(r)
-	if personWrite(ctx) && identity.oauth != nil && owner != "" && identity.oauth.UserID == owner {
+	if !personWrite(ctx) || identity.oauth == nil || owner == "" {
+		return problem(403, "forbidden", path+": actions can be added, changed or removed only by a person writing as themselves through Metatrash Sync or Slate Viewer: the space owner, or a member for their own actions. Agents cannot, because actions run on someone's tokens.")
+	}
+	before, after := actionsByName(old), actionsByName(text)
+	if identity.oauth.UserID == owner {
+		for name, a := range after {
+			if b, ok := before[name]; a.Member != "" && (!ok || !sameAction(a, b)) {
+				return problem(403, "forbidden", fmt.Sprintf("%s: action %q is %s's own and runs on their agent; you can remove it, or adopt it by taking out \"member\", but not add or change it in their name.", path, name, a.Member))
+			}
+		}
 		return nil
 	}
-	return problem(403, "forbidden", path+": only the space owner can add, change or remove actions, writing as themselves through Metatrash Sync or Slate Viewer; agents and members cannot, because actions run on the owner's tokens.")
+	username := s.usernameOf(ctx, identity.oauth.UserID)
+	if username == "" {
+		return problem(403, "forbidden", path+": choose a username first (Your account → Profile); your own actions are marked with it.")
+	}
+	names := map[string]bool{}
+	for name := range before {
+		names[name] = true
+	}
+	for name := range after {
+		names[name] = true
+	}
+	for name := range names {
+		a, now := after[name]
+		b, was := before[name]
+		if now && was && sameAction(a, b) {
+			continue
+		}
+		if was && b.Member != username || now && a.Member != username {
+			return problem(403, "forbidden", fmt.Sprintf("%s: you can add, change or remove only your own actions, marked \"member\": %q, which run on your own agent and only for your files; action %q is not yours.", path, username, name))
+		}
+	}
+	return nil
+}
+
+// actionsByName reads the actions of a configuration text, by name.
+func actionsByName(text string) map[string]folderAction {
+	out := map[string]folderAction{}
+	if c, err := parseFolderConfig(text); err == nil {
+		for _, a := range c.Actions {
+			out[a.Name] = a
+		}
+	}
+	return out
+}
+
+func sameAction(a, b folderAction) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+
+// usernameOf is a user's username, or "" when they have none or it cannot be
+// read.
+func (s *Service) usernameOf(ctx context.Context, userID string) string {
+	if s.usernameHook != nil {
+		return s.usernameHook(userID)
+	}
+	if s.ownedDB == nil {
+		return ""
+	}
+	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var username string
+	if err := s.ownedDB.db.QueryRowContext(lookup, "SELECT COALESCE(username, '') FROM metatrash_users WHERE user_id = ?", userID).Scan(&username); err != nil {
+		return ""
+	}
+	return username
+}
+
+// userIDOf is the user ID of a username, or "" when nobody has it.
+func (s *Service) userIDOf(ctx context.Context, username string) string {
+	if s.userIDHook != nil {
+		return s.userIDHook(username)
+	}
+	if s.ownedDB == nil || username == "" {
+		return ""
+	}
+	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var id string
+	if err := s.ownedDB.db.QueryRowContext(lookup, "SELECT user_id FROM metatrash_users WHERE username = ?", username).Scan(&id); err != nil {
+		return ""
+	}
+	return id
 }

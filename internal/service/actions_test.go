@@ -172,3 +172,58 @@ func TestActionsOwnerOnly(t *testing.T) {
 	empty := `{"purpose":"HR"}`
 	do(owner, "write", Input{Path: "hr/.metatrash.json", Text: &empty}, "")
 }
+
+// pays and member: who pays for an action's jobs.
+func TestActionsPays(t *testing.T) {
+	for config, want := range map[string]string{
+		`{"actions":[{"name":"a","on":"*.md","do":"x","pays":"contributor"}]}`:                              "needs a model",
+		`{"actions":[{"name":"a","on":"*.md","do":"x","pays":"everyone"}]}`:                                 `pays is "owner"`,
+		`{"actions":[{"name":"a","on":"*.md","do":"x","member":"Alice Smith"}]}`:                            "username of the member",
+		`{"actions":[{"name":"a","on":"*.md","do":"x","member":"alice","pays":"owner"}]}`:                   "leave out pays",
+		`{"actions":[{"name":"a","on":"*.md","do":"x","model":"minimax/MiniMax-M3","pays":"contributor"}]}`: "",
+		`{"actions":[{"name":"a","on":"*.md","do":"x","member":"alice"}]}`:                                  "",
+	} {
+		_, err := parseFolderConfig(config)
+		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: %v, want %q", config, err, want)
+		}
+	}
+}
+
+// A member changes only their own actions; the owner may remove or adopt a
+// member's action but not change it in their name.
+func TestActionsMembersOwn(t *testing.T) {
+	s, owned, do := folderFilesHarness(t)
+	ctx := context.Background()
+	owner := asOwner(ctx, owned)
+	alice, bob := strings.Repeat("c", 32), strings.Repeat("d", 32)
+	names := map[string]string{owned.owner: "dave", alice: "alice", bob: ""}
+	s.usernameHook = func(id string) string { return names[id] }
+	member := func(id string) context.Context {
+		return context.WithValue(context.WithValue(ctx, personWriteKey{}, true), mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: id}})
+	}
+	write := func(c context.Context, text, code string) {
+		t.Helper()
+		do(c, "write", Input{Path: "hr/.metatrash.json", Text: &text}, code)
+	}
+	ownerAction := `{"name":"tidy","on":"in/*.md","do":"Tidy."}`
+	aliceAction := `{"name":"mine","on":"in/*.md","do":"Mine.","member":"alice"}`
+	write(owner, `{"actions":[`+ownerAction+`]}`, "")
+	// Alice adds her own action, but not one in another name or none.
+	write(member(alice), `{"actions":[`+ownerAction+`,{"name":"x","on":"*.md","do":"x","member":"dave"}]}`, "forbidden")
+	write(member(alice), `{"actions":[`+ownerAction+`,{"name":"x","on":"*.md","do":"x"}]}`, "forbidden")
+	write(member(alice), `{"actions":[`+ownerAction+`,`+aliceAction+`]}`, "")
+	// She cannot change or remove the owner's; she can change her own.
+	write(member(alice), `{"actions":[`+aliceAction+`]}`, "forbidden")
+	write(member(alice), `{"actions":[{"name":"tidy","on":"*.md","do":"Tidy."},`+aliceAction+`]}`, "forbidden")
+	write(member(alice), `{"actions":[`+ownerAction+`,{"name":"mine","on":"*.md","do":"Mine.","member":"alice"}]}`, "")
+	// A member without a username, and agents, cannot.
+	write(member(bob), `{"actions":[`+ownerAction+`]}`, "forbidden")
+	agentCtx := context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: alice}})
+	write(agentCtx, `{"actions":[`+ownerAction+`]}`, "forbidden")
+	// The owner cannot change hers in her name, but can adopt or remove it.
+	write(owner, `{"actions":[`+ownerAction+`,{"name":"mine","on":"*.md","do":"Mine better.","member":"alice"}]}`, "forbidden")
+	write(owner, `{"actions":[`+ownerAction+`,{"name":"mine","on":"*.md","do":"Mine.","pays":"contributor","model":"minimax/MiniMax-M3"}]}`, "")
+	write(member(alice), `{"actions":[`+ownerAction+`]}`, "forbidden")
+	write(owner, `{"actions":[`+ownerAction+`]}`, "")
+}

@@ -209,7 +209,9 @@ A tidy-draft run succeeded on the live server on 2026-10-25 (15 steps, about
 Services → Agents, schema v16) and the action `model` field; the owner pays
 for every job, and each agent has its own daily cap. It also tells the agent
 to change only the files its instructions call for (the first live run
-renamed `README.md`).
+renamed `README.md`). 0.56.0 adds who pays per action (`"pays":
+"contributor"`, with opting in on `/account/actions/<job>` and a notice
+email) and members' own actions (`"member"`), schema v17.
 
 ### User agents and who pays (agreed with Dave 2026-10-25)
 
@@ -254,8 +256,15 @@ with their own money.
 1. ~~**0.55.0**: user agents (table, account page, encrypted keys), the action
    `model` field, owner pays.~~ Done; replacing a saved agent's key means
    removing and adding it again for now.
-2. **0.56.0**: bring your own key and members' own actions (opt-in,
-   notices, adopt).
+2. ~~**0.56.0**: bring your own key and members' own actions (opt-in,
+   notices, adopt).~~ Done. Choices made while building it: the field is
+   `"pays": "contributor"` and needs `model`; opting in picks one of your
+   agents for that model, whose daily cap applies (no separate cap per
+   action); the notice is an email at most once a day per action, linking to
+   the action's page, and opting in there runs the skipped file; a member's
+   action names them by username (`"member"`), so if an admin renames the
+   account, its actions stop running until the name is fixed; files with no clear contributor
+   (GitHub pull, space key) run on the owner's agent.
 3. **0.57.0**: web tools (Brave `web_search`, `web_fetch`, downloads cached in
    B2 as `web/<id>`) and `every` schedules.
 4. **0.58.0**: PDF and Word files as triggers and input.
@@ -307,6 +316,21 @@ with their own money.
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.56.0 (2026-10-25):
+
+- **Bring your own key:** with a second account (a member of a test space)
+  that has a MiniMax agent, set an action in that space to `"model":
+  "minimax/MiniMax-M3", "pays": "contributor"`. Drop a file in as the member:
+  `runner.md` says skipped, "has not opted in", and the member gets the
+  email. Open its link as the member, opt in: the file runs, `runner.md` ends
+  with `- Paid by: <member>`, History shows "MiniMax (agent) for <member>",
+  and Services lists it under Actions you pay for. Your own file in that
+  folder still runs on your agent. Opt out, and the next file is skipped.
+- **Member's own action:** as the member, in Slate Viewer, add an action with
+  `"member": "<their username>"`: it runs for their files only, on their
+  agent. As the owner, try to edit it (refused), then adopt it by deleting
+  the `member` line.
 
 From 0.53.0 (2026-10-25):
 

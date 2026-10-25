@@ -63,6 +63,9 @@ type Service struct {
 	clock func() time.Time
 	// agents runs folder actions; nil unless accounts.json enables agents.
 	agents atomic.Pointer[agentRunner]
+	// usernameHook and userIDHook replace the account lookups in tests.
+	usernameHook func(userID string) string
+	userIDHook   func(username string) string
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.

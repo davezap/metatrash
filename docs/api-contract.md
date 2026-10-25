@@ -135,7 +135,7 @@ Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in eac
 
 ## Folder actions
 
-0.54.0. A folder's `.metatrash.json` can list actions. When one fires, the server runs an agent loop on one of the space owner's agents (Your account → Services → Agents, 0.55.0); the agent can use only this space's file tools and is pinned to the folder. Folder actions must be on for the server (`agents` in `accounts.json`, deployment.md).
+0.54.0. A folder's `.metatrash.json` can list actions. When one fires, the server runs an agent loop on the agent of whoever pays (Your account → Services → Agents, 0.55.0): the space owner by default, the person who brought the file when the action says so and they opted in, or the member whose own action it is (0.56.0). The agent can use only this space's file tools and is pinned to the folder. Folder actions must be on for the server (`agents` in `accounts.json`, deployment.md).
 
 ```json
 {
@@ -155,15 +155,29 @@ Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in eac
 - `do` (required, up to 4,000 characters): the instructions in plain words, or the name of a `.md` file in the folder that holds them (no spaces, ends in `.md`).
 - `model` (0.55.0, optional): `provider/model`, such as `minimax/MiniMax-M3` or `anthropic/claude-sonnet-5-5`. The job runs on the owner's agent with that provider and model (their default one if several match). Left out, it runs on the owner's default agent.
 - `web` (`false` turns off the web tools, which come later) and `steps` (most tool calls per job, 1 to 200, default 40).
-- Owned spaces only: a configured space refuses `actions` (`invalid_request`). Actions are checked and stored while `agents` is off; they run when it is on. The space owner pays: every job runs on the owner's agent, whoever brought the file (choosing to pay with your own key comes in 0.56.0). An owner with no agent, or none matching `model`, gets the job recorded as skipped, with a pointer to Your account → Services → Agents.
-- Only the space owner, writing as a person (Metatrash Sync or Slate Viewer), can add, change or remove a folder's `actions` (0.54.2): actions spend the owner's tokens. Members and every agent, the owner's own included, get `forbidden` for a write or edit that touches `actions`; they can still change the file's other settings, and members' files still trigger the owner's actions.
+- `pays` (0.56.0, optional): `owner` (the default) or `contributor`. See Who pays below. `contributor` needs `model`, so the model is the same whoever brings the file.
+- `member` (0.56.0): the username of the member whose own action this is. Set by that member; see Members' own actions below. Not together with `pays`.
+- Owned spaces only: a configured space refuses `actions` (`invalid_request`). Actions are checked and stored while `agents` is off; they run when it is on.
 
-**How a job runs.** After every commit to an owned space (MCP, REST, mtsync, GitHub pull), the files it added or changed are matched against the actions of the folders holding them, and one job per matching file and action is queued (`metatrash_agent_jobs`, schema v16). Commits the runner makes never queue jobs, so an agent writing into `for-review/` cannot set itself off. At most 20 jobs per folder per hour: the 21st is recorded as skipped in `runner.md`, later ones in that hour are dropped. Jobs run one at a time per space and at most two at once; queued jobs survive a restart, and a job a restart interrupted is recorded as failed.
+**Who pays** (0.56.0). Each job runs on one person's agent, and nothing ever falls back to another key or model:
 
-- **Prompt.** A short runner preamble (unattended, no questions, paths are relative, change only the files the instructions call for and not `AGENTS.md`, reply with a summary of three to five sentences), the folder's `AGENTS.md`, the action's `do`, and which file arrived or changed.
+- `"pays": "owner"` (the default): the space owner's agent, for every file, whoever brought it.
+- `"pays": "contributor"`: the agent of the person whose change brought the file, once they have opted in to that action. Until then their file runs nothing: the job is recorded as skipped in `runner.md` ("… has not opted in. They can opt in at https://metatrash.com/account/actions/<job>") and they get an email, at most once a day per action, linking to that page. The page (only for the person whose file it was) shows the action's model, steps and instructions, which only the owner can change, and lets them choose one of their agents for that provider and model; opting in runs the skipped file at once. Their jobs count toward that agent's daily cap. They see the actions they pay for under Services → Agents, Actions you pay for, and can opt out there; removing the agent opts out too. If the chosen agent no longer runs the action's model, the job is skipped and they are told. The owner's own files, and files with no clear contributor (a GitHub pull, a space key), run on the owner's agent.
+- A member's own action (`member`): that member's agent, only for that member's files; nobody else's files run it.
+
+An owner (or member) with no agent for the action, or none matching `model`, gets the job recorded as skipped, with a pointer to Your account → Services → Agents. Changes are signed by whoever paid ("MiniMax (agent) for alice"), the agent still works within the owner's folder rules and locks, and `runner.md` adds `- Paid by: alice` when it was not the owner.
+
+**Who may change actions.** Only a person writing as themselves (Metatrash Sync or Slate Viewer) can add, change or remove `actions` (0.54.2): actions spend someone's tokens. Every agent, the owner's own included, gets `forbidden` for a write or edit that touches `actions`; agents and members can still change the file's other settings.
+
+- The space owner can add, change and remove their own actions, and remove a member's. They cannot add or change an action that names a member; they can adopt one by taking out `member` (it becomes theirs, and they choose who pays).
+- **Members' own actions** (0.56.0): a member with a username can add, change and remove actions marked `"member": "<their username>"`, and no others. Such an action runs only for their files, on their agent. The owner sees it in the folder's `.metatrash.json` and can remove it, adopt it, or leave it.
+
+**How a job runs.** After every commit to an owned space (MCP, REST, mtsync, GitHub pull), the files it added or changed are matched against the actions of the folders holding them, and one job per matching file and action is queued (`metatrash_agent_jobs`, schema v16), recording who brought the file (`contributor_id`, schema v17). Commits the runner makes never queue jobs, so an agent writing into `for-review/` cannot set itself off. At most 20 jobs per folder per hour: the 21st is recorded as skipped in `runner.md`, later ones in that hour are dropped. Jobs run one at a time per space and at most two at once; queued jobs survive a restart, and a job a restart interrupted is recorded as failed.
+
+- **Prompt.** A short runner preamble (unattended, the space owner and, when someone else pays, on whose behalf, no questions, paths are relative, change only the files the instructions call for and not `AGENTS.md`, reply with a summary of three to five sentences), the folder's `AGENTS.md`, the action's `do`, and which file arrived or changed.
 - **Tools.** `read`, `write`, `edit`, `append`, `search`, `list`, `move`, `delete` and `history`, with the descriptions and input schemas of `api/tool-schema.json` minus `space`. Each call goes to `dispatchRepository`, so ifInState, locks, `readOnly` files and size limits apply as for any agent. No `spaces`, `pull` or `push`, no shell, no other tools.
 - **Pinning.** The runner adds the folder to every `path`, `from`, `to` and `prefix` the agent sends and removes it from results (and drops `space`); list and search are limited to the folder, history shows only entries inside it, and `..` is refused as everywhere. The agent cannot change any `.metatrash.json` or the folder's `runner.md` (`protected_file`). A result over 100,000 bytes is refused with a hint to read by line range.
-- **Identity.** Changes are commits with `Metatrash-By: <owner>`, `Metatrash-App: MiniMax` (or `Claude`, after the agent's provider) and `Metatrash-Kind: agent`, so History shows "MiniMax (agent) for dave" and agent-level locks apply.
+- **Identity.** Changes are commits with `Metatrash-By: <whoever paid>`, `Metatrash-App: MiniMax` (or `Claude`, after the agent's provider) and `Metatrash-Kind: agent`, so History shows "MiniMax (agent) for dave" and agent-level locks apply.
 - **Limits.** `steps`; 400,000 input tokens and 10 minutes per job; a daily token cap per agent, set on the account page (2,000,000 unless set; 0 = none), counted over every job that agent ran that day. A provider error worth retrying (429, 5xx, network) is retried twice, then the job fails.
 - **Model replies.** Thinking blocks are passed back unchanged (MiniMax requires it), `pause_turn` is resumed, and the model's last text is the job's summary.
 - **runner.md.** When a job ends the runner appends an entry to `runner.md` in the folder (creating it), signed `Metatrash runner`:
@@ -178,7 +192,7 @@ Persist the ID-to-path mapping in a service-owned `.metatrash/files.json` in eac
 Rewrote the draft ... (the model's closing summary)
 ```
 
-The status is `done`, `failed` (with `- Error:`) or `skipped` (the file was gone before the job started, the folder's hourly limit, the owner has no agent for the action, or the agent's daily cap). The last part of the Steps line is the model. Times, and the daily caps' reset, are in `agents.timezone`.
+The status is `done`, `failed` (with `- Error:`) or `skipped` (the file was gone before the job started, the folder's hourly limit, whoever pays has no agent for the action or has not opted in, or the agent's daily cap). The last part of the Steps line is the model. Times, and the daily caps' reset, are in `agents.timezone`.
 
 ## Acknowledgements (policy reads)
 

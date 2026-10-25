@@ -23,8 +23,9 @@ import (
 
 // Users' agents (0.55.0, metatrash_agents in schema v16): each user adds the
 // model providers and API keys their folder actions run on. A job runs on
-// the space owner's agent, so the owner pays; the key is sealed with
-// AES-256-GCM under agents.keyFile and never shown again after it is saved.
+// the agent of whoever pays for it (the space owner, unless the action says
+// otherwise; see actions.go); the key is sealed with AES-256-GCM under
+// agents.keyFile and never shown again after it is saved.
 
 const maxAgentsPerUser = 10
 
@@ -265,8 +266,8 @@ func (db *accountDatabase) addUserAgent(ctx context.Context, u userAgent) error 
 	return nil
 }
 
-// removeUserAgent deletes one of the user's agents. If it was the default,
-// the oldest remaining one becomes the default.
+// removeUserAgent deletes one of the user's agents and the opt-ins it paid
+// for. If it was the default, the oldest remaining one becomes the default.
 func (db *accountDatabase) removeUserAgent(ctx context.Context, userID, agentID string) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -278,6 +279,9 @@ func (db *accountDatabase) removeUserAgent(ctx context.Context, userID, agentID 
 	case errors.Is(err, sql.ErrNoRows):
 		return missing()
 	case err != nil:
+		return fmt.Errorf("cannot remove the agent")
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_action_optins WHERE agent_id = ? AND user_id = ?", agentID, userID); err != nil {
 		return fmt.Errorf("cannot remove the agent")
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM metatrash_agents WHERE agent_id = ? AND user_id = ?", agentID, userID); err != nil {

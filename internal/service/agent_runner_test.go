@@ -80,6 +80,13 @@ func (m *memoryJobStore) queued(_ context.Context, limit int) ([]agentJob, error
 
 func (m *memoryJobStore) running(context.Context) ([]agentJob, error) { return m.list(jobRunning), nil }
 
+func (m *memoryJobStore) get(_ context.Context, id string) (agentJob, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	return j, ok, nil
+}
+
 func (m *memoryJobStore) claim(_ context.Context, id string, at time.Time) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -160,10 +167,17 @@ type runnerWorld struct {
 	runner *agentRunner
 	do     func(ctx context.Context, op string, in Input, code string) any
 	mu     sync.Mutex
-	// agents are the owner's agents; models records each job's agent.
+	// agents are everyone's agents; models records each job's agent.
 	agents []userAgent
 	models []agentModel
+	// optIns maps user/folder/action to the agent they opted in with;
+	// notices records the notices sent, as "user: why".
+	optIns  map[string]string
+	notices []string
 }
+
+// alice is a member of the test space, who brings files of her own.
+var aliceID = strings.Repeat("c", 32)
 
 // testAgentSettings are runner settings with a fresh sealing key.
 func testAgentSettings(t *testing.T) *agentSettings {
@@ -207,14 +221,41 @@ func newRunnerWorld(t *testing.T) *runnerWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.owner = func(context.Context, string) (string, string) { return "dave", "dave@example.com" }
+	names := map[string]string{repo.owner: "dave", aliceID: "alice"}
+	runner.owner = func(_ context.Context, id string) (string, string) { return names[id], names[id] + "@example.com" }
+	s.usernameHook = func(id string) string { return names[id] }
+	s.userIDHook = func(name string) string {
+		for id, n := range names {
+			if n == name {
+				return id
+			}
+		}
+		return ""
+	}
 	agent := testUserAgent(t, runner.settings, repo.owner, "MiniMax main", "minimax", "MiniMax-M3")
 	agent.Default = true
-	w := &runnerWorld{t: t, s: s, repo: repo, model: model, store: store, runner: runner, agents: []userAgent{agent}}
-	runner.agentsOf = func(context.Context, string) ([]userAgent, error) {
+	w := &runnerWorld{t: t, s: s, repo: repo, model: model, store: store, runner: runner, agents: []userAgent{agent}, optIns: map[string]string{}}
+	runner.agentsOf = func(_ context.Context, userID string) ([]userAgent, error) {
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		return append([]userAgent(nil), w.agents...), nil
+		var out []userAgent
+		for _, u := range w.agents {
+			if u.UserID == userID {
+				out = append(out, u)
+			}
+		}
+		return out, nil
+	}
+	runner.optInOf = func(_ context.Context, userID, _, folder, action string) (string, bool, error) {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		id, ok := w.optIns[userID+"/"+folder+action]
+		return id, ok, nil
+	}
+	runner.notice = func(_ context.Context, userID string, _ agentJob, why string) {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		w.notices = append(w.notices, names[userID]+": "+why)
 	}
 	runner.providerFor = func(m agentModel) agentProvider {
 		w.mu.Lock()
@@ -252,6 +293,17 @@ func (w *runnerWorld) write(path, text string) {
 		ctx = asOwner(ctx, w.repo)
 	}
 	w.do(ctx, "write", Input{Path: path, Text: &text}, "")
+}
+
+// as is a context writing as user through Metatrash Sync.
+func as(userID string) context.Context {
+	ctx := context.WithValue(context.Background(), personWriteKey{}, true)
+	return context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: userID}})
+}
+
+func (w *runnerWorld) writeAs(userID, path, text string) {
+	w.t.Helper()
+	w.do(as(userID), "write", Input{Path: path, Text: &text}, "")
 }
 
 func (w *runnerWorld) read(path string) string {
@@ -637,5 +689,100 @@ func TestUserAgents(t *testing.T) {
 	}
 	if err := checkActions([]folderAction{{Name: "x", On: actionPatterns{"*.md"}, Do: "y", Model: "openai/gpt"}}); err == nil {
 		t.Error("accepted an unknown provider")
+	}
+}
+
+// With "pays": "contributor", whoever brings a file pays once they opt in;
+// until then their files are skipped and they get a notice. The owner's own
+// files, and files nobody clear brought, run on the owner's agent.
+func TestRunnerContributorPays(t *testing.T) {
+	w := newRunnerWorld(t)
+	mine := testUserAgent(t, w.runner.settings, aliceID, "Alice MiniMax", "minimax", "MiniMax-M3")
+	mine.Default = true
+	w.agents = append(w.agents, mine)
+	w.write("hr/.metatrash.json", `{"actions":[{"name":"tidy","on":"in/*.md","do":"Tidy.","model":"minimax/MiniMax-M3","pays":"contributor"}]}`)
+	w.writeAs(aliceID, "hr/in/a.md", "a\n")
+	skipped := w.job(1, "hr/in/a.md")
+	if skipped.Status != jobSkipped || skipped.Contributor != aliceID || !strings.Contains(skipped.Error, "alice has not opted in") || !strings.Contains(skipped.Error, "/account/actions/"+skipped.ID) || len(w.models) != 0 {
+		t.Fatalf("not opted in: %+v", skipped)
+	}
+	if len(w.notices) != 1 || !strings.HasPrefix(w.notices[0], "alice: skipped: whoever brings a file pays") {
+		t.Errorf("notices %q", w.notices)
+	}
+	// Opted in: the skipped file runs again on her agent.
+	w.mu.Lock()
+	w.optIns[aliceID+"/hr/tidy"] = mine.ID
+	w.mu.Unlock()
+	if err := w.runner.requeue(context.Background(), skipped); err != nil {
+		t.Fatal(err)
+	}
+	var done agentJob
+	for _, j := range w.wait(2) {
+		if j.ID != skipped.ID {
+			done = j
+		}
+	}
+	if done.Status != jobDone || done.AgentID != mine.ID || done.Contributor != aliceID || len(w.models) != 1 || w.models[0].apiKey != "sk-Ali-1234" {
+		t.Fatalf("opted in: %+v %+v", done, w.models)
+	}
+	if log := w.read("hr/runner.md"); !strings.Contains(log, "- Paid by: alice") {
+		t.Errorf("runner.md:\n%s", log)
+	}
+	var system contentBlock
+	_ = json.Unmarshal(w.model.requests[0].System[0], &system)
+	if !strings.Contains(system.Text, "owned by dave, on behalf of alice") {
+		t.Errorf("system prompt: %s", system.Text)
+	}
+	// The owner's own file, and one from a space key, run on the owner's agent.
+	w.writeAs(w.repo.owner, "hr/in/b.md", "b\n")
+	w.do(context.Background(), "write", Input{Path: "hr/in/c.md", Text: ptr("c\n")}, "")
+	w.wait(4)
+	if len(w.models) != 3 || w.models[1].agentID != w.agents[0].ID || w.models[2].agentID != w.agents[0].ID {
+		t.Errorf("owner pays: %+v", w.models)
+	}
+	// Her chosen agent no longer runs the action's model: skipped, never
+	// another agent.
+	w.mu.Lock()
+	w.agents[1].Model = "MiniMax-M3.1"
+	w.mu.Unlock()
+	w.writeAs(aliceID, "hr/in/d.md", "d\n")
+	if j := w.job(5, "hr/in/d.md"); j.Status != jobSkipped || !strings.Contains(j.Error, "no longer runs MiniMax MiniMax-M3") || len(w.models) != 3 || len(w.notices) != 2 {
+		t.Errorf("changed agent: %+v %q", j, w.notices)
+	}
+	// GitHub pulls have no contributor.
+	if contributorOf(context.WithValue(as(aliceID), githubPullKey{}, true)) != "" || contributorOf(as(aliceID)) != aliceID || contributorOf(context.Background()) != "" {
+		t.Error("contributorOf")
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+// A member's own action runs only for that member's files, on their agent.
+func TestRunnerMemberAction(t *testing.T) {
+	w := newRunnerWorld(t)
+	mine := testUserAgent(t, w.runner.settings, aliceID, "Alice Claude", "anthropic", "claude-sonnet-5-5")
+	mine.Default = true
+	w.agents = append(w.agents, mine)
+	w.writeAs(aliceID, "hr/.metatrash.json", `{"actions":[{"name":"mine","on":"in/*.md","do":"Tidy.","member":"alice"}]}`)
+	w.writeAs(w.repo.owner, "hr/in/x.md", "x\n")
+	w.writeAs(aliceID, "hr/in/y.md", "y\n")
+	jobs := w.wait(1)
+	if len(jobs) != 1 || jobs[0].File != "hr/in/y.md" || jobs[0].Status != jobDone || jobs[0].AgentID != mine.ID || w.models[0].app != "Claude" {
+		t.Fatalf("jobs %+v", jobs)
+	}
+	_, files, _ := w.repo.snapshot(context.Background(), "")
+	if _, ok := files["hr/in/y.md"]; !ok {
+		t.Fatal("file missing")
+	}
+	if log := w.read("hr/runner.md"); !strings.Contains(log, "- Paid by: alice") {
+		t.Errorf("runner.md:\n%s", log)
+	}
+	// Without an agent of hers, her file is skipped and she is told.
+	w.mu.Lock()
+	w.agents = w.agents[:1]
+	w.mu.Unlock()
+	w.writeAs(aliceID, "hr/in/z.md", "z\n")
+	if j := w.job(2, "hr/in/z.md"); j.Status != jobSkipped || !strings.Contains(j.Error, "alice has no agent for this action") || !strings.Contains(j.Error, "They add one") || len(w.notices) != 1 {
+		t.Errorf("no agent: %+v %q", j, w.notices)
 	}
 }
