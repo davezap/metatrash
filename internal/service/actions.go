@@ -49,6 +49,10 @@ type folderAction struct {
 	// Tools narrows the agent's tools to these names (runner_tools.go);
 	// left out, it gets all of them.
 	Tools []string `json:"tools,omitempty"`
+	// AgentsMd adds the folder's AGENTS.md to the prompt. It is written for
+	// agents doing general work in the folder, so a job with a set task
+	// goes without it unless the action asks (it can still read it).
+	AgentsMd bool `json:"agentsMd,omitempty"`
 	// Pays is "owner" (the default) or "contributor".
 	Pays string `json:"pays,omitempty"`
 	// Member is the username of the member whose own action this is.

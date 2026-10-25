@@ -650,6 +650,8 @@ const runnerPreamble = `You are an unattended agent that Metatrash, a file servi
 
 Your tools work on this folder only: paths are relative to it, and an empty prefix means the whole folder. Each change is saved as you make it; there is nothing to push. Write, move and delete need ifInState from a read, list or search. Prefer edit and append to rewriting a whole file, and read long files by line range. You cannot change .metatrash.json files or %s; Metatrash adds your result to %s itself.
 
+Read only what the task needs. When your instructions say what to write and how, follow them; do not read other files to copy their style.
+
 Change only the files your instructions call for. Do not edit, tidy or create any other file, AGENTS.md included, unless the instructions say so; note anything else that needs attention in your summary instead.
 
 When you are done, reply with a short summary of three to five sentences: what you did and anything a person should check. That reply is recorded in %s.`
@@ -757,7 +759,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		}
 	}
 	tools = toolsFor(tools, action.Tools)
-	if f, ok := files[j.Folder+agentsFileName]; ok {
+	if f, ok := files[j.Folder+agentsFileName]; ok && action.AgentsMd {
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
 			return out, err

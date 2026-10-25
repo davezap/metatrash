@@ -370,6 +370,14 @@ scheduled yet. To settle when it is:
 
 ## Maintenance
 
+- **Cloudflare beacon** (2026-10-25): Cloudflare Web Analytics injects
+  `static.cloudflareinsights.com/beacon.min.js`, which the pages' CSP
+  (`script-src 'self'`) blocks, so every page logs a console error. Turn off
+  its automatic setup in the Cloudflare dashboard (or allow the host in the
+  CSP if the analytics are wanted).
+- **Edit an agent's daily cap** on Services → Agents (today it is set only
+  when the agent is added; Dave hit the cap on 2026-10-25 and had to add a
+  second agent).
 - **Old READMEs**: spaces made before 0.45.0 still hold the old agent
   README.md as an ordinary file; delete or rewrite them as needed.
 - [Security review](security-review-2026-09-30.md) F3: cache recent activity

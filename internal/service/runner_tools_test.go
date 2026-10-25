@@ -71,7 +71,7 @@ func TestRunnerActionTools(t *testing.T) {
 		func(req agentRequest) (agentResponse, error) {
 			var system contentBlock
 			json.Unmarshal(req.System[0], &system)
-			if got := strings.Join(toolNames(req), ","); got != "read,write,web_search" || strings.Contains(system.Text, "web_fetch") {
+			if got := strings.Join(toolNames(req), ","); got != "read,write,web_search" || strings.Contains(system.Text, "web_fetch") || strings.Contains(system.Text, "## This folder's AGENTS.md") {
 				t.Errorf("tools %s, system %s", got, system.Text)
 			}
 			return useTools(toolUse("t1", "delete", map[string]any{"path": "inbound/a.md", "ifInState": strings.Repeat("0", 40)}), toolUse("t2", "web_search", map[string]any{"query": "nz"}))(req)

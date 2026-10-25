@@ -410,7 +410,7 @@ const tidyConfig = `{"actions":[{"name":"tidy-draft","on":"inbound/*.md","do":"R
 
 func TestRunnerTidyDraft(t *testing.T) {
 	w := newRunnerWorld(t)
-	w.write("hr/.metatrash.json", tidyConfig)
+	w.write("hr/.metatrash.json", strings.Replace(tidyConfig, `"name":"tidy-draft",`, `"name":"tidy-draft","agentsMd":true,`, 1))
 	w.write("hr/AGENTS.md", "# HR policies\n\nDrafts arrive in inbound/.\n")
 	w.write("other/secret.md", "not for the agent\n")
 	var state string
@@ -481,7 +481,8 @@ func TestRunnerTidyDraft(t *testing.T) {
 	if strings.Contains(log, "fake entry") {
 		t.Error("the agent wrote runner.md")
 	}
-	// The prompt: preamble, the folder's AGENTS.md, the instructions and the trigger.
+	// The prompt: preamble, the folder's AGENTS.md (asked for with
+	// agentsMd), the instructions and the trigger.
 	first := w.model.requests[0]
 	var system contentBlock
 	_ = json.Unmarshal(first.System[0], &system)

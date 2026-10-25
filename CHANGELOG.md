@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.57.3 - Tighter folder-action prompts (2026-10-25)
+
+No schema, grant or configuration change. tool-schema.json is unchanged (0.15.0).
+
+- **AGENTS.md only when asked** (Dave): a folder's `AGENTS.md` is written for agents doing general work there, so a job with a set task no longer gets it in its prompt, which saves its size on every step. `"agentsMd": true` on an action puts it back; the agent can still `read` it either way. Actions that relied on AGENTS.md for their instructions need `"agentsMd": true`, or those instructions moved into `do`.
+- **Read only what the task needs**: the runner's instructions now say to follow the format the instructions give rather than reading other files to copy their style (a news run read the whole of `news.md` to match "the file's existing format").
+- Tested: the prompt carries AGENTS.md with `agentsMd` and not without it.
+
 ## 0.57.2 - Leaner tools for folder actions (2026-10-25)
 
 No schema, grant or configuration change. tool-schema.json is unchanged (0.15.0); MCP apps see the same tools as before.
