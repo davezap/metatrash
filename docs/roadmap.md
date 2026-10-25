@@ -263,6 +263,18 @@ with their own money.
    `runner.md`, opting in, and agents; make a refused `.metatrash.json` save
    obvious (an invalid file silently stayed local on 2026-10-25).
 
+### Ideas (not scheduled)
+
+- **Reply to the runner** (Dave, 2026-10-25): an input box under a
+  `runner.md` entry (Slate Viewer, website) where the person who brought the
+  file can answer the agent or ask for more ("use Australian law instead",
+  "also add a summary"). The reply starts a follow-up job for the same action
+  and file, with the earlier summary and the reply added to the prompt, under
+  the same rules, pinning, limits and who-pays as the original job. To settle:
+  who may reply (the owner only, or whoever pays), whether a reply can go
+  beyond the action's instructions, and how a thread of replies shows in
+  `runner.md`.
+
 ## mtsync and Slate Viewer
 
 - **Editor gaps G2–G8** (`developers/mtsync-editor-integration.md` in the
