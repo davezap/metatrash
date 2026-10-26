@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.57.5 - Space links from a PDF open the page (2026-10-26)
+
+No schema, grant or configuration change.
+
+- **Links clicked in a PDF or another site open the space page**: the sign-in cookie is `SameSite=Strict`, so a browser leaves it off a navigation that starts outside metatrash.com, and a private space page then sent a signed-in reader to the login page (Dave: links printed from Slate Viewer landed on `/account` or `/login`, while the same URL pasted into the address bar worked). A space page reached cross-site without the cookie now answers with a tiny page that reloads itself from metatrash.com, which does carry the cookie; a reader who isn't signed in still ends at the login page.
+- **Slate 0.19.5** for printing on the site: Mermaid diagrams fit one page, a `##` section that would spill starts on a new page, headings stay with what follows, link-only lines and blank trailing lines are left out.
+- Tested: a cross-site request without a cookie gets the reload page for a private page and a missing space; the cross-site sign-in and account-switching test still passes.
+
 ## 0.57.4 - A run cut off at its step limit is failed (2026-10-26)
 
 No schema, grant or configuration change.

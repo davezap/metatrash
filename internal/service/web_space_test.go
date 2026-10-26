@@ -2,6 +2,7 @@ package service
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -22,6 +23,23 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	}
 	if res := oauthCall(w.h, "GET", page, nil, strangerSession); res.Code != 404 {
 		t.Fatalf("stranger, private: %d", res.Code)
+	}
+	// A link from another site or a PDF arrives without the Strict session
+	// cookie: the page reloads itself from this site instead of going to
+	// sign in. Signed out after that reload, it is the sign-in page.
+	crossSite := func(target string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", target, nil)
+		req.Host = "metatrash.com"
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		res := httptest.NewRecorder()
+		w.h.ServeHTTP(res, req)
+		return res
+	}
+	if res := crossSite(page); res.Code != 200 || !strings.Contains(res.Body.String(), `<meta http-equiv="refresh" content="0">`) {
+		t.Fatalf("cross-site, private: %d %s", res.Code, res.Header().Get("Location"))
+	}
+	if res := crossSite("/spaces/" + w.owner.Username + "/no-such-space/"); res.Code != 200 {
+		t.Fatalf("cross-site, missing: %d", res.Code)
 	}
 	// Signed out, a space that does not exist looks the same as a private one.
 	if res := oauthCall(w.h, "GET", "/spaces/"+w.owner.Username+"/no-such-space/", nil); res.Code != 303 {

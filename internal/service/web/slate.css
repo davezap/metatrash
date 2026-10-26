@@ -1197,6 +1197,16 @@
 }
 @media print{
   .slate-editor-host .changes-bar{ display: none; }
+  /* Preview groups its blocks by heading while printing (slate.js): a group that won't fit on
+     what is left of the page starts on the next one, and headings stay with what follows. */
+  .slate-editor-host .slate-print-section{ break-inside: avoid; }
+  .slate-editor-host .preview-pane :is(h1, h2, h3, h4, h5, h6),
+  .slate-editor-host .preview-pane .live-block:has(> :is(h1, h2, h3, h4, h5, h6)),
+  .slate-editor-host .preview-pane .live-block:has(> :is(h1, h2, h3, h4, h5, h6)) + .live-block.is-empty{ break-after: avoid; }
+  .slate-editor-host .preview-pane :is(tr, pre, blockquote, img){ break-inside: avoid; }
+  .slate-editor-host .preview-pane .slate-print-hidden{ display: none; }
+  /* The page's margins are the document's margins. */
+  .slate-editor-host .preview-pane{ padding-top: 0; padding-bottom: 0; }
 }
 
 /* Diagrams (```mermaid), drawn by mermaid/mermaid.js once a document has one. */
@@ -1218,5 +1228,7 @@
 .slate-editor-host .cm-slate-diagram{ cursor: pointer; }
 @media print{
   .slate-editor-host .slate-diagram{ overflow: visible; break-inside: avoid; }
+  /* A diagram taller than the page is scaled down to fit one page, not split. */
+  .slate-editor-host .slate-diagram-canvas > svg{ max-height: 85vh; }
   .slate-editor-host .slate-diagram .media-source-toggle{ display: none; }
 }

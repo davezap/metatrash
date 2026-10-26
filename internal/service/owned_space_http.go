@@ -112,6 +112,9 @@ func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, 
 	return true
 }
 
+// reloadFromSitePage reloads the address it was served at, from this site.
+const reloadFromSitePage = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0"><title>Opening… — Metatrash</title></head><body><p>Opening… <a href="">Continue</a></p></body></html>`
+
 // serveSpacePage renders one file of an owned space in the read-only explorer.
 // root is the URL of the space's top folder; hasPath is false for the bare
 // space URL without its trailing slash. docs selects the /docs/ rules above.
@@ -188,6 +191,19 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		// Signed out: always the sign-in page, so a private space's existence
 		// is not revealed. The docs pages never ask anyone to sign in.
 		if !signedIn && !docs {
+			// The session cookie is SameSite=Strict, so a link from another
+			// site or a PDF arrives without it even when this browser is
+			// signed in. Reload once from this site, which sends it, before
+			// sending the browser to sign in. The reload is same-origin, so
+			// it cannot loop, and it keeps the link's #fragment.
+			if cookieToken(r, h.sessionCookieName()) == "" && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusOK)
+				if r.Method == http.MethodGet {
+					_, _ = w.Write([]byte(reloadFromSitePage))
+				}
+				return
+			}
 			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 			return
 		}
