@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -27,6 +28,7 @@ const (
 	maxFolderServices    = 8
 	maxPublishedVersion  = 1000000
 	maxAcknowledgeFiles  = 50
+	maxPrintImage        = 2000
 	githubDefaultBranch  = "main"
 	githubDefaultPush    = "agent"
 	githubDefaultPull    = "auto"
@@ -56,6 +58,14 @@ type folderConfig struct {
 	// Actions run an agent when files arrive (see actions.go). Never
 	// inherited; owned spaces only.
 	Actions []folderAction `json:"actions,omitempty"`
+	// Print is how the folder's documents print (Slate Viewer): Image is
+	// the https address of an image put centred above the title of the
+	// first page. Never in the files themselves. Inherited like purpose.
+	Print *folderPrint `json:"print,omitempty"`
+}
+
+type folderPrint struct {
+	Image string `json:"image,omitempty"`
 }
 
 // folderService is one entry of services. Each type uses its own fields
@@ -172,7 +182,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion, actions or locked, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion, actions, print or locked, not %q.", key))
 		}
 	}
 	if c.Locked["locked"] == lockEveryone {
@@ -188,6 +198,9 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	if v := c.PublishedVersion; v != nil && (*v < 1 || *v > maxPublishedVersion) {
 		return c, folderConfigError(fmt.Sprintf("publishedVersion must be a whole number from 1 to %d.", maxPublishedVersion))
+	}
+	if c.Print != nil && c.Print.Image != "" && !printImageAddress(c.Print.Image) {
+		return c, folderConfigError(fmt.Sprintf("print image must be an https address of an image, such as https://example.com/logo.png, of at most %d characters.", maxPrintImage))
 	}
 	if len(c.Services) > maxFolderServices {
 		return c, folderConfigError(fmt.Sprintf("services is limited to %d entries.", maxFolderServices))
@@ -211,6 +224,13 @@ func parseFolderConfig(text string) (folderConfig, error) {
 		kinds[svc.Type] = true
 	}
 	return c, nil
+}
+
+// printImageAddress reports whether image is an https URL with a host and no
+// credentials, as print.image needs.
+func printImageAddress(image string) bool {
+	u, err := url.Parse(image)
+	return err == nil && len(image) <= maxPrintImage && u.Scheme == "https" && u.Host != "" && u.User == nil && !strings.ContainsAny(image, " \t\r\n")
 }
 
 // withDefaults fills the documented defaults of a GitHub service.
@@ -473,7 +493,7 @@ func markServiceFolders(nodes []*browserNode, prefix string, configs map[string]
 }
 
 // lockableKeys are the keys locked may name.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "locked": true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "locked": true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.

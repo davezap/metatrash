@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	_ "embed"
+	"encoding/base64"
 	"errors"
 	"html/template"
 	"log"
@@ -19,6 +20,7 @@ import (
 const loginCookie = "__Host-metatrash-login"
 const sessionCookie = "__Host-metatrash-session"
 const noticeCookie = "__Host-metatrash-notice"
+const returnCookie = "__Host-metatrash-return"
 
 //go:embed web/account.html
 var accountHTML string
@@ -114,6 +116,45 @@ func accountCookie(w http.ResponseWriter, name, value string, age int) {
 		cookie.Expires = time.Now().Add(time.Duration(age) * time.Second)
 	}
 	http.SetCookie(w, cookie)
+}
+
+func (h *httpAdapter) returnCookieName() string {
+	if h.basePath == "" {
+		return returnCookie
+	}
+	return returnCookie + "-" + secretDigest(h.basePath)[:16]
+}
+
+// returnTarget reports whether target, a path and query on this site with
+// the base path removed, is a page signing in may go back to: a space page or
+// an account page. Nothing else, so the cookie cannot send anyone off-site.
+func returnTarget(target string) bool {
+	return len(target) <= 2048 && (strings.HasPrefix(target, "/spaces/") || strings.HasPrefix(target, "/account/")) && !strings.ContainsAny(target, "\\\r\n")
+}
+
+// redirectToLogin sends a signed-out browser to sign in and remembers the
+// page it asked for, so signing in comes back to it (a link from a printed
+// PDF or an email) instead of going to Your account.
+func (h *httpAdapter) redirectToLogin(w http.ResponseWriter, r *http.Request) {
+	if target := r.URL.RequestURI(); r.Method == http.MethodGet && returnTarget(target) {
+		accountCookie(w, h.returnCookieName(), base64.RawURLEncoding.EncodeToString([]byte(target)), 1200)
+	}
+	http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+}
+
+// takeReturn gives the page remembered by redirectToLogin, or "", and
+// forgets it.
+func (h *httpAdapter) takeReturn(w http.ResponseWriter, r *http.Request) string {
+	cookie, err := r.Cookie(h.returnCookieName())
+	if err != nil {
+		return ""
+	}
+	accountCookie(w, h.returnCookieName(), "", -1)
+	target, err := base64.RawURLEncoding.DecodeString(cookie.Value)
+	if err != nil || !returnTarget(string(target)) {
+		return ""
+	}
+	return string(target)
 }
 
 func cookieToken(r *http.Request, name string) string {
@@ -358,7 +399,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		}
 		if accountSectionPaths[path] != "" || sharingRoute || appRoute || actionRoute {
 			if !signedIn {
-				http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+				h.redirectToLogin(w, r)
 				return true
 			}
 			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)}
@@ -866,6 +907,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	// request lives server-side; the browser only holds its random cookie.
 	if h.oauth != nil && h.oauth.pendingFor(cookieToken(r, h.oauthCookieName())) != nil {
 		http.Redirect(w, r, h.basePath+"/oauth/consent", http.StatusSeeOther)
+		return true
+	}
+	// Go back to the page that sent this browser to sign in.
+	if target := h.takeReturn(w, r); target != "" {
+		http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
 		return true
 	}
 	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)

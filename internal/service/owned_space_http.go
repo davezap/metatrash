@@ -204,7 +204,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 				}
 				return
 			}
-			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
+			h.redirectToLogin(w, r)
 			return
 		}
 		sendError(w, missing())

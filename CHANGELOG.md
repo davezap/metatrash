@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.57.6 - Back to the link after signing in; printout image setting (2026-10-26)
+
+No schema, grant or configuration change. tool-schema.json is 0.15.1 (the write description mentions `print`). Deploy this before setting a printout image in Slate Viewer 0.19.0: older servers refuse the `print` key.
+
+- **Signing in goes back to the page that asked for it** (Dave): a signed-out browser sent to `/login` from a space page or an account page (a link in a printed PDF or an email) is remembered in a short-lived `__Host-metatrash-return` cookie (20 minutes, Strict, HttpOnly), and every way of signing in (email code, passkey, authenticator app, recovery code) then goes back there instead of to Your account. Only `/spaces/...` and `/account/...` pages of this site are remembered or followed, so the cookie can't send anyone elsewhere; an app connection waiting to finish still comes first.
+- **`print` in `.metatrash.json`** (Dave): `{"print": {"image": "https://example.com/logo.png"}}` names an image Slate Viewer prints centred above the title on the first page of the folder's documents. Only the address is stored; the files never change. The address must be `https` with a host and no credentials, up to 2,000 characters. Inherited like `purpose`, and lockable (`locked: {"print": ...}`). docs/api-contract.md, Folder settings.
+- Tested: sign-in returns to the remembered page and forgets it, a plain sign-in still goes to Your account, a forged cookie naming another site, `//host`, `/login` or a backslash path goes to Your account; `print` accepts an https image and refuses http, a bare name, credentials, spaces and unknown fields.
+
 ## 0.57.5 - Space links from a PDF open the page (2026-10-26)
 
 No schema, grant or configuration change.

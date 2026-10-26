@@ -1,9 +1,11 @@
 package service
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -100,5 +102,79 @@ func TestCrossSiteLinkAndSwitchingAccounts(t *testing.T) {
 	}
 	if _, ok, _ := s.accounts.currentUser(t.Context(), owner.Value); ok {
 		t.Fatal("previous session still signed in after switching")
+	}
+}
+
+// A signed-out browser sent to sign in from a page (a link in a printed PDF
+// or an email) goes back to that page after signing in, not to its account.
+func TestSignInReturnsToTheLinkedPage(t *testing.T) {
+	s, code, _ := testAccounts(t)
+	h := &httpAdapter{service: s}
+	call := func(method, path string, form url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, "https://metatrash.com"+path, strings.NewReader(form.Encode()))
+		if method == "POST" {
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("Origin", "https://metatrash.com")
+		}
+		for _, cookie := range cookies {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		if !h.serveAccounts(w, r, "test-client") {
+			t.Fatal("route not handled")
+		}
+		return w
+	}
+	cookie := func(w *httptest.ResponseRecorder, name string) *http.Cookie {
+		for _, c := range w.Result().Cookies() {
+			if c.Name == name {
+				return c
+			}
+		}
+		return nil
+	}
+	// A code can be asked for an address only so often, so each sign-in
+	// is another account.
+	accounts := 0
+	signIn := func(back *http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		accounts++
+		browser := cookie(call("GET", "/login", nil), loginCookie)
+		form := loginSendForm(t, call("GET", "/login", nil, browser).Body.String(), "reader"+strconv.Itoa(accounts)+"@example.com")
+		if w := call("POST", "/login/send", form, browser); w.Code != 303 {
+			t.Fatalf("send: %d", w.Code)
+		}
+		cookies := []*http.Cookie{browser}
+		if back != nil {
+			cookies = append(cookies, back)
+		}
+		return call("POST", "/login/verify", url.Values{"code": {*code}, "csrf": {browser.Value}}, cookies...)
+	}
+
+	w := call("GET", "/account/shared", nil)
+	back := cookie(w, returnCookie)
+	if w.Code != 303 || w.Header().Get("Location") != "/login" || back == nil || back.MaxAge <= 0 {
+		t.Fatalf("signed-out page: %d %v", w.Code, back)
+	}
+	w = signIn(back)
+	if w.Code != 303 || w.Header().Get("Location") != "/account/shared" || cookie(w, sessionCookie) == nil {
+		t.Fatalf("sign-in with a page to go back to: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	if c := cookie(w, returnCookie); c == nil || c.MaxAge >= 0 {
+		t.Fatal("the page to go back to is not forgotten")
+	}
+	if w := signIn(nil); w.Header().Get("Location") != "/account" {
+		t.Fatalf("plain sign-in: %q", w.Header().Get("Location"))
+	}
+	// Only space and account pages of this site, whatever the cookie says.
+	for _, target := range []string{"https://evil.example/", "//evil.example/", "/login", "/account\\..\\x"} {
+		forged := &http.Cookie{Name: returnCookie, Value: base64.RawURLEncoding.EncodeToString([]byte(target))}
+		if w := signIn(forged); w.Header().Get("Location") != "/account" {
+			t.Fatalf("forged %q: %q", target, w.Header().Get("Location"))
+		}
+	}
+	if !returnTarget("/spaces/bartco/r-d/policies/README.md?x=1") {
+		t.Fatal("space page refused")
 	}
 }

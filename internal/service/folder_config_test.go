@@ -17,6 +17,8 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"services":[{"type":"github","repo":"dave-zap/site"}]}`,
 		`{"services":[{"type":"github","repo":"dave-zap/site.io","branch":"release/1.0","push":"auto","pull":"auto"}]}`,
 		`{"actions":[{"name":"x","every":"Monday 08:00","do":"y","web":false},{"name":"z","every":"hour :30","do":"y","member":"alice"}]}`,
+		`{"print":{"image":"https://example.com/brand/logo.png?v=2"},"locked":{"print":"everyone"}}`,
+		`{"print":{}}`,
 	}
 	for _, text := range good {
 		if _, err := parseFolderConfig(text); err != nil {
@@ -44,6 +46,11 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"services":[{"type":"github","repo":"a/b","pull":"manual"}]}`:                "pull",
 		`{"services":[{"type":"github","repo":"a/b"},{"type":"github","repo":"a/c"}]}`: "only one github",
 		`{"services":[{"type":"github","repo":"a/b","token":"x"}]}`:                    "unknown",
+		`{"print":{"image":"http://example.com/logo.png"}}`:                            "https address",
+		`{"print":{"image":"logo.png"}}`:                                               "https address",
+		`{"print":{"image":"https://a:b@example.com/x.png"}}`:                          "https address",
+		`{"print":{"image":"https://example.com/a b.png"}}`:                            "https address",
+		`{"print":{"image":"https://example.com/x","size":1}}`:                         "unknown",
 		`{} {}`: "",
 	}
 	for text, want := range bad {
