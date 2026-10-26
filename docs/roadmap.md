@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.55.0 (2026-10-25). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of 0.58.0 (2026-10-26). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -213,7 +213,11 @@ renamed `README.md`). 0.56.0 adds who pays per action (`"pays":
 "contributor"`, with opting in on `/account/actions/<job>` and a notice
 email) and members' own actions (`"member"`), schema v17. 0.57.0 adds the web
 tools (`web_search` through Brave, `web_fetch` into a B2 downloads cache) and
-`every` schedules in each space's own time zone, schema v18.
+`every` schedules in each space's own time zone, schema v18. 0.57.1 to
+0.57.4 cut the tokens per job and mark a run cut off at its step limit as
+failed. 0.58.0 lets you change an agent's name, daily cap and key without
+removing it. (0.57.5 and 0.57.6 were printing and sign-in fixes, outside this
+plan, which is why PDF and Word moved from 0.58.0 to 0.59.0.)
 
 ### User agents and who pays (agreed with Dave 2026-10-25)
 
@@ -256,8 +260,7 @@ with their own money.
 ### Build order
 
 1. ~~**0.55.0**: user agents (table, account page, encrypted keys), the action
-   `model` field, owner pays.~~ Done; replacing a saved agent's key means
-   removing and adding it again for now.
+   `model` field, owner pays.~~ Done; changing a saved agent came in 0.58.0.
 2. ~~**0.56.0**: bring your own key and members' own actions (opt-in,
    notices, adopt).~~ Done. Choices made while building it: the field is
    `"pays": "contributor"` and needs `model`; opting in picks one of your
@@ -279,8 +282,13 @@ with their own money.
    schedules are `hour`, `hour :MM`, `day`, `weekday`, a day's name or
    `month D` (1 to 28) with a time, and cannot use `"pays": "contributor"`;
    each space's time zone is set with the clock icon on Your account.
-4. **0.58.0**: PDF and Word files as triggers and input.
-5. **Slate Viewer**: an Automation page for a folder's actions and its
+4. ~~**0.58.0**: change an agent (name, daily cap, a new key) on Services →
+   Agents, which the design called "replaceable".~~ Done. The provider,
+   model and endpoint stay fixed (another model is another agent, so the
+   actions and opt-ins that chose it keep their model); today's use counts
+   toward a new cap at once.
+5. **0.59.0**: PDF and Word files as triggers and input.
+6. **Slate Viewer**: an Automation page for a folder's actions and its
    `runner.md`, opting in, and agents; make a refused `.metatrash.json` save
    obvious in both Slate Viewer and mtsync (on 2026-10-25 an invalid file
    stayed local while `mtsync list` still said "in sync"); and open
@@ -375,9 +383,6 @@ scheduled yet. To settle when it is:
   (`script-src 'self'`) blocks, so every page logs a console error. Turn off
   its automatic setup in the Cloudflare dashboard (or allow the host in the
   CSP if the analytics are wanted).
-- **Edit an agent's daily cap** on Services → Agents (today it is set only
-  when the agent is added; Dave hit the cap on 2026-10-25 and had to add a
-  second agent).
 - **Old READMEs**: spaces made before 0.45.0 still hold the old agent
   README.md as an ordinary file; delete or rewrite them as needed.
 - [Security review](security-review-2026-09-30.md) F3: cache recent activity
@@ -392,6 +397,28 @@ scheduled yet. To settle when it is:
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.58.0 (2026-10-26):
+
+- **Change an agent:** run `deploy/account-grants.sql`, deploy, and see
+  `metatrash check` report no missing grants. On Services → Agents, open
+  the pencil on an agent: change its daily cap (the row shows "N of
+  <new cap> tokens today"), rename it, and give it a new key (the row shows
+  the new key ending; Test works with it). Renaming it to another agent's
+  name is refused. An action you opted in to pay with it still lists it under
+  Actions you pay for.
+
+From 0.57.5 and 0.57.6 (2026-10-26):
+
+- **Links from a PDF:** print a document with a link to another page in a
+  private space from Slate Viewer, open the PDF while signed in, and click
+  the link: the page opens, not `/account` or `/login`.
+- **Back after signing in:** signed out, open a private space page: after
+  signing in (email code, passkey or authenticator app) you land on that
+  page, not Your account.
+- **Printout image:** with 0.57.6 deployed, set Properties → Publishing →
+  Printed copies in Slate Viewer 0.19.0 to an https image; it prints above
+  the title on the first page.
 
 From 0.57.0 (2026-10-25):
 

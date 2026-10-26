@@ -109,8 +109,8 @@ type agentForm struct {
 // newUserAgent checks the form and seals the key.
 func newUserAgent(aead cipher.AEAD, userID string, f agentForm, now time.Time) (userAgent, error) {
 	u := userAgent{UserID: userID, Name: strings.TrimSpace(f.Name), Provider: strings.ToLower(strings.TrimSpace(f.Provider)), Model: strings.TrimSpace(f.Model), MaxTokens: defaultAgentMaxTokens, DailyCap: defaultDailyTokenCap, Created: now}
-	if !agentNamePattern.MatchString(u.Name) || !utf8.ValidString(u.Name) {
-		return u, invalid("Give the agent a name of up to 64 letters, numbers, spaces and . _ ' ( ) -, such as MiniMax main.")
+	if err := checkAgentName(u.Name); err != nil {
+		return u, err
 	}
 	p, ok := agentProviders[u.Provider]
 	if !ok {
@@ -129,13 +129,13 @@ func newUserAgent(aead cipher.AEAD, userID string, f agentForm, now time.Time) (
 		u.BaseURL = endpoint
 	}
 	key := strings.TrimSpace(f.Key)
-	if key == "" || len(key) > 512 || strings.ContainsFunc(key, func(r rune) bool { return r <= ' ' || r > '~' }) {
-		return u, invalid("Paste the API key from " + p.keysURL + ": one line, no spaces.")
+	if err := checkAgentKey(p, key); err != nil {
+		return u, err
 	}
-	if c := strings.ReplaceAll(strings.TrimSpace(f.Cap), ",", ""); c != "" {
-		var n int64
-		if _, err := fmt.Sscan(c, &n); err != nil || n < 0 || n > 1e12 || fmt.Sprint(n) != c {
-			return u, invalid("The daily token cap is a whole number of tokens; 0 means no limit.")
+	if c := strings.TrimSpace(f.Cap); c != "" {
+		n, err := parseAgentCap(c)
+		if err != nil {
+			return u, err
 		}
 		u.DailyCap = n
 	}
@@ -144,11 +144,66 @@ func newUserAgent(aead cipher.AEAD, userID string, f agentForm, now time.Time) (
 		return u, err
 	}
 	u.ID = id
-	if u.Sealed, err = sealAgentKey(aead, userID, id, key); err != nil {
+	return u, u.setKey(aead, key)
+}
+
+// changedUserAgent applies the Change agent form (0.58.0) to u: its name,
+// its daily cap and, when one is given, a new API key. The provider, model
+// and endpoint stay; an agent for another model is a new agent, so the
+// actions and opt-ins that chose this one keep the model they chose.
+func changedUserAgent(aead cipher.AEAD, u userAgent, f agentForm) (userAgent, error) {
+	u.Name = strings.TrimSpace(f.Name)
+	if err := checkAgentName(u.Name); err != nil {
 		return u, err
 	}
-	u.KeyHint = key[max(0, len(key)-4):]
+	n, err := parseAgentCap(strings.TrimSpace(f.Cap))
+	if err != nil {
+		return u, err
+	}
+	u.DailyCap = n
+	if key := strings.TrimSpace(f.Key); key != "" {
+		if err := checkAgentKey(agentProviders[u.Provider], key); err != nil {
+			return u, err
+		}
+		if err := u.setKey(aead, key); err != nil {
+			return u, err
+		}
+	}
 	return u, nil
+}
+
+func checkAgentName(name string) error {
+	if !agentNamePattern.MatchString(name) || !utf8.ValidString(name) {
+		return invalid("Give the agent a name of up to 64 letters, numbers, spaces and . _ ' ( ) -, such as MiniMax main.")
+	}
+	return nil
+}
+
+func checkAgentKey(p agentProviderInfo, key string) error {
+	if key == "" || len(key) > 512 || strings.ContainsFunc(key, func(r rune) bool { return r <= ' ' || r > '~' }) {
+		return invalid("Paste the API key from " + p.keysURL + ": one line, no spaces.")
+	}
+	return nil
+}
+
+// parseAgentCap reads a daily token cap ("2,000,000"); 0 means no limit.
+func parseAgentCap(c string) (int64, error) {
+	c = strings.ReplaceAll(c, ",", "")
+	var n int64
+	if _, err := fmt.Sscan(c, &n); err != nil || n < 0 || n > 1e12 || fmt.Sprint(n) != c {
+		return 0, invalid("The daily token cap is a whole number of tokens; 0 means no limit.")
+	}
+	return n, nil
+}
+
+// setKey seals key for u and keeps its last four characters as the hint.
+func (u *userAgent) setKey(aead cipher.AEAD, key string) error {
+	sealed, err := sealAgentKey(aead, u.UserID, u.ID, key)
+	if err != nil {
+		return err
+	}
+	u.Sealed, u.KeyHint = sealed, key[max(0, len(key)-4):]
+	return nil
 }
 
 // checkAgentEndpoint allows https addresses on public hosts only, so a user's
@@ -258,6 +313,38 @@ func (db *accountDatabase) addUserAgent(ctx context.Context, u userAgent) error 
 	u.Default = count == 0
 	if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_agents ("+userAgentColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		u.ID, u.UserID, u.Name, u.Provider, u.BaseURL, u.Model, u.MaxTokens, u.DailyCap, u.Sealed, u.KeyHint, u.Default, u.Created.Unix()); err != nil {
+		return fmt.Errorf("cannot save the agent")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("cannot save the agent")
+	}
+	return nil
+}
+
+// changeUserAgent saves a changed name, daily cap and key for one of the
+// user's agents (see changedUserAgent).
+func (db *accountDatabase) changeUserAgent(ctx context.Context, u userAgent) error {
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("cannot save the agent")
+	}
+	defer tx.Rollback()
+	var id string
+	switch err := tx.QueryRowContext(ctx, "SELECT agent_id FROM metatrash_agents WHERE agent_id = ? AND user_id = ? FOR UPDATE", u.ID, u.UserID).Scan(&id); {
+	case errors.Is(err, sql.ErrNoRows):
+		return missing()
+	case err != nil:
+		return fmt.Errorf("cannot save the agent")
+	}
+	var named int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_agents WHERE user_id = ? AND name = ? AND agent_id <> ?", u.UserID, u.Name, u.ID).Scan(&named); err != nil {
+		return fmt.Errorf("cannot save the agent")
+	}
+	if named > 0 {
+		return problem(409, "conflict", "You already have an agent called "+u.Name+". Choose another name.")
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE metatrash_agents SET name = ?, daily_cap = ?, key_sealed = ?, key_hint = ? WHERE agent_id = ? AND user_id = ?",
+		u.Name, u.DailyCap, u.Sealed, u.KeyHint, u.ID, u.UserID); err != nil {
 		return fmt.Errorf("cannot save the agent")
 	}
 	if err := tx.Commit(); err != nil {

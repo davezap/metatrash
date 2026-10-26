@@ -198,6 +198,40 @@ func TestDatabaseAgentsPage(t *testing.T) {
 	if res := oauthCall(w.h, "POST", "/account/agents/remove", url.Values{"csrf": {otherCSRF}, "agent": {agents[0].ID}}, other); res.Code != 404 {
 		t.Errorf("another account's remove: %d", res.Code)
 	}
+	// Change its name, cap and key (0.58.0); another account cannot.
+	change := url.Values{"csrf": {csrf("change")}, "agent": {agents[0].ID}, "name": {"MiniMax renamed"}, "cap": {"5,000,000"}, "key": {""}}
+	if res := oauthCall(w.h, "POST", "/account/agents/change", url.Values{"csrf": {w.s.accounts.agentCSRF("/account/agents/change", other.Value)}, "agent": {agents[0].ID}, "name": {"x"}, "cap": {"1"}, "key": {""}}, other); res.Code != 404 {
+		t.Errorf("another account's change: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "POST", "/account/agents/change", change, session); res.Code != 303 {
+		t.Fatalf("change: %d %s", res.Code, res.Body.String())
+	}
+	changed, _ := w.db.userAgents(ctx, user.ID)
+	if len(changed) != 1 || changed[0].Name != "MiniMax renamed" || changed[0].DailyCap != 5000000 || changed[0].KeyHint != "5678" || string(changed[0].Sealed) != string(agents[0].Sealed) {
+		t.Fatalf("after change: %+v", changed)
+	}
+	change.Set("key", "sk-new-4321")
+	change.Set("cap", "0")
+	if res := oauthCall(w.h, "POST", "/account/agents/change", change, session); res.Code != 303 {
+		t.Fatalf("change key: %d %s", res.Code, res.Body.String())
+	}
+	res = oauthCall(w.h, "POST", "/account/agents/test", url.Values{"csrf": {csrf("test")}, "agent": {agents[0].ID}}, session)
+	if res.Code != 200 || len(called) != 2 || called[1].apiKey != "sk-new-4321" {
+		t.Errorf("test after a new key: %d %+v", res.Code, called)
+	}
+	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "key ending 4321") || !strings.Contains(body, "No cap") || strings.Contains(body, "sk-new") {
+		t.Errorf("listed after change:\n%s", body)
+	}
+	change.Set("cap", "-1")
+	if res := oauthCall(w.h, "POST", "/account/agents/change", change, session); res.Code != 400 || !strings.Contains(res.Body.String(), "whole number") {
+		t.Errorf("bad cap: %d", res.Code)
+	}
+	change.Set("name", "MiniMax main")
+	change.Set("cap", "1")
+	change.Set("key", "")
+	if res := oauthCall(w.h, "POST", "/account/agents/change", change, session); res.Code != 303 {
+		t.Fatalf("rename back: %d", res.Code)
+	}
 	add.Set("name", "Claude")
 	add.Set("provider", "anthropic")
 	if res := oauthCall(w.h, "POST", "/account/agents/add", add, session); res.Code != 303 {
@@ -206,6 +240,10 @@ func TestDatabaseAgentsPage(t *testing.T) {
 	agents, _ = w.db.userAgents(ctx, user.ID)
 	if len(agents) != 2 || agents[1].Name != "Claude" || agents[1].Default {
 		t.Fatalf("agents %+v", agents)
+	}
+	clash := url.Values{"csrf": {csrf("change")}, "agent": {agents[1].ID}, "name": {"MiniMax main"}, "cap": {"1"}, "key": {""}}
+	if res := oauthCall(w.h, "POST", "/account/agents/change", clash, session); res.Code != 409 || !strings.Contains(res.Body.String(), "already have an agent called") {
+		t.Errorf("rename to a name in use: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "POST", "/account/agents/default", url.Values{"csrf": {csrf("default")}, "agent": {agents[1].ID}}, session); res.Code != 303 {
 		t.Fatalf("default: %d", res.Code)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.58.0 - Change an agent's key, name and daily cap (2026-10-26)
+
+**Grants only**: run `deploy/account-grants.sql` again before this binary starts (`UPDATE (name, daily_cap, key_sealed, key_hint)` on `metatrash_agents`); `metatrash check` lists them as missing until then. No schema or `accounts.json` change. tool-schema.json is unchanged (0.15.1).
+
+- **Change an agent** (the rest of "bring your own key", docs/roadmap.md): each agent on Your account → Services → Agents has a pencil that opens its name, its daily token cap and a new API key. Leave the key empty to keep the saved one; a new key is checked like a new agent's, sealed the same way and never shown again, and the row's "key ending" changes to it. Until now a new key or cap meant removing the agent and adding it again, which also dropped every action its owner had opted in to pay with it (Dave hit the 2,000,000 cap on 2026-10-25 and had to add a second agent).
+- **What stays**: the provider, model and endpoint (an agent for another model is a new agent, so actions and opt-ins that chose this one keep the model they chose), whether it is the default, its opt-ins, and today's use, which counts toward the new cap straight away.
+- Tested: the form's checks (name, cap, key) and that an empty key keeps the sealed one; against MariaDB with the runtime grants, renaming and changing the cap, a new key that Test then uses, the list showing the new key ending and "No cap", a bad cap refused, a clashing name refused, and another account's change not found.
+
 ## 0.57.6 - Back to the link after signing in; printout image setting (2026-10-26)
 
 No schema, grant or configuration change. tool-schema.json is 0.15.1 (the write description mentions `print`). Deploy this before setting a printout image in Slate Viewer 0.19.0: older servers refuse the `print` key.

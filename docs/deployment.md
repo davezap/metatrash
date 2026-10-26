@@ -745,6 +745,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.55.0 | schema v16 (`metatrash_agents`, `agent_id` on jobs) and grants (`SELECT, INSERT, DELETE` and `UPDATE (is_default)` on `metatrash_agents`, `UPDATE (agent_id)` on jobs); in `accounts.json` replace the agents settings with `keyFile` (Folder actions) | 15, after putting the 0.54.x agents settings back in `accounts.json`; agents stay in the table, unused |
 | 0.56.0 | schema v17 (`metatrash_action_optins`, `contributor_id` on jobs) and grants (`SELECT, INSERT, DELETE` on `metatrash_action_optins`) | 16, after removing `pays` and `member` from every action: 0.55 treats a file with them as invalid. Opt-ins stay in the table, unused |
 | 0.57.0 | schema v18 (`metatrash_action_schedules`, `metatrash_web_objects`, `metatrash_web_refs`, `timezone` on spaces) and grants (`SELECT, INSERT, DELETE` on the three tables, `UPDATE (every, next_run_at, last_run_at)` on schedules, `UPDATE (uploaded_at)` on web objects, `UPDATE (timezone)` on spaces); optional `agents.search` and `agents.downloads` (Folder actions) | 17, after removing `every` from every action: 0.56 refuses it. Schedules, downloads and time zones stay, unused |
+| 0.58.0 | grants (`UPDATE (name, daily_cap, key_sealed, key_hint)` on `metatrash_agents`) | (grants only); changed names, caps and keys stay |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

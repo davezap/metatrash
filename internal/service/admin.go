@@ -669,7 +669,7 @@ var accountGrants = []string{
 	"metatrash_form_submissions UPDATE (status)", "metatrash_form_submissions UPDATE (score)", "metatrash_form_submissions UPDATE (marks)", "metatrash_form_submissions UPDATE (reviewed_by)", "metatrash_form_submissions UPDATE (reviewed_at)", "metatrash_form_submissions UPDATE (note)", "metatrash_form_submissions UPDATE (text)",
 	"metatrash_agent_jobs SELECT", "metatrash_agent_jobs INSERT",
 	"metatrash_agent_jobs UPDATE (status)", "metatrash_agent_jobs UPDATE (started_at)", "metatrash_agent_jobs UPDATE (finished_at)", "metatrash_agent_jobs UPDATE (steps)", "metatrash_agent_jobs UPDATE (input_tokens)", "metatrash_agent_jobs UPDATE (output_tokens)", "metatrash_agent_jobs UPDATE (error)", "metatrash_agent_jobs UPDATE (agent_id)",
-	"metatrash_agents SELECT", "metatrash_agents INSERT", "metatrash_agents DELETE", "metatrash_agents UPDATE (is_default)",
+	"metatrash_agents SELECT", "metatrash_agents INSERT", "metatrash_agents DELETE", "metatrash_agents UPDATE (is_default)", "metatrash_agents UPDATE (name)", "metatrash_agents UPDATE (daily_cap)", "metatrash_agents UPDATE (key_sealed)", "metatrash_agents UPDATE (key_hint)",
 	"metatrash_action_optins SELECT", "metatrash_action_optins INSERT", "metatrash_action_optins DELETE",
 	"metatrash_spaces UPDATE (timezone)",
 	"metatrash_action_schedules SELECT", "metatrash_action_schedules INSERT", "metatrash_action_schedules DELETE",

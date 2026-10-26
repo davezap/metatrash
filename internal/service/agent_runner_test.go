@@ -741,9 +741,30 @@ func TestUserAgents(t *testing.T) {
 	if u, err := newUserAgent(settings.seal, "u1", agentForm{Name: "Own", Provider: "anthropic", Key: "k", Endpoint: "https://llm.example.com/v1/", Cap: "0"}, time.Now()); err != nil || u.BaseURL != "https://llm.example.com/v1" || u.DailyCap != 0 || u.Model != "claude-sonnet-5-5" {
 		t.Errorf("own endpoint: %+v %v", u, err)
 	}
+	// Changing an agent (0.58.0): name and cap always, the key only when given.
+	c, err := changedUserAgent(settings.seal, u, agentForm{Name: " Renamed ", Cap: "5,000,000"})
+	if err != nil || c.Name != "Renamed" || c.DailyCap != 5000000 || c.KeyHint != "9876" || string(c.Sealed) != string(u.Sealed) || c.ID != u.ID || c.Ref() != u.Ref() {
+		t.Fatalf("change without a key: %+v %v", c, err)
+	}
+	if c, err = changedUserAgent(settings.seal, u, agentForm{Name: "MiniMax main", Cap: "0", Key: " sk-new-4321 "}); err != nil || c.KeyHint != "4321" || c.DailyCap != 0 {
+		t.Fatalf("change with a key: %+v %v", c, err)
+	}
+	if key, err := openAgentKey(settings.seal, "u1", u.ID, c.Sealed); err != nil || key != "sk-new-4321" {
+		t.Errorf("open the new key: %q %v", key, err)
+	}
+	for f, want := range map[agentForm]string{
+		{Name: "", Cap: "1"}:                    "name",
+		{Name: "a", Cap: ""}:                    "whole number",
+		{Name: "a", Cap: "1.5"}:                 "whole number",
+		{Name: "a", Cap: "1", Key: "two words"}: "one line",
+	} {
+		if _, err := changedUserAgent(settings.seal, u, f); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("change %+v: %v, want %q", f, err, want)
+		}
+	}
 	a := userAgent{ID: "a", Provider: "minimax", Model: "MiniMax-M3"}
 	b := userAgent{ID: "b", Provider: "minimax", Model: "MiniMax-M3", Default: true}
-	c := userAgent{ID: "c", Provider: "anthropic", Model: "claude-sonnet-5-5"}
+	c = userAgent{ID: "c", Provider: "anthropic", Model: "claude-sonnet-5-5"}
 	for want, cases := range map[string][]string{"b": {"", "minimax/MiniMax-M3"}, "c": {"anthropic/claude-sonnet-5-5"}, "": {"anthropic/claude-opus-5-5"}} {
 		for _, ref := range cases {
 			got, ok := pickAgent([]userAgent{a, b, c}, ref)

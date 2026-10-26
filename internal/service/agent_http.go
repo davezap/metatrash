@@ -12,8 +12,8 @@ import (
 )
 
 // Agents in Your account → Services (0.55.0): add an agent (provider, model,
-// API key, daily cap), test it with one tiny call, make it the default, or
-// remove it. Since 0.56.0 it also lists the actions the user pays for, and
+// API key, daily cap), test it with one tiny call, make it the default,
+// change its name, daily cap or key (0.58.0), or remove it. Since 0.56.0 it also lists the actions the user pays for, and
 // /account/actions/<job> shows an action that skipped one of the user's
 // files, where they opt in to pay for it. Shown only while folder actions
 // are enabled on the server.
@@ -22,6 +22,7 @@ var agentRoutes = map[string]bool{
 	"/account/agents/add":     true,
 	"/account/agents/test":    true,
 	"/account/agents/default": true,
+	"/account/agents/change":  true,
 	"/account/agents/remove":  true,
 	"/account/agents/optin":   true,
 	"/account/agents/optout":  true,
@@ -31,6 +32,7 @@ var agentFormFields = map[string][]string{
 	"/account/agents/add":     {"name", "provider", "model", "key", "endpoint", "cap"},
 	"/account/agents/test":    {"agent"},
 	"/account/agents/default": {"agent"},
+	"/account/agents/change":  {"agent", "name", "cap", "key"},
 	"/account/agents/remove":  {"agent"},
 	"/account/agents/optin":   {"job", "agent"},
 	"/account/agents/optout":  {"optin"},
@@ -247,6 +249,44 @@ func (h *httpAdapter) submitAgent(w http.ResponseWriter, r *http.Request, sessio
 			return
 		}
 		accountCookie(w, h.noticeCookieName(), "agent-added", 60)
+	case "/account/agents/change":
+		if !idPattern.MatchString(agentID) {
+			fail(invalid("Choose one of your agents."), nil)
+			return
+		}
+		if err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600}); err != nil {
+			fail(err, nil)
+			return
+		}
+		agents, err := db.userAgents(r.Context(), user.ID)
+		if err != nil {
+			fail(err, nil)
+			return
+		}
+		var found *userAgent
+		for i := range agents {
+			if agents[i].ID == agentID {
+				found = &agents[i]
+			}
+		}
+		if found == nil {
+			fail(missing(), nil)
+			return
+		}
+		form := agentForm{Name: r.PostForm.Get("name"), Cap: r.PostForm.Get("cap"), Key: r.PostForm.Get("key")}
+		u, err := changedUserAgent(runner.settings.seal, *found, form)
+		if err == nil {
+			err = db.changeUserAgent(r.Context(), u)
+		}
+		if err != nil {
+			fail(err, nil)
+			return
+		}
+		notice := "agent-changed"
+		if strings.TrimSpace(form.Key) != "" {
+			notice = "agent-key-changed"
+		}
+		accountCookie(w, h.noticeCookieName(), notice, 60)
 	case "/account/agents/default", "/account/agents/remove":
 		if !idPattern.MatchString(agentID) {
 			fail(invalid("Choose one of your agents."), nil)

@@ -179,6 +179,7 @@ body.viewer pre{min-height:0}
 .pop-panel .hint{margin:0 0 12px}
 .pop-panel label{font-size:13px}
 .pop-panel .inline-form input:not([type=hidden]){flex-basis:150px}
+.agent-change{display:grid;gap:6px}.agent-change input:not([type=hidden]){width:100%}.agent-change label{margin-top:4px}.agent-change .hint{margin:0}.agent-change .button{justify-self:start;margin-top:8px}
 .acct .warning{padding:12px;border:1px solid #e5c38e;background:#3a321f;color:#ffe9c4;border-radius:4px;line-height:1.55}
 .web-note{margin:0 0 16px;padding:12px 14px;border:1px solid #6b5c2c;border-left:3px solid #f2c46b;border-radius:4px;background:#221f15;color:#efe3c2;font-size:14px}
 .web-note strong{color:#f6d58e}
