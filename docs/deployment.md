@@ -424,6 +424,12 @@ public space among them) refuse actions altogether.
   sudoedit /etc/metatrash/web-bucket-key        # the applicationKey, one line
   ```
 
+  PDF text (0.59.0) comes from `pdftotext`, part of Poppler: install it
+  with `sudo dnf install poppler-utils` (or `apt install poppler-utils`)
+  and check `pdftotext -v`; the service finds it on its `PATH` when it
+  starts, and `metatrash check` says whether it did. Without it, PDFs are
+  still downloaded but have no text. Word files need nothing extra.
+
   Without `search` and `downloads`, actions run without the web tools.
 
 The 0.54.x settings `owners`, `provider`, `baseURL`, `model`, `apiKeyFile`,
@@ -746,6 +752,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.56.0 | schema v17 (`metatrash_action_optins`, `contributor_id` on jobs) and grants (`SELECT, INSERT, DELETE` on `metatrash_action_optins`) | 16, after removing `pays` and `member` from every action: 0.55 treats a file with them as invalid. Opt-ins stay in the table, unused |
 | 0.57.0 | schema v18 (`metatrash_action_schedules`, `metatrash_web_objects`, `metatrash_web_refs`, `timezone` on spaces) and grants (`SELECT, INSERT, DELETE` on the three tables, `UPDATE (every, next_run_at, last_run_at)` on schedules, `UPDATE (uploaded_at)` on web objects, `UPDATE (timezone)` on spaces); optional `agents.search` and `agents.downloads` (Folder actions) | 17, after removing `every` from every action: 0.56 refuses it. Schedules, downloads and time zones stay, unused |
 | 0.58.0 | grants (`UPDATE (name, daily_cap, key_sealed, key_hint)` on `metatrash_agents`) | (grants only); changed names, caps and keys stay |
+| 0.59.0 | none; optional `poppler-utils` for PDF text (Folder actions) | 0.58; references made with text stay readable as their originals |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

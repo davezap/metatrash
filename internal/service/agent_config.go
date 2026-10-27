@@ -77,6 +77,9 @@ type agentSettings struct {
 	searchLimit, fetchLimit int
 	// The key files, for metatrash check.
 	searchKeyFile, downloadsKeyFile string
+	// pdftotext is the program that reads PDFs' text (0.59.0), "" when it is
+	// not installed.
+	pdftotext string
 }
 
 const (
@@ -177,6 +180,7 @@ func (c *agentsConfig) settings() (*agentSettings, error) {
 			return nil, fmt.Errorf("agents downloads keyFile must hold the application key")
 		}
 		settings.downloadsKeyFile = d.KeyFile
+		settings.pdftotext = findPDFToText()
 		settings.downloads = &s3Store{endpoint: "https://" + u.Host, region: region, bucket: d.Bucket, keyID: d.KeyID, secret: strings.TrimSpace(string(secret)), http: s3HTTPClient()}
 		if settings.fetchLimit = d.DailyLimit; settings.fetchLimit == 0 {
 			settings.fetchLimit = defaultFetchDailyLimit

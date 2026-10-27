@@ -246,6 +246,11 @@ func webKind(page webPage) (kind, media, ext string) {
 // textKind reports whether a kind's original is text an agent can read.
 func textKind(kind string) bool { return kind == webHTML || kind == webText }
 
+// convertedKind reports whether a kind's text is a Markdown version of the
+// original (web/<ref>.md beside web/<ref>.<ext>): web pages, and since
+// 0.59.0 PDF and Word files.
+func convertedKind(kind string) bool { return kind == webHTML || kind == webPDF || kind == webWord }
+
 // decodeWebText makes a download's text valid UTF-8. Text that is valid
 // UTF-8 is taken as UTF-8 whatever the site declared; anything else is read
 // as Windows-1252 (a superset of ISO 8859-1), the usual encoding of older

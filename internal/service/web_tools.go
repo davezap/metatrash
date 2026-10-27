@@ -395,6 +395,13 @@ func (w *webSession) webFetch(ctx context.Context, raw string) (any, error) {
 		return nil, err
 	}
 	w.add(page.URL)
+	if page.Status == http.StatusNotModified && havePrev && prev.Text == "" && convertedKind(prev.Kind) {
+		// Fetched before Metatrash could read its text: download it again.
+		if page, err = w.a.fetcher.fetch(ctx, u, "", ""); err != nil {
+			return nil, err
+		}
+		w.add(page.URL)
+	}
 	if page.Status == http.StatusNotModified {
 		if !havePrev {
 			return nil, problem(502, "fetch_failed", "The site answered 304 Not Modified to a first request.")
@@ -406,7 +413,7 @@ func (w *webSession) webFetch(ctx context.Context, raw string) (any, error) {
 		return nil, problem(415, "unsupported_type", fmt.Sprintf("web_fetch takes web pages, text, images, PDF and Word files; this is %s.", orUnknown(media)))
 	}
 	hash := webHash(page.Body)
-	if havePrev && prev.Original == hash {
+	if havePrev && prev.Original == hash && (prev.Text != "" || !convertedKind(kind)) {
 		return w.describe(ctx, prev, true)
 	}
 	original, err := w.store(ctx, page.Body, media, now)
@@ -432,8 +439,22 @@ func (w *webSession) webFetch(ctx context.Context, raw string) (any, error) {
 				ref.Title = oneLine(strings.SplitN(heading, "\n", 2)[0])
 			}
 		}
+	case webWord:
+		title, md, err := docxToMarkdown(page.Body)
+		if err != nil {
+			log.Printf("agent runner: web_fetch %s: %v", u.Redacted(), err)
+		}
+		ref.Title, text = title, md
+	case webPDF:
+		if w.a.pdfText != nil {
+			raw, err := w.a.pdfText(ctx, page.Body)
+			if err != nil {
+				log.Printf("agent runner: web_fetch %s: %v", u.Redacted(), err)
+			}
+			text = pdfMarkdown(raw)
+		}
 	}
-	if textKind(kind) {
+	if textKind(kind) || text != "" {
 		if text == string(page.Body) {
 			ref.Text = hash
 		} else {
@@ -458,6 +479,17 @@ func (w *webSession) webFetch(ctx context.Context, raw string) (any, error) {
 	return w.describe(ctx, ref, false)
 }
 
+// noTextNote says why a PDF or Word reference has no text.
+func noTextNote(kind string, canReadPDF bool) string {
+	if kind == webPDF && !canReadPDF {
+		return "This server cannot read the text of PDF files (pdftotext is not installed). Work from search results or a web page instead."
+	}
+	if kind == webPDF {
+		return "The PDF has no readable text: it may be scanned pages (there is no OCR), protected or damaged. Work from search results or a web page instead."
+	}
+	return "The Word file has no readable text, or cannot be read. Work from search results or a web page instead."
+}
+
 func orUnknown(media string) string {
 	if media == "" {
 		return "an unknown type"
@@ -470,7 +502,7 @@ func (w *webSession) describe(ctx context.Context, ref webRef, unchanged bool) (
 	out := webFetchResult{URL: ref.URL, Title: ref.Title, Type: webMedia[ref.Ext], Lines: ref.Lines, Unchanged: unchanged}
 	base := "web/" + ref.ID + "."
 	out.Path = base + ref.Ext
-	if ref.Kind == webHTML {
+	if ref.Kind == webHTML || convertedKind(ref.Kind) && ref.Text != "" {
 		out.Path, out.Original = base+"md", base+ref.Ext
 	}
 	if o, ok, err := w.a.webRefs.object(ctx, ref.Original); err == nil && ok {
@@ -480,7 +512,9 @@ func (w *webSession) describe(ctx context.Context, ref webRef, unchanged bool) (
 	case webKindImage:
 		out.Note = "read the path to see the image."
 	case webPDF, webWord:
-		out.Note = "Metatrash cannot read the text of PDF and Word files yet; that comes in a later release. Work from search results or a web page instead."
+		if ref.Text == "" {
+			out.Note = noTextNote(ref.Kind, w.a.pdfText != nil)
+		}
 	}
 	if ref.Text != "" {
 		b, err := w.object(ctx, ref.Text)
@@ -569,7 +603,7 @@ func (w *webSession) lookup(ctx context.Context, path string) (webRef, string, e
 		return ref, "", gone
 	case m[2] == ref.Ext:
 		return ref, ref.Original, nil
-	case m[2] == "md" && ref.Kind == webHTML:
+	case m[2] == "md" && convertedKind(ref.Kind) && ref.Text != "":
 		return ref, ref.Text, nil
 	}
 	return ref, "", gone
@@ -595,7 +629,10 @@ func (w *webSession) textOf(ctx context.Context, path string) (webRef, string, e
 		if ref.Kind == webKindImage {
 			return ref, "", problem(415, "not_text", path+" is an image; read it to see it.")
 		}
-		return ref, "", problem(415, "not_text", "Metatrash cannot read the text of PDF and Word files yet; that comes in a later release.")
+		if ref.Text != "" {
+			return ref, "", problem(415, "not_text", path+" is the original file; its text is web/"+ref.ID+".md.")
+		}
+		return ref, "", problem(415, "not_text", noTextNote(ref.Kind, w.a.pdfText != nil))
 	}
 	b, err := w.object(ctx, hash)
 	if err != nil {

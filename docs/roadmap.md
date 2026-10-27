@@ -184,9 +184,9 @@ Connect, pull, `pending` and `push` are done ([github.md](github.md)). Still
 open, from the 2026-10-03 design session:
 
 1. **`auto` push mode**: quiet-period batches (`push` still works).
-2. **Binary files**: images and PDFs by content allow-list, base64 in the
-   API, image content on MCP reads. Until then pull skips them and push
-   carries them through.
+2. **Binary files**: replaced by Binary files and conversion below; a pull
+   will send a repository's binary files to B2 like any other. Until then
+   pull skips them and push carries them through.
 3. **GitHub → space**: repo changes appear in the folder (`pull` auto),
    triggered by the push webhooks the app already receives (today they are
    acknowledged and ignored).
@@ -217,7 +217,8 @@ tools (`web_search` through Brave, `web_fetch` into a B2 downloads cache) and
 0.57.4 cut the tokens per job and mark a run cut off at its step limit as
 failed. 0.58.0 lets you change an agent's name, daily cap and key without
 removing it. (0.57.5 and 0.57.6 were printing and sign-in fixes, outside this
-plan, which is why PDF and Word moved from 0.58.0 to 0.59.0.)
+plan, which is why PDF and Word moved from 0.58.0 to 0.59.0.) PDF and Word
+are now part of Binary files and conversion, below.
 
 ### User agents and who pays (agreed with Dave 2026-10-25)
 
@@ -287,8 +288,7 @@ with their own money.
    model and endpoint stay fixed (another model is another agent, so the
    actions and opt-ins that chose it keep their model); today's use counts
    toward a new cap at once.
-5. **0.59.0**: PDF and Word files as triggers and input.
-6. **Slate Viewer**: an Automation page for a folder's actions and its
+5. **Slate Viewer**: an Automation page for a folder's actions and its
    `runner.md`, opting in, and agents; make a refused `.metatrash.json` save
    obvious in both Slate Viewer and mtsync (on 2026-10-25 an invalid file
    stayed local while `mtsync list` still said "in sync"); and open
@@ -322,6 +322,76 @@ with their own money.
   Anthropic-compatible API supports; Anthropic agents already mark cache
   breakpoints, though shortening a result changes the cached prefix from
   that point).
+
+## Binary files and conversion (Dave, 2026-10-26)
+
+Spaces stay plain UTF-8 text in Git, so they stay small, diffable and
+friendly to agents. Binary files (PDF, Word, images, archives, compute
+output) live in B2, the way `web_fetch` downloads already do, and never
+enter a space's Git history. Clients handle the split for people: mtsync,
+Slate Viewer and the server send a UTF-8 file to the space and anything else
+to B2, so a person just drops files into a folder. What agents mostly need
+from a binary is its content as Markdown, so converting is a first-class
+step.
+
+### Build order
+
+1. ~~**0.59.0: convert to Markdown in the downloads store.**~~ Done: Word
+   is read in Go, PDF with `pdftotext` (poppler-utils) when the server has
+   it, pages marked `<!-- page N -->`; a reference fetched before 0.59.0
+   gets its text on the next fetch. Planned: A PDF or Word
+   (`.docx`) file that `web_fetch` downloads gets a `web/<ref>.md` with its
+   text as Markdown, as HTML pages already do (headings, lists and tables
+   where the format has them). `read`, `search` and `move` (which copies
+   the Markdown into the folder) work on it unchanged. Word is zipped XML,
+   read in Go; PDF needs a text extractor on the server (a Go library or
+   `pdftotext`, to be chosen). Done on the server so it works the same for
+   MiniMax and Claude.
+2. **0.60.0: binaries in a space, kept in B2.** An upload route (REST, then
+   MCP) stores a non-UTF-8 file in B2 by its SHA-256 and records it in the
+   database by space and path, never in Git. Listing a folder shows these
+   files with a size and type; reading one gives a download link or, for an
+   image, the image; delete and move work on them. For PDF and Word,
+   `convert: true` also writes `<name>.md` into the folder in Git, and that
+   arriving file is what starts the folder's `on` actions. Locks,
+   `readOnly`, membership and agent permissions apply as for any file.
+3. **0.61.0: mtsync and Slate Viewer handle it transparently.** mtsync
+   uploads a local binary to B2 and downloads the space's binaries, with the
+   same three-way rules as text; Slate Viewer shows them in the tree, opens
+   them in the system's app, and offers "Convert to Markdown". GitHub
+   folders send a repository's binary files to B2 on pull and back on push.
+4. **Later: a blob service for compute output.** An action, or another
+   service, stores a result as a blob in B2 and gets a reference back for
+   later retrieval, with the same per-owner ownership and retention rules.
+
+### Settled with Dave (2026-10-27)
+
+- **History.** A binary keeps its old versions: earlier hashes per path stay
+  in the database and show in History; B2 holds each version once.
+- **Retention and backups.** Space binaries go in their own bucket (or a
+  prefix with no 30-day lifecycle rule, unlike `web/`). Deleting a file drops
+  its record; a sweep deletes objects that no record, old version or
+  download still uses. The bucket is backed up by restic or B2's own
+  versioning with Object Lock.
+- **Limits.** 100 MB per file and 5 GB per space to start, counted toward
+  the owner.
+- **Export.** The space zip export includes binaries, with an option to
+  list them only.
+- **Which files are binary.** Anything that is not UTF-8 without NUL, as the
+  write check already decides, so no list of extensions.
+- **B2 files never change.** Reading a byte range works, but there is no
+  append or partial rewrite, so binaries are written whole, once, by hash;
+  anything that grows (logs, `runner.md`) stays in Git or the database.
+
+### Text files
+
+Spaces already accept any UTF-8 file whatever its extension (`.json`, `.c`,
+`.go`, `.js`, `.css`, and so on); only "UTF-8 without NUL" is checked.
+Native support means showing them properly: a code view with highlighting
+on the site and in Slate Viewer, and HTML shown either raw or as filtered
+Markdown (the same converter `web_fetch` uses), chosen per file or folder.
+Check every client (mtsync, Slate Viewer, the site explorer, MCP) with a set
+of such files first.
 
 ## Hidden system files (Dave, 2026-10-25)
 

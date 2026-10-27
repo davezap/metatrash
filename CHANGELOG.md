@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.59.0 - PDF and Word downloads as Markdown (2026-10-27)
+
+No schema, grant or `accounts.json` change. tool-schema.json is unchanged (0.15.1). **Optional:** install `poppler-utils` on the server (`sudo dnf install poppler-utils`) for PDF text; `metatrash check` says whether the service found `pdftotext`.
+
+- **Word files as Markdown** (docs/roadmap.md, Binary files and conversion): a `.docx` that `web_fetch` downloads gets `web/<ref>.md` beside the original, as web pages do. Headings (Title, Heading 1–6), bulleted and numbered lists, tables, bold, italic, links and line breaks come through; pictures, text boxes and tracked deletions are left out. The first heading is the reference's title. Read in Go, with each part limited to 64 MB unpacked and the Markdown to 4 MB.
+- **PDF files as Markdown**: the text comes from `pdftotext` (60 seconds, 500 pages and 4 MB of text at most, run on a temporary copy without a shell), page by page, each page after the first starting with `<!-- page N -->` so an agent can say where something is. A scanned PDF has no text (no OCR) and the result's `note` says so; so does a server without `pdftotext`, which keeps PDFs without text as before.
+- **The rest works unchanged**: `read` by line range, `search` with `path`, and `move` to keep the Markdown in the folder. Reading the original `.pdf` or `.docx` says to read its `.md`. A PDF or Word file fetched before 0.59.0 has no text; fetching it again downloads it anew (even when the site says it has not changed) and adds it.
+- Tested: a Word file built in the test (title, headings, bold and italic runs, a link, bulleted, nested and numbered lists, a table with a `|` and two lines in a cell, a line break, a picture with a text box and a deleted run left out), a file that is not a Word file; PDF Markdown (pages, trailing spaces, blank lines, a `#` at a line start escaped, blank pages); a two-page PDF through the real `pdftotext` and a broken one refused; `web_fetch` of a `.docx` sent as `application/octet-stream`, reading its Markdown and its original, a PDF without `pdftotext` (kept, `note` says why), then with it (downloaded again despite the site's 304, page marker in the preview), and a plain 304 after that.
+
 ## 0.58.0 - Change an agent's key, name and daily cap (2026-10-26)
 
 **Grants only**: run `deploy/account-grants.sql` again before this binary starts (`UPDATE (name, daily_cap, key_sealed, key_hint)` on `metatrash_agents`); `metatrash check` lists them as missing until then. No schema or `accounts.json` change. tool-schema.json is unchanged (0.15.1).

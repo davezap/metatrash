@@ -70,6 +70,8 @@ type agentRunner struct {
 	webSchemas map[string]*jsonschema.Resolved
 	webRefs    webRefStore
 	fetcher    webFetcher
+	// pdfText reads a PDF's text; nil without pdftotext.
+	pdfText pdfTextFunc
 	// spaceZone returns a space's own time zone, "" for none (dbSpaceZone).
 	spaceZone func(ctx context.Context, spaceID string) string
 	ctx       context.Context
@@ -193,6 +195,9 @@ func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*
 	a.notice = a.mailNotice
 	a.spaceZone = func(ctx context.Context, spaceID string) string { return s.dbSpaceZone(ctx, spaceID) }
 	a.fetcher = newWebFetcher(false)
+	if settings.pdftotext != "" {
+		a.pdfText = pdfToText(settings.pdftotext)
+	}
 	if s.ownedDB != nil {
 		a.webRefs = dbWebStore{s.ownedDB.db}
 	}

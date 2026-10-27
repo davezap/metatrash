@@ -632,6 +632,11 @@ func accountFeatures(a *accounts) string {
 		}
 		if a.agents.downloads != nil {
 			s += ", web downloads"
+			if a.agents.pdftotext != "" {
+				s += " (PDF text with " + a.agents.pdftotext + ")"
+			} else {
+				s += " (no PDF text: install poppler-utils for pdftotext)"
+			}
 		}
 	}
 	return s
