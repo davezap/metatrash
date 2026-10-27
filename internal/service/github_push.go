@@ -161,6 +161,12 @@ func (r *repository) folderPending(ctx context.Context, head string, files map[s
 	}
 	for rel, f := range local {
 		blob, held := base.Files[rel]
+		if f.Virtual != nil && blob != f.Blob {
+			// Until GitHub folders handle virtual files (0.61.0), push
+			// leaves them, and GitHub's copy, alone.
+			p.notPushed = append(p.notPushed, PendingNote{folder + rel, "a virtual file (content kept outside Git); push does not send virtual files yet"})
+			continue
+		}
 		switch {
 		case held && blob == f.Blob:
 			if c, ok := base.Converted[rel]; ok {

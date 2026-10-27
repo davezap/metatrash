@@ -237,8 +237,13 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 			result.Unchanged = true
 			return result, nil
 		}
-		b, err := r.blob(ctx, f.Blob)
-		if err != nil {
+		var b []byte
+		if f.Virtual != nil {
+			if err := s.readVirtual(ctx, r, in.Path, *f.Virtual, &result); err != nil {
+				return nil, err
+			}
+			b = []byte(result.File.Text)
+		} else if b, err = r.blob(ctx, f.Blob); err != nil {
 			return nil, err
 		}
 		result.File.Text = string(b)
@@ -447,13 +452,22 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if exists && in.CreateOnly {
 			return nil, problem(409, "destination_exists", "Destination exists.")
 		}
+		if in.Virtual == nil && looksVirtual(*in.Text) && !exists {
+			return nil, pointerRefused()
+		}
+		if in.Virtual != nil && virtualSpaceBytes(files, dest)+in.Virtual.Size > maxVirtualPerSpace {
+			return nil, problem(507, "storage_limit", fmt.Sprintf("The space's virtual files would be over %d GB.", maxVirtualPerSpace>>30))
+		}
 		if exists {
 			b, err := r.blob(ctx, f.Blob)
 			if err != nil {
 				return nil, err
 			}
-			if string(b) == *in.Text {
+			if string(b) == *in.Text && (in.Virtual == nil || f.Virtual != nil) {
 				return WriteResult{Mutation: Mutation{Space: space, OldState: head, NewState: head, File: withBlob(f), Rebased: rebased}}, nil
+			}
+			if f.Virtual != nil && in.Virtual == nil {
+				return nil, virtualRefused(dest)
 			}
 		} else {
 			id, err := randomHex(16)
@@ -464,6 +478,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 			created = true
 		}
 		f.Bytes = int64(len(*in.Text))
+		f.Virtual = in.Virtual
 	}
 	for p := range files {
 		if strings.HasPrefix(dest, p+"/") || strings.HasPrefix(p, dest+"/") {

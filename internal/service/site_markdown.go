@@ -3,6 +3,7 @@ package service
 import (
 	"mime"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -88,13 +89,17 @@ func markdownAlternate(w http.ResponseWriter, pageURL string) {
 	w.Header().Set("Link", "<"+pageURL+"?"+markdownQuery+`>; rel="alternate"; type="text/markdown"`)
 }
 
-// llmsText lists a space's Markdown pages, the top folder's first and then
-// one section per folder, linking each page's Markdown. root is the space's
-// absolute address, ending in a slash.
-func llmsText(title, root string, files map[string]record) []byte {
+// llmsText lists the Markdown pages in folder ("" for the whole space), its
+// own first and then one section per subfolder, linking each page's
+// Markdown. root is the space's absolute address, ending in a slash.
+func llmsText(title, root string, files map[string]record, folder string) []byte {
+	prefix := ""
+	if folder != "" {
+		prefix = folder + "/"
+	}
 	folders := map[string][]string{}
 	for path := range files {
-		if isMarkdownPath(path) && !isFolderFile(path) {
+		if strings.HasPrefix(path, prefix) && isMarkdownPath(path) && !isFolderFile(path) {
 			folder, _ := splitFolder(path)
 			folders[folder] = append(folders[folder], path)
 		}
@@ -108,13 +113,13 @@ func llmsText(title, root string, files map[string]record) []byte {
 	b.WriteString("# " + title + "\n\n")
 	b.WriteString("> The pages of " + title + " as Markdown. Each link gives a page's Markdown; the same address without ?format=md is the page itself.\n")
 	listed := 0
-	for _, folder := range names {
-		paths := folders[folder]
+	for _, name := range names {
+		paths := folders[name]
 		sort.Strings(paths)
-		if folder == "" {
+		if name == folder {
 			b.WriteString("\n## Pages\n\n")
 		} else {
-			b.WriteString("\n## " + folder + "\n\n")
+			b.WriteString("\n## " + name + "\n\n")
 		}
 		for _, path := range paths {
 			if listed == maxLLMSEntries {
@@ -138,4 +143,40 @@ func splitFolder(path string) (string, string) {
 		return path[:i], path[i+1:]
 	}
 	return "", path
+}
+
+// serveFolder answers a folder's own address (path/to/folder/): for a
+// client that asks for Markdown, the folder's README.md, else the list of
+// its pages; for a browser, a redirect to the page the folder opens on.
+// title names the space; root is its address under the site, ending in a
+// slash, and origin the site's.
+func serveFolder(w http.ResponseWriter, r *http.Request, repo *repository, files map[string]record, folder, title, origin, root string, markdown bool) {
+	prefix := folder + "/"
+	found := false
+	for path := range files {
+		if strings.HasPrefix(path, prefix) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		sendError(w, missing())
+		return
+	}
+	if !markdown {
+		http.Redirect(w, r, root+(&url.URL{Path: defaultPageIn(files, folder)}).EscapedPath(), http.StatusFound)
+		return
+	}
+	w.Header().Add("Vary", "Accept")
+	if file, ok := files[prefix+"README.md"]; ok {
+		content, err := repo.blob(r.Context(), file.Blob)
+		if err != nil {
+			sendError(w, err)
+			return
+		}
+		if serveSource(w, r, prefix+"README.md", content) {
+			return
+		}
+	}
+	sendText(w, r, "text/markdown; charset=utf-8", llmsText(title+": "+prefix, origin+root, files, folder))
 }

@@ -254,7 +254,8 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	if defaulted {
 		path = "README.md"
 	}
-	if !validPath(path) {
+	folder, isFolder := strings.CutSuffix(path, "/")
+	if !validPath(folder) || raw && isFolder {
 		sendError(w, invalid("Invalid path."))
 		return
 	}
@@ -270,8 +271,16 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	if defaulted {
 		path = defaultPage(files)
 	}
-	if path == "llms.txt" && !raw {
-		h.serveLLMS(w, r, repo, files, space.Name, docs, root)
+	title := space.Name
+	if docs {
+		title = "Metatrash docs"
+	}
+	if isFolder {
+		serveFolder(w, r, repo, files, folder, title, h.publicOrigin, root, markdown)
+		return
+	}
+	if folder, name := splitFolder(path); name == "llms.txt" && !raw {
+		h.serveLLMS(w, r, repo, files, path, folder, title, root)
 		return
 	}
 	file, exists := files[path]
@@ -279,11 +288,23 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, missing())
 		return
 	}
-	if raw {
+	if file.Virtual != nil {
+		if raw || markdown {
+			h.serveVirtual(w, r, repo, path, *file.Virtual, raw)
+			return
+		}
+	} else if raw {
 		h.serveRawImage(w, r, repo, path, file.Blob)
 		return
 	}
-	content, err := repo.blob(ctx, file.Blob)
+	var content []byte
+	isMarkdown := isMarkdownPath(path)
+	if file.Virtual != nil {
+		content, err = h.virtualPage(ctx, repo, path, *file.Virtual)
+		isMarkdown = true
+	} else {
+		content, err = repo.blob(ctx, file.Blob)
+	}
 	if err != nil {
 		sendError(w, err)
 		return
@@ -297,8 +318,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	}
 	// Docs pages are all indexable; a web-readable space only in its top folder.
 	noIndex := !docs && (space.Visibility != spaceWeb || !indexable(path))
-	lowerPath := strings.ToLower(path)
-	page := browserPage{NoIndex: noIndex, BasePath: h.basePath, AccountsEnabled: true, Private: true, Docs: docs, Legal: h.docsSpace() != "", Web: space.Visibility == spaceWeb, Member: member, SpaceName: space.Name, SpaceRef: owner + "/" + space.Slug, Path: path, State: state, Text: string(content), Markdown: strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown"), RawImages: true, Tree: fileTree(files, path, root)}
+	page := browserPage{NoIndex: noIndex, BasePath: h.basePath, AccountsEnabled: true, Private: true, Docs: docs, Legal: h.docsSpace() != "", Web: space.Visibility == spaceWeb, Member: member, SpaceName: space.Name, SpaceRef: owner + "/" + space.Slug, Path: path, State: state, Text: string(content), Markdown: isMarkdown, RawImages: true, Tree: fileTree(files, path, root)}
 	if !docs {
 		configs, err := repo.folderConfigs(ctx, files)
 		if err != nil {
@@ -322,25 +342,36 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	}
 }
 
-// serveLLMS sends a space's llms.txt: its own file if it has one, else the
-// list of its Markdown pages. The caller has checked the visitor may read
-// the space.
-func (h *httpAdapter) serveLLMS(w http.ResponseWriter, r *http.Request, repo *repository, files map[string]record, name string, docs bool, root string) {
-	if file, ok := files["llms.txt"]; ok {
+// serveLLMS sends a folder's llms.txt (path): its own file if it has one,
+// else the list of its Markdown pages. The caller has checked the visitor
+// may read the space.
+func (h *httpAdapter) serveLLMS(w http.ResponseWriter, r *http.Request, repo *repository, files map[string]record, path, folder, title, root string) {
+	if file, ok := files[path]; ok {
 		content, err := repo.blob(r.Context(), file.Blob)
 		if err != nil {
 			sendError(w, err)
 			return
 		}
-		if !serveSource(w, r, "llms.txt", content) {
+		if !serveSource(w, r, path, content) {
 			sendError(w, missing())
 		}
 		return
 	}
-	if docs {
-		name = "Metatrash docs"
+	if folder != "" {
+		found := false
+		for p := range files {
+			if strings.HasPrefix(p, folder+"/") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			sendError(w, missing())
+			return
+		}
+		title += ": " + folder + "/"
 	}
-	sendText(w, r, "text/plain; charset=utf-8", llmsText(name, h.publicOrigin+root, files))
+	sendText(w, r, "text/plain; charset=utf-8", llmsText(title, h.publicOrigin+root, files, folder))
 }
 
 // rawImageTypes are the files ?raw serves, by extension: pictures only, so a

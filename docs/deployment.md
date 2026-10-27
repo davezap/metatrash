@@ -436,7 +436,14 @@ public space among them) refuse actions altogether.
   sudo -u metatrash metatrash check      # "web downloads (PDF text with /usr/bin/pdftotext)"
   ```
 
-  Without `search` and `downloads`, actions run without the web tools.
+  Virtual files (0.60.0) are kept in the same bucket under `files/`, which
+  the `web/` lifecycle rule does not touch, so they stay until deleted. Keep
+  the rule's file path `web/` exactly: a rule without a path would delete
+  virtual files too. Back the bucket up (or turn on B2 versioning) if
+  virtual files matter to you.
+
+  Without `search` and `downloads`, actions run without the web tools, and
+  spaces have no virtual files.
 
 The 0.54.x settings `owners`, `provider`, `baseURL`, `model`, `apiKeyFile`,
 `maxTokens` and `dailyTokenCap` are refused with a message saying so; remove

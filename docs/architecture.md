@@ -183,6 +183,15 @@ CSRF value, bounded form fields and a per-user attempt limit.
   the old owner/slug (results use the current name). The old owner cannot
   create or accept another space at that slug. If the space comes back to
   them it takes its address back and that alias is deleted.
+- **Virtual files** (0.60.0, `virtual.go`): content that isn't kept in Git
+  (PDFs, Word files, pictures, anything uploaded or fetched to a path) lives
+  in the `agents.downloads` bucket under `files/<space ID>/<sha256>`, with
+  its text (or Markdown) beside it by hash. Git holds a pointer at the
+  file's path and the index (`.metatrash/files.json`) marks it `virtual`,
+  so only pointers Metatrash wrote resolve, and only in their own space.
+  Reads resolve the text, content writes are refused, and everything else
+  (history, moves, locks, actions) is the pointer's. See api-contract.md,
+  Virtual files.
 
 ## Sharing
 
@@ -239,7 +248,11 @@ every request, before quotas are charged or Git is touched.
   page's own access rules; pages name it in a `Link` header and a
   `<link rel="alternate">`. `llms.txt` at the top of each space, of `/docs/`
   and at `/llms.txt` (the docs') lists the Markdown pages with their
-  `?format=md` links, unless the space has its own `llms.txt` file.
+  `?format=md` links, unless the space has its own `llms.txt` file. Every
+  folder has one too, for its own pages (0.59.2). A folder's address
+  (`folder/`) redirects a browser to the folder's page (README.md, first
+  Markdown file, AGENTS.md) and gives a Markdown client its README.md or,
+  without one, its page list.
 - Legacy `?path=` links redirect (308) to clean document URLs.
 - Assets come only from an explicit embedded allowlist, never from space
   storage. CSP allows same-origin scripts only where needed; space text is

@@ -263,7 +263,7 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 	}
 	index := make(map[string]storedRecord, len(files))
 	for p, f := range files {
-		index[p] = storedRecord{ID: f.ID, Path: f.Path, Bytes: f.Bytes, Blob: f.Blob}
+		index[p] = storedRecord{ID: f.ID, Path: f.Path, Bytes: f.Bytes, Blob: f.Blob, Virtual: f.Virtual}
 	}
 	metadata, err := json.Marshal(index)
 	if err != nil {

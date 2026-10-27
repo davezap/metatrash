@@ -351,6 +351,9 @@ step.
    `Accept: text/markdown` on every space, public and `/docs/` page,
    `llms.txt` per space plus `/llms.txt` for the docs (a space's own
    `llms.txt` file wins), and `web_fetch` asking for Markdown first.
+   0.59.2 added folder addresses (`/docs/legal/` opens the folder's page,
+   or gives its README.md or page list as Markdown) and an `llms.txt` per
+   folder.
    Planned: Every space page and `/docs/` page
    is a Markdown file already, so the site sends that file as it is when a
    client asks for Markdown: `Accept: text/markdown` or `?format=md` on the
@@ -366,7 +369,20 @@ step.
    `md.metatrash.com` (Dave, 2026-10-27) can come later on top of this if
    wanted; it would need DNS, TLS and Apache changes and nothing more from
    the server.
-3. **0.60.0: virtual files** (Dave's design, 2026-10-27; replaces the
+3. **0.60.0: virtual files.** The core is done (2026-10-27): the pointer
+   format, the index flag, `read` resolving (PDF and Word as Markdown by
+   default), content writes refused (`virtual_file`), the upload and
+   download route (`…/content`), `web_fetch` with `path`, and website pages
+   with Download. Settled while building: `read` gives the Markdown without
+   asking; old mtsync releases can't harm a pointer because every content
+   write over one is refused, so `minVersion` waits for 0.61.0; GitHub
+   folders leave virtual files out of push (`notPushed`) until 0.61.0
+   handles binaries both ways. **0.60.1** adds the rest: the `configure`
+   operation (source, refresh, retention), refresh on an `every` schedule
+   with the stale flag, the sweep, export with binaries, search inside
+   virtual text, images shown to models by `read`, and streamed downloads
+   (0.60.0 holds a file in memory, up to 100 MB). The design as planned
+   (Dave's design, 2026-10-27; replaces the
    earlier plan of a database record per path). A virtual file is content
    kept outside Git, uploaded or fetched from the internet, that appears in
    the space as a normal file:
@@ -524,6 +540,16 @@ scheduled yet. To settle when it is:
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
 
+From 0.60.0 (2026-10-27):
+
+- **Virtual files:** give a folder action the instruction "fetch <the URL of
+  a PDF> with web_fetch, with path policy.pdf, then summarise it in
+  summary.md". The folder then shows `policy.pdf`;
+  its page on the site says "Virtual file" with a Download link and shows
+  the text; `read` of it (from Claude) gives the Markdown; asking Claude to
+  write to it is refused with `virtual_file`. Download it from the page and
+  check it opens. In B2 the bucket has a `files/<space ID>/` folder.
+
 From 0.59.1 (2026-10-27):
 
 - **Markdown for agents:** open `https://metatrash.com/docs/README.md?format=md`
@@ -532,6 +558,9 @@ From 0.59.1 (2026-10-27):
   space page with `?format=md` goes to sign in. Run a folder action that
   fetches a metatrash.com docs page: its `web/<ref>.md` is the document
   itself, without the page's heading and code block.
+- **Folder addresses (0.59.2):** open `https://metatrash.com/docs/legal/`
+  (it goes to the folder's page), then `https://metatrash.com/docs/legal/?format=md`
+  and `https://metatrash.com/docs/legal/llms.txt` (lists of that folder's pages).
 
 From 0.58.0 (2026-10-26):
 

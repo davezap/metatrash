@@ -74,8 +74,9 @@ func (s *s3Store) get(ctx context.Context, key string) ([]byte, error) {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 		return nil, fmt.Errorf("downloads bucket answered %d", resp.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxWebBytes+1))
-	if err != nil || len(b) > maxWebBytes {
+	limit := max(maxWebBytes, maxVirtualBytes)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+	if err != nil || len(b) > limit {
 		return nil, fmt.Errorf("downloads bucket object could not be read")
 	}
 	return b, nil

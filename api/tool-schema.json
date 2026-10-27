@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.15.1",
+  "schemaVersion": "0.16.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.45.0"},
@@ -21,7 +21,7 @@
   "tools": [
     {
       "name": "read",
-      "description": "Read a file at the head or a revision; returns the state. Start with AGENTS.md: instructions for agents; each folder has its own. For a long file read only the lines you need with startLine and lineCount (search gives line numbers). To check a file you read before, pass its blob as ifBlob: if it is the same, the answer has unchanged: true and no text. A .metatrash.json that inherits also returns effective: its settings with the parent's filled in.",
+      "description": "Read a file at the head or a revision; returns the state. Start with AGENTS.md: instructions for agents; each folder has its own. For a long file read only the lines you need with startLine and lineCount (search gives line numbers). To check a file you read before, pass its blob as ifBlob: if it is the same, the answer has unchanged: true and no text. A .metatrash.json that inherits also returns effective: its settings with the parent's filled in. A virtual file (file.virtual: content kept outside Git) returns its text, a PDF or Word file as Markdown, with a note; an image or other file without text returns the note only.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -105,6 +105,10 @@
                 "type": "boolean",
                 "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
+              "virtual": {
+                "type": "object",
+                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+              },
               "readOnly": {
                 "type": "string",
                 "enum": [
@@ -135,6 +139,10 @@
           "effective": {
             "type": "object",
             "description": "Present when the file is a .metatrash.json that inherits: the folder's settings with the inherited ones filled in."
+          },
+          "note": {
+            "type": "string",
+            "description": "Present for a virtual file: what its text is, or why it has none."
           },
           "lines": {
             "type": "object",
@@ -401,6 +409,10 @@
                 "type": "boolean",
                 "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
+              "virtual": {
+                "type": "object",
+                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+              },
               "readOnly": {
                 "type": "string",
                 "enum": [
@@ -562,6 +574,10 @@
                 "type": "boolean",
                 "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
+              "virtual": {
+                "type": "object",
+                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+              },
               "readOnly": {
                 "type": "string",
                 "enum": [
@@ -693,6 +709,10 @@
                 "type": "boolean",
                 "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
+              "virtual": {
+                "type": "object",
+                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+              },
               "readOnly": {
                 "type": "string",
                 "enum": [
@@ -823,6 +843,10 @@
                 "deletable": {
                   "type": "boolean",
                   "description": "False for a folder's AGENTS.md and .metatrash.json."
+                },
+                "virtual": {
+                  "type": "object",
+                  "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
                 },
                 "readOnly": {
                   "type": "string",
@@ -961,6 +985,10 @@
                 "type": "boolean",
                 "description": "False for a folder's AGENTS.md and .metatrash.json."
               },
+              "virtual": {
+                "type": "object",
+                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+              },
               "readOnly": {
                 "type": "string",
                 "enum": [
@@ -1083,6 +1111,10 @@
               "deletable": {
                 "type": "boolean",
                 "description": "False for a folder's AGENTS.md and .metatrash.json."
+              },
+              "virtual": {
+                "type": "object",
+                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
               },
               "readOnly": {
                 "type": "string",

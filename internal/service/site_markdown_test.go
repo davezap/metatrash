@@ -29,7 +29,7 @@ func TestPrefersMarkdown(t *testing.T) {
 
 func TestLLMSText(t *testing.T) {
 	files := map[string]record{"README.md": {}, "AGENTS.md": {}, ".metatrash.json": {}, "guides/AGENTS.md": {}, "guides/b.md": {}, "guides/a b.md": {}, "about.md": {}, "data.json": {}}
-	got := string(llmsText("Docs", "https://metatrash.com/docs/", files))
+	got := string(llmsText("Docs", "https://metatrash.com/docs/", files, ""))
 	want := `# Docs
 
 > The pages of Docs as Markdown. Each link gives a page's Markdown; the same address without ?format=md is the page itself.
@@ -47,7 +47,11 @@ func TestLLMSText(t *testing.T) {
 	if got != want {
 		t.Fatalf("got:\n%s", got)
 	}
-	if got := string(llmsText("Empty", "https://x/", map[string]record{"AGENTS.md": {}})); !strings.HasSuffix(got, "There are no Markdown pages yet.\n") {
+	got = string(llmsText("Docs: guides/", "https://metatrash.com/docs/", files, "guides"))
+	if !strings.Contains(got, "## Pages\n\n- [a b.md](https://metatrash.com/docs/guides/a%20b.md?format=md)") || strings.Contains(got, "README") {
+		t.Fatalf("folder:\n%s", got)
+	}
+	if got := string(llmsText("Empty", "https://x/", map[string]record{"AGENTS.md": {}}, "")); !strings.HasSuffix(got, "There are no Markdown pages yet.\n") {
 		t.Fatalf("empty: %s", got)
 	}
 }
@@ -150,6 +154,34 @@ func TestMarkdownPagesAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/llms.txt", nil); res.Code != 200 || res.Body.String() != "# Mine\n" || res.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
 		t.Fatalf("own llms.txt: %d %q", res.Code, res.Body)
 	}
+
+	// Folder addresses (0.59.2): a browser goes to the folder's page; a
+	// client asking for Markdown gets its README.md, else its page list.
+	if res := oauthCall(w.h, "GET", "/docs/legal/", nil); res.Code != 302 || res.Header().Get("Location") != "/docs/legal/terms.md" {
+		t.Fatalf("folder, browser: %d %s", res.Code, res.Header().Get("Location"))
+	}
+	res = oauthCall(w.h, "GET", "/docs/legal/?format=md", nil)
+	if body := res.Body.String(); res.Code != 200 || res.Header().Get("Content-Type") != "text/markdown; charset=utf-8" || !strings.HasPrefix(body, "# Metatrash docs: legal/\n") || !strings.Contains(body, "- [terms.md](https://metatrash.com/docs/legal/terms.md?format=md)") || strings.Contains(body, "README") {
+		t.Fatalf("folder, Markdown list: %d\n%s", res.Code, body)
+	}
+	res = oauthCall(w.h, "GET", "/docs/legal/llms.txt", nil)
+	if body := res.Body.String(); res.Code != 200 || !strings.HasPrefix(body, "# Metatrash docs: legal/\n") || res.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatalf("folder llms.txt: %d\n%s", res.Code, body)
+	}
+	state = w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
+	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "legal/README.md", "text": "# Legal\n", "ifInState": state}, "")
+	if res := accept("/docs/legal/", "text/markdown"); !isMarkdown(res, "# Legal\n") {
+		t.Fatalf("folder README: %d %q", res.Code, res.Body)
+	}
+	if res := oauthCall(w.h, "GET", "/docs/legal/", nil); res.Code != 302 || res.Header().Get("Location") != "/docs/legal/README.md" {
+		t.Fatalf("folder README, browser: %d %s", res.Code, res.Header().Get("Location"))
+	}
+	for _, page := range []string{"/docs/nothing/", "/docs/nothing/llms.txt", "/docs/nothing/?format=md", "/docs/legal/?raw"} {
+		if res := oauthCall(w.h, "GET", page, nil); res.Code != 404 && res.Code != 400 {
+			t.Fatalf("%s: %d", page, res.Code)
+		}
+	}
+
 	w.s.accounts.config.DocsSpace = ""
 	if res := oauthCall(w.h, "GET", "/llms.txt", nil); res.Code != 404 {
 		t.Fatalf("/llms.txt without docs: %d", res.Code)

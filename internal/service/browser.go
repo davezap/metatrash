@@ -364,7 +364,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		if defaulted {
 			page.Path = "README.md"
 		}
-		if !validPath(page.Path) {
+		if !validPath(strings.TrimSuffix(page.Path, "/")) {
 			sendError(w, invalid("Invalid path."))
 			return true
 		}
@@ -393,8 +393,13 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		if defaulted {
 			page.Path = defaultPage(files)
 		}
-		if page.Path == "llms.txt" {
-			h.serveLLMS(w, r, repo, files, "Metatrash public space", false, h.basePath+"/spaces/public/")
+		markdown := asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))
+		if folder, ok := strings.CutSuffix(page.Path, "/"); ok {
+			serveFolder(w, r, repo, files, folder, "Metatrash public space", h.publicOrigin, h.basePath+"/spaces/public/", markdown)
+			return true
+		}
+		if folder, name := splitFolder(page.Path); name == "llms.txt" {
+			h.serveLLMS(w, r, repo, files, page.Path, folder, "Metatrash public space", h.basePath+"/spaces/public/")
 			return true
 		}
 		file, exists := files[page.Path]
@@ -404,7 +409,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		}
 		var content []byte
 		content, err = repo.blob(ctx, file.Blob)
-		if err == nil && (asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))) {
+		if err == nil && markdown {
 			if serveSource(w, r, page.Path, content) {
 				return true
 			}
@@ -457,18 +462,37 @@ func (h *httpAdapter) publicTree(nodes []*browserNode) {
 // defaultPage is the file a space's address shows when it names none: its
 // README.md, else its first top-level Markdown file, else the root AGENTS.md.
 func defaultPage(files map[string]record) string {
-	if _, ok := files["README.md"]; ok {
-		return "README.md"
+	return defaultPageIn(files, "")
+}
+
+// defaultPageIn is the page a folder's address opens on, by the same rule
+// within the folder (0.59.2).
+func defaultPageIn(files map[string]record, folder string) string {
+	prefix := ""
+	if folder != "" {
+		prefix = folder + "/"
+	}
+	if _, ok := files[prefix+"README.md"]; ok {
+		return prefix + "README.md"
 	}
 	first := ""
 	for p := range files {
-		lower := strings.ToLower(p)
-		if !strings.Contains(p, "/") && !isFolderFile(p) && (strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown")) && (first == "" || p < first) {
+		name, ok := strings.CutPrefix(p, prefix)
+		if ok && !strings.Contains(name, "/") && !isFolderFile(p) && isMarkdownPath(p) && (first == "" || p < first) {
 			first = p
 		}
 	}
 	if first != "" {
 		return first
 	}
-	return agentsFileName
+	if _, ok := files[prefix+agentsFileName]; ok || folder == "" {
+		return prefix + agentsFileName
+	}
+	// A GitHub folder has no AGENTS.md of Metatrash's: its first file.
+	for p := range files {
+		if strings.HasPrefix(p, prefix) && (first == "" || p < first) {
+			first = p
+		}
+	}
+	return first
 }

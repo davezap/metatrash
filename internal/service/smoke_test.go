@@ -128,7 +128,7 @@ func TestSmoke(t *testing.T) {
 		}
 	}
 	// Markdown for agents (0.59.1): the file as it is, and llms.txt.
-	for page, want := range map[string]string{"/spaces/public/archive/a.txt?format=md": "text/plain; charset=utf-8", "/spaces/public/AGENTS.md?format=md": "text/markdown; charset=utf-8", "/spaces/public/llms.txt": "text/plain; charset=utf-8"} {
+	for page, want := range map[string]string{"/spaces/public/archive/a.txt?format=md": "text/plain; charset=utf-8", "/spaces/public/AGENTS.md?format=md": "text/markdown; charset=utf-8", "/spaces/public/llms.txt": "text/plain; charset=utf-8", "/spaces/public/archive/llms.txt": "text/plain; charset=utf-8", "/spaces/public/archive/?format=md": "text/markdown; charset=utf-8"} {
 		r := httptest.NewRequest("GET", page, nil)
 		r.RemoteAddr = "127.0.0.1:12345"
 		res := httptest.NewRecorder()
@@ -144,6 +144,14 @@ func TestSmoke(t *testing.T) {
 	h.ServeHTTP(res, r)
 	if res.Code != 200 || res.Body.String() != "hello\n" {
 		t.Fatalf("Accept: text/markdown: %d %q", res.Code, res.Body)
+	}
+	// A folder's address opens its page (here its AGENTS.md).
+	r = httptest.NewRequest("GET", "/spaces/public/archive/", nil)
+	r.RemoteAddr = "127.0.0.1:12345"
+	res = httptest.NewRecorder()
+	h.ServeHTTP(res, r)
+	if res.Code != 302 || res.Header().Get("Location") != "/spaces/public/archive/AGENTS.md" {
+		t.Fatalf("folder: %d %s", res.Code, res.Header().Get("Location"))
 	}
 	call("DELETE", "/api/v1/spaces/public/file?path=AGENTS.md", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=.metatrash.json", "", map[string]any{"ifInState": moved.NewState}, 403)

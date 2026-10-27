@@ -119,6 +119,9 @@ func (s *Service) edit(ctx context.Context, r *repository, space string, in Inpu
 	if !ok {
 		return nil, missing()
 	}
+	if f.Virtual != nil {
+		return nil, virtualRefused(in.Path)
+	}
 	rebased := in.IfInState != "" && in.IfInState != head
 	if rebased && (in.Strict || !r.unchangedSince(ctx, in.IfInState, files, in.Path)) {
 		message := in.Path + " changed since that state; read it again before editing."
@@ -174,6 +177,9 @@ func (s *Service) appendText(ctx context.Context, r *repository, space string, i
 	}
 	text := ""
 	if f, ok := files[in.Path]; ok {
+		if f.Virtual != nil {
+			return nil, virtualRefused(in.Path)
+		}
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
 			return nil, err
@@ -271,9 +277,10 @@ func (s *Service) search(ctx context.Context, r *repository, space string, in In
 	if err != nil {
 		return nil, err
 	}
+	// Virtual files are left out: their text is outside Git (read them).
 	paths := []string{}
-	for p := range files {
-		if strings.HasPrefix(p, in.Prefix) {
+	for p, f := range files {
+		if strings.HasPrefix(p, in.Prefix) && f.Virtual == nil {
 			paths = append(paths, p)
 		}
 	}

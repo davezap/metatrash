@@ -38,6 +38,9 @@ type File struct {
 	// and delete results carry it, and list with blobs=true or since=, so a
 	// client can tell a changed file without reading it (read's ifBlob).
 	Blob string `json:"blob,omitempty"`
+	// Virtual is set on a virtual file (0.60.0, virtual.go): the text is
+	// its pointer, and this describes the content kept outside Git.
+	Virtual *VirtualInfo `json:"virtual,omitempty"`
 }
 
 type record struct {
@@ -58,6 +61,8 @@ type ReadResult struct {
 	// Effective is set when the file is a .metatrash.json that inherits: the
 	// folder's settings with the inherited ones filled in.
 	Effective json.RawMessage `json:"effective,omitempty"`
+	// Note explains a virtual file's text: its Markdown, or why it has none.
+	Note string `json:"note,omitempty"`
 	// Unchanged is set when the read gave ifBlob and the file still has that
 	// blob; Text is then empty, so an agent re-checking a file it holds pays
 	// for no text.
@@ -147,15 +152,19 @@ type Input struct {
 	Regex      bool   `json:"-"`
 	IgnoreCase bool   `json:"-"`
 	Context    int    `json:"-"`
+	// Virtual is set only by Metatrash itself (putVirtual): the write is a
+	// virtual file's pointer, and this describes its content.
+	Virtual *VirtualInfo `json:"-"`
 }
 
 // storedRecord is the index entry format in .metatrash/files.json.
 type storedRecord struct {
-	ID        string `json:"id"`
-	Path      string `json:"path"`
-	Bytes     int64  `json:"bytes"`
-	Protected bool   `json:"protected"`
-	Blob      string `json:"blob"`
+	ID        string       `json:"id"`
+	Path      string       `json:"path"`
+	Bytes     int64        `json:"bytes"`
+	Protected bool         `json:"protected"`
+	Blob      string       `json:"blob"`
+	Virtual   *VirtualInfo `json:"virtual,omitempty"`
 }
 
 // validPath checks path syntax only. ".", "..", ".git" (any case, trailing

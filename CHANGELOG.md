@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.60.0 - Virtual files (2026-10-27)
+
+No schema, grant or configuration change: virtual files use the `agents.downloads` bucket, under `files/` (outside the `web/` lifecycle rule; docs/deployment.md). tool-schema.json is 0.16.0 (file results may carry `virtual`; read may carry `note`). mtsync's `minVersion` is unchanged.
+
+- **Virtual files** (Dave's design; docs/roadmap.md, Binary files and conversion; docs/api-contract.md, Virtual files): content kept outside Git that appears in a space as an ordinary file. Git holds a small pointer at the file's own path (`metatrash-virtual 1`, the content's SHA-256, size, type, its text's hash and the source URL), so history, moves, deletes, locks and folder-action triggers work unchanged and each pointer revision is a version of the content. The content goes to the bucket once per space by hash, with its text beside it: the content itself for text, the Markdown for PDF (with `pdftotext`), Word and HTML files.
+- **Reading:** `read` returns the text, a PDF or Word file as its Markdown by default, with a `note` saying what it is; a picture or other file without text returns the note only. Line ranges, `ifBlob` and old revisions work. `list` and every file result carry `virtual: {sha256, size, type, textSha256?, source?}`. Search leaves virtual files out for now.
+- **Writing:** `write`, `edit` and `append` over a virtual file are refused (`virtual_file`), so an older mtsync that sees the pointer as text can't damage it; writing the pointer unchanged changes nothing, and pointer text can't be written to a new path. Move and delete work as for any file.
+- **Making one:** `PUT /api/v1/account/spaces/{owner}/{slug}/content?path=&ifInState=` uploads a file (any type, up to 100 MB; 5 GB of current virtual files per space) and `GET …/content?path=` downloads one, for mtsync and Slate Viewer in 0.61.0. A folder action's `web_fetch` takes `path` and saves its download in the folder as a virtual file; fetching to the same path again saves a new version.
+- **On the website** a virtual file's page says what it is, links Download (`?raw`; pictures show on the page), and shows its text; `?format=md` gives the text.
+- **GitHub folders** leave virtual files out of push for now (`pending` lists them under `notPushed`); 0.61.0 handles binaries on pull and push.
+- Next, 0.60.1: `configure` (source, refresh and retention), refresh on an `every` schedule with a stale flag, the sweep of unused content, export with binaries, search inside virtual text, pictures shown to models, and streamed downloads.
+- Tested: the pointer format and media guessing; a Word upload (bucket object, pointer in Git, `list`, Markdown read and line range), refused write, edit, append and pointer writes, the same pointer written again, search not matching pointers, a picture without text, a CSV read as itself, a new version with the old revision still reading the old content, a move, and no bucket (`virtual_unavailable`); `web_fetch` with `path` saving a Word file and reading its Markdown; against MariaDB, upload and download over REST (stale and missing `ifInState` refused), an MCP read and refused write, the page with Download, `?raw` inline for a picture, `?format=md` for a Markdown file and not for a picture, and a signed-out `?raw` sent to sign in.
+
+## 0.59.2 - Folder addresses and folder llms.txt (2026-10-27)
+
+No schema, grant or configuration change. tool-schema.json is unchanged (0.15.1).
+
+- **A folder's address answers** (Dave: `https://metatrash.com/docs/legal/` was an error): agents and people trim a link back to its folder to look around. A browser now goes to the folder's page, chosen as for a space's top: its `README.md`, else its first Markdown file, else its `AGENTS.md`. A client asking for Markdown (`?format=md` or `Accept: text/markdown`) gets the folder's `README.md`, or, without one, the list of the folder's pages and subfolders' pages with their `?format=md` links. A folder that doesn't exist is not found.
+- **`llms.txt` in every folder**: `/docs/legal/llms.txt` lists just that folder's pages, the same way the top one lists the space's (useful in big spaces, where the top list stops at 2,000 pages). A folder with its own `llms.txt` file gets that file.
+- Tested: the folder list (its pages only); against MariaDB, `/docs/legal/` in a browser, as Markdown without and then with a `README.md`, `legal/llms.txt`, and missing folders; the public space's folder address, folder `llms.txt` and folder Markdown.
+
 ## 0.59.1 - Markdown for agents (2026-10-27)
 
 No schema, grant or configuration change. tool-schema.json is unchanged (0.15.1).
