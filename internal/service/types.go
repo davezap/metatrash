@@ -63,6 +63,10 @@ type ReadResult struct {
 	Effective json.RawMessage `json:"effective,omitempty"`
 	// Note explains a virtual file's text: its Markdown, or why it has none.
 	Note string `json:"note,omitempty"`
+	// image is a virtual picture for a client that shows pictures to its
+	// model (Input.Images; 0.60.1). MCP and the runner send it beside the
+	// JSON.
+	image *imageResult
 	// Unchanged is set when the read gave ifBlob and the file still has that
 	// blob; Text is then empty, so an agent re-checking a file it holds pays
 	// for no text.
@@ -155,6 +159,9 @@ type Input struct {
 	// Virtual is set only by Metatrash itself (putVirtual): the write is a
 	// virtual file's pointer, and this describes its content.
 	Virtual *VirtualInfo `json:"-"`
+	// Images is set by clients that can show a model a picture (MCP, the
+	// runner): a read of a virtual picture then carries it.
+	Images bool `json:"-"`
 }
 
 // storedRecord is the index entry format in .metatrash/files.json.

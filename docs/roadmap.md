@@ -377,11 +377,13 @@ step.
    asking; old mtsync releases can't harm a pointer because every content
    write over one is refused, so `minVersion` waits for 0.61.0; GitHub
    folders leave virtual files out of push (`notPushed`) until 0.61.0
-   handles binaries both ways. **0.60.1** adds the rest: the `configure`
-   operation (source, refresh, retention), refresh on an `every` schedule
-   with the stale flag, the sweep, export with binaries, search inside
-   virtual text, images shown to models by `read`, and streamed downloads
-   (0.60.0 holds a file in memory, up to 100 MB). The design as planned
+   handles binaries both ways. **0.60.1** (written 2026-10-27) added search
+   inside virtual text, pictures shown to models by `read` (MCP and folder
+   actions), export with binaries (`?virtual=list` for pointers), streamed
+   downloads and the daily sweep. **0.60.2** adds the rest: the `configure`
+   operation (source and refresh) and refresh on an `every` schedule with
+   the stale flag. Uploads still hold one file in memory (up to 100 MB).
+   The design as planned
    (Dave's design, 2026-10-27; replaces the
    earlier plan of a database record per path). A virtual file is content
    kept outside Git, uploaded or fetched from the internet, that appears in
@@ -431,7 +433,8 @@ step.
    it is edited locally (as for everyone-locked files), and turns a new
    local binary into a virtual file; Slate Viewer shows virtual files, opens
    them in the system's app and offers "Convert to Markdown". GitHub folders
-   store a repository's binary files as virtual files on pull.
+   store a repository's binary files as virtual files on pull. mtsync's
+   `export` streams to the file instead of reading at most 256 MB.
 5. **Later: a blob service for compute output.** An action, or another
    service, stores a result as a virtual file (or a bare blob with a
    reference) for later retrieval, under the same ownership and retention
@@ -539,6 +542,24 @@ scheduled yet. To settle when it is:
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.60.1 (2026-10-27):
+
+- **Search and pictures:** with a Word or PDF virtual file in a space, ask
+  Claude to search the space for a phrase from inside it: the match is in
+  that file. Have a folder action fetch a PNG with `path`, then ask Claude
+  to read it and describe it.
+- **Export:** `mtsync export` a space with a virtual file: the zip holds
+  the file itself and it opens, and `.metatrash-export.json` says
+  `"virtualFiles": "content"`. Over REST, `…/export?virtual=list` holds the
+  pointer text instead.
+- **Sweep:** add the `files/` lifecycle rule (docs/deployment.md). In the B2
+  browser, upload any small file to `files/<space ID>/` named with 64 hex
+  digits (`aaaa…`). About a day later (the sweep runs an hour after start,
+  then daily, and skips content under a day old) the journal says
+  `virtual files sweep: space … removed 1 of N objects`, the file is
+  hidden in B2, and every virtual file in that space still reads,
+  old versions too (History).
 
 From 0.60.0 (2026-10-27):
 

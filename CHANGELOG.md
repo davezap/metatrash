@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.60.1 - Virtual files: search, pictures, export, sweep (2026-10-27)
+
+No schema, grant or `accounts.json` change. **Optional, recommended:** add a second lifecycle rule to the downloads bucket, file path `files/`, days till hide empty, days till delete `7` (docs/deployment.md, Folder actions), so content the sweep removes is deleted a week later rather than kept hidden. tool-schema.json is 0.16.1 (read and search descriptions only). mtsync's `minVersion` is unchanged.
+
+- **Search inside virtual files:** `search` (MCP, REST and folder actions) looks in a virtual file's text, the same text `read` gives (a text file's content, the Markdown of a PDF, Word or HTML file), and never in pointers. Texts are cached in memory (up to 64 MB, least recently used out first), so repeated searches don't fetch them from the bucket again; a text the bucket can't give is skipped.
+- **Pictures for models:** reading a virtual PNG, JPEG, GIF or WebP picture up to 5 MB over MCP adds it to the result as image content, and a folder action's agent gets it as an image block, so the model sees it; the `note` says it is shown. REST reads stay JSON only.
+- **Export with binaries:** the space zip holds each virtual file's content at its path (binaries stored without compression), the manifest marks them (`virtual` per file, `"virtualFiles": "content"`), and `?virtual=list` gives pointers instead (`"pointers"`). The zip is built in a temporary file beside the repository, not in memory; with virtual files it may take up to 30 minutes. The console export (`metatrash spaces export`) has no bucket and gives pointers.
+- **Streamed downloads:** `GET …/content` and a page's `?raw` stream a virtual file from the bucket instead of holding it in memory (uploads still hold one file, up to 100 MB).
+- **Sweep:** once a day (an hour after start, then every 24 hours) the service deletes content under `files/<space ID>/` that no version of any file in the space names and that is over a day old (an upload stores its content before committing the pointer). Old revisions keep resolving. The journal logs what each sweep removed ("virtual files sweep").
+- Not yet: `configure`, scheduled refresh and the stale flag come in 0.60.2. mtsync's `export` reads at most 256 MB, so a space whose export is larger needs `?virtual=list` or mtsync 0.61.0.
+- Tested: search finding a Word file's Markdown and a CSV's content, not pointers, and answering from the cache with the bucket's text gone; a picture read with and without image support, and through the runner's read tool; export with content and with pointers, and the manifest; the sweep removing an old orphan only (keeping both versions of a file, a fresh orphan and a non-hash key), and the old version still reading after it; S3 listing over two pages, streamed open and delete against a fake bucket; against MariaDB, MCP image content for a picture, REST export with content and with `?virtual=list`, and an unknown export option refused.
+
 ## 0.60.0 - Virtual files (2026-10-27)
 
 No schema, grant or configuration change: virtual files use the `agents.downloads` bucket, under `files/` (outside the `web/` lifecycle rule; docs/deployment.md). tool-schema.json is 0.16.0 (file results may carry `virtual`; read may carry `note`). mtsync's `minVersion` is unchanged.

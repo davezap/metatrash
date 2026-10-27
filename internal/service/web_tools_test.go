@@ -1,9 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +21,9 @@ type memoryObjects struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	puts    int
+	// modified is each object's time for listings; unset ones are old.
+	modified map[string]time.Time
+	removed  []string
 }
 
 func (m *memoryObjects) put(_ context.Context, key, _ string, body []byte) error {
@@ -37,6 +42,38 @@ func (m *memoryObjects) get(_ context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("no such object")
 	}
 	return b, nil
+}
+
+func (m *memoryObjects) open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	b, err := m.get(ctx, key)
+	if err != nil {
+		return nil, 0, err
+	}
+	return io.NopCloser(bytes.NewReader(b)), int64(len(b)), nil
+}
+
+func (m *memoryObjects) list(_ context.Context, prefix string) ([]storedObject, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []storedObject
+	for key, b := range m.objects {
+		if strings.HasPrefix(key, prefix) {
+			modified := m.modified[key]
+			if modified.IsZero() {
+				modified = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			}
+			out = append(out, storedObject{Key: key, Size: int64(len(b)), Modified: modified})
+		}
+	}
+	return out, nil
+}
+
+func (m *memoryObjects) remove(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.objects, key)
+	m.removed = append(m.removed, key)
+	return nil
 }
 
 // memoryWebStore keeps references and objects for tests.
@@ -511,5 +548,58 @@ func TestWebSettings(t *testing.T) {
 		if _, err := c.settings(); err == nil {
 			t.Errorf("accepted %+v %+v", c.Search, c.Downloads)
 		}
+	}
+}
+
+// open, list (two pages) and remove against a fake bucket (0.60.1).
+func TestS3ListOpenRemove(t *testing.T) {
+	var deleted []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 Credential=key/") {
+			http.Error(w, "bad", 403)
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/downloads" && r.URL.Query().Get("list-type") == "2":
+			if r.URL.Query().Get("prefix") != "files/x/" {
+				http.Error(w, "prefix", 400)
+				return
+			}
+			if r.URL.Query().Get("continuation-token") == "" {
+				io.WriteString(w, `<?xml version="1.0"?><ListBucketResult><Contents><Key>files/x/a</Key><Size>3</Size><LastModified>2026-10-01T10:00:00.000Z</LastModified></Contents><IsTruncated>true</IsTruncated><NextContinuationToken>t 2</NextContinuationToken></ListBucketResult>`)
+				return
+			}
+			io.WriteString(w, `<?xml version="1.0"?><ListBucketResult><Contents><Key>files/x/b</Key><Size>5</Size><LastModified>2026-10-02T10:00:00.000Z</LastModified></Contents><IsTruncated>false</IsTruncated></ListBucketResult>`)
+		case r.Method == http.MethodGet && r.URL.Path == "/downloads/files/x/a":
+			w.Header().Set("Content-Length", "5")
+			io.WriteString(w, "hello")
+		case r.Method == http.MethodDelete:
+			deleted = append(deleted, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "missing", 404)
+		}
+	}))
+	defer srv.Close()
+	store := &s3Store{endpoint: srv.URL, region: "us-west-004", bucket: "downloads", keyID: "key", secret: "secret", http: s3HTTPClient()}
+	ctx := context.Background()
+	objects, err := store.list(ctx, "files/x/")
+	if err != nil || len(objects) != 2 || objects[0].Key != "files/x/a" || objects[1].Size != 5 || objects[1].Modified.Day() != 2 {
+		t.Fatalf("list %+v %v", objects, err)
+	}
+	body, size, err := store.open(ctx, "files/x/a")
+	if err != nil || size != 5 {
+		t.Fatalf("open %d %v", size, err)
+	}
+	b, _ := io.ReadAll(body)
+	body.Close()
+	if string(b) != "hello" {
+		t.Errorf("open read %q", b)
+	}
+	if _, _, err := store.open(ctx, "files/x/missing"); err == nil {
+		t.Error("missing object opened")
+	}
+	if err := store.remove(ctx, "files/x/a"); err != nil || len(deleted) != 1 || deleted[0] != "/downloads/files/x/a" {
+		t.Errorf("remove %v %v", deleted, err)
 	}
 }

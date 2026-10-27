@@ -24,34 +24,46 @@ const exportManifestName = ".metatrash-export.json"
 // ExportManifest describes an export: which space, which state, and each
 // file's ID, so a backup records what a restore would need to match.
 type ExportManifest struct {
-	Space     string       `json:"space"`
-	State     string       `json:"state"`
-	Committed string       `json:"committed"`
-	Files     []ExportFile `json:"files"`
+	Space     string `json:"space"`
+	State     string `json:"state"`
+	Committed string `json:"committed"`
+	// VirtualFiles says what the zip holds at a virtual file's path, when
+	// the space has any (0.60.1): "content" (the file itself) or
+	// "pointers" (the pointer text Git holds; the content is listed only).
+	VirtualFiles string       `json:"virtualFiles,omitempty"`
+	Files        []ExportFile `json:"files"`
 }
 
 type ExportFile struct {
 	Path  string `json:"path"`
 	ID    string `json:"id"`
 	Bytes int64  `json:"bytes"`
+	// Virtual describes a virtual file's content (Bytes is its pointer's).
+	Virtual *VirtualInfo `json:"virtual,omitempty"`
 }
 
-// exportZip returns the space at its head as a zip: every file at its path,
-// dated with the head commit's time, plus exportManifestName. The whole
-// archive is built before anything is sent, so a failure is still an error
+// exportContent opens a virtual file's content for an export; nil exports
+// pointers only.
+type exportContent func(ctx context.Context, v VirtualInfo) (io.ReadCloser, error)
+
+// exportZip writes the space at its head to out as a zip: every file at its
+// path, dated with the head commit's time, plus exportManifestName. A
+// virtual file is its content when content is set (stored as it is, unless
+// it is text), else its pointer. Callers write to a buffer or a temporary
+// file and send it only once it is complete, so a failure is still an error
 // response; a space's current text is bounded by maxCurrentTextBytes.
-func (r *repository) exportZip(ctx context.Context, space string) (string, []byte, error) {
+func (r *repository) exportZip(ctx context.Context, space string, out io.Writer, content exportContent) (string, error) {
 	state, files, err := r.snapshot(ctx, "")
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	b, err := git(ctx, r.path, "", nil, "show", "-s", "--format=%cI", state)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	committed, err := time.Parse(time.RFC3339, strings.TrimSpace(string(b)))
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid commit time")
+		return "", fmt.Errorf("invalid commit time")
 	}
 	committed = committed.UTC()
 	paths := make([]string, 0, len(files))
@@ -63,20 +75,29 @@ func (r *repository) exportZip(ctx context.Context, space string) (string, []byt
 	sort.Strings(paths)
 	texts, err := r.blobs(ctx, hashes)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	manifest := ExportManifest{Space: space, State: state, Committed: committed.Format(time.RFC3339), Files: make([]ExportFile, 0, len(paths))}
 	for _, p := range paths {
-		manifest.Files = append(manifest.Files, ExportFile{Path: p, ID: files[p].ID, Bytes: files[p].Bytes})
+		f := files[p]
+		manifest.Files = append(manifest.Files, ExportFile{Path: p, ID: f.ID, Bytes: f.Bytes, Virtual: f.Virtual})
+		if f.Virtual != nil {
+			manifest.VirtualFiles = "pointers"
+			if content != nil {
+				manifest.VirtualFiles = "content"
+			}
+		}
 	}
 	m, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
+	zw := zip.NewWriter(out)
+	create := func(name string, method uint16) (io.Writer, error) {
+		return zw.CreateHeader(&zip.FileHeader{Name: name, Method: method, Modified: committed})
+	}
 	add := func(name string, text []byte) error {
-		w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: committed})
+		w, err := create(name, zip.Deflate)
 		if err != nil {
 			return err
 		}
@@ -84,17 +105,42 @@ func (r *repository) exportZip(ctx context.Context, space string) (string, []byt
 		return err
 	}
 	if err := add(exportManifestName, append(m, '\n')); err != nil {
-		return "", nil, err
+		return "", err
 	}
 	for _, p := range paths {
-		if err := add(p, texts[files[p].Blob]); err != nil {
-			return "", nil, err
+		f := files[p]
+		if f.Virtual == nil || content == nil {
+			if err := add(p, texts[f.Blob]); err != nil {
+				return "", err
+			}
+			continue
+		}
+		// Pictures, PDFs and Word files are compressed already.
+		method := zip.Store
+		if f.Virtual.textIsContent() {
+			method = zip.Deflate
+		}
+		w, err := create(p, method)
+		if err != nil {
+			return "", err
+		}
+		body, err := content(ctx, *f.Virtual)
+		if err != nil {
+			return "", err
+		}
+		n, err := io.Copy(w, body)
+		body.Close()
+		if err != nil {
+			return "", err
+		}
+		if n != f.Virtual.Size {
+			return "", fmt.Errorf("virtual file %s: got %d bytes of %d", p, n, f.Virtual.Size)
 		}
 	}
 	if err := zw.Close(); err != nil {
-		return "", nil, err
+		return "", err
 	}
-	return state, buf.Bytes(), nil
+	return state, nil
 }
 
 // blobs reads many blobs with one git process.
@@ -144,15 +190,21 @@ func (r *repository) blobs(ctx context.Context, hashes []string) (map[string][]b
 }
 
 // ExportRepository exports the Git repository at gitDir the way the REST
-// export does, for console commands that run beside the service. Reading
-// needs no lock: Git never changes the objects a branch points to.
+// export does, for console commands that run beside the service, with
+// virtual files as their pointers (the console has no bucket). Reading needs
+// no lock: Git never changes the objects a branch points to.
 func ExportRepository(ctx context.Context, gitDir, space string) (string, []byte, error) {
 	if info, err := os.Stat(gitDir); err != nil || !info.IsDir() {
 		return "", nil, fmt.Errorf("no space repository at %s", gitDir)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	return (&repository{path: gitDir}).exportZip(ctx, space)
+	var buf bytes.Buffer
+	state, err := (&repository{path: gitDir}).exportZip(ctx, space, &buf, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	return state, buf.Bytes(), nil
 }
 
 // exportFileName is the suggested name for an export: owner-slug, the UTC

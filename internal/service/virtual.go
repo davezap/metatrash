@@ -1,8 +1,10 @@
 package service
 
 import (
+	"container/list"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"mime"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	pathpkg "path"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -230,20 +233,102 @@ func (s *Service) readVirtual(ctx context.Context, r *repository, path string, v
 		}
 		return nil
 	}
-	store, _ := s.spaceFiles()
-	if store == nil {
-		return virtualUnavailable()
-	}
-	b, err := store.get(ctx, v.textKey(r.id))
+	text, err := s.virtualTextOf(ctx, r, path, v)
 	if err != nil {
-		log.Printf("virtual file %s: %v", path, err)
-		return problem(503, "unavailable", path+" is a virtual file whose content could not be fetched; try again later.")
+		return err
 	}
-	result.File.Text = string(b)
+	result.File.Text = text
 	if !v.textIsContent() {
 		result.Note = fmt.Sprintf("%s is a virtual %s file (%s); this is its text as Markdown.", path, v.Type, humanBytes(v.Size))
 	}
 	return nil
+}
+
+// readPicture adds a virtual picture to a read for a client that shows it
+// to its model, when it is small enough to send.
+func (s *Service) readPicture(ctx context.Context, r *repository, path string, v VirtualInfo, result *ReadResult) error {
+	if v.Size > maxWebImageBytes {
+		result.Note = fmt.Sprintf("%s is a virtual picture (%s, %s), over %d MB, too large to show.", path, v.Type, humanBytes(v.Size), maxWebImageBytes>>20)
+		return nil
+	}
+	b, err := s.virtualContent(ctx, r, v)
+	if err != nil {
+		return err
+	}
+	result.image = &imageResult{media: v.Type, data: b}
+	result.Note = fmt.Sprintf("%s is a virtual picture (%s, %s), shown with this result.", path, v.Type, humanBytes(v.Size))
+	return nil
+}
+
+// virtualTextOf is a virtual file's text, from the cache or the bucket.
+func (s *Service) virtualTextOf(ctx context.Context, r *repository, path string, v VirtualInfo) (string, error) {
+	key := v.textKey(r.id)
+	if text, ok := s.virtualTexts.get(key); ok {
+		return text, nil
+	}
+	store, _ := s.spaceFiles()
+	if store == nil {
+		return "", virtualUnavailable()
+	}
+	b, err := store.get(ctx, key)
+	if err != nil {
+		log.Printf("virtual file %s: %v", path, err)
+		return "", problem(503, "unavailable", path+" is a virtual file whose content could not be fetched; try again later.")
+	}
+	s.virtualTexts.add(key, string(b))
+	return string(b), nil
+}
+
+// textCache keeps recently used virtual texts in memory (0.60.1), so a
+// search does not fetch every text from the bucket each time. Objects never
+// change, so entries are never stale; the least recently used go first once
+// the cache holds more than maxBytes.
+type textCache struct {
+	mu       sync.Mutex
+	maxBytes int
+	bytes    int
+	order    *list.List // of *textEntry, most recent first
+	entries  map[string]*list.Element
+}
+
+type textEntry struct {
+	key, text string
+}
+
+const virtualTextCacheBytes = 64 << 20
+
+func (c *textCache) get(key string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if !ok {
+		return "", false
+	}
+	c.order.MoveToFront(e)
+	return e.Value.(*textEntry).text, true
+}
+
+func (c *textCache) add(key, text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries, c.order = map[string]*list.Element{}, list.New()
+		if c.maxBytes == 0 {
+			c.maxBytes = virtualTextCacheBytes
+		}
+	}
+	if _, ok := c.entries[key]; ok || len(text) > c.maxBytes {
+		return
+	}
+	c.entries[key] = c.order.PushFront(&textEntry{key, text})
+	c.bytes += len(text)
+	for c.bytes > c.maxBytes {
+		last := c.order.Back()
+		e := last.Value.(*textEntry)
+		c.order.Remove(last)
+		delete(c.entries, e.key)
+		c.bytes -= len(e.text)
+	}
 }
 
 // virtualContent is a virtual file's content.
@@ -258,6 +343,21 @@ func (s *Service) virtualContent(ctx context.Context, r *repository, v VirtualIn
 		return nil, problem(503, "unavailable", "The file's content could not be fetched; try again later.")
 	}
 	return b, nil
+}
+
+// openVirtual streams a virtual file's content (0.60.1), so a download
+// never holds the whole file in memory.
+func (s *Service) openVirtual(ctx context.Context, r *repository, v VirtualInfo) (io.ReadCloser, int64, error) {
+	store, _ := s.spaceFiles()
+	if store == nil {
+		return nil, 0, virtualUnavailable()
+	}
+	body, size, err := store.open(ctx, v.key(r.id))
+	if err != nil {
+		log.Printf("virtual file: %v", err)
+		return nil, 0, problem(503, "unavailable", "The file's content could not be fetched; try again later.")
+	}
+	return body, size, nil
 }
 
 func humanBytes(n int64) string {

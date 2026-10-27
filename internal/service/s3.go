@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,16 +16,35 @@ import (
 	"time"
 )
 
-// objectStore keeps the web tools' downloads (web_tools.go). The server uses
-// an S3-compatible bucket (Backblaze B2); tests use memory.
+// objectStore keeps the web tools' downloads (web_tools.go) and virtual
+// files' content (virtual.go). The server uses an S3-compatible bucket
+// (Backblaze B2); tests use memory.
 type objectStore interface {
 	put(ctx context.Context, key, contentType string, body []byte) error
 	// get returns an object; a missing one is an error.
 	get(ctx context.Context, key string) ([]byte, error)
+	// open streams an object and gives its size; a missing one is an error.
+	open(ctx context.Context, key string) (io.ReadCloser, int64, error)
 }
 
-// s3Store speaks just enough of the S3 API (PUT and GET of one object, path
-// style, AWS Signature Version 4) for the downloads bucket.
+// storedObject is one object a listing found.
+type storedObject struct {
+	Key      string
+	Size     int64
+	Modified time.Time
+}
+
+// objectSweeper lists and removes objects, for the sweep of virtual files'
+// content (virtual_sweep.go).
+type objectSweeper interface {
+	// list returns every object whose key starts with prefix.
+	list(ctx context.Context, prefix string) ([]storedObject, error)
+	remove(ctx context.Context, key string) error
+}
+
+// s3Store speaks just enough of the S3 API (PUT, GET and DELETE of one
+// object and ListObjectsV2, path style, AWS Signature Version 4) for the
+// downloads bucket.
 type s3Store struct {
 	endpoint, region, bucket, keyID, secret string
 	http                                    *http.Client
@@ -80,6 +100,93 @@ func (s *s3Store) get(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("downloads bucket object could not be read")
 	}
 	return b, nil
+}
+
+func (s *s3Store) open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.objectURL(key), nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	s.sign(req, nil)
+	// The client's timeout covers reading the body too, so a long stream
+	// uses a client without one; ctx bounds it instead.
+	client := *s.http
+	client.Timeout = 0
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("downloads bucket unreachable")
+	}
+	if resp.StatusCode != http.StatusOK || resp.ContentLength < 0 {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+		resp.Body.Close()
+		return nil, 0, fmt.Errorf("downloads bucket answered %d", resp.StatusCode)
+	}
+	return resp.Body, resp.ContentLength, nil
+}
+
+// list pages through ListObjectsV2.
+func (s *s3Store) list(ctx context.Context, prefix string) ([]storedObject, error) {
+	var out []storedObject
+	token := ""
+	for page := 0; ; page++ {
+		if page >= 10000 {
+			return nil, fmt.Errorf("downloads bucket listing too long")
+		}
+		q := url.Values{"list-type": {"2"}, "prefix": {prefix}}
+		if token != "" {
+			q.Set("continuation-token", token)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.endpoint+"/"+s.bucket+"?"+s3Query(q), nil)
+		if err != nil {
+			return nil, err
+		}
+		s.sign(req, nil)
+		resp, err := s.http.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("downloads bucket unreachable")
+		}
+		var listing struct {
+			Contents []struct {
+				Key          string
+				Size         int64
+				LastModified time.Time
+			}
+			IsTruncated           bool
+			NextContinuationToken string
+		}
+		err = xml.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&listing)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || err != nil {
+			return nil, fmt.Errorf("downloads bucket listing failed (%d)", resp.StatusCode)
+		}
+		for _, c := range listing.Contents {
+			out = append(out, storedObject{Key: c.Key, Size: c.Size, Modified: c.LastModified})
+		}
+		if !listing.IsTruncated || listing.NextContinuationToken == "" {
+			return out, nil
+		}
+		token = listing.NextContinuationToken
+	}
+}
+
+// remove deletes an object. In B2 this hides it; the bucket's lifecycle
+// rule for files/ deletes hidden files later (docs/deployment.md).
+func (s *s3Store) remove(ctx context.Context, key string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.objectURL(key), nil)
+	if err != nil {
+		return err
+	}
+	s.sign(req, nil)
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("downloads bucket unreachable")
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("downloads bucket refused the delete (%d)", resp.StatusCode)
+	}
+	return nil
 }
 
 // sign adds the Signature Version 4 headers, signing host, the payload hash,

@@ -319,7 +319,20 @@ func (a *agentRunner) loop() {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	var housekeeping time.Time
+	// The first sweep of virtual files runs an hour after start, then daily,
+	// so restarts neither skip it for long nor repeat it.
+	swept := a.clock().Add(time.Hour - 24*time.Hour)
 	for {
+		if now := a.clock(); now.Sub(swept) >= 24*time.Hour {
+			swept = now
+			a.wg.Add(1)
+			go func() {
+				defer a.wg.Done()
+				ctx, cancel := context.WithTimeout(a.ctx, time.Hour)
+				defer cancel()
+				a.s.sweepVirtual(ctx, now)
+			}()
+		}
 		if now := a.clock(); now.Sub(housekeeping) >= time.Hour {
 			// On start and then hourly: catch up schedules with every space's
 			// settings, and forget expired downloads.
@@ -877,11 +890,16 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 			} else {
 				var text string
 				var isError bool
-				text, isError, change = a.callTool(toolCtx, r, j.SpaceID, pin, use.Name, use.Input)
+				var image *imageResult
+				text, isError, change, image = a.callTool(toolCtx, r, j.SpaceID, pin, use.Name, use.Input)
 				if web != nil {
 					web.see(text)
 				}
-				result = rawBlock(contentBlock{Type: "tool_result", ToolUseID: use.ID, Content: text, IsError: isError})
+				if image != nil {
+					result = rawImageResult(use.ID, text, *image)
+				} else {
+					result = rawBlock(contentBlock{Type: "tool_result", ToolUseID: use.ID, Content: text, IsError: isError})
+				}
 			}
 			if change != "" {
 				out.changed = append(out.changed, change)
@@ -1051,8 +1069,8 @@ type pinnedFolder string
 
 // callTool runs one tool call for an agent job. It returns the result text
 // for the model, whether it is an error, and a note of the file it changed.
-func (a *agentRunner) callTool(ctx context.Context, r *repository, space string, pin pinnedFolder, name string, raw json.RawMessage) (string, bool, string) {
-	fail := func(err error) (string, bool, string) {
+func (a *agentRunner) callTool(ctx context.Context, r *repository, space string, pin pinnedFolder, name string, raw json.RawMessage) (string, bool, string, *imageResult) {
+	fail := func(err error) (string, bool, string, *imageResult) {
 		var p *Error
 		if !errors.As(err, &p) {
 			log.Printf("agent runner: tool %s: %v", name, err)
@@ -1063,7 +1081,7 @@ func (a *agentRunner) callTool(ctx context.Context, r *repository, space string,
 		b, _ := json.Marshal(struct {
 			Error Error `json:"error"`
 		}{e})
-		return string(b), true, ""
+		return string(b), true, "", nil
 	}
 	schema, ok := a.schemas[name]
 	if !ok {
@@ -1089,7 +1107,7 @@ func (a *agentRunner) callTool(ctx context.Context, r *repository, space string,
 	p := string(pin)
 	in := Input{Revision: args.Revision, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit, Text: args.Text, IfInState: args.IfInState,
 		CreateOnly: args.CreateOnly, Strict: args.Strict, StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query,
-		Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context, IfBlob: args.IfBlob, Line: args.Line, Since: args.Since}
+		Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context, IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true}
 	if args.Path != "" {
 		in.Path = p + args.Path
 	}
@@ -1154,7 +1172,11 @@ func (a *agentRunner) callTool(ctx context.Context, r *repository, space string,
 	case "move":
 		change = args.From + " → " + args.To + " (moved)"
 	}
-	return text, false, change
+	var image *imageResult
+	if read, ok := value.(ReadResult); ok {
+		image = read.image
+	}
+	return text, false, change, image
 }
 
 func mutationOf(value any) (Mutation, bool) {

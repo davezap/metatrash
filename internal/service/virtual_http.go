@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -76,25 +77,52 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 		sendError(w, missing())
 		return
 	}
-	kind := "text/plain; charset=utf-8"
-	var body []byte
+	w.Header().Set("X-Metatrash-State", state)
 	if f.Virtual != nil {
-		kind = f.Virtual.Type
-		body, err = h.service.virtualContent(ctx, repo, *f.Virtual)
-	} else {
-		body, err = repo.blob(ctx, f.Blob)
+		h.streamVirtual(w, r, repo, path, *f.Virtual, false)
+		return
 	}
+	body, err := repo.blob(ctx, f.Blob)
 	if err != nil {
 		sendError(w, err)
 		return
 	}
-	w.Header().Set("X-Metatrash-State", state)
-	sendDownload(w, r, pathpkg.Base(path), kind, body, false)
+	sendDownload(w, r, pathpkg.Base(path), "text/plain; charset=utf-8", body, false)
+}
+
+// streamVirtual sends a virtual file's content as it arrives from the
+// bucket (0.60.1): as an attachment, or inline for a picture a page shows.
+func (h *httpAdapter) streamVirtual(w http.ResponseWriter, r *http.Request, repo *repository, path string, v VirtualInfo, inline bool) {
+	if r.Method == http.MethodHead {
+		downloadHeaders(w, pathpkg.Base(path), v.Type, v.Size, inline)
+		return
+	}
+	// A download may take longer than a page: allow ten minutes.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	body, size, err := h.service.openVirtual(ctx, repo, v)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	defer body.Close()
+	downloadHeaders(w, pathpkg.Base(path), v.Type, size, inline)
+	if _, err := io.Copy(w, body); err != nil {
+		// The headers are sent, so the client sees a short download.
+		log.Printf("virtual file %s: download cut short: %v", path, err)
+	}
 }
 
 // sendDownload sends a file's bytes so that nothing in them runs on this
 // site: inline only for the pictures a page shows, else as an attachment.
 func sendDownload(w http.ResponseWriter, r *http.Request, name, kind string, body []byte, inline bool) {
+	downloadHeaders(w, name, kind, int64(len(body)), inline)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(body)
+	}
+}
+
+func downloadHeaders(w http.ResponseWriter, name, kind string, size int64, inline bool) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", kind)
@@ -103,10 +131,7 @@ func sendDownload(w http.ResponseWriter, r *http.Request, name, kind string, bod
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
-	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-	if r.Method != http.MethodHead {
-		_, _ = w.Write(body)
-	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 }
 
 // serveVirtual sends a virtual file from a space page: with ?raw its
@@ -114,12 +139,7 @@ func sendDownload(w http.ResponseWriter, r *http.Request, name, kind string, bod
 // text. The caller has checked the visitor may read the space.
 func (h *httpAdapter) serveVirtual(w http.ResponseWriter, r *http.Request, repo *repository, path string, v VirtualInfo, raw bool) {
 	if raw {
-		body, err := h.service.virtualContent(r.Context(), repo, v)
-		if err != nil {
-			sendError(w, err)
-			return
-		}
-		sendDownload(w, r, pathpkg.Base(path), v.Type, body, v.image())
+		h.streamVirtual(w, r, repo, path, v, v.image())
 		return
 	}
 	var result ReadResult

@@ -66,6 +66,8 @@ type Service struct {
 	// usernameHook and userIDHook replace the account lookups in tests.
 	usernameHook func(userID string) string
 	userIDHook   func(username string) string
+	// virtualTexts caches virtual files' text for search and read.
+	virtualTexts textCache
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -243,6 +245,11 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 				return nil, err
 			}
 			b = []byte(result.File.Text)
+			if in.Images && f.Virtual.image() && in.StartLine == 0 && in.LineCount == 0 {
+				if err := s.readPicture(ctx, r, in.Path, *f.Virtual, &result); err != nil {
+					return nil, err
+				}
+			}
 		} else if b, err = r.blob(ctx, f.Blob); err != nil {
 			return nil, err
 		}

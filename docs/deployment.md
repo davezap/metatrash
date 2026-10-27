@@ -442,6 +442,25 @@ public space among them) refuse actions altogether.
   virtual files too. Back the bucket up (or turn on B2 versioning) if
   virtual files matter to you.
 
+  Since 0.60.1 the service sweeps `files/` once a day (an hour after it
+  starts, then every 24 hours): content that no version of any file in its
+  space names, and that is over a day old, is deleted. In B2 that only hides
+  the file, so add a second lifecycle rule (Lifecycle Settings → Use custom
+  lifecycle rules → Add rule): file path `files/`, days till hide empty,
+  days till delete `7`. Hidden content then goes after a week, and until
+  then you can bring a file back in the B2 browser (show hidden files, then
+  unhide). The key from step 3 can already list and delete. The journal
+  logs each space a sweep removed anything from:
+
+  ```sh
+  journalctl -u metatrash | grep "virtual files sweep"
+  ```
+
+  A space export with virtual files (0.60.1) is built in a temporary file
+  beside the space's repository (`/var/lib/metatrash/owned-repos/.export-*`)
+  before it is sent, so the data volume needs free space for the largest
+  space's files (up to 5 GB each).
+
   Without `search` and `downloads`, actions run without the web tools, and
   spaces have no virtual files.
 

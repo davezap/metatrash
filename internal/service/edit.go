@@ -277,17 +277,22 @@ func (s *Service) search(ctx context.Context, r *repository, space string, in In
 	if err != nil {
 		return nil, err
 	}
-	// Virtual files are left out: their text is outside Git (read them).
+	// Virtual files are searched in their text (0.60.1): the content for a
+	// text file, the Markdown of a PDF, Word or HTML file. Those without
+	// text are left out, and so are pointers. A text the bucket cannot give
+	// is skipped.
 	paths := []string{}
 	for p, f := range files {
-		if strings.HasPrefix(p, in.Prefix) && f.Virtual == nil {
+		if strings.HasPrefix(p, in.Prefix) && (f.Virtual == nil || f.Virtual.TextSHA256 != "") {
 			paths = append(paths, p)
 		}
 	}
 	sort.Strings(paths)
 	hashes := make([]string, 0, len(paths))
 	for _, p := range paths {
-		hashes = append(hashes, files[p].Blob)
+		if files[p].Virtual == nil {
+			hashes = append(hashes, files[p].Blob)
+		}
 	}
 	texts, err := r.blobs(ctx, hashes)
 	if err != nil {
@@ -295,7 +300,16 @@ func (s *Service) search(ctx context.Context, r *repository, space string, in In
 	}
 	result := SearchResult{Space: space, State: state, Matches: []SearchMatch{}}
 	for _, p := range paths {
-		if !searchLines(&result, p, files[p].ID, string(texts[files[p].Blob]), match, in) {
+		f := files[p]
+		text := string(texts[f.Blob])
+		if f.Virtual != nil {
+			if text, err = s.virtualTextOf(ctx, r, p, *f.Virtual); err != nil {
+				// One unreadable text should not stop the search;
+				// virtualTextOf logged it.
+				continue
+			}
+		}
+		if !searchLines(&result, p, f.ID, text, match, in) {
 			break
 		}
 	}

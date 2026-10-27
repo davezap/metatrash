@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -457,7 +459,10 @@ func (h *httpAdapter) serveGitHubPost(w http.ResponseWriter, r *http.Request, op
 // backups. It costs one read plus the export allowances, since one export
 // reads every file: one client cannot use up a space's exports alone.
 func (h *httpAdapter) serveExport(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
-	if r.URL.RawQuery != "" {
+	// virtual=list leaves virtual files' content out (0.60.1): the zip then
+	// holds their pointers, and the manifest lists them.
+	listOnly := r.URL.RawQuery == "virtual=list"
+	if r.URL.RawQuery != "" && !listOnly {
 		sendError(w, invalid("Unknown query parameter."))
 		return
 	}
@@ -465,21 +470,48 @@ func (h *httpAdapter) serveExport(w http.ResponseWriter, r *http.Request, repo *
 		sendError(w, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	var content exportContent
+	timeout := 30 * time.Second
+	if store, _ := h.service.spaceFiles(); store != nil && repo.owned && repo.id != "" && !listOnly {
+		timeout = 30 * time.Minute
+		content = func(ctx context.Context, v VirtualInfo) (io.ReadCloser, error) {
+			body, _, err := h.service.openVirtual(ctx, repo, v)
+			return body, err
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	state, b, err := repo.exportZip(ctx, space)
+	// The zip is built in a temporary file beside the repository (on the
+	// data volume), so binaries are not held in memory and a failure part way
+	// is still an error response.
+	tmp, err := os.CreateTemp(filepath.Dir(repo.path), ".export-*.zip")
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	state, err := repo.exportZip(ctx, space, tmp, content)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	size, err := tmp.Seek(0, io.SeekCurrent)
+	if err == nil {
+		_, err = tmp.Seek(0, io.SeekStart)
+	}
 	if err != nil {
 		sendError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+exportFileName(space, state, time.Now())+`"`)
-	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Metatrash-State", state)
 	w.WriteHeader(200)
-	_, _ = w.Write(b)
+	_, _ = io.Copy(w, tmp)
 }
 
 // Exports per space, and per client of a space, in each ten minutes.

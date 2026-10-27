@@ -168,7 +168,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
 				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, Strict: args.Strict, From: args.From, To: args.To,
 				StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context,
-				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since}
+				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true}
 			value, err := h.service.dispatchRepository(ctx, repo, space, op, in)
 			if err != nil {
 				return mcpFailure(err), nil
@@ -177,7 +177,11 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			if err != nil {
 				return mcpFailure(err), nil
 			}
-			return &mcp.CallToolResult{StructuredContent: value, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
+			content := []mcp.Content{&mcp.TextContent{Text: string(b)}}
+			if read, ok := value.(ReadResult); ok && read.image != nil {
+				content = append(content, &mcp.ImageContent{Data: read.image.data, MIMEType: read.image.media})
+			}
+			return &mcp.CallToolResult{StructuredContent: value, Content: content}, nil
 		})
 	}
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{

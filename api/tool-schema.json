@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.16.0",
+  "schemaVersion": "0.16.1",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.45.0"},
@@ -21,7 +21,7 @@
   "tools": [
     {
       "name": "read",
-      "description": "Read a file at the head or a revision; returns the state. Start with AGENTS.md: instructions for agents; each folder has its own. For a long file read only the lines you need with startLine and lineCount (search gives line numbers). To check a file you read before, pass its blob as ifBlob: if it is the same, the answer has unchanged: true and no text. A .metatrash.json that inherits also returns effective: its settings with the parent's filled in. A virtual file (file.virtual: content kept outside Git) returns its text, a PDF or Word file as Markdown, with a note; an image or other file without text returns the note only.",
+      "description": "Read a file at the head or a revision; returns the state. Start with AGENTS.md: instructions for agents; each folder has its own. For a long file read only the lines you need with startLine and lineCount (search gives line numbers). To check a file you read before, pass its blob as ifBlob: if it is the same, the answer has unchanged: true and no text. A .metatrash.json that inherits also returns effective: its settings with the parent's filled in. A virtual file (file.virtual: content kept outside Git) returns its text, a PDF or Word file as Markdown, with a note; a picture comes with the result as an image; another file without text returns the note only.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -185,7 +185,7 @@
     },
     {
       "name": "search",
-      "description": "Find lines in a space's files, like grep: each match with path, file ID, line number and optional context. Use it to locate text for edit or choose lines to read instead of reading whole files. Plain text, or RE2 with regex.",
+      "description": "Find lines in a space's files, like grep: each match with path, file ID, line number and optional context. Use it to locate text for edit or choose lines to read instead of reading whole files. Virtual files are searched in their text. Plain text, or RE2 with regex.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
