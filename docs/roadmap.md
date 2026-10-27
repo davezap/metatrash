@@ -347,31 +347,83 @@ step.
    read in Go; PDF needs a text extractor on the server (a Go library or
    `pdftotext`, to be chosen). Done on the server so it works the same for
    MiniMax and Claude.
-2. **0.60.0: binaries in a space, kept in B2.** An upload route (REST, then
-   MCP) stores a non-UTF-8 file in B2 by its SHA-256 and records it in the
-   database by space and path, never in Git. Listing a folder shows these
-   files with a size and type; reading one gives a download link or, for an
-   image, the image; delete and move work on them. For PDF and Word,
-   `convert: true` also writes `<name>.md` into the folder in Git, and that
-   arriving file is what starts the folder's `on` actions. Locks,
-   `readOnly`, membership and agent permissions apply as for any file.
-3. **0.61.0: mtsync and Slate Viewer handle it transparently.** mtsync
-   uploads a local binary to B2 and downloads the space's binaries, with the
-   same three-way rules as text; Slate Viewer shows them in the tree, opens
-   them in the system's app, and offers "Convert to Markdown". GitHub
-   folders send a repository's binary files to B2 on pull and back on push.
-4. **Later: a blob service for compute output.** An action, or another
-   service, stores a result as a blob in B2 and gets a reference back for
-   later retrieval, with the same per-owner ownership and retention rules.
+2. **0.59.1: Markdown for agents.** Every space page and `/docs/` page
+   is a Markdown file already, so the site sends that file as it is when a
+   client asks for Markdown: `Accept: text/markdown` or `?format=md` on the
+   same URL (`Content-Type: text/markdown; charset=utf-8`, the same access
+   rules as the page, so a private page still needs the sign-in). An
+   `llms.txt` at the root of `/docs/` (and of each web-readable space) lists
+   the pages with one line each, the usual way to point AI tools at a site's
+   Markdown. `web_fetch` asks for Markdown first, so fetching a Metatrash
+   page gives the document itself instead of the page around it. Today a
+   fetch gets the HTML page, whose `<main>` carries the source in a `<pre>`,
+   so the agent sees the Markdown inside a code block under the page's
+   heading: usable, but larger and less clean. A separate
+   `md.metatrash.com` (Dave, 2026-10-27) can come later on top of this if
+   wanted; it would need DNS, TLS and Apache changes and nothing more from
+   the server.
+3. **0.60.0: virtual files** (Dave's design, 2026-10-27; replaces the
+   earlier plan of a database record per path). A virtual file is content
+   kept outside Git, uploaded or fetched from the internet, that appears in
+   the space as a normal file:
+   - **In Git, a small pointer at the file's own path** (as Git LFS does):
+     `report.pdf` holds a UTF-8 record, starting with a `metatrash-virtual 1`
+     line, then the content's SHA-256, size and type, an optional source URL
+     and its refresh and retention policy. The same format serves binary and
+     text content. Because the pointer is an ordinary Git file, history,
+     moves, deletes, export, locks and the `on` triggers of folder actions all
+     work unchanged, and each pointer revision is a version of the content.
+   - **Tools resolve it.** `list` marks the file `virtual` (with size, type,
+     source, stale); `read` returns the content (text as text, an image as an
+     image, a PDF or Word file as its Markdown with a link to the original).
+     Content writes are refused (`virtual_file`); a separate `configure`
+     operation changes the source and policies, under the usual locks. The
+     website and Slate Viewer show it as virtual and read-only.
+   - **Creating one.** An upload route stores a file and writes its pointer;
+     `web_fetch` takes an optional destination path in the folder, so
+     Metatrash fetches, stores and creates the virtual file there, and the
+     agent then uses the normal file tools without handling the URL.
+   - **Refresh.** A policy pins an exact version or refreshes from the
+     source on an `every` schedule (the folder-actions schedules), asking
+     the site whether it changed first. A new hash is a new commit of the
+     pointer, so History shows it and actions fire; an unchanged source makes
+     no commit. A failed refresh keeps the previous content and marks it
+     stale in the database (not in Git, so no commit noise), and reads say
+     so. Refreshes are made for the space owner and count toward their daily
+     fetch limit; the `web_fetch` address rules apply.
+   - **Storage and retention.** Content goes to the space-files bucket (no
+     lifecycle rule) by hash, once. A sweep keeps every hash a pointer in any
+     commit of the space still names, so old revisions always resolve; the
+     30-day `web/` cache stays separate, and fetching to a path copies the
+     content into the space-files bucket.
+   - **Uses.** Attachments, embedded images, PDF and Word files with their
+     Markdown, and documents kept up to date from a URL, such as the forms
+     guide an action needs (`forms-guide.md`, refreshed daily from
+     `/docs/guides/forms.md?format=md`), which the agent then reads like any
+     file in its folder.
+   - To settle while building: whether `read` of a PDF or Word file returns
+     its Markdown by default or needs `as: "markdown"`; what a GitHub folder
+     pushes for a virtual file (the pointer, the content, or nothing); and
+     how old mtsync releases, which see pointer text, are kept from
+     overwriting one (refuse writes over pointers and raise `minVersion`).
+4. **0.61.0: mtsync and Slate Viewer handle it transparently.** mtsync
+   downloads a virtual file's content to the local path, puts it back when
+   it is edited locally (as for everyone-locked files), and turns a new
+   local binary into a virtual file; Slate Viewer shows virtual files, opens
+   them in the system's app and offers "Convert to Markdown". GitHub folders
+   store a repository's binary files as virtual files on pull.
+5. **Later: a blob service for compute output.** An action, or another
+   service, stores a result as a virtual file (or a bare blob with a
+   reference) for later retrieval, under the same ownership and retention
+   rules.
 
 ### Settled with Dave (2026-10-27)
 
-- **History.** A binary keeps its old versions: earlier hashes per path stay
-  in the database and show in History; B2 holds each version once.
+- **History.** A binary keeps its old versions; with virtual files these
+  are the pointer's revisions in Git, and B2 holds each version once.
 - **Retention and backups.** Space binaries go in their own bucket (or a
-  prefix with no 30-day lifecycle rule, unlike `web/`). Deleting a file drops
-  its record; a sweep deletes objects that no record, old version or
-  download still uses. The bucket is backed up by restic or B2's own
+  prefix with no 30-day lifecycle rule, unlike `web/`). A sweep deletes
+  objects that no pointer in any commit, and no download, still uses. The bucket is backed up by restic or B2's own
   versioning with Object Lock.
 - **Limits.** 100 MB per file and 5 GB per space to start, counted toward
   the owner.
