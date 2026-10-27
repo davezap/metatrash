@@ -127,6 +127,24 @@ func TestSmoke(t *testing.T) {
 			t.Fatalf("%s: %d header %q", page, res.Code, res.Header().Get("X-Robots-Tag"))
 		}
 	}
+	// Markdown for agents (0.59.1): the file as it is, and llms.txt.
+	for page, want := range map[string]string{"/spaces/public/archive/a.txt?format=md": "text/plain; charset=utf-8", "/spaces/public/AGENTS.md?format=md": "text/markdown; charset=utf-8", "/spaces/public/llms.txt": "text/plain; charset=utf-8"} {
+		r := httptest.NewRequest("GET", page, nil)
+		r.RemoteAddr = "127.0.0.1:12345"
+		res := httptest.NewRecorder()
+		h.ServeHTTP(res, r)
+		if res.Code != 200 || res.Header().Get("Content-Type") != want || strings.Contains(res.Body.String(), "<html") {
+			t.Fatalf("%s: %d %s", page, res.Code, res.Header().Get("Content-Type"))
+		}
+	}
+	r := httptest.NewRequest("GET", "/spaces/public/archive/a.txt", nil)
+	r.RemoteAddr = "127.0.0.1:12345"
+	r.Header.Set("Accept", "text/markdown")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, r)
+	if res.Code != 200 || res.Body.String() != "hello\n" {
+		t.Fatalf("Accept: text/markdown: %d %q", res.Code, res.Body)
+	}
 	call("DELETE", "/api/v1/spaces/public/file?path=AGENTS.md", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=.metatrash.json", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=archive/a.txt", "", map[string]any{"ifInState": moved.NewState, "text": "x"}, 400)

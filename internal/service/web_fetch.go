@@ -121,7 +121,9 @@ func (f *httpFetcher) fetch(ctx context.Context, u *url.URL, etag, lastModified 
 			return webPage{}, invalid("The URL could not be requested.")
 		}
 		req.Header.Set("User-Agent", "Metatrash/"+metatrash.Version+" (folder actions; +https://metatrash.com)")
-		req.Header.Set("Accept", "text/html,application/xhtml+xml,text/markdown;q=0.9,text/plain;q=0.9,*/*;q=0.8")
+		// Markdown first (0.59.1): sites that keep it, Metatrash among
+		// them, send the document itself rather than the page around it.
+		req.Header.Set("Accept", "text/markdown,text/html;q=0.9,application/xhtml+xml;q=0.9,text/plain;q=0.8,*/*;q=0.7")
 		if redirects == 0 {
 			if etag != "" {
 				req.Header.Set("If-None-Match", etag)

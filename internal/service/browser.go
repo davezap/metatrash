@@ -343,8 +343,9 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		sendError(w, invalid("Invalid query."))
 		return true
 	}
+	asked := r.URL.RawQuery == markdownQuery && path != "/"
 	for key, values := range q {
-		if path != "/spaces/public/" || key != "path" || len(values) != 1 {
+		if !asked && (path != "/spaces/public/" || key != "path" || len(values) != 1) {
 			sendError(w, invalid("Unknown or duplicate query parameter."))
 			return true
 		}
@@ -392,6 +393,10 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		if defaulted {
 			page.Path = defaultPage(files)
 		}
+		if page.Path == "llms.txt" {
+			h.serveLLMS(w, r, repo, files, "Metatrash public space", false, h.basePath+"/spaces/public/")
+			return true
+		}
 		file, exists := files[page.Path]
 		if !exists {
 			sendError(w, missing())
@@ -399,6 +404,15 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		}
 		var content []byte
 		content, err = repo.blob(ctx, file.Blob)
+		if err == nil && (asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))) {
+			if serveSource(w, r, page.Path, content) {
+				return true
+			}
+			if asked {
+				sendError(w, problem(404, "not_found", "This file is not text, so it has no Markdown."))
+				return true
+			}
+		}
 		page.Text = string(content)
 		lowerPath := strings.ToLower(page.Path)
 		page.Markdown = strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown")
@@ -415,6 +429,9 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		return true
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if !page.Home {
+		markdownAlternate(w, h.basePath+fileURL(page.Path))
+	}
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(body.Bytes())
 	}

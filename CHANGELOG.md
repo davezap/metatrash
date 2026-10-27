@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.59.1 - Markdown for agents (2026-10-27)
+
+No schema, grant or configuration change. tool-schema.json is unchanged (0.15.1).
+
+- **Every page's Markdown at its own address** (docs/roadmap.md, Binary files and conversion): add `?format=md` to a page in a space, the public space or `/docs/`, or ask for it with `Accept: text/markdown`, and the site sends the file as it is (`text/markdown; charset=utf-8`; other text files as `text/plain`) instead of the HTML page around it. The access rules are the page's own: a private page still needs its member signed in. Browsers never ask for Markdown, so they get the page as before. The Markdown copies are `noindex` and sandboxed; each HTML page names its Markdown in a `Link` header and a `<link rel="alternate" type="text/markdown">`.
+- **`llms.txt`**: `/docs/llms.txt` (also at `/llms.txt`, where AI tools look first), `/spaces/public/llms.txt` and `llms.txt` at the top of any space you can read list its Markdown pages, top folder first and then one section per folder, each linking the page's `?format=md` address. A space with its own `llms.txt` file gets that file instead.
+- **`web_fetch` asks for Markdown first** (`Accept: text/markdown, text/html;q=0.9, …`): a Metatrash page comes back as the document itself rather than the page with the Markdown inside a code block, and other sites that keep Markdown versions send those. Sites that don't still send HTML, converted as before.
+- Tested: the Accept ranking (browsers' headers, Markdown first, Markdown ranked below HTML, `q=0`); llms.txt's layout and escaped links; against MariaDB, a private page's Markdown (signed out to sign in, a stranger not found, the owner by `?format=md` and by Accept, a browser's Accept still HTML), then readable on the web (anonymous, the space's top, the bare space address keeping `?format=md`, a JSON file as plain text, other queries and missing files not found, the `Link` header and head link, `llms.txt`), `/docs/` and `/llms.txt`, a space's own `llms.txt`, and `/llms.txt` without a docs space; the public space's Markdown, plain text and `llms.txt`.
+
 ## 0.59.0 - PDF and Word downloads as Markdown (2026-10-27)
 
 No schema, grant or `accounts.json` change. tool-schema.json is unchanged (0.15.1). **Optional:** install `poppler-utils` on the server (`sudo dnf install poppler-utils`) for PDF text; `metatrash check` says whether the service found `pdftotext`.

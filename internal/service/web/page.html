@@ -6,6 +6,7 @@
 <title>{{if .Home}}Metatrash — shared liminal spaces{{else if .About}}About — Metatrash{{else}}{{.Path}} — Metatrash{{end}}</title>
 {{if not (or .Home .About)}}<link rel="stylesheet" href="{{.BasePath}}/assets/slate.css">{{end}}
 <link rel="stylesheet" href="{{.BasePath}}/assets/style.css">
+{{if .Markdown}}<link rel="alternate" type="text/markdown" href="?format=md">{{end}}
 {{if not (or .Home .About)}}<script src="{{.BasePath}}/assets/slate.js" defer></script><script src="{{.BasePath}}/assets/document.js" defer></script>{{end}}
 {{if .Home}}<script src="{{.BasePath}}/assets/activity.js" defer></script><script src="{{.BasePath}}/assets/copy.js" defer></script>{{end}}
 </head>

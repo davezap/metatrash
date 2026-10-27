@@ -233,6 +233,13 @@ every request, before quotas are charged or Git is touched.
   load from `path?raw` (image types only, sandboxed, `nosniff`), and wiki
   links open the nearest matching file in the tree. Other files show as
   escaped text, which is also the fallback without JavaScript.
+- Markdown for agents (0.59.1): `?format=md` on a page, or `Accept:
+  text/markdown` ranked at least as high as HTML, sends the file as it is
+  (`text/markdown`, other text `text/plain`; sandboxed, `noindex`) under the
+  page's own access rules; pages name it in a `Link` header and a
+  `<link rel="alternate">`. `llms.txt` at the top of each space, of `/docs/`
+  and at `/llms.txt` (the docs') lists the Markdown pages with their
+  `?format=md` links, unless the space has its own `llms.txt` file.
 - Legacy `?path=` links redirect (308) to clean document URLs.
 - Assets come only from an explicit embedded allowlist, never from space
   storage. CSP allows same-origin scripts only where needed; space text is

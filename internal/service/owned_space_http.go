@@ -78,7 +78,8 @@ func (h *httpAdapter) docsSpace() string {
 // but only while the space is readable on the web: otherwise, and for anything
 // missing, /docs/ is simply not found, signed in or not, members included.
 func (h *httpAdapter) serveDocs(w http.ResponseWriter, r *http.Request, client string) bool {
-	if r.URL.Path != "/docs" && !strings.HasPrefix(r.URL.Path, "/docs/") {
+	// /llms.txt, where AI tools look first, is the docs' llms.txt.
+	if r.URL.Path != "/docs" && !strings.HasPrefix(r.URL.Path, "/docs/") && r.URL.Path != "/llms.txt" {
 		return false
 	}
 	ref := h.docsSpace()
@@ -87,6 +88,9 @@ func (h *httpAdapter) serveDocs(w http.ResponseWriter, r *http.Request, client s
 	}
 	owner, slug, _ := strings.Cut(ref, "/")
 	path, hasPath := strings.CutPrefix(r.URL.Path, "/docs/")
+	if r.URL.Path == "/llms.txt" {
+		path, hasPath = "llms.txt", true
+	}
 	h.serveSpacePage(w, r, client, owner, slug, path, hasPath, h.basePath+"/docs/", true)
 	return true
 }
@@ -138,12 +142,15 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, problem(403, "forbidden", "Use the configured site address."))
 		return
 	}
-	// ?raw serves an image file itself, for the pictures in a document.
+	// ?raw serves an image file itself, for the pictures in a document, and
+	// ?format=md (or Accept: text/markdown) a file's text as it is.
 	raw := r.URL.RawQuery == "raw"
-	if r.URL.RawQuery != "" && !raw {
+	asked := r.URL.RawQuery == markdownQuery
+	if r.URL.RawQuery != "" && !raw && !asked {
 		sendError(w, missing())
 		return
 	}
+	markdown := asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))
 	if len(slug) > 48 || !usernamePattern.MatchString(slug) || len(owner) > 32 || !usernamePattern.MatchString(owner) {
 		sendError(w, missing())
 		return
@@ -225,6 +232,9 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		if hasPath {
 			target += (&url.URL{Path: path}).EscapedPath()
 		}
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
 		// Permanent: the old address stays reserved for this space, and
 		// search engines move a web-readable space's pages to the new one.
 		// (Cache-Control: no-store, set above, still applies: the space can
@@ -233,7 +243,11 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		return
 	}
 	if !hasPath {
-		http.Redirect(w, r, root, http.StatusTemporaryRedirect)
+		target := root
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 		return
 	}
 	defaulted := path == ""
@@ -256,6 +270,10 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	if defaulted {
 		path = defaultPage(files)
 	}
+	if path == "llms.txt" && !raw {
+		h.serveLLMS(w, r, repo, files, space.Name, docs, root)
+		return
+	}
 	file, exists := files[path]
 	if !exists {
 		sendError(w, missing())
@@ -268,6 +286,13 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	content, err := repo.blob(ctx, file.Blob)
 	if err != nil {
 		sendError(w, err)
+		return
+	}
+	if markdown && serveSource(w, r, path, content) {
+		return
+	}
+	if asked {
+		sendError(w, problem(404, "not_found", "This file is not text, so it has no Markdown."))
 		return
 	}
 	// Docs pages are all indexable; a web-readable space only in its top folder.
@@ -291,9 +316,31 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	if !noIndex {
 		w.Header().Del("X-Robots-Tag")
 	}
+	markdownAlternate(w, root+(&url.URL{Path: path}).EscapedPath())
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(body.Bytes())
 	}
+}
+
+// serveLLMS sends a space's llms.txt: its own file if it has one, else the
+// list of its Markdown pages. The caller has checked the visitor may read
+// the space.
+func (h *httpAdapter) serveLLMS(w http.ResponseWriter, r *http.Request, repo *repository, files map[string]record, name string, docs bool, root string) {
+	if file, ok := files["llms.txt"]; ok {
+		content, err := repo.blob(r.Context(), file.Blob)
+		if err != nil {
+			sendError(w, err)
+			return
+		}
+		if !serveSource(w, r, "llms.txt", content) {
+			sendError(w, missing())
+		}
+		return
+	}
+	if docs {
+		name = "Metatrash docs"
+	}
+	sendText(w, r, "text/plain; charset=utf-8", llmsText(name, h.publicOrigin+root, files))
 }
 
 // rawImageTypes are the files ?raw serves, by extension: pictures only, so a

@@ -347,7 +347,11 @@ step.
    read in Go; PDF needs a text extractor on the server (a Go library or
    `pdftotext`, to be chosen). Done on the server so it works the same for
    MiniMax and Claude.
-2. **0.59.1: Markdown for agents.** Every space page and `/docs/` page
+2. ~~**0.59.1: Markdown for agents.**~~ Done: `?format=md` and
+   `Accept: text/markdown` on every space, public and `/docs/` page,
+   `llms.txt` per space plus `/llms.txt` for the docs (a space's own
+   `llms.txt` file wins), and `web_fetch` asking for Markdown first.
+   Planned: Every space page and `/docs/` page
    is a Markdown file already, so the site sends that file as it is when a
    client asks for Markdown: `Accept: text/markdown` or `?format=md` on the
    same URL (`Content-Type: text/markdown; charset=utf-8`, the same access
@@ -519,6 +523,15 @@ scheduled yet. To settle when it is:
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.59.1 (2026-10-27):
+
+- **Markdown for agents:** open `https://metatrash.com/docs/README.md?format=md`
+  (plain Markdown, no page around it), then `https://metatrash.com/llms.txt`
+  (a list of the docs pages with `?format=md` links). Signed out, a private
+  space page with `?format=md` goes to sign in. Run a folder action that
+  fetches a metatrash.com docs page: its `web/<ref>.md` is the document
+  itself, without the page's heading and code block.
 
 From 0.58.0 (2026-10-26):
 

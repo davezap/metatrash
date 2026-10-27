@@ -424,11 +424,17 @@ public space among them) refuse actions altogether.
   sudoedit /etc/metatrash/web-bucket-key        # the applicationKey, one line
   ```
 
-  PDF text (0.59.0) comes from `pdftotext`, part of Poppler: install it
-  with `sudo dnf install poppler-utils` (or `apt install poppler-utils`)
-  and check `pdftotext -v`; the service finds it on its `PATH` when it
-  starts, and `metatrash check` says whether it did. Without it, PDFs are
-  still downloaded but have no text. Word files need nothing extra.
+  PDF text (0.59.0) comes from `pdftotext`, part of Poppler. The service
+  looks for it on its `PATH` only when it starts, so restart it after
+  installing. Without it, PDFs are still downloaded but have no text; Word
+  files need nothing extra.
+
+  ```sh
+  sudo dnf install -y poppler-utils      # Debian/Ubuntu: sudo apt install poppler-utils
+  pdftotext -v
+  sudo systemctl restart metatrash
+  sudo -u metatrash metatrash check      # "web downloads (PDF text with /usr/bin/pdftotext)"
+  ```
 
   Without `search` and `downloads`, actions run without the web tools.
 
