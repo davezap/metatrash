@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -26,6 +27,7 @@ import (
 //	type <media type>
 //	text <hex of its text>   (optional: the content itself for text, its Markdown for PDF, Word and HTML)
 //	source <url>             (optional: where it was fetched from)
+//	refresh <every>          (optional, 0.60.2: fetch the source again on this schedule)
 //
 // The space's index marks the file virtual when Metatrash writes the
 // pointer, so a pointer-looking text from anywhere else (a GitHub pull, an
@@ -56,6 +58,9 @@ type VirtualInfo struct {
 	// text, its Markdown for a PDF, Word or HTML file; "" when it has none.
 	TextSHA256 string `json:"textSha256,omitempty"`
 	Source     string `json:"source,omitempty"`
+	// Refresh is an "every" schedule on which the source is fetched again
+	// (0.60.2, virtual_refresh.go); "" keeps this version.
+	Refresh string `json:"refresh,omitempty"`
 }
 
 // pointer is the text Git holds for the file.
@@ -70,6 +75,9 @@ func (v VirtualInfo) pointer() string {
 	}
 	if v.Source != "" {
 		b.WriteString("source " + v.Source + "\n")
+	}
+	if v.Refresh != "" {
+		b.WriteString("refresh " + v.Refresh + "\n")
 	}
 	return b.String()
 }
@@ -171,8 +179,9 @@ func virtualText(ctx context.Context, body []byte, media, source string, pdfText
 }
 
 // putVirtual stores content and writes path's pointer: a new virtual file,
-// or a new version of one. ifInState works as for write.
-func (s *Service) putVirtual(ctx context.Context, r *repository, space, path, ifInState string, body []byte, media, source string) (WriteResult, error) {
+// or a new version of one. ifInState works as for write. refresh needs a
+// source.
+func (s *Service) putVirtual(ctx context.Context, r *repository, space, path, ifInState string, body []byte, media, source, refresh string) (WriteResult, error) {
 	if !r.owned || r.id == "" {
 		return WriteResult{}, problem(403, "forbidden", "Virtual files are kept in account spaces only.")
 	}
@@ -186,7 +195,7 @@ func (s *Service) putVirtual(ctx context.Context, r *repository, space, path, if
 	if len(body) > maxVirtualBytes {
 		return WriteResult{}, problem(413, "payload_too_large", fmt.Sprintf("A virtual file holds at most %d MB.", maxVirtualBytes>>20))
 	}
-	info := VirtualInfo{SHA256: webHash(body), Size: int64(len(body)), Type: virtualMedia(media, path, body), Source: source}
+	info := VirtualInfo{SHA256: webHash(body), Size: int64(len(body)), Type: virtualMedia(media, path, body), Source: source, Refresh: refresh}
 	if err := store.put(ctx, info.key(r.id), info.Type, body); err != nil {
 		log.Printf("virtual file: %v", err)
 		return WriteResult{}, problem(503, "unavailable", "The file could not be stored; try again later.")
@@ -256,7 +265,12 @@ func (s *Service) readPicture(ctx context.Context, r *repository, path string, v
 		return err
 	}
 	result.image = &imageResult{media: v.Type, data: b}
-	result.Note = fmt.Sprintf("%s is a virtual picture (%s, %s), shown with this result.", path, v.Type, humanBytes(v.Size))
+	note := fmt.Sprintf("%s is a virtual picture (%s, %s), shown with this result.", path, v.Type, humanBytes(v.Size))
+	if result.Stale != nil {
+		since, _ := time.Parse(time.RFC3339, result.Stale.Since)
+		note += " " + staleNote(since, result.Stale.Reason)
+	}
+	result.Note = note
 	return nil
 }
 

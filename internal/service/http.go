@@ -301,6 +301,16 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		} else if r.Method == "PUT" {
 			op = "upload"
 		}
+	case "configure":
+		// A virtual file's source and refresh (0.60.2).
+		if metadataPath == "" {
+			sendError(w, missing())
+			return
+		}
+		allow = "POST"
+		if r.Method == "POST" {
+			op = "configure"
+		}
 	case "pull", "push", "pending":
 		// GitHub folders exist only in owned spaces, so only the OAuth resource offers these.
 		if metadataPath == "" {
@@ -323,7 +333,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews" || op == "upload"
+	write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews" || op == "upload" || op == "configure"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -355,6 +365,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	case "content", "upload":
 		h.serveContent(w, r, repo, space, op == "upload")
+		return
+	case "configure":
+		h.serveConfigure(w, r, repo, space)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)

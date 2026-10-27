@@ -72,6 +72,13 @@ type agentRunner struct {
 	fetcher    webFetcher
 	// pdfText reads a PDF's text; nil without pdftotext.
 	pdfText pdfTextFunc
+	// refreshes holds virtual files' refresh schedules (virtual_refresh.go);
+	// nil without the account database. refreshSlots bounds the refreshes
+	// running at once.
+	refreshes    refreshStore
+	refreshSlots chan struct{}
+	// refreshWG counts refreshes in progress (tests wait on it).
+	refreshWG sync.WaitGroup
 	// spaceZone returns a space's own time zone, "" for none (dbSpaceZone).
 	spaceZone func(ctx context.Context, spaceID string) string
 	ctx       context.Context
@@ -115,6 +122,11 @@ func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolv
 	schemas := map[string]*jsonschema.Resolved{}
 	inputs := map[string]json.RawMessage{}
 	for _, tool := range catalog.Tools {
+		if tool.Name == "configure" {
+			// A job's agent saves downloads with web_fetch's path, which
+			// fetches only URLs it has seen; configure would fetch any.
+			continue
+		}
 		input := tool.InputSchema
 		var properties map[string]json.RawMessage
 		if err := json.Unmarshal(input["properties"], &properties); err != nil {
@@ -161,7 +173,7 @@ func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &agentRunner{s: s, settings: settings, store: store, tools: tools, schemas: schemas, inputs: inputs, ctx: ctx, cancel: cancel,
-		wake: make(chan struct{}, 1), running: map[string]bool{}, clock: time.Now,
+		wake: make(chan struct{}, 1), running: map[string]bool{}, clock: time.Now, refreshSlots: make(chan struct{}, refreshSlots),
 		retryWait: func(n int) time.Duration { return time.Duration(n*n) * 5 * time.Second }}
 	a.owner = func(ctx context.Context, userID string) (string, string) {
 		if s.ownedDB == nil {
@@ -200,6 +212,7 @@ func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*
 	}
 	if s.ownedDB != nil {
 		a.webRefs = dbWebStore{s.ownedDB.db}
+		a.refreshes = dbRefreshStore{s.ownedDB.db}
 	}
 	if err := a.setWebTools(settings.search != nil, settings.downloads != nil); err != nil {
 		return nil, err
@@ -334,10 +347,11 @@ func (a *agentRunner) loop() {
 			}()
 		}
 		if now := a.clock(); now.Sub(housekeeping) >= time.Hour {
-			// On start and then hourly: catch up schedules with every space's
-			// settings, and forget expired downloads.
+			// On start and then hourly: catch up schedules and refreshes with
+			// every space's settings and files, and forget expired downloads.
 			housekeeping = now
 			a.syncAllSchedules()
+			a.syncAllRefreshes()
 			if a.webRefs != nil {
 				ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
 				if err := a.webRefs.expire(ctx, now); err != nil {
@@ -347,6 +361,7 @@ func (a *agentRunner) loop() {
 			}
 		}
 		a.runSchedules()
+		a.runRefreshes()
 		a.startReady()
 		select {
 		case <-a.ctx.Done():

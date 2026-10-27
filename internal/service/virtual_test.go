@@ -42,7 +42,7 @@ func TestVirtualFiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := w.s.putVirtual(ctx, w.repo, w.repo.id, path, head, body, media, "")
+		result, err := w.s.putVirtual(ctx, w.repo, w.repo.id, path, head, body, media, "", "")
 		if err != nil {
 			t.Fatalf("put %s: %v", path, err)
 		}
@@ -127,7 +127,7 @@ func TestVirtualFiles(t *testing.T) {
 	// Without the bucket there are no virtual files.
 	w.runner.settings.downloads = nil
 	head, _ := w.repo.head(ctx)
-	if _, err := w.s.putVirtual(ctx, w.repo, w.repo.id, "hr/x.pdf", head, []byte("%PDF"), "", ""); err == nil || err.(*Error).Code != "virtual_unavailable" {
+	if _, err := w.s.putVirtual(ctx, w.repo, w.repo.id, "hr/x.pdf", head, []byte("%PDF"), "", "", ""); err == nil || err.(*Error).Code != "virtual_unavailable" {
 		t.Errorf("no bucket: %v", err)
 	}
 	w.s.virtualTexts = textCache{} // texts read already come from memory
@@ -277,6 +277,55 @@ func TestVirtualFilesAgainstDatabase(t *testing.T) {
 	if res := call("GET", "/api/v1/account/spaces/"+w.ownedName+"/export?virtual=all", "", nil); res.Code != 400 {
 		t.Errorf("export with an unknown option: %d", res.Code)
 	}
+
+	// 0.60.2: configure makes a file from a URL with a refresh schedule
+	// (rows in metatrash_virtual_refresh), and reads say when it is stale.
+	runner.fetcher, settings.fetchLimit = newWebFetcher(true), 50
+	src := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("Content-Type", "text/markdown")
+		rw.Write([]byte("# Forms guide\n"))
+	}))
+	t.Cleanup(src.Close)
+	made := w.tool(token, "configure", map[string]any{"space": w.ownedName, "path": "docs/forms-guide.md", "source": src.URL + "/forms.md", "refresh": "day 06:00"}, "")
+	file := made["file"].(map[string]any)
+	virtual, _ := file["virtual"].(map[string]any)
+	if made["created"] != true || virtual == nil || virtual["refresh"] != "day 06:00" {
+		t.Fatalf("configure: %v", made)
+	}
+	ctx := context.Background()
+	rows, err := runner.refreshes.refreshes(ctx, w.ownedID)
+	if err != nil || len(rows) != 1 || rows[0].FileID != file["id"] || rows[0].Every != "day 06:00" {
+		t.Fatalf("refresh rows %+v %v", rows, err)
+	}
+	if err := runner.refreshes.markRefresh(ctx, rows[0], time.Date(2026, 10, 27, 6, 0, 0, 0, time.UTC), "the site answered 503"); err != nil {
+		t.Fatal(err)
+	}
+	stale := w.tool(token, "read", map[string]any{"space": w.ownedName, "path": "docs/forms-guide.md"}, "")
+	if staleInfo, _ := stale["stale"].(map[string]any); staleInfo == nil || staleInfo["reason"] != "the site answered 503" || !strings.Contains(stale["note"].(string), "has failed since 27 October 2026") {
+		t.Errorf("stale read: %v", stale)
+	}
+	if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/docs/forms-guide.md", nil, ownerSession); res.Code != 200 || !strings.Contains(res.Body.String(), "Stale:") {
+		t.Errorf("stale page: %d", res.Code)
+	}
+	// REST changes the schedule; the row follows. An ordinary file is refused.
+	res = call("POST", "/api/v1/account/spaces/"+w.ownedName+"/configure", "application/json", []byte(`{"path":"docs/forms-guide.md","refresh":"weekday 08:00"}`))
+	if res.Code != 200 || !strings.Contains(res.Body.String(), `"refresh":"weekday 08:00"`) {
+		t.Fatalf("REST configure: %d %s", res.Code, res.Body)
+	}
+	if rows, err := runner.refreshes.refreshes(ctx, w.ownedID); err != nil || len(rows) != 1 || rows[0].Every != "weekday 08:00" || rows[0].StaleReason == "" {
+		t.Errorf("rows after REST %+v %v", rows, err)
+	}
+	if res := call("POST", "/api/v1/account/spaces/"+w.ownedName+"/configure", "application/json", []byte(`{"path":"AGENTS.md","source":"https://example.org/a"}`)); res.Code != 400 && res.Code != 409 {
+		t.Errorf("configure an ordinary file: %d %s", res.Code, res.Body)
+	}
+	if res := call("POST", "/api/v1/account/spaces/"+w.ownedName+"/configure", "application/json", []byte(`{"path":"docs/forms-guide.md","source":"","extra":1}`)); res.Code != 400 {
+		t.Errorf("unknown field: %d", res.Code)
+	}
+	// Removing the source removes the row.
+	w.tool(token, "configure", map[string]any{"space": w.ownedName, "path": "docs/forms-guide.md", "source": ""}, "")
+	if rows, err := runner.refreshes.refreshes(ctx, w.ownedID); err != nil || len(rows) != 0 {
+		t.Errorf("rows after removal %+v %v", rows, err)
+	}
 }
 
 // 0.60.1: search inside virtual text, pictures for models, export with the
@@ -290,7 +339,7 @@ func TestVirtualFilesFollowUp(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := w.s.putVirtual(ctx, w.repo, w.repo.id, path, head, body, media, "")
+		result, err := w.s.putVirtual(ctx, w.repo, w.repo.id, path, head, body, media, "", "")
 		if err != nil {
 			t.Fatalf("put %s: %v", path, err)
 		}

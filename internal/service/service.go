@@ -245,6 +245,12 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 				return nil, err
 			}
 			b = []byte(result.File.Text)
+			if f.Virtual.Refresh != "" && in.Revision == "" {
+				if since, reason := s.staleOf(ctx, r, f.ID); !since.IsZero() {
+					result.Stale = &VirtualStale{Since: since.UTC().Format(time.RFC3339), Reason: reason}
+					result.Note = strings.TrimSpace(result.Note + " " + staleNote(since, reason))
+				}
+			}
 			if in.Images && f.Virtual.image() && in.StartLine == 0 && in.LineCount == 0 {
 				if err := s.readPicture(ctx, r, in.Path, *f.Virtual, &result); err != nil {
 					return nil, err

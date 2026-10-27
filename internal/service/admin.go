@@ -117,7 +117,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v18.
+// a notice is sent, its SMTP settings) and checks the schema is v19.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -139,9 +139,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 18 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 19 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v18 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v19 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -570,7 +570,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v18 ready") {
+	if !add("schema", store.ready(ctx), "v19 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -681,6 +681,9 @@ var accountGrants = []string{
 	"metatrash_action_schedules UPDATE (every)", "metatrash_action_schedules UPDATE (next_run_at)", "metatrash_action_schedules UPDATE (last_run_at)",
 	"metatrash_web_objects SELECT", "metatrash_web_objects INSERT", "metatrash_web_objects DELETE", "metatrash_web_objects UPDATE (uploaded_at)",
 	"metatrash_web_refs SELECT", "metatrash_web_refs INSERT", "metatrash_web_refs DELETE",
+	"metatrash_virtual_refresh SELECT", "metatrash_virtual_refresh INSERT", "metatrash_virtual_refresh DELETE",
+	"metatrash_virtual_refresh UPDATE (every)", "metatrash_virtual_refresh UPDATE (next_run_at)", "metatrash_virtual_refresh UPDATE (last_run_at)",
+	"metatrash_virtual_refresh UPDATE (stale_since)", "metatrash_virtual_refresh UPDATE (stale_reason)",
 }
 
 // checkPrivileges compares the login's privileges in this database with

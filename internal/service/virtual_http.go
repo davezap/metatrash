@@ -50,7 +50,7 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 			}
 			return
 		}
-		result, err := h.service.putVirtual(ctx, repo, space, path, ifInState, body, r.Header.Get("Content-Type"), "")
+		result, err := h.service.putVirtual(ctx, repo, space, path, ifInState, body, r.Header.Get("Content-Type"), "", "")
 		if err != nil {
 			sendError(w, err)
 			return
@@ -113,6 +113,41 @@ func (h *httpAdapter) streamVirtual(w http.ResponseWriter, r *http.Request, repo
 	}
 }
 
+// serveConfigure handles POST .../configure (0.60.2): {path, source?,
+// refresh?, ifInState?, strict?} changes a virtual file's source and
+// refresh schedule, or with a source makes one by fetching it.
+func (h *httpAdapter) serveConfigure(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
+	var body struct {
+		Path      string  `json:"path"`
+		Source    *string `json:"source"`
+		Refresh   *string `json:"refresh"`
+		IfInState string  `json:"ifInState"`
+		Strict    *bool   `json:"strict"`
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
+	if err != nil || !validUnicodeJSON(raw) || strictJSON(raw, &body) != nil {
+		sendError(w, invalid("Send a JSON object with path and source, refresh or both (ifInState and strict optional)."))
+		return
+	}
+	if body.IfInState != "" && !hashPattern.MatchString(body.IfInState) {
+		sendError(w, invalid("ifInState must be a commit hash from read/list."))
+		return
+	}
+	in := Input{Path: body.Path, Source: body.Source, Refresh: body.Refresh, IfInState: body.IfInState, Strict: body.Strict == nil || *body.Strict}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	result, err := h.service.configureVirtual(ctx, repo, space, in)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	status := 200
+	if result.Created {
+		status = 201
+	}
+	sendJSON(w, status, result)
+}
+
 // sendDownload sends a file's bytes so that nothing in them runs on this
 // site: inline only for the pictures a page shows, else as an attachment.
 func sendDownload(w http.ResponseWriter, r *http.Request, name, kind string, body []byte, inline bool) {
@@ -161,13 +196,19 @@ func (h *httpAdapter) serveVirtual(w http.ResponseWriter, r *http.Request, repo 
 
 // virtualPage is the Markdown a space page shows for a virtual file: what
 // it is, a download link, the picture, and its text.
-func (h *httpAdapter) virtualPage(ctx context.Context, repo *repository, path string, v VirtualInfo) ([]byte, error) {
+func (h *httpAdapter) virtualPage(ctx context.Context, repo *repository, path, fileID string, v VirtualInfo) ([]byte, error) {
 	name := pathpkg.Base(path)
 	link := (&url.URL{Path: name}).EscapedPath()
 	var b strings.Builder
 	b.WriteString("> **Virtual file** · " + v.Type + " · " + humanBytes(v.Size) + " · [Download](" + link + "?raw)")
 	if v.Source != "" {
 		b.WriteString(" · [Source](<" + v.Source + ">)")
+	}
+	if v.Refresh != "" {
+		b.WriteString(" · refreshed every " + v.Refresh)
+		if since, reason := h.service.staleOf(ctx, repo, fileID); !since.IsZero() {
+			b.WriteString("\n>\n> **Stale:** " + escapeInline(staleNote(since, reason)))
+		}
 	}
 	b.WriteString("\n\n")
 	if v.image() {

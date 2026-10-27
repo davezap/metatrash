@@ -63,6 +63,9 @@ type ReadResult struct {
 	Effective json.RawMessage `json:"effective,omitempty"`
 	// Note explains a virtual file's text: its Markdown, or why it has none.
 	Note string `json:"note,omitempty"`
+	// Stale is set when refreshing a virtual file from its source fails
+	// (0.60.2): the text is the last version fetched.
+	Stale *VirtualStale `json:"stale,omitempty"`
 	// image is a virtual picture for a client that shows pictures to its
 	// model (Input.Images; 0.60.1). MCP and the runner send it beside the
 	// JSON.
@@ -162,6 +165,10 @@ type Input struct {
 	// Images is set by clients that can show a model a picture (MCP, the
 	// runner): a read of a virtual picture then carries it.
 	Images bool `json:"-"`
+	// Source and Refresh are configure's changes to a virtual file (0.60.2):
+	// nil leaves one as it is.
+	Source  *string `json:"-"`
+	Refresh *string `json:"-"`
 }
 
 // storedRecord is the index entry format in .metatrash/files.json.

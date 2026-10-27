@@ -719,11 +719,16 @@ func (w *webSession) save(ctx context.Context, r *repository, space string, pin 
 	if err != nil {
 		return fetched, "", err
 	}
-	head, err := r.head(ctx)
+	head, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return fetched, "", err
 	}
-	saved, err := w.a.s.putVirtual(ctx, r, space, string(pin)+path, head, body, webMedia[ref.Ext], ref.URL)
+	// A file fetched again from its own source keeps its refresh schedule.
+	refresh := ""
+	if f, ok := files[string(pin)+path]; ok && f.Virtual != nil && f.Virtual.Source == ref.URL {
+		refresh = f.Virtual.Refresh
+	}
+	saved, err := w.a.s.putVirtual(ctx, r, space, string(pin)+path, head, body, webMedia[ref.Ext], ref.URL, refresh)
 	if err != nil {
 		return fetched, "", err
 	}

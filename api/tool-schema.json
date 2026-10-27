@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.16.1",
+  "schemaVersion": "0.17.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.45.0"},
@@ -107,7 +107,7 @@
               },
               "virtual": {
                 "type": "object",
-                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+                "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
               },
               "readOnly": {
                 "type": "string",
@@ -143,6 +143,23 @@
           "note": {
             "type": "string",
             "description": "Present for a virtual file: what its text is, or why it has none."
+          },
+          "stale": {
+            "type": "object",
+            "description": "Present when refreshing a virtual file from its source fails: since (RFC 3339) and reason; the text is the last version fetched.",
+            "properties": {
+              "since": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "since",
+              "reason"
+            ],
+            "additionalProperties": false
           },
           "lines": {
             "type": "object",
@@ -411,7 +428,7 @@
               },
               "virtual": {
                 "type": "object",
-                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+                "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
               },
               "readOnly": {
                 "type": "string",
@@ -576,7 +593,7 @@
               },
               "virtual": {
                 "type": "object",
-                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+                "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
               },
               "readOnly": {
                 "type": "string",
@@ -711,7 +728,7 @@
               },
               "virtual": {
                 "type": "object",
-                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+                "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
               },
               "readOnly": {
                 "type": "string",
@@ -846,7 +863,7 @@
                 },
                 "virtual": {
                   "type": "object",
-                  "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+                  "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
                 },
                 "readOnly": {
                   "type": "string",
@@ -987,7 +1004,7 @@
               },
               "virtual": {
                 "type": "object",
-                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+                "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
               },
               "readOnly": {
                 "type": "string",
@@ -1114,7 +1131,7 @@
               },
               "virtual": {
                 "type": "object",
-                "description": "Set on a virtual file: content kept outside Git (size, type, source); read returns its text."
+                "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
               },
               "readOnly": {
                 "type": "string",
@@ -1295,6 +1312,150 @@
         ],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "configure",
+      "description": "Set where a virtual file comes from and how often it is fetched again, or make one from a URL. source: an http or https URL, fetched now when new or changed (a new version); \"\" removes the source and refresh. refresh: an every schedule (hour, day 06:00, weekday 08:00, monday 08:00, month 1 09:00, in the space's time zone); \"\" keeps the current version. A failed refresh keeps the content and read says it is stale.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "owner/slug from spaces, or public."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "description": "Case-sensitive relative path."
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "http or https URL; \"\" removes it."
+          },
+          "refresh": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "every schedule; \"\" for none."
+          },
+          "ifInState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Optional: state from read, list or search."
+          },
+          "strict": {
+            "type": "boolean",
+            "default": false,
+            "description": "Refuse if anything in the space changed since ifInState, not only this change's files."
+          }
+        },
+        "required": [
+          "space",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
+          },
+          "oldState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "newState": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Stable across edits and moves."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "protected": {
+                "type": "boolean"
+              },
+              "deletable": {
+                "type": "boolean",
+                "description": "False for a folder's AGENTS.md and .metatrash.json."
+              },
+              "virtual": {
+                "type": "object",
+                "description": "Set on a virtual file: content kept outside Git (size, type, source, refresh); read returns its text."
+              },
+              "readOnly": {
+                "type": "string",
+                "enum": [
+                  "agents",
+                  "everyone"
+                ],
+                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "Git blob hash of the text; pass it to read as ifBlob."
+              }
+            },
+            "required": [
+              "id",
+              "path",
+              "bytes",
+              "protected",
+              "deletable"
+            ],
+            "additionalProperties": false
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "hint": {
+            "type": "string",
+            "description": "Present when this change lies in a GitHub folder whose oldest unpushed change is over 30 minutes old (at most once per 30 minutes per folder): check pending and push when the work is ready."
+          },
+          "rebased": {
+            "type": "boolean",
+            "description": "Present (true) when ifInState was older than the space's state: the change was applied on top of newer changes to other files."
+          }
+        },
+        "required": [
+          "space",
+          "oldState",
+          "newState",
+          "file",
+          "created",
+          "changed"
+        ],
+        "additionalProperties": false
+      }
     }
   ],
   "restMappings": {
@@ -1396,6 +1557,18 @@
         "limit",
         "cursor"
       ]
+    },
+    "configure": {
+      "method": "POST",
+      "path": "/api/v1/account/spaces/{space}/configure",
+      "body": [
+        "path",
+        "source",
+        "refresh",
+        "ifInState",
+        "strict"
+      ],
+      "note": "OAuth only (account spaces). Changes a virtual file's source and refresh schedule, or with a source makes one by fetching it; 201 when it made the file. strict defaults to true."
     },
     "spaces": {
       "method": "GET",

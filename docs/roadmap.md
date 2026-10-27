@@ -380,9 +380,12 @@ step.
    handles binaries both ways. **0.60.1** (written 2026-10-27) added search
    inside virtual text, pictures shown to models by `read` (MCP and folder
    actions), export with binaries (`?virtual=list` for pointers), streamed
-   downloads and the daily sweep. **0.60.2** adds the rest: the `configure`
-   operation (source and refresh) and refresh on an `every` schedule with
-   the stale flag. Uploads still hold one file in memory (up to 100 MB).
+   downloads and the daily sweep. **0.60.2** (written 2026-10-27) added the
+   `configure` operation (source and refresh; MCP and REST, not for folder
+   actions' agents) and refresh on an `every` schedule with the stale flag
+   (schema v19). A retention policy was dropped: every version stays. Still
+   open: stale marks in `list`, and uploads hold one file in memory (up to
+   100 MB).
    The design as planned
    (Dave's design, 2026-10-27; replaces the
    earlier plan of a database record per path). A virtual file is content
@@ -542,6 +545,25 @@ scheduled yet. To settle when it is:
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.60.2 (2026-10-27):
+
+- **Schema v19:** apply `deploy/account-schema-v19.sql` and
+  `deploy/account-grants.sql`, deploy, and see `metatrash check` say v19
+  ready with no missing grants.
+- **Kept up to date from a URL:** ask Claude to configure
+  `forms-guide.md` in a folder with source
+  `https://metatrash.com/docs/guides/forms.md?format=md` and refresh
+  `hour`. The file appears (a virtual file; its page shows "refreshed every
+  hour"), and reading it gives the guide. After the next hour, History
+  shows no new version unless the guide changed; change a docs page you
+  control and see a new version by "Metatrash refresh" within the hour.
+- **Stale:** put a `test.md` in a web-readable space and configure a file
+  elsewhere with source `https://metatrash.com/spaces/<owner>/<slug>/test.md?format=md`
+  and refresh `hour`. Delete `test.md`: after the next run, reading the
+  file says refreshing has failed since … and its page shows "Stale", and
+  History has no new version. Write `test.md` again: after the next run
+  the stale note is gone and the new text is a new version.
 
 From 0.60.1 (2026-10-27):
 

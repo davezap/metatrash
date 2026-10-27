@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v17 (from 0.56.0); 0.57.0 needs v18.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v18 (from 0.57.0); 0.60.2 needs v19.
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -147,7 +147,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v18 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v19 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -481,7 +481,8 @@ otherwise the service exits at start. Agents are rows in
 `metatrash_agents`, jobs in `metatrash_agent_jobs` (schema v16), opt-ins
 in `metatrash_action_optins` (schema v17), and schedules, downloads and
 web references in `metatrash_action_schedules`, `metatrash_web_objects` and
-`metatrash_web_refs` (schema v18). Notices to people who have not
+`metatrash_web_refs` (schema v18), and virtual files' refresh schedules and
+stale marks in `metatrash_virtual_refresh` (schema v19). Notices to people who have not
 opted in go out through the account SMTP settings, at most once a day per
 person and action, within the site-wide 100 emails a day.
 
@@ -759,7 +760,7 @@ roadmap.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v18 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v19 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -785,6 +786,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.57.0 | schema v18 (`metatrash_action_schedules`, `metatrash_web_objects`, `metatrash_web_refs`, `timezone` on spaces) and grants (`SELECT, INSERT, DELETE` on the three tables, `UPDATE (every, next_run_at, last_run_at)` on schedules, `UPDATE (uploaded_at)` on web objects, `UPDATE (timezone)` on spaces); optional `agents.search` and `agents.downloads` (Folder actions) | 17, after removing `every` from every action: 0.56 refuses it. Schedules, downloads and time zones stay, unused |
 | 0.58.0 | grants (`UPDATE (name, daily_cap, key_sealed, key_hint)` on `metatrash_agents`) | (grants only); changed names, caps and keys stay |
 | 0.59.0 | none; optional `poppler-utils` for PDF text (Folder actions) | 0.58; references made with text stay readable as their originals |
+| 0.60.2 | schema v19 (`metatrash_virtual_refresh`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (every, next_run_at, last_run_at, stale_since, stale_reason)` on it) | 18; pointers keep their `refresh` line but nothing refreshes them, and 0.60.0/0.60.1 read them as before. Rows stay in the table, unused |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer
@@ -841,7 +843,7 @@ addresses are only in the notice emails.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v18 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v19 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - CI runs both on every push (see Automated builds and releases).
 

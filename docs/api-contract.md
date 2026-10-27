@@ -17,6 +17,7 @@ MCP (`/mcp`, `/mcp/account`) and REST (`/api/v1/…`) call the same service.
 | `move` | `POST /api/v1/spaces/{space}/move` | JSON: `from`, `to`, `ifInState`, optional `strict` |
 | `delete` | `DELETE /api/v1/spaces/{space}/file` | query: `path`; JSON: `ifInState`, optional `strict` |
 | `history` | `GET /api/v1/spaces/{space}/history` | query: `id`, optional `limit`, `cursor` or `offset` (REST) |
+| `configure` | `POST /api/v1/account/spaces/{space}/configure` | JSON: `path`, `source` and/or `refresh`, optional `ifInState`, `strict`; account spaces only (Virtual files, 0.60.2) |
 
 `search`, `edit` and read's line ranges (0.40.0), and `append`, read's `ifBlob` and list's `since` on MCP (0.52.0), let an agent find, read and change part of a file without moving the whole text through its context: see [Search, line ranges and edit](#search-line-ranges-and-edit).
 
@@ -44,7 +45,7 @@ README.md is an ordinary file (from 0.45.0; before, the root one was operator-ma
 
 ## Virtual files
 
-0.60.0 (0.60.1 added search, pictures for models, export with content, streamed downloads and the sweep). A virtual file is content kept outside Git (in the space-files bucket, under `files/<space ID>/<sha256>`) that appears in an account space as an ordinary file. Git holds a small UTF-8 pointer at the file's path:
+0.60.0 (0.60.1 added search, pictures for models, export with content, streamed downloads and the sweep; 0.60.2 `configure` and refresh). A virtual file is content kept outside Git (in the space-files bucket, under `files/<space ID>/<sha256>`) that appears in an account space as an ordinary file. Git holds a small UTF-8 pointer at the file's path:
 
 ```text
 metatrash-virtual 1
@@ -53,13 +54,16 @@ size <bytes>
 type <media type>
 text <hex of its text>   (when it has text: the content itself, or a PDF, Word or HTML file's Markdown)
 source <url>             (when it was fetched)
+refresh <every>          (0.60.2: when the source is fetched again)
 ```
 
-The space's index marks the file virtual when Metatrash writes the pointer, so the same text arriving any other way (a GitHub pull, a write) is an ordinary file. File results carry `virtual: {sha256, size, type, textSha256?, source?}`; `bytes` stays the pointer's size.
+The space's index marks the file virtual when Metatrash writes the pointer, so the same text arriving any other way (a GitHub pull, a write) is an ordinary file. File results carry `virtual: {sha256, size, type, textSha256?, source?, refresh?}`; `bytes` stays the pointer's size.
 
 - **read** returns the file's text: the content for text, the Markdown for PDF (when the server has `pdftotext` and the PDF is not scanned), Word and HTML, with `note` saying so; a file without text (an image, an archive) returns empty `text` and a `note`. Over MCP and to folder actions' agents, a PNG, JPEG, GIF or WebP picture up to 5 MB also comes with the result as an image (MCP `image` content, an Anthropic `image` block), and the `note` says so; REST reads leave it out (use `…/content`). Line ranges, `ifBlob` and `revision` work as for any file, and an old revision reads that version's content.
 - **write, edit and append** over a virtual file are refused with `virtual_file` (409); writing its pointer text unchanged changes nothing. Writing pointer text to a new path is refused (400, `virtual_file`). **move, delete, history** and locks work unchanged, and actions fire on pointer changes. **search** looks in a virtual file's text (as `read` gives it) and never in pointers; files without text are left out. Texts are cached in memory (64 MB), so repeated searches don't fetch them again.
 - **Making one:** `PUT /api/v1/account/spaces/{owner}/{slug}/content?path=&ifInState=` with the file as the body and its `Content-Type` (guessed from the name and bytes when missing or `application/octet-stream`) stores it and writes the pointer: 201 for a new file, 200 for a new version, with the usual write result. `GET …/content?path=[&revision=]` sends a file's content as an attachment (a virtual file's bytes, streamed from the bucket, an ordinary file's text). A folder action's `web_fetch` with `path` saves its download the same way (Folder actions).
+- **configure** (0.60.2; MCP on `/mcp/account`, and `POST /api/v1/account/spaces/{owner}/{slug}/configure` with `{path, source?, refresh?, ifInState?, strict?}`) sets where a virtual file comes from and how often it is fetched again. `source` is an http or https URL: when it is new or changed it is fetched at once (a new version; for a path with no file, a new virtual file, 201 over REST), and `""` removes the source and the schedule, keeping the content. `refresh` is an `every` schedule as for folder actions (`hour`, `hour :30`, `day 06:00`, `weekday 08:00`, `monday 08:00`, `month 1 09:00`, in the space's time zone) and needs a source; `""` stops refreshing. Changing only `refresh` rewrites the pointer without fetching. `ifInState` is optional (checked as for write when given). An ordinary file is refused with `not_virtual` (409). Fetches are made for the space owner under `web_fetch`'s rules (public addresses only, at most 25 MB, the owner's daily fetch limit) and need the server's web downloads; folder actions' agents don't get `configure` (they save downloads with `web_fetch`'s `path`, which fetches only URLs they have seen).
+- **Refresh:** on its schedule the server fetches the source again, asking the site whether it changed (`If-None-Match` / `If-Modified-Since`). New content is committed as a new version by the owner through `Metatrash refresh` (History shows it, folder actions fire); unchanged content makes no commit. A failed refresh keeps the content and marks the file stale in the database: `read` then carries `stale: {since, reason}` and its `note` says so, and the file's page shows it, until a refresh works. Schedules follow the file through moves (they are kept by file ID). `list` does not show stale marks.
 - **On the website** a virtual file's page says what it is with a Download link (`path?raw`, inline only for PNG, JPEG, GIF and WebP pictures, which also show on the page), followed by its text; `?format=md` gives the text.
 - **Limits:** 100 MB per file and 5 GB of current virtual files per space; the text kept is at most 4 MB. Virtual files need the server's `agents.downloads` bucket; without it they are refused with `virtual_unavailable` (503). GitHub folders don't push them yet (`pending` lists them under `notPushed`).
 - **Sweep:** once a day the server removes content in `files/<space ID>/` that no pointer in any commit of the space names and that is over a day old, so every revision keeps resolving. In B2 a removed object is hidden first; the bucket's lifecycle rule for `files/` deletes it later (docs/deployment.md).
@@ -371,7 +375,7 @@ Every domain error is `{"error":{"code":"...","message":"..."}}`. Do not expose 
 | 401 | `unauthorized` |
 | 403 | `forbidden`, `protected_file` |
 | 404 | `not_found` |
-| 409 | `state_mismatch`, `destination_exists`, `conflict`, `virtual_file` |
+| 409 | `state_mismatch`, `destination_exists`, `conflict`, `virtual_file`, `not_virtual` |
 | 413 | `payload_too_large` |
 | 429 | `rate_limited` |
 | 507 | `storage_limit` |

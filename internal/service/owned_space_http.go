@@ -300,7 +300,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	var content []byte
 	isMarkdown := isMarkdownPath(path)
 	if file.Virtual != nil {
-		content, err = h.virtualPage(ctx, repo, path, *file.Virtual)
+		content, err = h.virtualPage(ctx, repo, path, file.ID, *file.Virtual)
 		isMarkdown = true
 	} else {
 		content, err = repo.blob(ctx, file.Blob)

@@ -48,6 +48,8 @@ type mcpInput struct {
 	IfBlob     string  `json:"ifBlob"`
 	Line       int     `json:"line"`
 	Since      string  `json:"since"`
+	Source     *string `json:"source"`
+	Refresh    *string `json:"refresh"`
 }
 
 const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access; pass a returned space value as the space argument of the other tools. Start in a space by reading its root AGENTS.md. Every folder has its own AGENTS.md (what it holds, how to work in it; read it before working there and keep it current) and a .metatrash.json (its settings); neither can be deleted or moved. To save tokens: find text with search, read long files by line range, re-check a file you hold with read ifBlob, see what changed with list since, change part of a file with edit and add to one with append, instead of reading and rewriting whole files. Write, move and delete need ifInState from a read, list or search; it goes stale only when the files the change touches changed since. A folder whose .metatrash.json has a github service mirrors a GitHub repository: pull at the start of each session, change its files, check pending, then push with a message."
@@ -114,6 +116,11 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 		op := tool.Name
 		switch op {
 		case "read", "write", "edit", "append", "search", "list", "move", "delete", "history":
+		case "configure":
+			// Virtual files are kept in account spaces only.
+			if !account {
+				continue
+			}
 		default:
 			return nil, fmt.Errorf("unknown MCP tool %q", op)
 		}
@@ -139,7 +146,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			if err := decodeMCPInput(raw, &args); err != nil {
 				return mcpFailure(err), nil
 			}
-			write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete"
+			write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "configure"
 			var repo *repository
 			var err error
 			space := args.Space
@@ -168,8 +175,14 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
 				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, Strict: args.Strict, From: args.From, To: args.To,
 				StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context,
-				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true}
-			value, err := h.service.dispatchRepository(ctx, repo, space, op, in)
+				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true, Source: args.Source, Refresh: args.Refresh}
+			var value any
+			if op == "configure" {
+				// configure may fetch, so it runs outside the write queue.
+				value, err = h.service.configureVirtual(ctx, repo, space, in)
+			} else {
+				value, err = h.service.dispatchRepository(ctx, repo, space, op, in)
+			}
 			if err != nil {
 				return mcpFailure(err), nil
 			}
