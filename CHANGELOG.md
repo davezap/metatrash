@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.61.1 - Virtual HTML files download as they are (2026-10-28)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0.
+
+- **Fix:** mtsync never finished downloading a virtual file holding HTML (a file made with `configure` from a web page). It kept writing an `.mtsync-*.tmp` file beside it and deleting it again, which Slate Viewer showed for a moment on each pass. Cloudflare adds its analytics script to every HTML answer, so the download no longer matched the file's SHA-256. `GET …/content` now sends virtual files as `application/octet-stream`, and every download (`…/content` and `?raw`) carries `Cache-Control: no-store, no-transform`, so a proxy passes the bytes through unchanged.
+- **mtsync tests** print the requests they saw when a request count is wrong (the 0.61.0 release run once counted 3 requests where 2 were expected).
+- Tested: the content download test now expects `application/octet-stream` and `no-transform`.
+
 ## 0.61.0 - mtsync and GitHub folders handle virtual files (2026-10-27)
 
 No schema, grant or `accounts.json` change. **Release mtsync 0.61.0 with this server:** tool-schema.json is 0.17.1 and raises mtsync's `minVersion` to 0.61.0 (pull and push descriptions). **Recommended:** `ProxyTimeout 660` in the Apache config (was 60; docs/deployment.md, Apache), since a GitHub pull or push that moves virtual files can take minutes before it answers.

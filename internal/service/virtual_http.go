@@ -81,7 +81,10 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 	}
 	w.Header().Set("X-Metatrash-State", state)
 	if f.Virtual != nil {
-		h.streamVirtual(w, r, repo, path, *f.Virtual, false)
+		// As bytes, whatever the file is: a proxy may rewrite an HTML
+		// answer (Cloudflare adds its analytics script), and the client
+		// checks the content against its sha256 (0.61.1).
+		h.streamVirtual(w, r, repo, path, *f.Virtual, "application/octet-stream", false)
 		return
 	}
 	body, err := repo.blob(ctx, f.Blob)
@@ -94,9 +97,9 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 
 // streamVirtual sends a virtual file's content as it arrives from the
 // bucket (0.60.1): as an attachment, or inline for a picture a page shows.
-func (h *httpAdapter) streamVirtual(w http.ResponseWriter, r *http.Request, repo *repository, path string, v VirtualInfo, inline bool) {
+func (h *httpAdapter) streamVirtual(w http.ResponseWriter, r *http.Request, repo *repository, path string, v VirtualInfo, kind string, inline bool) {
 	if r.Method == http.MethodHead {
-		downloadHeaders(w, pathpkg.Base(path), v.Type, v.Size, inline)
+		downloadHeaders(w, pathpkg.Base(path), kind, v.Size, inline)
 		return
 	}
 	// A download may take longer than a page: allow ten minutes.
@@ -108,7 +111,7 @@ func (h *httpAdapter) streamVirtual(w http.ResponseWriter, r *http.Request, repo
 		return
 	}
 	defer body.Close()
-	downloadHeaders(w, pathpkg.Base(path), v.Type, size, inline)
+	downloadHeaders(w, pathpkg.Base(path), kind, size, inline)
 	if _, err := io.Copy(w, body); err != nil {
 		// The headers are sent, so the client sees a short download.
 		log.Printf("virtual file %s: download cut short: %v", path, err)
@@ -162,6 +165,8 @@ func sendDownload(w http.ResponseWriter, r *http.Request, name, kind string, bod
 func downloadHeaders(w http.ResponseWriter, name, kind string, size int64, inline bool) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// no-transform: a proxy must send the file as it is.
+	w.Header().Set("Cache-Control", "no-store, no-transform")
 	w.Header().Set("Content-Type", kind)
 	disposition := "attachment"
 	if inline {
@@ -176,7 +181,7 @@ func downloadHeaders(w http.ResponseWriter, name, kind string, size int64, inlin
 // text. The caller has checked the visitor may read the space.
 func (h *httpAdapter) serveVirtual(w http.ResponseWriter, r *http.Request, repo *repository, path string, v VirtualInfo, raw bool) {
 	if raw {
-		h.streamVirtual(w, r, repo, path, v, v.image())
+		h.streamVirtual(w, r, repo, path, v, v.Type, v.image())
 		return
 	}
 	var result ReadResult

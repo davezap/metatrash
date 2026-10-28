@@ -201,7 +201,7 @@ func TestVirtualFilesAgainstDatabase(t *testing.T) {
 	if res.Code != 201 || json.Unmarshal(res.Body.Bytes(), &put) != nil || put.File.Virtual == nil || put.File.Virtual.Type != "image/png" {
 		t.Fatalf("upload: %d %s", res.Code, res.Body)
 	}
-	if res := call("GET", base+"pics/logo.png", "", nil); res.Code != 200 || res.Body.String() != string(testPNG) || res.Header().Get("Content-Type") != "image/png" || !strings.HasPrefix(res.Header().Get("Content-Disposition"), "attachment") {
+	if res := call("GET", base+"pics/logo.png", "", nil); res.Code != 200 || res.Body.String() != string(testPNG) || res.Header().Get("Content-Type") != "application/octet-stream" || res.Header().Get("Cache-Control") != "no-store, no-transform" || !strings.HasPrefix(res.Header().Get("Content-Disposition"), "attachment") {
 		t.Fatalf("download: %d %v", res.Code, res.Header())
 	}
 	if res := call("PUT", base+"pics/logo.png&ifInState="+strings.Repeat("0", 40), "image/png", testPNG); res.Code != 409 {
