@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,16 +21,43 @@ import (
 	"metatrash.com/metatrash/internal/service"
 )
 
+// requestLog counts the requests a test server answers and keeps their
+// lines, so a count check can say which requests it saw.
+type requestLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *requestLog) add(r *http.Request) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, r.Method+" "+r.URL.RequestURI())
+}
+
+// Load returns how many requests have arrived.
+func (l *requestLog) Load() int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return int64(len(l.lines))
+}
+
+// since lists the requests after the first n.
+func (l *requestLog) since(n int64) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Join(l.lines[n:], "\n")
+}
+
 // testSpace runs a service with a key-protected space "private" and returns
-// its URL and a request counter.
-func testSpace(t *testing.T) (string, *atomic.Int64) {
+// its URL and a request log.
+func testSpace(t *testing.T) (string, *requestLog) {
 	t.Helper()
 	return testSpaceServer(t, false)
 }
 
 // testSpaceServer can act as a server from before 0.34.0, which refuses
 // after= on list.
-func testSpaceServer(t *testing.T, oldServer bool) (string, *atomic.Int64) {
+func testSpaceServer(t *testing.T, oldServer bool) (string, *requestLog) {
 	t.Helper()
 	dir := t.TempDir()
 	high := `{"windowSeconds":60,"clientReads":100000,"clientWrites":100000,"spaceReads":100000,"spaceWrites":100000}`
@@ -56,9 +83,9 @@ func testSpaceServer(t *testing.T, oldServer bool) (string, *atomic.Int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var count atomic.Int64
+	requests := &requestLog{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count.Add(1)
+		requests.add(r)
 		if oldServer && (r.URL.Query().Has("after") || r.URL.Query().Has("since")) {
 			w.WriteHeader(400)
 			_, _ = w.Write([]byte(`{"error":{"code":"invalid_request","message":"Unknown or duplicate query parameter."}}`))
@@ -67,7 +94,7 @@ func testSpaceServer(t *testing.T, oldServer bool) (string, *atomic.Int64) {
 		h.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	return srv.URL, &count
+	return srv.URL, requests
 }
 
 type harness struct {
@@ -190,7 +217,7 @@ func TestSyncBothWays(t *testing.T) {
 	before := requests.Load()
 	h.sync()
 	if n := requests.Load() - before; n != 1 {
-		t.Fatalf("quiet pass made %d requests", n)
+		t.Fatalf("quiet pass made %d requests:\n%s", n, requests.since(before))
 	}
 
 	// Local new file and edit upload.
@@ -370,10 +397,10 @@ func TestSyncFetchesOnlyChanges(t *testing.T) {
 		t.Fatalf("first pass: %d files", len(localPaths(t, h.dir)))
 	}
 	h.agentWrite("notes/n042.txt", "changed\n")
-	before := requests.Load()
+	before, logs := requests.Load(), len(h.logs)
 	h.sync()
 	if n := requests.Load() - before; n != 2 {
-		t.Fatalf("one changed file took %d requests", n)
+		t.Fatalf("one changed file took %d requests:\n%s\nlog: %q", n, requests.since(before), h.logs[logs:])
 	}
 	if text, _ := h.localText("notes/n042.txt"); text != "changed\n" {
 		t.Fatal("change not downloaded")
@@ -383,10 +410,10 @@ func TestSyncFetchesOnlyChanges(t *testing.T) {
 	if _, err := h.agent.remove(h.ctx, "notes/n007.txt", state); err != nil {
 		t.Fatal(err)
 	}
-	before = requests.Load()
+	before, logs = requests.Load(), len(h.logs)
 	h.sync()
 	if n := requests.Load() - before; n != 1 {
-		t.Fatalf("one removal took %d requests", n)
+		t.Fatalf("one removal took %d requests:\n%s\nlog: %q", n, requests.since(before), h.logs[logs:])
 	}
 	if _, ok := h.localText("notes/n007.txt"); ok {
 		t.Fatal("removal not applied")
