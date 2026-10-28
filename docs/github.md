@@ -168,9 +168,19 @@ or `POST /api/v1/account/spaces/{space}/pull`). The rules agents see are in
    limit and the path rules. UTF-16 and UTF-32 with a byte order mark are
    converted to UTF-8 with the UTF-8 byte order mark (EF BB BF, a hint to
    PowerShell), losslessly: unpaired surrogates, values past U+10FFFF or NUL
-   characters leave the file skipped. Skipped with a reason: binaries, other
-   encodings, oversize (also after conversion), names Metatrash refuses,
-   symbolic links, submodules, `.metatrash.json`.
+   characters leave the file skipped. **Virtual files (0.61.0):** when the
+   server keeps virtual files (the `agents.downloads` bucket), binaries,
+   other encodings and text over the file limit come in as virtual files of
+   up to 100 MB: the content goes to the bucket and Git holds the pointer.
+   Files over the file limit are read one at a time as raw blobs
+   (`GET /git/blobs/{sha}`, `application/vnd.github.raw+json`), never through
+   the tarball; one pull fetches at most 512 MB of them, and the space's 5 GB
+   of virtual files applies. Skipped with a reason: binaries and other
+   encodings on a server without virtual files, oversize (over the file
+   limit there, over 100 MB or the pull's 512 MB here; also after
+   conversion), names Metatrash refuses, symbolic links, submodules,
+   `.metatrash.json`. Text from GitHub over a virtual file makes it an
+   ordinary file again.
 6. **Apply, in the write queue.** If the space moved on meanwhile, pull
    refuses when the folder's files, its settings or its baseline changed (the
    rest of the space may change freely). One commit writes the files and the
@@ -182,7 +192,9 @@ folder, the repo, branch, commit, tree, time, every held file's path and blob
 hash, non-default modes (executables), the skipped files with blob, mode and
 reason, and `converted` (for converted files: GitHub's original blob and the
 encoding; `files` holds the converted blob, so an agent's edit shows as a
-change). `state` is the space revision holding the baseline content (set by
+change). For a virtual file `files` holds its content's blob hash, which is
+GitHub's (the index keeps it as `gitBlob`, the pointer's `git` line), so a
+change to the pointer alone (a new source or refresh schedule) is no change. `state` is the space revision holding the baseline content (set by
 push; for a pull, the pull commit, found by its summary line) and
 `fileStates` overrides it per file after a merging pull. Held files with
 GitHub's blobs plus the skipped entries rebuild GitHub's tree exactly, which
@@ -215,9 +227,15 @@ Agent-facing rules are in
    message says what to do on GitHub.
 4. **GitHub calls, under the folder lock, outside the write queue.** Branch
    head: not the baseline commit → stop ("moved ahead"; pull merges). Then
+   Each changed virtual file's content, one at a time, as `POST /git/blobs`
+   (base64; the hash GitHub answers must be the content's). Then
    `POST /git/trees` with `base_tree` = the baseline tree and only the changed
-   entries (deletions as `sha: null`, content inline), chained in batches of
-   at most 250 files or 4 MB; the final tree must equal the expected hash.
+   entries (deletions as `sha: null`, text inline, virtual files by their blob
+   `sha`), chained in batches of at most 250 files or 4 MB; the final tree
+   must equal the expected hash. One push sends at most 40 MB of text and
+   512 MB of virtual files. A virtual file stored before 0.61.0 has no
+   `gitBlob`: pending lists it as modified, and push reads its content for
+   the hash (sending nothing new when it matches).
    `POST /git/commits` with that tree and parent = baseline commit, and no
    author or committer: GitHub records the app's bot and signs the commit
    (Verified), which it does not do with a custom author or committer. The

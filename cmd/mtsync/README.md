@@ -36,8 +36,19 @@ Linux and macOS.
   - Renamed here: a `move` in the space, so the file keeps its ID and history.
   - Changed on both sides: the space's version keeps the name and yours is
     saved beside it as `name.conflict-<UTC time>.ext`, then uploaded too.
-- **What stays local.** Files a space can't hold (not UTF-8 text, over 64 KiB,
-  names with spaces or a leading dot outside a GitHub folder) and editor or
+- **Virtual files** (mtsync 0.61.0, metatrash 0.60.0 on the site, signed-in
+  spaces). Pictures, PDFs, Word files and other binaries, and text over
+  64 KiB, up to 100 MB each, sync as virtual files: the space keeps the
+  content outside Git and mtsync uploads and downloads the file itself
+  (`…/content`), checking its SHA-256. They are compared by content, so a
+  change the space makes to a file's pointer alone (a new source or refresh
+  schedule) changes nothing here. A virtual file that comes from a URL
+  (`configure`) can't be changed here: a local change is kept as a conflict
+  copy and the space's version put back. A folder synced by mtsync before
+  0.61.0 holds such files' text; the first pass replaces it with the file.
+- **What stays local.** Files a space can't hold (over 100 MB, binaries in a
+  space reached with a key, which holds text only, names with spaces or a
+  leading dot outside a GitHub folder) and editor or
   system files (`*.swp`, `*~`, `*.tmp`, `.DS_Store`, `Thumbs.db`, …). A `.git` folder is skipped entirely, so you can `git init` a synced folder for your own local history. Refusals
   are reported once and retried when the file changes. A folder's `AGENTS.md`
   and `.metatrash.json` can't be deleted in a space, so deleting them locally
@@ -130,6 +141,8 @@ mtsync remove ~/spaces/notes                  # stop syncing it (or: mtsync remo
 mtsync export dave-zap/notes                  # back up the space to a zip here
 mtsync history ~/spaces/notes/plan.md         # the last 10 changes to a file
 mtsync show ~/spaces/notes/plan.md 3f9c…      # the file as it was at that revision
+mtsync virtual ~/spaces/notes                 # the virtual files (PDFs, pictures, …)
+mtsync text ~/spaces/notes/policy.pdf         # the space's text for one: a PDF's Markdown
 ```
 
 To sync one folder of a space instead of all of it, add its path after the
@@ -174,7 +187,17 @@ prints it (7 or more characters; metatrash 0.51.1's mtsync): mtsync finds it
 in the file's newest 1,000 changes and reads the path the file had then, so
 the file's current name works for revisions from before a rename. For a file
 no longer in the folder, give the path it had then (the entry's `file`) and
-all 40 characters. A `delete` entry has no text; show the one before it. In a folder with a published version (metatrash 0.48.0),
+all 40 characters. A `delete` entry has no text; show the one before it. For
+a virtual file it prints the content (the PDF or picture itself, so redirect
+it to a file: `mtsync show policy.pdf 3f9c… > old.pdf`).
+
+`mtsync virtual PLACE` lists the virtual files in a registered folder (or
+under a folder in it) as of the last pass: path, type, size and the source
+it comes from. `-json` answers for editors with `path`, `file` (the local
+path), `type`, `size`, `sha256`, `text` (whether the space has text for it),
+`source` and `refresh`. `mtsync text FILE` prints the space's text for a
+file: a PDF, Word or HTML file's Markdown, a text file's content (an error
+for a picture, which has none). In a folder with a published version (metatrash 0.48.0),
 `history` marks each entry that is the text of a published version
 (`[published v3]`; `published` in `-json`).
 
@@ -237,7 +260,9 @@ All commands:
 | `log [N]` | the last N lines of the service log |
 | `export SPACE [FILE]` | save the space as it is now to a zip, for backups |
 | `history FILE` | a synced file's changes, newest first (`-limit`, `-offset`, `-json`) |
-| `show FILE REVISION` | print a synced file's text at a revision (short or full, as `history` prints it) |
+| `show FILE REVISION` | print a synced file's text at a revision (short or full, as `history` prints it; a virtual file's content) |
+| `virtual PLACE` | the virtual files in a folder: type, size, source (`-json`; mtsync 0.61.0) |
+| `text FILE` | print the space's text for a file, such as a PDF's Markdown (mtsync 0.61.0) |
 | `policies PLACE` | published folders and files, and what you still have to read (`-json`) |
 | `ack FILE VERSION` | confirm you read FILE as published in VERSION |
 | `readers PLACE` | who has read what (read-write access; `-json`) |
@@ -257,7 +282,7 @@ Flags go before the command:
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |
 | `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
-| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`: answer in JSON |
+| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`, `virtual`: answer in JSON |
 | `-published` | `0` | `submit`: answer this published version of the form's folder, as Slate Viewer shows it |
 | `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
 
@@ -288,7 +313,9 @@ minutes.
 
 ## Limits
 
-- Spaces hold text only: up to 1,000 files, 64 KiB each, 16 MiB in all.
+- Spaces hold up to 1,000 files; text files up to 64 KiB each, 16 MiB in all.
+  Virtual files hold up to 100 MB each and 5 GB per space (signed-in spaces
+  on metatrash 0.60.0 or later with its downloads bucket).
 - Each computer gets 120 reads and 20 writes a minute per space, so the first
   download of a large space, or saving many files at once, can take a few
   minutes. mtsync waits rather than failing.

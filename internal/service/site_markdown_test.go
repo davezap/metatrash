@@ -85,8 +85,19 @@ func TestMarkdownPagesAgainstDatabase(t *testing.T) {
 	}
 
 	// Private: the same rules as the page.
-	if res := oauthCall(w.h, "GET", space+"README.md?format=md", nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
-		t.Fatalf("signed out, private: %d", res.Code)
+	// A program asking for the text gets a refusal, not the sign-in page it
+	// would keep as the file; a browser still goes to sign in.
+	if res := oauthCall(w.h, "GET", space+"README.md?format=md", nil); res.Code != 401 || !strings.Contains(res.Body.String(), `"unauthorized"`) {
+		t.Fatalf("signed out, private: %d %q", res.Code, res.Body)
+	}
+	if res := accept(space+"README.md", "text/markdown,text/html;q=0.9"); res.Code != 401 {
+		t.Fatalf("signed out, private, Accept markdown: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "GET", space+"README.md?raw", nil); res.Code != 401 {
+		t.Fatalf("signed out, private, ?raw: %d", res.Code)
+	}
+	if res := accept(space+"README.md", "text/html,*/*;q=0.8"); res.Code != 303 || res.Header().Get("Location") != "/login" {
+		t.Fatalf("signed out, private, browser: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", space+"README.md?format=md", nil, strangerSession); res.Code != 404 {
 		t.Fatalf("stranger, private: %d", res.Code)

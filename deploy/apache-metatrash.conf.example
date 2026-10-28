@@ -2,7 +2,9 @@
 # Requires mod_proxy, mod_proxy_http, mod_headers. Keep existing TLS configuration.
 ProxyRequests Off
 ProxyPreserveHost On
-ProxyTimeout 60
+# 0.61.0: a GitHub pull or push that moves virtual files may answer after up
+# to 11 minutes (uploads and downloads keep data flowing, so they need less).
+ProxyTimeout 660
 ProxyAddHeaders On
 
 # Discard supplied chains; mod_proxy adds the actual client address.

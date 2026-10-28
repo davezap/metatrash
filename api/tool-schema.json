@@ -1,8 +1,8 @@
 {
-  "schemaVersion": "0.17.0",
+  "schemaVersion": "0.17.1",
   "status": "implemented",
   "clients": {
-    "mtsync": {"minVersion": "0.45.0"},
+    "mtsync": {"minVersion": "0.61.0"},
     "slateViewer": {"minVersion": "0.2.0"}
   },
   "description": "Git-backed text storage; messaging via file conventions. Every folder has an AGENTS.md (instructions for agents) and a .metatrash.json (settings); read the space root AGENTS.md first.",
@@ -1730,7 +1730,7 @@
     },
     {
       "name": "pull",
-      "description": "Fill or update a GitHub folder (the github service in its .metatrash.json) from its branch; call it at the start of each session. The first pull needs the folder empty apart from .metatrash.json. Files changed here since the last pull or push stay pending unless GitHub changed them too (conflict, naming them). Files Metatrash cannot hold (binary, non-UTF encodings, too big, bad names) are skipped and listed; UTF-16/32 files are converted and listed. Needs write access.",
+      "description": "Fill or update a GitHub folder (the github service in its .metatrash.json) from its branch; call it at the start of each session. The first pull needs the folder empty apart from .metatrash.json. Files changed here since the last pull or push stay pending unless GitHub changed them too (conflict, naming them). Binaries and files over the space's file limit (up to 100 MB) come in as virtual files where the server keeps them; files Metatrash cannot hold (bad names, too big, or binaries on a server without virtual files) are skipped and listed; UTF-16/32 files are converted and listed. Needs write access.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2079,7 +2079,7 @@
     },
     {
       "name": "push",
-      "description": "Send a GitHub folder's pending changes as one signed commit with your message; check pending first. All or nothing: refused if not pulled, if GitHub moved ahead (pull, then push again), for .github/workflows/ changes, or when the folder's push mode is review. Never forces. Limits: 1000 files, 40 MB, 10 pushes per space per 10 minutes.",
+      "description": "Send a GitHub folder's pending changes as one signed commit with your message; check pending first. All or nothing: refused if not pulled, if GitHub moved ahead (pull, then push again), for .github/workflows/ changes, or when the folder's push mode is review. Never forces. Virtual files are sent as their content. Limits: 1000 files, 40 MB of text plus 512 MB of virtual files, 10 pushes per space per 10 minutes.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

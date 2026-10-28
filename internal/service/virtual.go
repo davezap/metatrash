@@ -28,6 +28,7 @@ import (
 //	text <hex of its text>   (optional: the content itself for text, its Markdown for PDF, Word and HTML)
 //	source <url>             (optional: where it was fetched from)
 //	refresh <every>          (optional, 0.60.2: fetch the source again on this schedule)
+//	git <hex>                (0.61.0: the content's Git blob hash, as GitHub knows it)
 //
 // The space's index marks the file virtual when Metatrash writes the
 // pointer, so a pointer-looking text from anywhere else (a GitHub pull, an
@@ -61,6 +62,9 @@ type VirtualInfo struct {
 	// Refresh is an "every" schedule on which the source is fetched again
 	// (0.60.2, virtual_refresh.go); "" keeps this version.
 	Refresh string `json:"refresh,omitempty"`
+	// GitBlob is the content's Git blob hash (0.61.0): what a GitHub folder
+	// pushes and compares; "" for files stored before.
+	GitBlob string `json:"gitBlob,omitempty"`
 }
 
 // pointer is the text Git holds for the file.
@@ -78,6 +82,9 @@ func (v VirtualInfo) pointer() string {
 	}
 	if v.Refresh != "" {
 		b.WriteString("refresh " + v.Refresh + "\n")
+	}
+	if v.GitBlob != "" {
+		b.WriteString("git " + v.GitBlob + "\n")
 	}
 	return b.String()
 }
@@ -182,23 +189,40 @@ func virtualText(ctx context.Context, body []byte, media, source string, pdfText
 // or a new version of one. ifInState works as for write. refresh needs a
 // source.
 func (s *Service) putVirtual(ctx context.Context, r *repository, space, path, ifInState string, body []byte, media, source, refresh string) (WriteResult, error) {
-	if !r.owned || r.id == "" {
-		return WriteResult{}, problem(403, "forbidden", "Virtual files are kept in account spaces only.")
-	}
-	store, pdfText := s.spaceFiles()
-	if store == nil {
-		return WriteResult{}, virtualUnavailable()
-	}
 	if !validPath(path) || isFolderFile(path) {
 		return WriteResult{}, invalid("A valid path for an ordinary file is required.")
 	}
-	if len(body) > maxVirtualBytes {
-		return WriteResult{}, problem(413, "payload_too_large", fmt.Sprintf("A virtual file holds at most %d MB.", maxVirtualBytes>>20))
+	info, err := s.storeVirtual(ctx, r, path, body, media, source)
+	if err != nil {
+		return WriteResult{}, err
 	}
-	info := VirtualInfo{SHA256: webHash(body), Size: int64(len(body)), Type: virtualMedia(media, path, body), Source: source, Refresh: refresh}
+	info.Refresh = refresh
+	pointer := info.pointer()
+	value, err := s.dispatchRepository(ctx, r, space, "write", Input{Path: path, Text: &pointer, IfInState: ifInState, Virtual: &info})
+	if err != nil {
+		return WriteResult{}, err
+	}
+	return value.(WriteResult), nil
+}
+
+// storeVirtual puts content (and its text) in the space-files bucket and
+// describes it; the pointer is written separately. Objects are keyed by
+// hash, so one stored for a write that then fails is only swept later.
+func (s *Service) storeVirtual(ctx context.Context, r *repository, path string, body []byte, media, source string) (VirtualInfo, error) {
+	if !r.owned || r.id == "" {
+		return VirtualInfo{}, problem(403, "forbidden", "Virtual files are kept in account spaces only.")
+	}
+	store, pdfText := s.spaceFiles()
+	if store == nil {
+		return VirtualInfo{}, virtualUnavailable()
+	}
+	if len(body) > maxVirtualBytes {
+		return VirtualInfo{}, problem(413, "payload_too_large", fmt.Sprintf("A virtual file holds at most %d MB.", maxVirtualBytes>>20))
+	}
+	info := VirtualInfo{SHA256: webHash(body), Size: int64(len(body)), Type: virtualMedia(media, path, body), Source: source, GitBlob: blobHash(body)}
 	if err := store.put(ctx, info.key(r.id), info.Type, body); err != nil {
 		log.Printf("virtual file: %v", err)
-		return WriteResult{}, problem(503, "unavailable", "The file could not be stored; try again later.")
+		return VirtualInfo{}, problem(503, "unavailable", "The file could not be stored; try again later.")
 	}
 	if text := virtualText(ctx, body, info.Type, source, pdfText); text == string(body) {
 		info.TextSHA256 = info.SHA256
@@ -209,15 +233,10 @@ func (s *Service) putVirtual(ctx context.Context, r *repository, space, path, if
 		info.TextSHA256 = webHash([]byte(text))
 		if err := store.put(ctx, info.textKey(r.id), "text/markdown; charset=utf-8", []byte(text)); err != nil {
 			log.Printf("virtual file: %v", err)
-			return WriteResult{}, problem(503, "unavailable", "The file could not be stored; try again later.")
+			return VirtualInfo{}, problem(503, "unavailable", "The file could not be stored; try again later.")
 		}
 	}
-	pointer := info.pointer()
-	value, err := s.dispatchRepository(ctx, r, space, "write", Input{Path: path, Text: &pointer, IfInState: ifInState, Virtual: &info})
-	if err != nil {
-		return WriteResult{}, err
-	}
-	return value.(WriteResult), nil
+	return info, nil
 }
 
 // virtualSpaceBytes adds up the content of a space's current virtual files,

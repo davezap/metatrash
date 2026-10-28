@@ -69,10 +69,14 @@ type fakeRepoHost struct {
 	beforeRef func()
 	// treeOverride, when set, replaces the hash createTree answers.
 	treeOverride string
+	// blobs holds content createBlob stored, by hash; rawFetches counts raw
+	// blob reads (pull's virtual files).
+	blobs      map[string]string
+	rawFetches int
 }
 
 func newFakeRepoHost(t *testing.T) *fakeRepoHost {
-	f := &fakeRepoHost{t: t, repos: map[string]*fakeRepo{}, trees: map[string]map[string]fakeRepoFile{}, gitDir: filepath.Join(t.TempDir(), "trees.git")}
+	f := &fakeRepoHost{t: t, repos: map[string]*fakeRepo{}, trees: map[string]map[string]fakeRepoFile{}, blobs: map[string]string{}, gitDir: filepath.Join(t.TempDir(), "trees.git")}
 	if out, err := exec.Command("git", "init", "-q", "--bare", f.gitDir).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
@@ -301,8 +305,15 @@ func (f *fakeRepoHost) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(302)
 	case strings.HasPrefix(rest, "git/blobs/"):
 		sha := strings.TrimPrefix(rest, "git/blobs/")
+		raw := r.Header.Get("Accept") == "application/vnd.github.raw+json"
 		for _, c := range repo.commits {
 			for _, file := range c.files {
+				if file.mode != "160000" && blobHash([]byte(file.text)) == sha && raw {
+					f.rawFetches++
+					w.Header().Set("Content-Type", "application/octet-stream")
+					_, _ = w.Write([]byte(file.text))
+					return
+				}
 				if file.mode != "160000" && blobHash([]byte(file.text)) == sha {
 					f.blobFetches++
 					fmt.Fprintf(w, `{"sha":%q,"encoding":"base64","content":%q}`, sha, base64.StdEncoding.EncodeToString([]byte(file.text)))
@@ -807,7 +818,7 @@ func TestClassifyRepoEntries(t *testing.T) {
 		{Path: "bad sha", Mode: "100644", Type: "blob", SHA: "nope"},
 		{Path: "odd", Mode: "100664", Type: "blob", SHA: sha},
 		{Path: ".git/config", Mode: "100644", Type: "blob", SHA: sha},
-	}, 100)
+	}, 100, 0)
 	if len(keep) != 1 || keep["ok.md"].SHA != sha || len(skipped) != 4 {
 		t.Fatalf("keep %v skipped %v", keep, skipped)
 	}

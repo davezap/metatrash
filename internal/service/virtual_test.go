@@ -237,9 +237,16 @@ func TestVirtualFilesAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/docs/notes.md?format=md", nil, ownerSession); res.Code != 200 || res.Body.String() != "# Notes\n" || res.Header().Get("Content-Type") != "text/markdown; charset=utf-8" {
 		t.Errorf("md ?format=md: %d %q", res.Code, res.Body)
 	}
-	// Signed out, private: the sign-in page, as for any file.
-	if res := oauthCall(w.h, "GET", page+"?raw", nil); res.Code != 303 {
+	// Signed out, private: a program gets 401 (0.61.0: configure kept the
+	// sign-in page as the file), a browser opening the link signs in.
+	if res := oauthCall(w.h, "GET", page+"?raw", nil); res.Code != 401 {
 		t.Errorf("signed out raw: %d", res.Code)
+	}
+	navigate := httptest.NewRequest("GET", page+"?raw", nil)
+	navigate.Host = "metatrash.com"
+	navigate.Header.Set("Sec-Fetch-Mode", "navigate")
+	if res := httptest.NewRecorder(); func() bool { w.h.ServeHTTP(res, navigate); return res.Code != 303 }() {
+		t.Errorf("signed out raw, browser: %d", res.Code)
 	}
 
 	// 0.60.1: an MCP read of a picture carries it as image content.

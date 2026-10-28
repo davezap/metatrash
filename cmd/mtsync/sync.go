@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -22,10 +25,49 @@ import (
 // uploaded.
 const stateDir = ".mtsync"
 
-// baseFile is a file as it was when local and remote last agreed.
+// baseFile is a file as it was when local and remote last agreed. Virtual
+// is set for a virtual file (mtsync 0.61.0): Blob is then its pointer's, and
+// the local file holds the content Virtual describes.
 type baseFile struct {
-	ID   string `json:"id"`
-	Blob string `json:"blob"`
+	ID      string       `json:"id"`
+	Blob    string       `json:"blob"`
+	Virtual *virtualInfo `json:"virtual,omitempty"`
+}
+
+// The three sides of a path are compared by key: an ordinary file's Git blob,
+// or "sha256:" and a virtual file's content hash, so a change to a virtual
+// file's pointer alone (a new source or refresh schedule) is no change to
+// the file. "" is a path that is not there.
+const contentKey = "sha256:"
+
+func (f baseFile) key() string {
+	if f.Virtual != nil {
+		return contentKey + f.Virtual.SHA256
+	}
+	return f.Blob
+}
+
+func (f remoteFile) key() string {
+	if f.Virtual != nil {
+		return contentKey + f.Virtual.SHA256
+	}
+	return f.Blob
+}
+
+// localFile is a local file's Git blob and SHA-256 ("" when it is not there).
+type localFile struct {
+	blob, sha string
+}
+
+// key is the local file compared with a virtual file, or an ordinary one.
+func (l localFile) key(virtual bool) string {
+	switch {
+	case l.blob == "":
+		return ""
+	case virtual:
+		return contentKey + l.sha
+	}
+	return l.blob
 }
 
 // syncState is saved in .mtsync/state.json. Files is the last agreed version
@@ -37,12 +79,16 @@ type syncState struct {
 	Space  string              `json:"space"`
 	State  string              `json:"state"`
 	Files  map[string]baseFile `json:"files"`
+	// Virtual is set once Files says which files are virtual (mtsync
+	// 0.61.0); a state from before lists the space in full once, as only a
+	// listing says so.
+	Virtual bool `json:"virtual,omitempty"`
 }
 
 type localEntry struct {
 	size  int64
 	mtime time.Time
-	blob  string
+	file  localFile
 }
 
 type syncer struct {
@@ -84,6 +130,17 @@ func gitBlob(b []byte) string {
 	h.Write([]byte("blob " + strconv.Itoa(len(b)) + "\x00"))
 	h.Write(b)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func hashes(b []byte) localFile {
+	sum := sha256.Sum256(b)
+	return localFile{blob: gitBlob(b), sha: hex.EncodeToString(sum[:])}
+}
+
+// isText reports content a space holds as text: UTF-8 without NUL. Anything
+// else is a virtual file.
+func isText(b []byte) bool {
+	return utf8.Valid(b) && bytes.IndexByte(b, 0) < 0
 }
 
 func openSyncer(c *client, root, server, space string, logf func(string, ...any)) (*syncer, error) {
@@ -148,8 +205,8 @@ func (s *syncer) full(p string) string { return filepath.Join(s.root, filepath.F
 
 // scan hashes every local file, rereading only files whose size or time
 // changed. Files modified within the settle time are returned as unstable.
-func (s *syncer) scan() (map[string]string, map[string]bool, error) {
-	files, unstable := map[string]string{}, map[string]bool{}
+func (s *syncer) scan() (map[string]localFile, map[string]bool, error) {
+	files, unstable := map[string]localFile{}, map[string]bool{}
 	seen := map[string]bool{}
 	err := filepath.WalkDir(s.root, func(full string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -182,7 +239,7 @@ func (s *syncer) scan() (map[string]string, map[string]bool, error) {
 			return nil
 		}
 		if e, ok := s.cache[p]; ok && e.size == info.Size() && e.mtime.Equal(info.ModTime()) {
-			files[p] = e.blob
+			files[p] = e.file
 			return nil
 		}
 		b, err := os.ReadFile(full)
@@ -190,9 +247,9 @@ func (s *syncer) scan() (map[string]string, map[string]bool, error) {
 			unstable[p] = true
 			return nil
 		}
-		blob := gitBlob(b)
-		s.cache[p] = localEntry{size: info.Size(), mtime: info.ModTime(), blob: blob}
-		files[p] = blob
+		file := hashes(b)
+		s.cache[p] = localEntry{size: info.Size(), mtime: info.ModTime(), file: file}
+		files[p] = file
 		return nil
 	})
 	for p := range s.cache {
@@ -223,7 +280,7 @@ type pass struct {
 	remote   map[string]remoteFile
 	snapshot string // state the remote listing came from
 	current  string // latest state, for ifInState
-	local    map[string]string
+	local    map[string]localFile
 	unstable map[string]bool
 	// deferred is set when a path whose space version differs from the base
 	// is left for a later pass, so the next pass must list the space again.
@@ -238,7 +295,7 @@ type pass struct {
 func (s *syncer) cycle(ctx context.Context) error {
 	p := &pass{syncer: s, ctx: ctx, remote: map[string]remoteFile{}}
 	known := false
-	if s.st.State != "" {
+	if s.st.State != "" && s.st.Virtual {
 		var err error
 		if known, err = p.remoteFromChanges(); err != nil {
 			return err
@@ -270,6 +327,7 @@ func (s *syncer) cycle(ctx context.Context) error {
 		}
 		return err
 	}
+	s.st.Virtual = true
 	if !p.deferred {
 		// The state the pass started from, not the one after its own writes:
 		// a write can also add or remove a folder's AGENTS.md and
@@ -287,7 +345,7 @@ func (p *pass) remoteFromChanges() (bool, error) {
 	base := p.st.Files
 	fromBase := func() {
 		for path, f := range base {
-			p.remote[path] = remoteFile{ID: f.ID, Path: path, Blob: f.Blob, Deletable: !folderFile(path)}
+			p.remote[path] = remoteFile{ID: f.ID, Path: path, Blob: f.Blob, Deletable: !folderFile(path), Virtual: f.Virtual}
 		}
 	}
 	if p.noChanges {
@@ -347,7 +405,22 @@ func (p *pass) run() error {
 		if handled[path] {
 			continue
 		}
-		b, l, r := p.st.Files[path].Blob, p.local[path], p.remote[path].Blob
+		base, rf, lf := p.st.Files[path], p.remote[path], p.local[path]
+		b, r := base.key(), rf.key()
+		if base.Virtual == nil && rf.Virtual != nil && base.Blob != "" && base.Blob == rf.Blob {
+			// Agreed by mtsync before 0.61.0, which downloaded a virtual
+			// file's text instead of its content and could never upload it:
+			// the local copy is that text, so the content replaces it.
+			b = r
+			if lf.blob != "" && lf.key(true) != r && !p.unstable[path] {
+				if err := p.pullChange(path, localFile{blob: "old text", sha: "old text"}, rf); err != nil {
+					return err
+				}
+				continue
+			}
+		}
+		// The local file as the space side knows it, and as the base does.
+		l, lb := lf.key(rf.Virtual != nil), lf.key(base.Virtual != nil)
 		if p.unstable[path] {
 			if r != b {
 				p.deferred = true
@@ -357,19 +430,19 @@ func (p *pass) run() error {
 		var err error
 		switch {
 		case l == r:
-			p.agree(path, r)
-		case l == b:
-			err = p.pullChange(path, l, r)
+			p.agree(path)
+		case lb == b:
+			err = p.pullChange(path, lf, rf)
 		case r == b:
-			err = p.push(path, l)
+			err = p.push(path, lf)
 		case l == "":
 			// Deleted here, edited in the space: keep the edit.
-			err = p.pullChange(path, l, r)
+			err = p.pullChange(path, lf, rf)
 		case r == "":
 			// Deleted in the space, edited here: keep the edit.
-			err = p.push(path, l)
+			err = p.push(path, lf)
 		default:
-			err = p.conflict(path, l, r)
+			err = p.conflict(path, lf, rf)
 		}
 		if err != nil {
 			return err
@@ -378,20 +451,30 @@ func (p *pass) run() error {
 	return nil
 }
 
-func (p *pass) agree(path, blob string) {
+// agree records the space's version of path as the agreed one (none when
+// the space has no file there).
+func (p *pass) agree(path string) {
 	old, had := p.st.Files[path]
-	if blob == "" {
+	f, ok := p.remote[path]
+	if !ok || f.key() == "" {
 		if had {
 			delete(p.st.Files, path)
 			p.changed = true
 		}
 		return
 	}
-	next := baseFile{ID: p.remote[path].ID, Blob: blob}
-	if !had || old != next {
+	next := baseFile{ID: f.ID, Blob: f.Blob, Virtual: f.Virtual}
+	if !had || !sameBase(old, next) {
 		p.st.Files[path] = next
 		p.changed = true
 	}
+}
+
+func sameBase(a, b baseFile) bool {
+	if a.ID != b.ID || a.Blob != b.Blob || (a.Virtual == nil) != (b.Virtual == nil) {
+		return false
+	}
+	return a.Virtual == nil || *a.Virtual == *b.Virtual
 }
 
 // moves turns a local rename (a path gone and a new path with the same
@@ -403,32 +486,39 @@ func (p *pass) moves(paths []string) (map[string]bool, error) {
 	}
 	gone := map[string][]string{}
 	for _, path := range paths {
-		b := p.st.Files[path].Blob
-		if b != "" && p.local[path] == "" && !p.unstable[path] && p.remote[path].Blob == b && p.remote[path].Deletable {
+		base := p.st.Files[path]
+		if b := base.key(); b != "" && p.local[path].blob == "" && !p.unstable[path] && p.remote[path].key() == b && p.remote[path].Deletable {
 			gone[b] = append(gone[b], path)
 		}
 	}
 	for _, to := range paths {
-		l := p.local[to]
-		if l == "" || p.st.Files[to].Blob != "" || p.remote[to].Blob != "" || p.unstable[to] || len(gone[l]) == 0 || p.wasWarned(to, l) {
+		lf := p.local[to]
+		if lf.blob == "" || p.st.Files[to].key() != "" || p.remote[to].key() != "" || p.unstable[to] || p.wasWarned(to, lf.blob) {
 			continue
 		}
-		from := gone[l][0]
+		key := lf.key(false)
+		if len(gone[key]) == 0 {
+			key = lf.key(true)
+		}
+		if len(gone[key]) == 0 {
+			continue
+		}
+		from := gone[key][0]
 		m, err := p.c.move(p.ctx, from, to, p.current)
 		if err != nil {
-			if err := p.refused(to, l, err); err != nil {
+			if err := p.refused(to, lf.blob, err); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		gone[l] = gone[l][1:]
+		gone[key] = gone[key][1:]
 		p.current = m.NewState
 		f := p.remote[from]
 		delete(p.remote, from)
 		f.Path, f.ID = to, m.File.ID
 		p.remote[to] = f
 		delete(p.st.Files, from)
-		p.st.Files[to] = baseFile{ID: m.File.ID, Blob: l}
+		p.st.Files[to] = baseFile{ID: m.File.ID, Blob: f.Blob, Virtual: f.Virtual}
 		p.changed = true
 		handled[from], handled[to] = true, true
 		p.logf("moved %s -> %s", from, to)
@@ -436,34 +526,43 @@ func (p *pass) moves(paths []string) (map[string]bool, error) {
 	return handled, nil
 }
 
-// pullChange makes the local file match the space version r ("" deletes it),
-// provided the local file is still l.
-func (p *pass) pullChange(path, l, r string) error {
-	if now, err := p.currentBlob(path); err != nil || now != l {
+// pullChange makes the local file match the space's version rf (none
+// deletes it), provided the local file is still lf.
+func (p *pass) pullChange(path string, lf localFile, rf remoteFile) error {
+	if now, err := p.currentBlob(path); err != nil || now != lf.blob && lf.blob != "old text" || lf.blob == "old text" && now == "" {
 		p.deferred = true
 		return nil
 	}
-	if r == "" {
+	if rf.key() == "" {
 		if err := os.Remove(p.full(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		p.pruneDirs(path)
 		delete(p.cache, path)
-		p.agree(path, "")
+		p.agree(path)
 		p.logf("deleted %s (removed in the space)", path)
 		return nil
 	}
-	text, err := p.content(path, r)
-	if err != nil {
-		return err
-	}
-	if err := p.writeLocal(path, text); err != nil {
-		return err
-	}
-	p.agree(path, r)
-	if l == "" {
-		p.logf("downloaded %s", path)
+	if rf.Virtual != nil {
+		if err := p.downloadVirtual(path, rf); err != nil {
+			return err
+		}
 	} else {
+		text, err := p.content(path, rf.Blob)
+		if err != nil {
+			return err
+		}
+		if err := p.writeLocal(path, text); err != nil {
+			return err
+		}
+	}
+	p.agree(path)
+	switch {
+	case lf.blob == "old text":
+		p.logf("downloaded %s whole (it is a virtual file: mtsync before 0.61.0 kept its text only)", path)
+	case lf.blob == "":
+		p.logf("downloaded %s", path)
+	default:
 		p.logf("updated %s", path)
 	}
 	return nil
@@ -473,18 +572,67 @@ func (p *pass) pullChange(path, l, r string) error {
 // local file with the same content when there is one (a move or copy in the
 // space) instead of downloading it.
 func (p *pass) content(path, r string) ([]byte, error) {
-	for other, blob := range p.local {
-		if blob == r && !p.unstable[other] {
-			if b, err := os.ReadFile(p.full(other)); err == nil && gitBlob(b) == r {
-				return b, nil
-			}
-		}
+	if b, ok := p.localCopy(r, false); ok {
+		return b, nil
 	}
 	text, err := p.c.read(p.ctx, path, p.snapshot)
 	if err != nil {
 		return nil, err
 	}
 	return []byte(text), nil
+}
+
+// localCopy reads a stable local file whose key (as a virtual file, or an
+// ordinary one) is key.
+func (p *pass) localCopy(key string, virtual bool) ([]byte, bool) {
+	for other, lf := range p.local {
+		if lf.key(virtual) == key && !p.unstable[other] {
+			if b, err := os.ReadFile(p.full(other)); err == nil && hashes(b).key(virtual) == key {
+				return b, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// downloadVirtual puts a virtual file's content at path: copied from a local
+// file with the same content when there is one, else downloaded at the
+// pass's snapshot into a temporary file beside it, checked against its
+// hash, then renamed into place.
+func (p *pass) downloadVirtual(path string, rf remoteFile) error {
+	if b, ok := p.localCopy(rf.key(), true); ok {
+		return p.writeLocal(path, b)
+	}
+	full := p.full(path)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(full), ".mtsync-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	h := sha256.New()
+	n, err := p.c.download(p.ctx, path, p.snapshot, io.MultiWriter(f, h))
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != rf.Virtual.SHA256 || n != rf.Virtual.Size {
+		return fmt.Errorf("%s: the download does not match the space's file (%d bytes, sha256 %s); trying again later", path, n, got)
+	}
+	if err := os.Chmod(tmp, 0644); err != nil {
+		return err
+	}
+	if err := renameRetry(tmp, full); err != nil {
+		return err
+	}
+	// The next scan hashes it, once.
+	delete(p.cache, path)
+	return nil
 }
 
 func (p *pass) writeLocal(path string, b []byte) error {
@@ -496,7 +644,7 @@ func (p *pass) writeLocal(path string, b []byte) error {
 		return err
 	}
 	if info, err := os.Stat(full); err == nil {
-		p.cache[path] = localEntry{size: info.Size(), mtime: info.ModTime(), blob: gitBlob(b)}
+		p.cache[path] = localEntry{size: info.Size(), mtime: info.ModTime(), file: hashes(b)}
 	}
 	return nil
 }
@@ -510,25 +658,28 @@ func (p *pass) pruneDirs(file string) {
 	}
 }
 
-// push sends the local version of path ("" deletes it) to the space.
-func (p *pass) push(path, l string) error {
-	if p.readOnly || p.wasWarned(path, l) {
+// push sends the local version of path (lf; none deletes it) to the space:
+// UTF-8 text as a file's text, anything else, or new content for a virtual
+// file, as a virtual file's content.
+func (p *pass) push(path string, lf localFile) error {
+	if p.readOnly || p.wasWarned(path, lf.blob) {
 		return nil
 	}
-	if l == "" {
-		if f, ok := p.remote[path]; ok && !f.Deletable {
+	rf, existed := p.remote[path]
+	if lf.blob == "" {
+		if existed && !rf.Deletable {
 			// A folder's AGENTS.md and .metatrash.json cannot be deleted:
 			// restore them. When the folder's other files went too, the
 			// space removes them and the next pass deletes them here.
-			return p.pullChange(path, "", f.Blob)
+			return p.pullChange(path, localFile{}, rf)
 		}
 		m, err := p.c.remove(p.ctx, path, p.current)
 		if err != nil {
-			return p.refused(path, l, err)
+			return p.refused(path, lf.blob, err)
 		}
 		p.current = m.NewState
 		delete(p.remote, path)
-		p.agree(path, "")
+		p.agree(path)
 		p.logf("deleted %s in the space", path)
 		return nil
 	}
@@ -540,27 +691,70 @@ func (p *pass) push(path, l string) error {
 	if err != nil {
 		return err
 	}
-	blob := gitBlob(b)
-	if !utf8.Valid(b) {
-		p.warn(path, blob, "%s is not UTF-8 text; spaces hold text only, so it stays local", path)
+	now := hashes(b)
+	if now != lf {
+		// Changed since the scan: the next pass looks again.
+		p.deferred = true
 		return nil
 	}
-	m, err := p.c.write(p.ctx, path, string(b), p.current)
-	if err != nil {
-		return p.refused(path, blob, err)
+	var m mutation
+	virtual := rf.Virtual != nil || !isText(b)
+	switch {
+	case virtual && rf.Virtual != nil && rf.Virtual.Source != "":
+		// Fetched from its source (and maybe refreshed from it): the space
+		// keeps the source's version, so a local change goes to a copy.
+		return p.restoreLocked(path, lf, rf, fmt.Sprintf("%s comes from %s, so it can't be changed here", path, rf.Virtual.Source))
+	case virtual && !p.c.account:
+		p.warn(path, lf.blob, "%s is not UTF-8 text; a space reached with a key holds text only, so it stays local", path)
+		return nil
+	case virtual && len(b) > maxVirtualBytes:
+		p.warn(path, lf.blob, "%s is larger than %d MB, the most a space holds in one file, so it stays local", path, maxVirtualBytes>>20)
+		return nil
+	case virtual:
+		if m, err = p.upload(path, lf, b); err != nil || m.NewState == "" {
+			return err
+		}
+	default:
+		m, err = p.c.write(p.ctx, path, string(b), p.current)
+		if errorCode(err) == "payload_too_large" && p.c.account && len(b) <= maxVirtualBytes {
+			// Text over the space's file limit is kept as a virtual file.
+			if m, err = p.upload(path, lf, b); err != nil || m.NewState == "" {
+				return err
+			}
+			break
+		}
+		if err != nil {
+			return p.refused(path, lf.blob, err)
+		}
+		m.File.Blob = lf.blob
 	}
 	p.current = m.NewState
-	f := m.File
-	f.Blob = blob
-	_, existed := p.remote[path]
-	p.remote[path] = f
-	p.agree(path, blob)
+	p.remote[path] = m.File
+	p.agree(path)
 	if existed {
 		p.logf("uploaded %s", path)
 	} else {
 		p.logf("uploaded new %s", path)
 	}
 	return nil
+}
+
+// upload sends b as the virtual file at path. An empty mutation with no
+// error means the file stays local (warned once).
+func (p *pass) upload(path string, lf localFile, b []byte) (mutation, error) {
+	m, err := p.c.upload(p.ctx, path, b, p.current)
+	if errorCode(err) == "not_found" {
+		// The route is missing: a server before 0.60.0.
+		p.warn(path, lf.blob, "%s is not UTF-8 text or is too large for a text file, and this server keeps text only (binary files need metatrash 0.60.0), so it stays local", path)
+		return mutation{}, nil
+	}
+	if err != nil {
+		return mutation{}, p.refused(path, lf.blob, err)
+	}
+	if m.File.Virtual == nil || m.File.Virtual.SHA256 != lf.sha {
+		return mutation{}, fmt.Errorf("%s: the space did not store the content uploaded", path)
+	}
+	return m, nil
 }
 
 // refused handles a failed upload: a stale state restarts the pass, a lost
@@ -588,21 +782,22 @@ func (p *pass) refused(path, blob string, err error) error {
 		// Locked for everyone in the space's settings: put the space's
 		// version back, keeping a local change as a conflict copy.
 		if r, ok := p.remote[path]; ok {
-			return p.restoreLocked(path, blob, r.Blob)
+			return p.restoreLocked(path, p.local[path], r, path+" is read-only in the space")
 		}
 	}
 	p.warn(path, blob, "%s was not uploaded: %s", path, e.Message)
 	return nil
 }
 
-// restoreLocked puts back the space's version r of a read-only file that was
-// changed (local version l) or deleted (l is "") here.
-func (p *pass) restoreLocked(path, l, r string) error {
-	if l == "" {
-		p.logf("%s is read-only in the space, so it was put back", path)
-		return p.pullChange(path, "", r)
+// restoreLocked puts back the space's version rf of a file that can't be
+// changed here (why says so) and was changed (local version lf) or deleted
+// (lf empty) here; a change is kept as a conflict copy.
+func (p *pass) restoreLocked(path string, lf localFile, rf remoteFile, why string) error {
+	if lf.blob == "" {
+		p.logf("%s, so it was put back", why)
+		return p.pullChange(path, localFile{}, rf)
 	}
-	if now, err := p.currentBlob(path); err != nil || now != l {
+	if now, err := p.currentBlob(path); err != nil || now != lf.blob {
 		p.deferred = true
 		return nil
 	}
@@ -611,8 +806,8 @@ func (p *pass) restoreLocked(path, l, r string) error {
 		return err
 	}
 	delete(p.cache, path)
-	p.logf("%s is read-only in the space; your version is now %s", path, copyPath)
-	return p.pullChange(path, "", r)
+	p.logf("%s; your version is now %s", why, copyPath)
+	return p.pullChange(path, localFile{}, rf)
 }
 
 func (s *syncer) wasWarned(path, blob string) bool {
@@ -629,8 +824,8 @@ func (p *pass) warn(path, blob, format string, args ...any) {
 
 // conflict keeps both versions: the local file is renamed to a conflict copy
 // (uploaded on the next pass) and the space version takes its place.
-func (p *pass) conflict(path, l, r string) error {
-	if now, err := p.currentBlob(path); err != nil || now != l {
+func (p *pass) conflict(path string, lf localFile, rf remoteFile) error {
+	if now, err := p.currentBlob(path); err != nil || now != lf.blob {
 		p.deferred = true
 		return nil
 	}
@@ -640,7 +835,7 @@ func (p *pass) conflict(path, l, r string) error {
 	}
 	delete(p.cache, path)
 	p.logf("conflict: %s changed here and in the space; your version is now %s", path, copyPath)
-	return p.pullChange(path, "", r)
+	return p.pullChange(path, localFile{}, rf)
 }
 
 // conflictName inserts ".conflict-<time>" before the extension, keeping to the

@@ -21,6 +21,11 @@ import (
 // Baselines live in the space's own Git, in the service file
 // .metatrash/github.json, written in the same commit as the pulled files.
 // Agents cannot read or write .metatrash/.
+//
+// With the space-files bucket (0.61.0), binary files and text over the
+// space's file limit come in as virtual files of up to 100 MB: content in
+// the bucket, a pointer in Git. Their baseline entry is the content's blob
+// hash, which is GitHub's, so pull and push compare content, not pointers.
 
 const githubBaselinePath = serviceDir + "github.json"
 
@@ -29,7 +34,10 @@ const (
 	maxPullListed       = 50  // skipped files and clashes named in a result or error
 	githubPullsPerSpace = 10  // per githubPullWindow seconds
 	githubPullWindow    = 600 // seconds
-	githubPullTimeout   = 3 * time.Minute
+	githubPullTimeout   = 10 * time.Minute
+	// maxPullVirtualBytes bounds the virtual files one pull fetches; the
+	// rest are skipped until they change on GitHub.
+	maxPullVirtualBytes = 512 << 20
 )
 
 type githubBaseline struct {
@@ -77,6 +85,9 @@ type githubSource interface {
 	branchHead(ctx context.Context, branch string) (commit, tree string, err error)
 	tree(ctx context.Context, tree string) ([]githubTreeEntry, error)
 	contents(ctx context.Context, commit string, want map[string]string) (map[string][]byte, error)
+	// blob reads one file too large for contents, which pull keeps as a
+	// virtual file (0.61.0), checked against its hash.
+	blob(ctx context.Context, sha string, limit int64) ([]byte, error)
 }
 
 // PullSkipped names a repository file the folder does not hold, by its path
@@ -177,7 +188,9 @@ func localRepoFiles(files map[string]record, folder string) map[string]record {
 // classifyRepoEntries splits a repository tree into the blobs the folder can
 // hold (by relative path) and the ones it skips. Binary content is checked
 // later, once the content is known.
-func classifyRepoEntries(folder string, entries []githubTreeEntry, maxFileBytes int64) (map[string]githubTreeEntry, []githubSkipped) {
+// Files over maxFileBytes are kept when they fit in maxVirtual (0 when the
+// space keeps no virtual files), to be held as virtual files.
+func classifyRepoEntries(folder string, entries []githubTreeEntry, maxFileBytes, maxVirtual int64) (map[string]githubTreeEntry, []githubSkipped) {
 	keep := map[string]githubTreeEntry{}
 	var skipped []githubSkipped
 	skip := func(e githubTreeEntry, reason string) {
@@ -206,8 +219,10 @@ func classifyRepoEntries(folder string, entries []githubTreeEntry, maxFileBytes 
 			skip(e, "Metatrash folder settings file ("+folderConfigName+")")
 		case !validPath(folder + e.Path):
 			skip(e, "name not allowed in Metatrash (letters, digits, . _ - only, not starting with -; at most 8 levels and 240 characters)")
-		case e.Size > maxFileBytes:
-			skip(e, fmt.Sprintf("larger than the space's file limit (%d bytes)", maxFileBytes))
+		case e.Size > maxFileBytes && maxVirtual > 0 && e.Size > maxVirtual:
+			skip(e, fmt.Sprintf("larger than the %d MB a virtual file holds", maxVirtual>>20))
+		case e.Size > maxFileBytes && maxVirtual == 0:
+			skip(e, fmt.Sprintf("larger than the space's file limit (%d bytes); this server keeps no virtual files for larger ones", maxFileBytes))
 		default:
 			keep[e.Path] = e
 		}
@@ -259,6 +274,17 @@ func listSome(items []string) string {
 	return strings.Join(items, ", ")
 }
 
+// repoBlob is the blob hash a GitHub folder compares for a file: a virtual
+// file's content's (0.61.0), else the file's own. A virtual file stored
+// before 0.61.0 has no content hash and compares by its pointer, so it shows
+// as changed until push sends it.
+func repoBlob(f record) string {
+	if f.Virtual != nil && f.Virtual.GitBlob != "" {
+		return f.Virtual.GitBlob
+	}
+	return f.Blob
+}
+
 // sameRecords reports whether two views of a folder hold the same files.
 func sameRecords(a, b map[string]record) bool {
 	if len(a) != len(b) {
@@ -279,7 +305,7 @@ func localChanges(base githubBaseline, local map[string]record) map[string]strin
 	for rel, f := range local {
 		if blob, ok := base.Files[rel]; !ok {
 			out[rel] = "added"
-		} else if blob != f.Blob {
+		} else if blob != repoBlob(f) {
 			out[rel] = "modified"
 		}
 	}
@@ -300,8 +326,9 @@ type pullPlan struct {
 	base      githubBaseline
 	hasBase   bool
 	seenLocal map[string]record
-	writes    map[string][]byte // rel -> content to create or replace
-	deletes   []string          // rel
+	writes    map[string][]byte      // rel -> content to create or replace
+	virtual   map[string]VirtualInfo // rel -> the virtual file a write's pointer is for
+	deletes   []string               // rel
 	baseline  githubBaseline
 }
 
@@ -416,7 +443,11 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 	if err != nil {
 		return nil, err
 	}
-	keep, skipped := classifyRepoEntries(folder, entries, r.limits.MaxFileBytes)
+	var maxVirtual int64
+	if store, _ := s.spaceFiles(); store != nil && r.owned && r.id != "" {
+		maxVirtual = maxVirtualBytes
+	}
+	keep, skipped := classifyRepoEntries(folder, entries, r.limits.MaxFileBytes, maxVirtual)
 	newTree := treeFromEntries(entries)
 	githubChanged := map[string]bool{}
 	if hasBase {
@@ -428,7 +459,7 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			}
 			e, onGitHub := newTree[rel]
 			f, here := local[rel]
-			if onGitHub == here && (!here || e.sha == f.Blob) {
+			if onGitHub == here && (!here || e.sha == repoBlob(f)) {
 				// The same change on both sides: both deleted, or the same content.
 				delete(changed, rel)
 				continue
@@ -459,7 +490,7 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 		for rel, f := range local {
 			e, ok := keep[rel]
 			switch {
-			case ok && e.SHA == f.Blob:
+			case ok && e.SHA == repoBlob(f):
 			case isAgentsFile(rel) && f.Blob == starter:
 				// The untouched AGENTS.md the folder got before it was a
 				// GitHub folder: the repository's copy replaces it, or the
@@ -476,10 +507,13 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			return nil, githubConflict(fmt.Sprintf("%s already holds files that do not match %s@%s: %s. A first pull needs the folder empty apart from %s files and untouched AGENTS.md files, or holding identical copies. Move or delete those files, then pull again.", folder, svc.Repo, svc.Branch, listSome(clashes), folderConfigName))
 		}
 	}
-	// Rough bound before downloading: binaries are only found once fetched.
+	// Rough bound before downloading: binaries are only found once fetched,
+	// and files over the file limit become virtual files.
 	var candidateBytes int64
 	for _, e := range keep {
-		candidateBytes += e.Size
+		if e.Size <= r.limits.MaxFileBytes {
+			candidateBytes += e.Size
+		}
 	}
 	if len(keep) > 4*r.limits.MaxFiles || candidateBytes > 4*r.limits.MaxCurrentTextBytes {
 		return nil, problem(507, "storage_limit", fmt.Sprintf("%s is too large for this space: %d files, %d bytes of text (the space holds at most %d files and %d bytes).", svc.Repo, len(keep), candidateBytes, r.limits.MaxFiles, r.limits.MaxCurrentTextBytes))
@@ -488,12 +522,17 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 	// download; neither do files the folder holds identical copies of.
 	reuse := map[string]bool{}
 	want := map[string]string{}
+	large := map[string]string{} // rel -> blob, over the file limit: virtual files
 	for rel, e := range keep {
 		if _, held := base.Files[rel]; hasBase && held && !githubChanged[rel] {
 			reuse[rel] = true
 			continue
 		}
-		if f, ok := local[rel]; ok && f.Blob == e.SHA {
+		if f, ok := local[rel]; ok && repoBlob(f) == e.SHA {
+			continue
+		}
+		if e.Size > r.limits.MaxFileBytes {
+			large[rel] = e.SHA
 			continue
 		}
 		want[rel] = e.SHA
@@ -525,12 +564,20 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 			skipped = append(skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: fmt.Sprintf("%s text, larger than the space's file limit (%d bytes) once converted to UTF-8", encoding, r.limits.MaxFileBytes)})
 			continue
 		}
+		if maxVirtual > 0 {
+			large[rel] = e.SHA // already fetched: content[rel]
+			continue
+		}
 		delete(keep, rel)
 		delete(content, rel)
 		skipped = append(skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: notTextReason(b)})
 	}
+	virtual, err := s.pullVirtual(ctx, r, source, folder, files, keep, large, content, &skipped)
+	if err != nil {
+		return nil, err
+	}
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Path < skipped[j].Path })
-	plan := pullPlan{result: result, svc: svc, folder: folder, seenHead: head, base: base, hasBase: hasBase, seenLocal: local, writes: map[string][]byte{}}
+	plan := pullPlan{result: result, svc: svc, folder: folder, seenHead: head, base: base, hasBase: hasBase, seenLocal: local, writes: map[string][]byte{}, virtual: virtual}
 	plan.baseline = githubBaseline{Repo: svc.Repo, Branch: svc.Branch, Commit: commit, Tree: treeHash, PulledAt: time.Now().UTC().Format(time.RFC3339), Files: map[string]string{}, Skipped: skipped}
 	baseline := &plan.baseline
 	for rel, e := range keep {
@@ -561,7 +608,7 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 		if _, mine := changed[rel]; mine {
 			continue // the local change stays, still pending for push
 		}
-		if f, ok := local[rel]; ok && f.Blob == blob {
+		if f, ok := local[rel]; ok && repoBlob(f) == blob {
 			plan.result.Unchanged++
 			continue
 		}
@@ -686,6 +733,11 @@ func (s *Service) applyPull(ctx context.Context, r *repository, plan pullPlan) (
 		}
 		f.Bytes = int64(len(b))
 		f.Protected, f.Deletable = false, true
+		// Text replaces a virtual file, or a pointer an ordinary one.
+		f.Virtual = nil
+		if info, ok := plan.virtual[rel]; ok {
+			f.Virtual = &info
+		}
 		files[p] = f
 		texts[p] = string(b)
 		changes = append(changes, commitChange{f.ID, operation, p})
@@ -716,6 +768,65 @@ func (s *Service) applyPull(ctx context.Context, r *repository, plan pullPlan) (
 	result.NewState = state
 	result.listFrom(plan.baseline, folder)
 	return result, nil
+}
+
+// pullVirtual stores the files in large (rel -> blob) as virtual files: the
+// content already in content (binaries the tarball brought), or one blob at a
+// time from GitHub. Each one's content then holds its pointer, for applyPull
+// to write. Files over the pull's or the space's allowance are skipped.
+func (s *Service) pullVirtual(ctx context.Context, r *repository, source githubSource, folder string, files map[string]record, keep map[string]githubTreeEntry, large map[string]string, content map[string][]byte, skipped *[]githubSkipped) (map[string]VirtualInfo, error) {
+	out := map[string]VirtualInfo{}
+	if len(large) == 0 {
+		return out, nil
+	}
+	paths := make([]string, 0, len(large))
+	for rel := range large {
+		paths = append(paths, rel)
+	}
+	sort.Strings(paths)
+	// The space's other virtual files, and the folder's that stay.
+	var spaceBytes int64
+	for p, f := range files {
+		if _, replaced := large[strings.TrimPrefix(p, folder)]; f.Virtual != nil && (!strings.HasPrefix(p, folder) || !replaced) {
+			spaceBytes += f.Virtual.Size
+		}
+	}
+	var pulled int64
+	for _, rel := range paths {
+		e := keep[rel]
+		skip := func(reason string) {
+			delete(keep, rel)
+			delete(content, rel)
+			*skipped = append(*skipped, githubSkipped{Path: e.Path, Blob: e.SHA, Mode: e.Mode, Reason: reason})
+		}
+		if pulled+e.Size > maxPullVirtualBytes {
+			skip(fmt.Sprintf("a large or binary file over the %d MB of virtual files one pull fetches; it comes in once it changes on GitHub, or move it out of the repository folder", maxPullVirtualBytes>>20))
+			continue
+		}
+		if spaceBytes+e.Size > maxVirtualPerSpace {
+			skip(fmt.Sprintf("a large or binary file that would take the space's virtual files over %d GB", maxVirtualPerSpace>>30))
+			continue
+		}
+		body, ok := content[rel]
+		if !ok {
+			var err error
+			if body, err = source.blob(ctx, large[rel], maxVirtualBytes); err != nil {
+				return nil, err
+			}
+		}
+		if blobHash(body) != large[rel] {
+			return nil, errGitHubUnavailable
+		}
+		info, err := s.storeVirtual(ctx, r, folder+rel, body, "", "")
+		if err != nil {
+			return nil, err
+		}
+		pulled += info.Size
+		spaceBytes += info.Size
+		out[rel] = info
+		content[rel] = []byte(info.pointer())
+	}
+	return out, nil
 }
 
 func short(commit string) string {

@@ -23,7 +23,7 @@ func (s *syncer) loop(ctx context.Context, interval time.Duration, once bool) er
 	remote := make(chan struct{}, 1)
 	go s.watchRemote(ctx, interval, remote)
 	dirty, failures := true, 0
-	var lastScan map[string]string
+	var lastScan map[string]localFile
 	for {
 		if !dirty {
 			local, unstable, err := s.scan()

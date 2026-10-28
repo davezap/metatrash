@@ -45,16 +45,9 @@ func syncedFile(file string) (folderEntry, string, error) {
 
 // fileID is the space's ID for rel, from the folder's last agreed state.
 func fileID(e folderEntry, rel string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(e.Folder, stateDir, "state.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("%s has not synced yet", e.Folder)
-	}
+	st, err := folderState(e)
 	if err != nil {
 		return "", err
-	}
-	var st syncState
-	if err := json.Unmarshal(b, &st); err != nil {
-		return "", fmt.Errorf("%s is damaged: %v", filepath.Join(e.Folder, stateDir, "state.json"), err)
 	}
 	for p, f := range st.Files {
 		if p == rel || (samePath("A", "a") && strings.EqualFold(p, rel)) {
@@ -62,6 +55,22 @@ func fileID(e folderEntry, rel string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s is not in %s yet (mtsync has not uploaded it)", rel, e.Space)
+}
+
+// folderState is a registered folder's last agreed state.
+func folderState(e folderEntry) (syncState, error) {
+	var st syncState
+	b, err := os.ReadFile(filepath.Join(e.Folder, stateDir, "state.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return st, fmt.Errorf("%s has not synced yet", e.Folder)
+	}
+	if err != nil {
+		return st, err
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return st, fmt.Errorf("%s is damaged: %v", filepath.Join(e.Folder, stateDir, "state.json"), err)
+	}
+	return st, nil
 }
 
 // historyJSON is mtsync history -json's answer, for editors.
@@ -186,11 +195,17 @@ func showRevision(ctx context.Context, file, revision string, out io.Writer) err
 	} else if len(revision) < 40 {
 		return fmt.Errorf("%w; for a short revision give the file's current name, or give all 40 characters (mtsync -json history)", idErr)
 	}
-	text, err := c.read(ctx, readPath, revision)
+	text, virtual, err := c.readFile(ctx, readPath, revision)
 	if errorCode(err) == "not_found" {
 		return fmt.Errorf("%s did not exist at %s; a delete entry has no text, so pick the one before it (or the path it had then): %w", path.Join(e.Space, readPath), revision[:12], err)
 	}
 	if err != nil {
+		return err
+	}
+	if virtual != nil && c.account {
+		// A virtual file's revision is its content (a PDF, an image), not
+		// the server's text for it; mtsync text prints that.
+		_, err = c.download(ctx, readPath, revision, out)
 		return err
 	}
 	_, err = io.WriteString(out, text)

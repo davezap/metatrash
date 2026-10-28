@@ -431,13 +431,17 @@ step.
      pushes for a virtual file (the pointer, the content, or nothing); and
      how old mtsync releases, which see pointer text, are kept from
      overwriting one (refuse writes over pointers and raise `minVersion`).
-4. **0.61.0: mtsync and Slate Viewer handle it transparently.** mtsync
-   downloads a virtual file's content to the local path, puts it back when
-   it is edited locally (as for everyone-locked files), and turns a new
-   local binary into a virtual file; Slate Viewer shows virtual files, opens
-   them in the system's app and offers "Convert to Markdown". GitHub folders
-   store a repository's binary files as virtual files on pull. mtsync's
-   `export` streams to the file instead of reading at most 256 MB.
+4. ~~**0.61.0: mtsync and Slate Viewer handle it transparently.**~~
+   Written 2026-10-27: mtsync downloads a virtual file's content, uploads a
+   new local binary (or text over the file limit) as one, and compares by
+   content, so a pointer-only change (configure, refresh) makes no conflict
+   copy; a file with a source is put back when edited locally. `minVersion`
+   is now 0.61.0. GitHub folders pull binaries and files over the file
+   limit as virtual files and push them as blobs. mtsync's `export`
+   streams to the file. Slate Viewer 0.20.0 lists virtual files, opens them
+   in the system's app and offers "Convert to Markdown". A signed-out
+   Markdown or `?raw` request to a private space now answers 401, so
+   `configure` can't store a sign-in page.
 5. **Later: a blob service for compute output.** An action, or another
    service, stores a result as a virtual file (or a bare blob with a
    reference) for later retrieval, under the same ownership and retention
@@ -545,6 +549,30 @@ scheduled yet. To settle when it is:
 
 Live checks not yet reported done. The server is at schema v14 with current
 grants, so the schema and grant steps these once needed are behind us.
+
+From 0.61.0 (2026-10-27; release mtsync 0.61.0 with the server, since
+`minVersion` rises to it):
+
+- **mtsync and virtual files:** with mtsync 0.61.0 syncing a folder that
+  holds `vtest/`, the virtual files there appear as the files themselves
+  (open the PDF or picture). Copy a picture into the folder: it uploads, and
+  its page on the site shows it. Ask Claude to `configure` one of them with
+  a new `refresh`: nothing changes locally and no `.conflict-` copy
+  appears. Edit a file that has a source: the space's version comes back
+  and your edit is kept as a conflict copy. `mtsync virtual <folder>` lists
+  them; `mtsync text <folder>/x.pdf` prints the PDF's Markdown.
+- **Big files:** upload a file of 20 to 100 MB through mtsync, and export
+  the space with `mtsync export`: both finish (the server now gives such
+  requests up to 30 minutes; a proxy in front needs timeouts that allow
+  it).
+- **GitHub binaries:** in a GitHub folder of a repository with a picture or
+  a PDF, pull: the file is a virtual file (not skipped). Add a picture to
+  the folder, check `pending` (added, "a virtual file"), push, and see it on
+  GitHub.
+- **Sign-in page refused:** ask Claude to `configure` a file with source
+  `https://metatrash.com/spaces/<owner>/<private-space>/README.md?format=md`:
+  it is refused ("401 … needs a sign-in") and nothing is stored. Open the
+  same address in a signed-out browser: it still goes to sign in.
 
 From 0.60.2 (2026-10-27):
 

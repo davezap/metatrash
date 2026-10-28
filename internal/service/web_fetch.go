@@ -157,6 +157,9 @@ func (f *httpFetcher) fetch(ctx context.Context, u *url.URL, etag, lastModified 
 			resp.Body.Close()
 			return webPage{URL: u.String(), Status: http.StatusNotModified}, nil
 		case http.StatusOK:
+		case http.StatusUnauthorized, http.StatusForbidden:
+			resp.Body.Close()
+			return webPage{}, problem(502, "fetch_failed", fmt.Sprintf("The site answered %d %s: the page needs a sign-in, and fetches have none. A file in a private Metatrash space can be read from the space itself.", resp.StatusCode, http.StatusText(resp.StatusCode)))
 		default:
 			resp.Body.Close()
 			return webPage{}, problem(502, "fetch_failed", fmt.Sprintf("The site answered %d %s.", resp.StatusCode, http.StatusText(resp.StatusCode)))

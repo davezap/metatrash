@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,6 +30,20 @@ func (f *fakeRepoHost) serveWrite(w http.ResponseWriter, r *http.Request, name s
 		return s
 	}
 	switch {
+	case r.Method == http.MethodPost && rest == "git/blobs":
+		if str("encoding") != "base64" {
+			w.WriteHeader(422)
+			return
+		}
+		content, err := base64.StdEncoding.DecodeString(str("content"))
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		sha := blobHash(content)
+		f.blobs[sha] = string(content)
+		w.WriteHeader(201)
+		fmt.Fprintf(w, `{"sha":%q,"url":"x"}`, sha)
 	case r.Method == http.MethodPost && rest == "git/trees":
 		base, ok := f.trees[str("base_tree")]
 		if !ok {
@@ -56,11 +71,18 @@ func (f *fakeRepoHost) serveWrite(w http.ResponseWriter, r *http.Request, name s
 				w.WriteHeader(422)
 				return
 			}
-			if hasSHA {
-				if string(sha) != "null" {
+			if hasSHA && string(sha) != "null" {
+				var hash string
+				_ = json.Unmarshal(sha, &hash)
+				text, ok := f.blobs[hash]
+				if !ok {
 					w.WriteHeader(422)
 					return
 				}
+				files[path] = fakeRepoFile{text: text, mode: mode}
+				continue
+			}
+			if hasSHA {
 				if _, ok := files[path]; !ok {
 					w.WriteHeader(422) // GitHub refuses to delete what is not there
 					return

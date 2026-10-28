@@ -234,6 +234,12 @@ On`. Go answers `/healthz` only to direct loopback requests. Then
 `sudo apachectl configtest` and, only after `Syntax OK`, `sudo systemctl reload
 httpd`. If SELinux blocks the proxy connection, check the audit log.
 
+- `ProxyTimeout 660` (0.61.0): a GitHub pull or push that moves virtual files
+  may take up to 10 minutes before it answers, and Apache's timeout is how
+  long it waits for the next bytes. Uploads, downloads and exports of
+  virtual files (up to 30 minutes, past the service's own 15 and 45 second
+  limits, which those requests lift) keep data flowing, so they are not
+  affected.
 - `-trusted-proxies 127.0.0.1/32` (in the unit) makes rate limits see the real
   client address. Configure any CDN in front of Apache first.
 - Never enable request body or header logging (`mod_dumpio`,
@@ -787,6 +793,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.58.0 | grants (`UPDATE (name, daily_cap, key_sealed, key_hint)` on `metatrash_agents`) | (grants only); changed names, caps and keys stay |
 | 0.59.0 | none; optional `poppler-utils` for PDF text (Folder actions) | 0.58; references made with text stay readable as their originals |
 | 0.60.2 | schema v19 (`metatrash_virtual_refresh`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (every, next_run_at, last_run_at, stale_since, stale_reason)` on it) | 18; pointers keep their `refresh` line but nothing refreshes them, and 0.60.0/0.60.1 read them as before. Rows stay in the table, unused |
+| 0.61.0 | none; release mtsync 0.61.0 with it (`minVersion` rises to 0.61.0). Recommended: `ProxyTimeout 660` in Apache (Apache) | 0.60.2 (no schema change); pointers with a `git` line and virtual files pulled from GitHub read as before, and 0.60 push leaves them out again |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

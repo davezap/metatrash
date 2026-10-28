@@ -50,7 +50,26 @@ type remoteFile struct {
 	Protected bool   `json:"protected"`
 	Deletable bool   `json:"deletable"`
 	Blob      string `json:"blob"`
+	// Virtual is set on a virtual file (metatrash 0.60.0): its content is
+	// kept outside Git, Blob is its pointer's, and the content moves through
+	// .../content (download and upload).
+	Virtual *virtualInfo `json:"virtual,omitempty"`
 }
+
+// virtualInfo describes a virtual file's content, as the server lists it.
+type virtualInfo struct {
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+	Type   string `json:"type"`
+	// TextSHA256 is set when the server holds text for the file (its
+	// Markdown for a PDF or Word file); it equals SHA256 for text content.
+	TextSHA256 string `json:"textSha256,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Refresh    string `json:"refresh,omitempty"`
+}
+
+// maxVirtualBytes is the most one virtual file holds (metatrash 0.60.0).
+const maxVirtualBytes = 100 << 20
 
 type mutation struct {
 	OldState string     `json:"oldState"`
@@ -129,9 +148,32 @@ func (c *client) do(ctx context.Context, method, resource string, query url.Valu
 }
 
 // send sends one request and returns the body of a successful answer, read
-// up to limit bytes. It refreshes the token once on 401 and waits out 429
-// and 503 responses as Retry-After asks.
+// up to limit bytes.
 func (c *client) send(ctx context.Context, method, resource string, query url.Values, payload []byte, limit int64) ([]byte, http.Header, error) {
+	contentType := ""
+	if payload != nil {
+		contentType = "application/json"
+	}
+	resp, err := c.sendRaw(ctx, c.http, method, resource, query, payload, contentType)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, nil, fmt.Errorf("answer is larger than %d bytes", limit)
+	}
+	return b, resp.Header, nil
+}
+
+// sendRaw sends one request and returns a successful answer, whose body the
+// caller reads and closes. It refreshes the token once on 401 and waits out
+// 429 and 503 responses as Retry-After asks (not a server that keeps no
+// virtual files, which says so with 503).
+func (c *client) sendRaw(ctx context.Context, hc *http.Client, method, resource string, query url.Values, payload []byte, contentType string) (*http.Response, error) {
 	target := c.base
 	if resource != "" {
 		target += "/" + resource
@@ -141,36 +183,37 @@ func (c *client) send(ctx context.Context, method, resource string, query url.Va
 	}
 	refreshed := false
 	for attempt := 0; ; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(payload))
-		if err != nil {
-			return nil, nil, err
-		}
+		var body io.Reader
 		if payload != nil {
-			req.Header.Set("Content-Type", "application/json")
+			body = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, target, body)
+		if err != nil {
+			return nil, err
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
 		}
 		if c.token != nil {
 			token, err := c.token(ctx, false)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			if token != "" {
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
 		}
-		resp, err := c.http.Do(req)
+		resp, err := hc.Do(req)
 		if err != nil {
-			return nil, nil, err
-		}
-		b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-		resp.Body.Close()
-		if err != nil {
-			return nil, nil, err
-		}
-		if int64(len(b)) > limit {
-			return nil, nil, fmt.Errorf("answer is larger than %d bytes", limit)
+			return nil, err
 		}
 		if resp.StatusCode < 300 {
-			return b, resp.Header, nil
+			return resp, nil
+		}
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
 		}
 		var wrapped struct {
 			Error apiError `json:"error"`
@@ -184,35 +227,55 @@ func (c *client) send(ctx context.Context, method, resource string, query url.Va
 		if resp.StatusCode == 401 && c.token != nil && !refreshed {
 			refreshed = true
 			if _, err := c.token(ctx, true); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			continue
 		}
-		if (resp.StatusCode == 429 || resp.StatusCode == 503) && attempt < 20 {
+		if (resp.StatusCode == 429 || resp.StatusCode == 503 && e.Code != "virtual_unavailable") && attempt < 20 {
 			wait, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
 			if wait < 1 {
 				wait = 1
 			}
 			if err := c.sleep(ctx, time.Duration(wait)*time.Second); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			continue
 		}
-		return nil, nil, &e
+		return nil, &e
 	}
 }
 
-// export downloads the whole space at its current state as a zip.
-func (c *client) export(ctx context.Context) (string, []byte, error) {
-	b, header, err := c.send(ctx, "GET", "export", nil, nil, 256<<20)
+// transfers is the HTTP client for downloads and uploads of whole files,
+// which may take longer than the minute other requests get.
+func (c *client) transfers() *http.Client {
+	t := *c.http
+	t.Timeout = 30 * time.Minute
+	return &t
+}
+
+// export saves the whole space at its current state as a zip to w, as it
+// arrives (a space with virtual files can be larger than memory should
+// hold).
+func (c *client) export(ctx context.Context, w io.Writer) (string, int64, error) {
+	resp, err := c.sendRaw(ctx, c.transfers(), "GET", "export", nil, nil, "")
 	if err != nil {
-		return "", nil, err
+		return "", 0, err
 	}
-	state := header.Get("X-Metatrash-State")
-	if len(state) < 12 || len(b) < 4 || string(b[:4]) != "PK\x03\x04" {
-		return "", nil, fmt.Errorf("the server did not send a zip; it may be older than 0.38.0")
+	defer resp.Body.Close()
+	state := resp.Header.Get("X-Metatrash-State")
+	head := make([]byte, 4)
+	n, _ := io.ReadFull(resp.Body, head)
+	if len(state) < 12 || n < 4 || string(head) != "PK\x03\x04" {
+		return "", 0, fmt.Errorf("the server did not send a zip; it may be older than 0.38.0")
 	}
-	return state, b, nil
+	if _, err := w.Write(head); err != nil {
+		return "", 0, err
+	}
+	copied, err := io.Copy(w, resp.Body)
+	if err != nil {
+		return "", 0, fmt.Errorf("the export was cut off: %w", err)
+	}
+	return state, copied + 4, nil
 }
 
 // head returns the space's current state with a one-file listing.
@@ -292,9 +355,18 @@ func (c *client) changes(ctx context.Context, since string) (string, []remoteFil
 }
 
 func (c *client) read(ctx context.Context, path, revision string) (string, error) {
+	text, _, err := c.readFile(ctx, path, revision)
+	return text, err
+}
+
+// readFile reads a file's text, and says whether it is a virtual file: its
+// text is then the server's text for it (a PDF's Markdown, say), and its
+// content comes from download.
+func (c *client) readFile(ctx context.Context, path, revision string) (string, *virtualInfo, error) {
 	var out struct {
 		File struct {
-			Text string `json:"text"`
+			Text    string       `json:"text"`
+			Virtual *virtualInfo `json:"virtual"`
 		} `json:"file"`
 	}
 	query := url.Values{"path": {c.prefix + path}}
@@ -302,7 +374,46 @@ func (c *client) read(ctx context.Context, path, revision string) (string, error
 		query.Set("revision", revision)
 	}
 	err := c.do(ctx, "GET", "file", query, nil, &out)
-	return out.File.Text, err
+	return out.File.Text, out.File.Virtual, err
+}
+
+// download writes a file's content at revision ("" for the latest) to w: a
+// virtual file's bytes, or an ordinary file's text (metatrash 0.60.0).
+func (c *client) download(ctx context.Context, path, revision string, w io.Writer) (int64, error) {
+	query := url.Values{"path": {c.prefix + path}}
+	if revision != "" {
+		query.Set("revision", revision)
+	}
+	resp, err := c.sendRaw(ctx, c.transfers(), "GET", "content", query, nil, "")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxVirtualBytes+1))
+	if err == nil && n > maxVirtualBytes {
+		err = fmt.Errorf("%s is larger than %d MB", path, maxVirtualBytes>>20)
+	}
+	return n, err
+}
+
+// upload stores content as the virtual file at path (a new one, or a new
+// version), as of state (metatrash 0.60.0). The server tells the type from
+// the name and the bytes.
+func (c *client) upload(ctx context.Context, path string, content []byte, state string) (mutation, error) {
+	if content == nil {
+		content = []byte{}
+	}
+	resp, err := c.sendRaw(ctx, c.transfers(), "PUT", "content", url.Values{"path": {c.prefix + path}, "ifInState": {state}}, content, "application/octet-stream")
+	if err != nil {
+		return mutation{}, err
+	}
+	defer resp.Body.Close()
+	var out mutation
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return mutation{}, err
+	}
+	out.File.Path = strings.TrimPrefix(out.File.Path, c.prefix)
+	return out, nil
 }
 
 func (c *client) write(ctx context.Context, path, text, state string) (mutation, error) {

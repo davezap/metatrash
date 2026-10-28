@@ -28,10 +28,11 @@ import (
 const (
 	githubPushesPerSpace   = 10  // per githubPushWindow seconds
 	githubPushWindow       = 600 // seconds
-	githubPushTimeout      = 3 * time.Minute
+	githubPushTimeout      = 10 * time.Minute
 	maxPushFiles           = 1000
 	maxPushBytes           = 40 << 20
-	maxPushMessage         = 4000 // characters
+	maxPushVirtualBytes    = 512 << 20 // virtual files' content, sent one at a time
+	maxPushMessage         = 4000      // characters
 	maxPushTreeBatchBytes  = 4 << 20
 	maxPushTreeBatchFiles  = 250
 	githubNoreplyDomain    = "users.noreply.metatrash.com"
@@ -126,6 +127,8 @@ func (a pushAuthor) coAuthor() string {
 type pendingFile struct {
 	rel, change, note string
 	blob, mode        string // added and modified files
+	// virtual is set for a virtual file, whose content push sends as a blob.
+	virtual *VirtualInfo
 }
 
 // folderPending is a GitHub folder compared with its baseline.
@@ -161,34 +164,33 @@ func (r *repository) folderPending(ctx context.Context, head string, files map[s
 	}
 	for rel, f := range local {
 		blob, held := base.Files[rel]
-		if f.Virtual != nil && blob != f.Blob {
-			// Until GitHub folders handle virtual files (0.61.0), push
-			// leaves them, and GitHub's copy, alone.
-			p.notPushed = append(p.notPushed, PendingNote{folder + rel, "a virtual file (content kept outside Git); push does not send virtual files yet"})
-			continue
+		current := repoBlob(f)
+		virtualNote := ""
+		if f.Virtual != nil {
+			virtualNote = fmt.Sprintf("a virtual file (%s, %s): push sends its content", f.Virtual.Type, humanBytes(f.Virtual.Size))
 		}
 		switch {
-		case held && blob == f.Blob:
+		case held && blob == current:
 			if c, ok := base.Converted[rel]; ok {
 				p.converted = append(p.converted, PendingNote{folder + rel, fmt.Sprintf("%s on GitHub, held here as UTF-8 (with a UTF-8 byte order mark); unchanged, so push leaves GitHub's %s copy. Push sends it as UTF-8 only once edited: some Windows files need UTF-16 (PowerShell 5.1 scripts with non-ASCII text, .reg files)", c.Encoding, c.Encoding)})
 			}
 		case held:
-			note := ""
-			if c, ok := base.Converted[rel]; ok {
+			note := virtualNote
+			if c, ok := base.Converted[rel]; ok && f.Virtual == nil {
 				note = fmt.Sprintf("converted from %s on pull; push replaces GitHub's %s file with this UTF-8 version", c.Encoding, c.Encoding)
 			}
-			p.changes = append(p.changes, pendingFile{rel: rel, change: "modified", note: note, blob: f.Blob, mode: base.mode(rel)})
+			p.changes = append(p.changes, pendingFile{rel: rel, change: "modified", note: note, blob: current, mode: base.mode(rel), virtual: f.Virtual})
 		default:
 			if sk, tracked := base.skippedReason(rel); tracked {
 				mode := "100644"
 				if sk.Mode == "100755" {
 					mode = sk.Mode
 				}
-				p.changes = append(p.changes, pendingFile{rel: rel, change: "modified", note: "replaces the repository's copy, which pull skipped (" + sk.Reason + ")", blob: f.Blob, mode: mode})
+				p.changes = append(p.changes, pendingFile{rel: rel, change: "modified", note: "replaces the repository's copy, which pull skipped (" + sk.Reason + ")", blob: current, mode: mode, virtual: f.Virtual})
 			} else if ignore.ignored(rel) {
 				p.notPushed = append(p.notPushed, PendingNote{folder + rel, "excluded by .gitignore"})
 			} else {
-				p.changes = append(p.changes, pendingFile{rel: rel, change: "added", blob: f.Blob, mode: "100644"})
+				p.changes = append(p.changes, pendingFile{rel: rel, change: "added", note: virtualNote, blob: current, mode: "100644", virtual: f.Virtual})
 			}
 		}
 	}
@@ -385,14 +387,32 @@ func (s *Service) push(ctx context.Context, r *repository, space, folderArg, mes
 	if len(p.changes) > maxPushFiles {
 		return nil, problem(413, "payload_too_large", fmt.Sprintf("%d files changed; one push sends at most %d. Nothing was pushed.", len(p.changes), maxPushFiles))
 	}
-	var pushBytes int64
+	var pushBytes, virtualBytes int64
 	for _, c := range p.changes {
-		if c.change != "deleted" {
+		switch {
+		case c.change == "deleted":
+		case c.virtual != nil:
+			virtualBytes += c.virtual.Size
+		default:
 			pushBytes += files[folder+c.rel].Bytes
 		}
 	}
 	if pushBytes > maxPushBytes {
 		return nil, problem(413, "payload_too_large", fmt.Sprintf("The changes hold %d bytes; one push sends at most %d. Nothing was pushed.", pushBytes, maxPushBytes))
+	}
+	if virtualBytes > maxPushVirtualBytes {
+		return nil, problem(413, "payload_too_large", fmt.Sprintf("The changed virtual files hold %d MB; one push sends at most %d MB of them. Nothing was pushed.", virtualBytes>>20, maxPushVirtualBytes>>20))
+	}
+	// A virtual file stored before 0.61.0 has no content hash yet: its
+	// content gives it.
+	for i, c := range p.changes {
+		if c.virtual != nil && c.virtual.GitBlob == "" {
+			b, err := s.virtualContent(ctx, r, *c.virtual)
+			if err != nil {
+				return nil, err
+			}
+			p.changes[i].blob = blobHash(b)
+		}
 	}
 	if !usernamePattern.MatchString(author.Username) {
 		return nil, problem(403, "forbidden", "Pushes name you by your public Metatrash username; choose one on Your account, then push again.")
@@ -441,7 +461,10 @@ func (s *Service) push(ctx context.Context, r *repository, space, folderArg, mes
 	})
 	for _, c := range ordered {
 		change := githubTreeChange{Path: c.rel, Mode: "100644"}
-		if c.change != "deleted" {
+		if c.virtual != nil && c.change != "deleted" {
+			// Sent as a blob once GitHub is known to be at the baseline.
+			change.SHA, change.Mode = c.blob, c.mode
+		} else if c.change != "deleted" {
 			b, err := r.blob(ctx, c.blob)
 			if err != nil {
 				return nil, err
@@ -474,6 +497,23 @@ func (s *Service) push(ctx context.Context, r *repository, space, folderArg, mes
 	}
 	if ghHead != p.base.Commit {
 		return nil, movedAhead(short(ghHead))
+	}
+	// Virtual files' content, one at a time.
+	for _, c := range p.changes {
+		if c.virtual == nil || c.change == "deleted" {
+			continue
+		}
+		b, err := s.virtualContent(ctx, r, *c.virtual)
+		if err != nil {
+			return nil, err
+		}
+		sha, err := pusher.createBlob(ctx, b)
+		if err != nil {
+			return nil, err
+		}
+		if sha != c.blob {
+			return nil, problem(502, "github_unavailable", fmt.Sprintf("GitHub stored %s as blob %s, not the expected %s; nothing was pushed (the branch was not moved).", folder+c.rel, short(sha), short(c.blob)))
+		}
 	}
 	tree := p.base.Tree
 	for _, b := range batches {

@@ -412,6 +412,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 // serveGitHubPost handles POST .../pull with {"folder": "site/"} and
 // POST .../push with {"folder", "message", "ifInState"?}.
 func (h *httpAdapter) serveGitHubPost(w http.ResponseWriter, r *http.Request, op string, repo *repository, space string) {
+	allowLong(w, githubPushTimeout+time.Minute)
 	if r.URL.RawQuery != "" {
 		sendError(w, invalid("Unknown query parameter."))
 		return
@@ -468,10 +469,25 @@ func (h *httpAdapter) serveGitHubPost(w http.ResponseWriter, r *http.Request, op
 	sendJSON(w, 200, value)
 }
 
+// maxTransferTime bounds one request that moves a whole virtual file (up to
+// 100 MB) or a space's export.
+const maxTransferTime = 30 * time.Minute
+
+// allowLong lets one request run past the server's read and write timeouts
+// (cmd/metatrash: 15 and 45 seconds), for whole-file transfers and GitHub
+// pulls and pushes. A writer that cannot (a test recorder) is left alone.
+func allowLong(w http.ResponseWriter, d time.Duration) {
+	rc := http.NewResponseController(w)
+	deadline := time.Now().Add(d)
+	_ = rc.SetReadDeadline(deadline)
+	_ = rc.SetWriteDeadline(deadline)
+}
+
 // serveExport handles GET .../export: the space at its head as a zip, for
 // backups. It costs one read plus the export allowances, since one export
 // reads every file: one client cannot use up a space's exports alone.
 func (h *httpAdapter) serveExport(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
+	allowLong(w, maxTransferTime)
 	// virtual=list leaves virtual files' content out (0.60.1): the zip then
 	// holds their pointers, and the manifest lists them.
 	listOnly := r.URL.RawQuery == "virtual=list"

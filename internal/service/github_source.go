@@ -257,6 +257,69 @@ func (g *githubRepoReader) contents(ctx context.Context, commit string, want map
 	return got, nil
 }
 
+// transfer makes one API call that may move a whole virtual file (up to
+// 100 MB each way): bounded by ctx rather than the client's 15 seconds.
+func (g *githubRepoReader) transfer(ctx context.Context, method, path, contentType string, body io.Reader, accept string, limit int64) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, method, g.client.settings.apiBase+"/repos/"+g.repo+path, body)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+g.token)
+	req.Header.Set("Accept", accept)
+	req.Header.Set("User-Agent", "metatrash")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	stream := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := stream.Do(req)
+	if err != nil {
+		return nil, 0, errGitHubUnavailable
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil || int64(len(b)) > limit || resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, resp.StatusCode, errGitHubUnavailable
+	}
+	return b, resp.StatusCode, nil
+}
+
+// blob reads one blob's raw content (a file pull keeps as a virtual file),
+// checked against its hash.
+func (g *githubRepoReader) blob(ctx context.Context, sha string, limit int64) ([]byte, error) {
+	b, _, err := g.transfer(ctx, http.MethodGet, "/git/blobs/"+sha, "", nil, "application/vnd.github.raw+json", limit)
+	if err != nil {
+		return nil, err
+	}
+	if blobHash(b) != sha {
+		return nil, errGitHubUnavailable
+	}
+	return b, nil
+}
+
+func (g *githubRepoReader) createBlob(ctx context.Context, content []byte) (string, error) {
+	// The JSON body is built around the base64 text rather than marshalled,
+	// so a large file is not copied once more.
+	var body bytes.Buffer
+	body.Grow(base64.StdEncoding.EncodedLen(len(content)) + 40)
+	body.WriteString(`{"encoding":"base64","content":"`)
+	enc := base64.NewEncoder(base64.StdEncoding, &body)
+	_, _ = enc.Write(content)
+	_ = enc.Close()
+	body.WriteString(`"}`)
+	b, _, err := g.transfer(ctx, http.MethodPost, "/git/blobs", "application/json", &body, "application/vnd.github+json", 64*1024)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		SHA string `json:"sha"`
+	}
+	if json.Unmarshal(b, &out) != nil || !hashPattern.MatchString(out.SHA) {
+		return "", errGitHubUnavailable
+	}
+	return out.SHA, nil
+}
+
 // tarball streams the commit's archive and keeps the wanted files whose
 // content matches their blob hash.
 func (g *githubRepoReader) tarball(ctx context.Context, commit string, want map[string]string, got map[string][]byte) error {
@@ -331,6 +394,9 @@ func (g *githubRepoReader) tarball(ctx context.Context, commit string, want map[
 // trees, a commit, then a non-forced branch update.
 type githubPusher interface {
 	branchHead(ctx context.Context, branch string) (commit, tree string, err error)
+	// createBlob stores content (a virtual file's, which may be binary) and
+	// returns its blob hash.
+	createBlob(ctx context.Context, content []byte) (string, error)
 	// createTree applies changes on top of base and returns the new tree.
 	createTree(ctx context.Context, base string, changes []githubTreeChange) (string, error)
 	// createCommit returns the new commit and the tree GitHub recorded in it.
@@ -341,11 +407,13 @@ type githubPusher interface {
 }
 
 // githubTreeChange is one entry for createTree: Content set writes a file,
-// Content nil deletes the path.
+// SHA set points the path at a blob createBlob stored, neither deletes the
+// path.
 type githubTreeChange struct {
 	Path    string
 	Mode    string
 	Content *string
+	SHA     string
 }
 
 type githubNewCommit struct {
@@ -360,6 +428,8 @@ func (g *githubRepoReader) createTree(ctx context.Context, base string, changes 
 		e := map[string]any{"path": c.Path, "mode": c.Mode, "type": "blob"}
 		if c.Content != nil {
 			e["content"] = *c.Content
+		} else if c.SHA != "" {
+			e["sha"] = c.SHA
 		} else {
 			e["sha"] = nil
 		}

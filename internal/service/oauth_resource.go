@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // bearerToken returns the single Authorization: Bearer credential, or "" when
@@ -89,6 +90,11 @@ func (h *httpAdapter) serveMCPAccount(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: h.client(r), oauth: &id})
 	clean := r.Clone(withAuthor(ctx, func() changeAuthor { return h.service.oauthAuthor(ctx, id, false) }))
 	clean.Header.Del("Authorization")
+	// The answer to a pull or push that moves virtual files can take longer
+	// than the server's write timeout.
+	if r.Method == http.MethodPost {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(githubPushTimeout + time.Minute))
+	}
 	h.mcpAccount.ServeHTTP(w, clean)
 }
 

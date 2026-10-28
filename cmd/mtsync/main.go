@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -52,7 +53,12 @@ History (FILE is a file in a registered folder):
   history FILE             the file's changes, newest first: when, revision,
                            operation, path (-limit, default 10; -offset to page;
                            -json for editors)
-  show FILE REVISION       print the file's text as it was at REVISION
+  show FILE REVISION       print the file's text as it was at REVISION (a virtual
+                           file's content, so redirect it to a file)
+
+Virtual files (content kept outside Git: PDFs, pictures, large files):
+  virtual PLACE            the virtual files in PLACE: type, size, source (-json)
+  text FILE                print the space's text for FILE (a PDF's Markdown)
 
 Published versions (PLACE is a registered folder or anything in it):
   policies PLACE           published folders, their files, and which you still
@@ -190,6 +196,10 @@ func run(args []string) error {
 		return showSubmissions(ctx, rest[1], rest[2], *asJSON, os.Stdout)
 	case cmd == "show" && len(rest) == 3:
 		return showRevision(ctx, rest[1], rest[2], os.Stdout)
+	case cmd == "virtual" && len(rest) == 2:
+		return showVirtual(rest[1], *asJSON, os.Stdout)
+	case cmd == "text" && len(rest) == 2:
+		return showText(ctx, rest[1], os.Stdout)
 	case cmd == "export" && (len(rest) == 2 || len(rest) == 3):
 		file := ""
 		if len(rest) == 3 {
@@ -235,17 +245,34 @@ func exportSpace(ctx context.Context, server, space, file, keyEnv string, out io
 	if c.prefix != "" {
 		return fmt.Errorf("export takes a whole space, not a folder in it")
 	}
-	state, b, err := c.export(ctx)
+	// The zip goes to a temporary file beside the target as it arrives, and
+	// gets its name once the state is known.
+	dir := "."
+	if file != "" {
+		dir = filepath.Dir(file)
+	}
+	tmp, err := os.CreateTemp(dir, ".mtsync-export-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	state, size, err := c.export(ctx, tmp)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return err
 	}
 	if file == "" {
 		file = strings.ReplaceAll(strings.Trim(space, "/"), "/", "-") + "-" + time.Now().UTC().Format("2006-01-02") + "-" + state[:12] + ".zip"
 	}
-	if err := writeFileAtomic(file, b, 0o600); err != nil {
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Saved %s at %s to %s (%d KiB).\n", space, state[:12], file, (len(b)+1023)/1024)
+	if err := renameRetry(tmp.Name(), file); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Saved %s at %s to %s (%d KiB).\n", space, state[:12], file, (size+1023)/1024)
 	return nil
 }
 

@@ -197,6 +197,14 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	if err == sql.ErrNoRows || (!member && space.Visibility != spaceWeb) {
 		// Signed out: always the sign-in page, so a private space's existence
 		// is not revealed. The docs pages never ask anyone to sign in.
+		if !signedIn && !docs && (markdown || raw && r.Header.Get("Sec-Fetch-Mode") != "navigate") {
+			// A program asking for the file itself (web_fetch, configure)
+			// gets a refusal rather than the sign-in page, which it would
+			// otherwise keep as the file (0.61.0). A browser opening a
+			// link (HTML, or ?raw in the address bar) still goes to sign in.
+			sendError(w, problem(401, "unauthorized", "Sign in to read this space: it is not shared on the web."))
+			return
+		}
 		if !signedIn && !docs {
 			// The session cookie is SameSite=Strict, so a link from another
 			// site or a PDF arrives without it even when this browser is

@@ -246,7 +246,10 @@ every request, before quotas are charged or Git is touched.
   text/markdown` ranked at least as high as HTML, sends the file as it is
   (`text/markdown`, other text `text/plain`; sandboxed, `noindex`) under the
   page's own access rules; pages name it in a `Link` header and a
-  `<link rel="alternate">`. `llms.txt` at the top of each space, of `/docs/`
+  `<link rel="alternate">`. Signed out, a private space's Markdown and
+  `?raw` answer 401 to programs (0.61.0: `web_fetch` and `configure` kept
+  the sign-in page as the file); a browser opening the link still goes to
+  sign in. `llms.txt` at the top of each space, of `/docs/`
   and at `/llms.txt` (the docs') lists the Markdown pages with their
   `?format=md` links, unless the space has its own `llms.txt` file. Every
   folder has one too, for its own pages (0.59.2). A folder's address

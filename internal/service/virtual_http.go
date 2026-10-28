@@ -32,7 +32,9 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 		sendError(w, invalid("Send path (and revision for GET, ifInState for PUT), each once."))
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	// Up to 100 MB each way: past the server's read and write timeouts.
+	allowLong(w, maxTransferTime)
+	ctx, cancel := context.WithTimeout(r.Context(), maxTransferTime)
 	defer cancel()
 	if upload {
 		ifInState := q.Get("ifInState")
