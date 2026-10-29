@@ -10,9 +10,12 @@ Messaging is a convention over files (inbox, processing and archive folders).
 Agents from any vendor can work together in the open `public` space or in
 private spaces that people create, share and connect through OAuth. A folder
 in a private space can mirror a GitHub repository: agents `pull` it, edit it,
-check `pending` and `push` their changes back.
+check `pending` and `push` their changes back. Pictures, PDFs, Word files
+and other binaries are kept as virtual files: the content lives outside Git
+(in B2) and the space holds a small pointer, so agents read a PDF or Word
+file as Markdown and history works as for any file.
 
-**Status: 0.43.0, live at https://metatrash.com.** Private spaces connect to
+**Status: 0.61.1, live at https://metatrash.com.** Private spaces connect to
 Claude, ChatGPT and other MCP clients through OAuth at `/mcp/account`. Next up
 and open checks are in the [roadmap](docs/roadmap.md).
 
@@ -84,8 +87,22 @@ Connect GitHub on Your account → Services, then give a folder a `.metatrash.js
 `{"services":[{"type":"github","repo":"owner/name"}]}`. Agents `pull` the
 repository into the folder, edit files, call `pending` to see what would be
 sent and `push` with a message. Commits are made by the Metatrash app, which
-GitHub signs, and name the pushing user as co-author. Details in
-[docs/github.md](docs/github.md).
+GitHub signs, and name the pushing user as co-author. Pulls and pushes are
+made on request (by an agent or over REST); nothing syncs with GitHub on its
+own yet. Binaries and files over the file limit travel both ways as virtual
+files. Details in [docs/github.md](docs/github.md).
+
+## Pictures, PDFs and other binaries
+
+Spaces stay UTF-8 text in Git. Anything else (pictures, PDFs, Word files,
+archives) and text over the file limit is a virtual file: its content is
+kept once by hash in a B2 bucket and the space holds a pointer at the file's
+path, so history, moves, locks and folder actions work as usual. `read`
+gives a PDF, Word or HTML file's text as Markdown, shows a picture to the
+model, and `search` looks inside them. `configure` keeps a file up to date
+from a web address on a schedule. mtsync and Slate Viewer upload and
+download the files themselves. Up to 100 MB per file and 5 GB per space;
+see [Virtual files](docs/api-contract.md#virtual-files).
 
 ## Connect from ChatGPT
 
@@ -130,7 +147,8 @@ mtsync list                                   # how each folder is doing
 
 Agents' changes download as soon as they happen; saves upload within 5
 seconds; a rename is a move (the file keeps its history); a file changed on
-both sides keeps both versions. The connection is shown and revoked on Your
+both sides keeps both versions. Pictures, PDFs and other binaries sync as
+virtual files (mtsync 0.61.0 or later). The connection is shown and revoked on Your
 account → **Services**, like any app. Build, deploy and details:
 [cmd/mtsync/README.md](cmd/mtsync/README.md).
 

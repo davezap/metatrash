@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of 0.58.0 (2026-10-26). Done work is in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.61.1 and Slate Viewer 0.20.2 (2026-10-28). Done work is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -184,14 +184,20 @@ Connect, pull, `pending` and `push` are done ([github.md](github.md)). Still
 open, from the 2026-10-03 design session:
 
 1. **`auto` push mode**: quiet-period batches (`push` still works).
-2. **Binary files**: replaced by Binary files and conversion below; a pull
-   will send a repository's binary files to B2 like any other. Until then
-   pull skips them and push carries them through.
+2. ~~**Binary files**~~: done in 0.61.0. Pull keeps a repository's binaries
+   and files over the file limit as virtual files, and push sends them as
+   blobs (Binary files and conversion below).
 3. **GitHub → space**: repo changes appear in the folder (`pull` auto),
    triggered by the push webhooks the app already receives (today they are
-   acknowledged and ignored).
+   acknowledged and ignored). Until then pull and push happen only when an
+   agent or a REST call asks for them.
 4. **One folder action**: done in 0.54.0 as folder actions (see Folder agent
    tasks below).
+
+Also wanted (Dave, 2026-10-28): **Pull and Push in Slate Viewer**, a button
+on a GitHub folder that shows `pending` and pushes with a message, so a
+person can do it without asking an agent. Slate Viewer only runs mtsync
+commands, so this needs pull, pending and push in mtsync first.
 
 Later: letting push send `.github/workflows/` changes (needs the app's
 `workflows` permission; refused for now because workflows can reach CI
@@ -339,109 +345,48 @@ step.
 1. ~~**0.59.0: convert to Markdown in the downloads store.**~~ Done: Word
    is read in Go, PDF with `pdftotext` (poppler-utils) when the server has
    it, pages marked `<!-- page N -->`; a reference fetched before 0.59.0
-   gets its text on the next fetch. Planned: A PDF or Word
-   (`.docx`) file that `web_fetch` downloads gets a `web/<ref>.md` with its
-   text as Markdown, as HTML pages already do (headings, lists and tables
-   where the format has them). `read`, `search` and `move` (which copies
-   the Markdown into the folder) work on it unchanged. Word is zipped XML,
-   read in Go; PDF needs a text extractor on the server (a Go library or
-   `pdftotext`, to be chosen). Done on the server so it works the same for
-   MiniMax and Claude.
+   gets its text on the next fetch.
 2. ~~**0.59.1: Markdown for agents.**~~ Done: `?format=md` and
    `Accept: text/markdown` on every space, public and `/docs/` page,
    `llms.txt` per space plus `/llms.txt` for the docs (a space's own
    `llms.txt` file wins), and `web_fetch` asking for Markdown first.
    0.59.2 added folder addresses (`/docs/legal/` opens the folder's page,
    or gives its README.md or page list as Markdown) and an `llms.txt` per
-   folder.
-   Planned: Every space page and `/docs/` page
-   is a Markdown file already, so the site sends that file as it is when a
-   client asks for Markdown: `Accept: text/markdown` or `?format=md` on the
-   same URL (`Content-Type: text/markdown; charset=utf-8`, the same access
-   rules as the page, so a private page still needs the sign-in). An
-   `llms.txt` at the root of `/docs/` (and of each web-readable space) lists
-   the pages with one line each, the usual way to point AI tools at a site's
-   Markdown. `web_fetch` asks for Markdown first, so fetching a Metatrash
-   page gives the document itself instead of the page around it. Today a
-   fetch gets the HTML page, whose `<main>` carries the source in a `<pre>`,
-   so the agent sees the Markdown inside a code block under the page's
-   heading: usable, but larger and less clean. A separate
-   `md.metatrash.com` (Dave, 2026-10-27) can come later on top of this if
-   wanted; it would need DNS, TLS and Apache changes and nothing more from
-   the server.
-3. **0.60.0: virtual files.** The core is done (2026-10-27): the pointer
-   format, the index flag, `read` resolving (PDF and Word as Markdown by
-   default), content writes refused (`virtual_file`), the upload and
-   download route (`…/content`), `web_fetch` with `path`, and website pages
-   with Download. Settled while building: `read` gives the Markdown without
-   asking; old mtsync releases can't harm a pointer because every content
-   write over one is refused, so `minVersion` waits for 0.61.0; GitHub
-   folders leave virtual files out of push (`notPushed`) until 0.61.0
-   handles binaries both ways. **0.60.1** (written 2026-10-27) added search
-   inside virtual text, pictures shown to models by `read` (MCP and folder
-   actions), export with binaries (`?virtual=list` for pointers), streamed
-   downloads and the daily sweep. **0.60.2** (written 2026-10-27) added the
-   `configure` operation (source and refresh; MCP and REST, not for folder
+   folder. A separate `md.metatrash.com` (Dave, 2026-10-27) can come later
+   on top of this if wanted; it would need DNS, TLS and Apache changes and
+   nothing more from the server.
+3. ~~**0.60.0 to 0.60.2: virtual files.**~~ Done (Dave's design,
+   2026-10-27; format and rules in
+   [api-contract.md](api-contract.md#virtual-files)). A virtual file is
+   content kept outside Git that appears in the space as an ordinary file:
+   Git holds a small pointer at its path (`metatrash-virtual 1`, SHA-256,
+   size, type, source, refresh), so history, moves, deletes, export, locks
+   and folder-action triggers work unchanged. 0.60.0: the pointer, `read`
+   resolving (PDF and Word as Markdown by default), content writes refused
+   (`virtual_file`), the upload and download route (`…/content`),
+   `web_fetch` with `path`, and website pages with Download. 0.60.1: search
+   inside virtual text, pictures shown to models, export with binaries
+   (`?virtual=list` for pointers), streamed downloads and the daily sweep.
+   0.60.2: `configure` (source and refresh; MCP and REST, not for folder
    actions' agents) and refresh on an `every` schedule with the stale flag
-   (schema v19). A retention policy was dropped: every version stays. Still
-   open: stale marks in `list`, and uploads hold one file in memory (up to
-   100 MB).
-   The design as planned
-   (Dave's design, 2026-10-27; replaces the
-   earlier plan of a database record per path). A virtual file is content
-   kept outside Git, uploaded or fetched from the internet, that appears in
-   the space as a normal file:
-   - **In Git, a small pointer at the file's own path** (as Git LFS does):
-     `report.pdf` holds a UTF-8 record, starting with a `metatrash-virtual 1`
-     line, then the content's SHA-256, size and type, an optional source URL
-     and its refresh and retention policy. The same format serves binary and
-     text content. Because the pointer is an ordinary Git file, history,
-     moves, deletes, export, locks and the `on` triggers of folder actions all
-     work unchanged, and each pointer revision is a version of the content.
-   - **Tools resolve it.** `list` marks the file `virtual` (with size, type,
-     source, stale); `read` returns the content (text as text, an image as an
-     image, a PDF or Word file as its Markdown with a link to the original).
-     Content writes are refused (`virtual_file`); a separate `configure`
-     operation changes the source and policies, under the usual locks. The
-     website and Slate Viewer show it as virtual and read-only.
-   - **Creating one.** An upload route stores a file and writes its pointer;
-     `web_fetch` takes an optional destination path in the folder, so
-     Metatrash fetches, stores and creates the virtual file there, and the
-     agent then uses the normal file tools without handling the URL.
-   - **Refresh.** A policy pins an exact version or refreshes from the
-     source on an `every` schedule (the folder-actions schedules), asking
-     the site whether it changed first. A new hash is a new commit of the
-     pointer, so History shows it and actions fire; an unchanged source makes
-     no commit. A failed refresh keeps the previous content and marks it
-     stale in the database (not in Git, so no commit noise), and reads say
-     so. Refreshes are made for the space owner and count toward their daily
-     fetch limit; the `web_fetch` address rules apply.
-   - **Storage and retention.** Content goes to the space-files bucket (no
-     lifecycle rule) by hash, once. A sweep keeps every hash a pointer in any
-     commit of the space still names, so old revisions always resolve; the
-     30-day `web/` cache stays separate, and fetching to a path copies the
-     content into the space-files bucket.
-   - **Uses.** Attachments, embedded images, PDF and Word files with their
-     Markdown, and documents kept up to date from a URL, such as the forms
-     guide an action needs (`forms-guide.md`, refreshed daily from
-     `/docs/guides/forms.md?format=md`), which the agent then reads like any
-     file in its folder.
-   - To settle while building: whether `read` of a PDF or Word file returns
-     its Markdown by default or needs `as: "markdown"`; what a GitHub folder
-     pushes for a virtual file (the pointer, the content, or nothing); and
-     how old mtsync releases, which see pointer text, are kept from
-     overwriting one (refuse writes over pointers and raise `minVersion`).
-4. ~~**0.61.0: mtsync and Slate Viewer handle it transparently.**~~
-   Written 2026-10-27: mtsync downloads a virtual file's content, uploads a
-   new local binary (or text over the file limit) as one, and compares by
-   content, so a pointer-only change (configure, refresh) makes no conflict
-   copy; a file with a source is put back when edited locally. `minVersion`
-   is now 0.61.0. GitHub folders pull binaries and files over the file
-   limit as virtual files and push them as blobs. mtsync's `export`
+   (schema v19). A retention policy was dropped: every version stays.
+   Still open: stale marks in `list`, and uploads hold one file in memory
+   (up to 100 MB).
+4. ~~**0.61.0: mtsync and Slate Viewer handle it transparently.**~~ Done
+   and checked live 2026-10-28: mtsync downloads a virtual file's content,
+   uploads a new local binary (or text over the file limit) as one, and
+   compares by content, so a pointer-only change (configure, refresh) makes
+   no conflict copy; a file with a source is put back when edited locally.
+   `minVersion` is 0.61.0. GitHub folders pull binaries and files over the
+   file limit as virtual files and push them as blobs. mtsync's `export`
    streams to the file. Slate Viewer 0.20.0 lists virtual files, opens them
    in the system's app and offers "Convert to Markdown". A signed-out
-   Markdown or `?raw` request to a private space now answers 401, so
-   `configure` can't store a sign-in page.
+   Markdown or `?raw` request to a private space answers 401, so
+   `configure` can't store a sign-in page. Fixes since: 0.61.1 sends
+   downloads as `application/octet-stream` with `no-transform` (Cloudflare
+   was adding its script to HTML content), Slate Viewer 0.20.1 stops
+   offering to merge a conflict copy of a linked or locked file, and 0.20.2
+   shows an upload as a virtual file as soon as Sync finishes.
 5. **Later: a blob service for compute output.** An action, or another
    service, stores a result as a virtual file (or a bare blob with a
    reference) for later retrieval, under the same ownership and retention
@@ -503,16 +448,19 @@ scheduled yet. To settle when it is:
 ## mtsync and Slate Viewer
 
 - **Editor gaps G2–G8** (`developers/mtsync-editor-integration.md` in the
-  `dave-zap/metatrash-com` space): `--json` on `spaces` and `list`, `whoami`,
-  `resolve URL`, `files` and `status`.
+  `dave-zap/metatrash-com` space): `--json` on `spaces` and `list`,
+  `resolve URL`, `files` and `status` (`whoami -json` is done).
 - **macOS code signing** (Developer ID and notarization) for mtsync and
   Slate Viewer; needs an Apple Developer account. Windows files are signed
   with Azure Artifact Signing since 0.43.2 (deployment.md, Code signing).
 - **Slate**: a read-only Compare, so Slate Viewer's History panel works on
   documents it cannot edit. (Mermaid diagrams shipped in Slate 0.14, and the
-  website uses Slate 0.19.0 since Metatrash 0.49.3.)
+  website uses Slate 0.19.5 since Metatrash 0.57.5.)
 - **Slate Viewer as the space manager**: the desktop companion for managing
   Metatrash spaces (agreed direction 2026-10-17, not yet planned in detail).
+- **Open pictures in Slate Viewer** (Dave, 2026-10-28): clicking a virtual
+  picture (and perhaps a PDF) shows it in the Viewer instead of handing it
+  to the system's app. Planned as Slate Viewer 0.21.0.
 - **Create folder** (Dave, 2026-10-25): a folder only exists in Git once it
   holds a file, so a new empty folder has no `.metatrash.json` or `AGENTS.md`
   until a file arrives, and people make them by hand (one became
@@ -525,6 +473,12 @@ scheduled yet. To settle when it is:
   `.metatrash.json` belongs to. Stronger indent guides (a line per level),
   folders' own files grouped first, and perhaps the folder's settings shown
   as an icon on the folder row instead of a separate file.
+- **Activity icon** (Dave, 2026-10-28): Slate Viewer shows when something is
+  happening: files syncing (mtsync uploading or downloading, which would need
+  mtsync to report its progress, perhaps in `mtsync status`), and agents
+  running actions on folders (the runner's jobs for the space, which the
+  server would need to expose). Perhaps on the folder rows as well as one
+  icon for the whole space.
 - Deferred with Dave 2026-10-12: bulk first download, on-demand files like
   OneDrive, automatic three-way merge of conflicts.
 
@@ -534,7 +488,8 @@ scheduled yet. To settle when it is:
   `static.cloudflareinsights.com/beacon.min.js`, which the pages' CSP
   (`script-src 'self'`) blocks, so every page logs a console error. Turn off
   its automatic setup in the Cloudflare dashboard (or allow the host in the
-  CSP if the analytics are wanted).
+  CSP if the analytics are wanted). It also rewrote HTML downloads of
+  virtual files until 0.61.1 sent them with `no-transform`.
 - **Old READMEs**: spaces made before 0.45.0 still hold the old agent
   README.md as an ordinary file; delete or rewrite them as needed.
 - [Security review](security-review-2026-09-30.md) F3: cache recent activity
@@ -547,38 +502,15 @@ scheduled yet. To settle when it is:
 
 ## Owner checks still to run
 
-Live checks not yet reported done. The server is at schema v14 with current
-grants, so the schema and grant steps these once needed are behind us.
-
-From 0.61.0 (2026-10-27; release mtsync 0.61.0 with the server, since
-`minVersion` rises to it):
-
-- **mtsync and virtual files:** with mtsync 0.61.0 syncing a folder that
-  holds `vtest/`, the virtual files there appear as the files themselves
-  (open the PDF or picture). Copy a picture into the folder: it uploads, and
-  its page on the site shows it. Ask Claude to `configure` one of them with
-  a new `refresh`: nothing changes locally and no `.conflict-` copy
-  appears. Edit a file that has a source: the space's version comes back
-  and your edit is kept as a conflict copy. `mtsync virtual <folder>` lists
-  them; `mtsync text <folder>/x.pdf` prints the PDF's Markdown.
-- **Big files:** upload a file of 20 to 100 MB through mtsync, and export
-  the space with `mtsync export`: both finish (the server now gives such
-  requests up to 30 minutes; a proxy in front needs timeouts that allow
-  it).
-- **GitHub binaries:** in a GitHub folder of a repository with a picture or
-  a PDF, pull: the file is a virtual file (not skipped). Add a picture to
-  the folder, check `pending` (added, "a virtual file"), push, and see it on
-  GitHub.
-- **Sign-in page refused:** ask Claude to `configure` a file with source
-  `https://metatrash.com/spaces/<owner>/<private-space>/README.md?format=md`:
-  it is refused ("401 … needs a sign-in") and nothing is stored. Open the
-  same address in a signed-out browser: it still goes to sign in.
+Live checks not yet reported done. The server is at schema v19 with current
+grants (0.60.2), so the schema and grant steps these once needed are behind
+us. All 0.61.0 checks (mtsync and virtual files, big files, GitHub binaries,
+sign-in page refused) passed on 2026-10-28, as did the 0.60.0 to 0.60.2
+basics tried on 2026-10-27 in `vtest/` (configure, read, history,
+`not_virtual`, an empty source, search inside a PDF).
 
 From 0.60.2 (2026-10-27):
 
-- **Schema v19:** apply `deploy/account-schema-v19.sql` and
-  `deploy/account-grants.sql`, deploy, and see `metatrash check` say v19
-  ready with no missing grants.
 - **Kept up to date from a URL:** ask Claude to configure
   `forms-guide.md` in a folder with source
   `https://metatrash.com/docs/guides/forms.md?format=md` and refresh
@@ -595,9 +527,7 @@ From 0.60.2 (2026-10-27):
 
 From 0.60.1 (2026-10-27):
 
-- **Search and pictures:** with a Word or PDF virtual file in a space, ask
-  Claude to search the space for a phrase from inside it: the match is in
-  that file. Have a folder action fetch a PNG with `path`, then ask Claude
+- **Pictures:** have a folder action fetch a PNG with `path`, then ask Claude
   to read it and describe it.
 - **Export:** `mtsync export` a space with a virtual file: the zip holds
   the file itself and it opens, and `.metatrash-export.json` says

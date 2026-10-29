@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v18 (from 0.57.0); 0.60.2 needs v19.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); the server runs 0.61.1 (2026-10-28).
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
