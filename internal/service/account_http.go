@@ -67,6 +67,10 @@ type accountPage struct {
 	CSRF, Email, Message          string
 	Pow                           string // login proof-of-work challenge
 	LoginPasskey                  string // WebAuthn request options for passkey sign-in
+	// ForgetPasskey is a passkey (credential ID, base64url) the site has no
+	// record of, which the page asks the browser to stop offering
+	// (signalUnknownCredential) on the relying party PasskeyRPID.
+	ForgetPasskey, PasskeyRPID string
 	// TOTPLogin offers sign-in with an authenticator app; TOTPOpen and
 	// TOTPEmail show that form again after it failed.
 	TOTPLogin, TOTPOpen bool
@@ -790,6 +794,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if errors.As(err, &p) {
 			note(p.Code)
 			page.Message = p.Message
+			if p.Code == "unknown_passkey" {
+				if id, err := formBytes(r, "credential", maxCredentialIDBytes, true); err == nil {
+					page.ForgetPasskey, page.PasskeyRPID = b64.EncodeToString(id), a.rpID()
+				}
+			}
 			if p.RetryAfterSeconds > 0 {
 				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
 			}

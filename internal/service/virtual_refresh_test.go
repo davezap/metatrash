@@ -182,6 +182,7 @@ func TestVirtualRefresh(t *testing.T) {
 	}
 
 	// A refresh with new content commits a new version, made by the refresh.
+	older, _ := w.repo.head(ctx)
 	set("# Guide\n\nVersion 2\n", 200)
 	store.runDue(t, w.runner)
 	if got := w.read("hr/guide.md"); got != "# Guide\n\nVersion 2\n" {
@@ -208,6 +209,22 @@ func TestVirtualRefresh(t *testing.T) {
 	if now, _ := w.repo.head(ctx); now != head {
 		t.Error("failed refresh committed")
 	}
+	// list marks it too (0.62.0), in full and with since.
+	staleIn := func(l ListResult) *VirtualStale {
+		for _, f := range l.Files {
+			if f.Path == "hr/guide.md" {
+				return f.Stale
+			}
+		}
+		t.Fatalf("hr/guide.md not listed: %+v", l.Files)
+		return nil
+	}
+	if l := w.do(ctx, "list", Input{Prefix: "hr/"}, "").(ListResult); staleIn(l) == nil || staleIn(l).Since != got.Stale.Since || staleIn(l).Reason == "" {
+		t.Errorf("stale list %+v", l.Files)
+	}
+	if l := w.do(ctx, "list", Input{Since: older}, "").(ListResult); staleIn(l) == nil {
+		t.Errorf("stale list since %+v", l.Files)
+	}
 	// It stays stale from the first failure, then clears once a refresh works.
 	first := got.Stale.Since
 	store.runDue(t, w.runner)
@@ -218,6 +235,9 @@ func TestVirtualRefresh(t *testing.T) {
 	store.runDue(t, w.runner)
 	if got := w.do(ctx, "read", Input{Path: "hr/guide.md"}, "").(ReadResult); got.Stale != nil || got.File.Text != "# Guide\n\nVersion 3\n" {
 		t.Errorf("recovered %+v", got)
+	}
+	if l := w.do(ctx, "list", Input{Prefix: "hr/"}, "").(ListResult); staleIn(l) != nil {
+		t.Errorf("recovered list %+v", l.Files)
 	}
 
 	// A move keeps the schedule (rows are by file ID).

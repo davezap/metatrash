@@ -177,6 +177,14 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	if res.Code != 400 || !strings.Contains(res.Body.String(), "not registered with Metatrash") {
 		t.Fatalf("unknown passkey: %d", res.Code)
 	}
+	// The page asks the browser to forget that passkey (0.63.0).
+	if body := res.Body.String(); !strings.Contains(body, `data-passkey-forget="`+b64.EncodeToString(stranger.id)+`"`) || !strings.Contains(body, `data-rp-id="`+w.s.accounts.rpID()+`"`) {
+		t.Fatalf("unknown passkey not signalled: %s", body)
+	}
+	// A known passkey that fails, or no failure at all, signals nothing.
+	if body := oauthCall(w.h, "GET", "/login", nil).Body.String(); strings.Contains(body, "data-passkey-forget") {
+		t.Fatal("login page signals a passkey")
+	}
 	elsewhere := oauthCall(w.h, "GET", "/login", nil)
 	in = soft.get(t, dataOptions(t, elsewhere.Body.String(), "data-passkey-get"))
 	if res = oauthCall(w.h, "POST", "/login/passkey", assertionForm(browser.Value, in), browser); res.Code != 400 {

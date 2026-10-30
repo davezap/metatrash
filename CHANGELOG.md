@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.63.0 - list marks stale virtual files; browsers forget unknown passkeys (2026-10-30)
+
+No schema, grant or `accounts.json` change. tool-schema.json is 0.17.2 (`stale` on list's files); mtsync's `minVersion` stays 0.61.0.
+
+- **Stale marks in `list`:** a virtual file whose refreshes from its source are failing now carries `stale: {since, reason}` in `list` (MCP, REST and folder actions; a full list and one with `since`), as `read` does since 0.60.2, so an agent sees it without reading each file. The marks come from one query per list, made only when a listed file has a refresh schedule.
+- **Browsers forget passkeys Metatrash doesn't know:** signing in with a passkey that has no record here (removed from the account, or the account is gone) still says it isn't registered, and the sign-in page now also asks the browser to stop offering it (`PublicKeyCredential.signalUnknownCredential` with the site's relying party ID and that credential ID; Chrome 132 and later, ignored where the function is missing). The page only repeats the credential ID the browser just sent, so it says nothing about which accounts exist.
+- **Fix (0.62.0):** an mtsync service test still called `listFolders` the old way, so `go test ./cmd/mtsync` didn't build. 0.62.0 was never tagged; release 0.63.0, which includes it.
+- Tasks T002 and T003 from `build/`, written by the conductor directly: workers now take reading jobs only.
+- Tested: the refresh test lists the folder while its file is stale (the mark with the same since as `read`, and in a `since` list) and after a refresh works again (no mark); against MariaDB, an unknown passkey's refusal page naming that credential and the site's relying party ID for the browser, and a plain sign-in page naming none, and the whole suite; in Chromium, the page calling `signalUnknownCredential` where it exists and doing nothing where it doesn't.
+
+## 0.62.0 - mtsync spaces and list answer in JSON (2026-10-30)
+
+No server, schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only mtsync needs releasing.
+
+- **`mtsync spaces -json`** answers `{"server", "spaces": [{"space", "name", "access"}]}`, with `access` as the server gives it (`read_only` or `read_write`); no spaces is `[]`.
+- **`mtsync list -json`** (and `status -json`) answers `{"serviceRunning", "folders": [{"folder", "space", "server", "state", "lastSync", "error"}]}`. `state` is `stopped` (service not running), `starting` (nothing reported yet), `in-sync` or `error`; `lastSync` is RFC 3339 UTC and left out when there has been none. Editors (Slate Viewer first) no longer need to parse the text, which is unchanged. Closes editor gaps G4 and G5.
+- First change built through `build/` in dave-zap/metatrash (task T001): a MiniMax folder action drafted it from the conductor's brief, and the conductor reviewed and tested it.
+- Tested: `list -json` with no folders, one in sync, one with an error and the service stopped, and the text output in the same cases; `spaces -json` against a fake server, an empty list, and the text output.
+
 ## 0.61.1 - Virtual HTML files download as they are (2026-10-28)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0.

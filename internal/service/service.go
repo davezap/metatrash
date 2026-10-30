@@ -621,7 +621,7 @@ func (s *Service) waitForChange(ctx context.Context, r *repository, after string
 // state, with blobs, and the paths removed. All of them, in one response:
 // a space holds at most 1,000 files. A since that is not an earlier state of
 // this space is not_found; the client then lists in full.
-func listChanges(ctx context.Context, r *repository, space, state string, files map[string]record, in Input) (ListResult, error) {
+func (s *Service) listChanges(ctx context.Context, r *repository, space, state string, files map[string]record, in Input) (ListResult, error) {
 	result := ListResult{Space: space, State: state, Files: []File{}}
 	_, old, err := r.snapshot(ctx, in.Since)
 	if err != nil {
@@ -639,6 +639,7 @@ func listChanges(ctx context.Context, r *repository, space, state string, files 
 		f.Blob = files[p].Blob
 		result.Files = append(result.Files, f)
 	}
+	s.markStale(ctx, r, result.Files)
 	for p := range old {
 		if _, ok := files[p]; !ok && strings.HasPrefix(p, in.Prefix) {
 			result.Removed = append(result.Removed, p)
@@ -700,7 +701,7 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 	}
 	c.State = state
 	if op == "list" && in.Since != "" {
-		return listChanges(ctx, r, space, state, files, in)
+		return s.listChanges(ctx, r, space, state, files, in)
 	}
 	if op == "list" {
 		paths := []string{}
@@ -725,6 +726,7 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 			}
 			result.Files = append(result.Files, f)
 		}
+		s.markStale(ctx, r, result.Files)
 		if end < len(paths) {
 			c.Offset = end
 			result.NextCursor = s.encodeCursor(c)

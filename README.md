@@ -267,5 +267,6 @@ repository to update it.
 - [Builds and releases](docs/deployment.md#automated-builds-and-releases):
   GitHub Actions CI and tagged releases.
 - [Roadmap](docs/roadmap.md): next work, open checks, ideas.
+- [Roadmap archive](docs/roadmap-archive.md): finished plans, decisions made while building, checks passed.
 - [Security review (2026-09-30)](docs/security-review-2026-09-30.md).
 - [CHANGELOG](CHANGELOG.md).

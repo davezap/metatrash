@@ -79,7 +79,7 @@ func TestServiceSyncsRegisteredFolders(t *testing.T) {
 		return st.Space == "private" && !st.LastSync.IsZero() && st.Error == ""
 	})
 	var list bytes.Buffer
-	if err := listFolders(&list); err != nil || !strings.Contains(list.String(), "in sync") {
+	if err := listFolders(false, &list); err != nil || !strings.Contains(list.String(), "in sync") {
 		t.Fatalf("list: %v %s", err, list.String())
 	}
 

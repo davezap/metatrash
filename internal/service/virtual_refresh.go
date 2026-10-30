@@ -399,6 +399,39 @@ func (s *Service) staleOf(ctx context.Context, r *repository, fileID string) (ti
 	return row.StaleSince, row.StaleReason
 }
 
+// markStale sets Stale on the listed virtual files whose refreshes are
+// failing. Only files with a refresh schedule can be stale, so a list
+// without one asks the database nothing; otherwise one query covers the
+// space.
+func (s *Service) markStale(ctx context.Context, r *repository, files []File) {
+	scheduled := false
+	for _, f := range files {
+		if f.Virtual != nil && f.Virtual.Refresh != "" {
+			scheduled = true
+			break
+		}
+	}
+	a := s.agents.Load()
+	if !scheduled || a == nil || a.refreshes == nil || !r.owned {
+		return
+	}
+	rows, err := a.refreshes.refreshes(ctx, r.id)
+	if err != nil {
+		return
+	}
+	stale := map[string]virtualRefresh{}
+	for _, row := range rows {
+		if !row.StaleSince.IsZero() {
+			stale[row.FileID] = row
+		}
+	}
+	for i := range files {
+		if row, ok := stale[files[i].ID]; ok && files[i].Virtual != nil {
+			files[i].Stale = &VirtualStale{Since: row.StaleSince.UTC().Format(time.RFC3339), Reason: row.StaleReason}
+		}
+	}
+}
+
 // VirtualStale is a read's note that refreshing a file fails.
 type VirtualStale struct {
 	Since  string `json:"since"`

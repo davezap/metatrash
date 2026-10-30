@@ -41,6 +41,9 @@ type File struct {
 	// Virtual is set on a virtual file (0.60.0, virtual.go): the text is
 	// its pointer, and this describes the content kept outside Git.
 	Virtual *VirtualInfo `json:"virtual,omitempty"`
+	// Stale is set by list on a virtual file whose refreshes are failing
+	// (0.62.0; read says so too, with a note).
+	Stale *VirtualStale `json:"stale,omitempty"`
 }
 
 type record struct {

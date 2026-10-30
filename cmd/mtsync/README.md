@@ -248,11 +248,11 @@ All commands:
 | Command | What it does |
 | --- | --- |
 | `login`, `logout` | connect this computer to your account, or forget it |
-| `spaces` | the spaces this computer may use, with access |
+| `spaces` | the spaces this computer may use, with access (`-json` for editors; mtsync 0.62.0) |
 | `whoami` | the account this computer signs in as (`-json` for editors; needs metatrash 0.49.1) |
 | `add SPACE[/PATH] FOLDER` | register a folder for a space, or for one folder of it |
 | `remove FOLDER` or `remove SPACE` | unregister a folder |
-| `list` | registered folders and their state |
+| `list` | registered folders and their state (`-json` for editors: `stopped`, `starting`, `in-sync` or `error`; mtsync 0.62.0) |
 | `install`, `uninstall` | start the service at every login (and now), or stop that |
 | `start` | start the service in the background (no window) |
 | `run` | run the service in this window instead (Ctrl+C stops it) |
@@ -282,7 +282,7 @@ Flags go before the command:
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |
 | `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
-| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`, `virtual`: answer in JSON |
+| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`, `virtual`, `spaces`, `list`: answer in JSON |
 | `-published` | `0` | `submit`: answer this published version of the form's folder, as Slate Viewer shows it |
 | `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
 

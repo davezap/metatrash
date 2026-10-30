@@ -9,6 +9,8 @@
 //                             (data-conditional: also offer passkeys in the
 //                             email field's autofill)
 //   form[data-passkey-create] add a passkey on Your account
+//   [data-passkey-forget]     a passkey the site has no record of: ask the
+//                             browser to stop offering it, where it can
 (() => {
   const supported = !!(window.PublicKeyCredential && navigator.credentials);
 
@@ -58,6 +60,15 @@
     form.elements.signature.value = encode(r.signature);
     form.elements.user_handle.value = r.userHandle ? encode(r.userHandle) : "";
   };
+
+  // A sign-in with a passkey the site doesn't know (removed from the
+  // account, or the account is gone): tell the browser, so its passkey list
+  // stops offering it (Chrome 132+; other browsers lack the function).
+  for (const el of document.querySelectorAll("[data-passkey-forget]")) {
+    if (supported && typeof PublicKeyCredential.signalUnknownCredential === "function") {
+      PublicKeyCredential.signalUnknownCredential({ rpId: el.dataset.rpId, credentialId: el.dataset.passkeyForget }).catch(() => {});
+    }
+  }
 
   for (const form of document.querySelectorAll("form[data-passkey-get]")) {
     if (!supported) continue; // stays hidden

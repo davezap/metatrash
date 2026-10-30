@@ -177,17 +177,48 @@ func removeFolder(target string, out io.Writer) error {
 	return nil
 }
 
-func listFolders(out io.Writer) error {
+// listFolders prints the registered folders and how each is doing.
+func listFolders(asJSON bool, out io.Writer) error {
 	r, err := loadRegistry()
 	if err != nil {
 		return err
+	}
+	board := readStatus()
+	running := serviceRunning()
+	if asJSON {
+		type folder struct {
+			Folder   string `json:"folder"`
+			Space    string `json:"space"`
+			Server   string `json:"server"`
+			State    string `json:"state"`
+			LastSync string `json:"lastSync,omitempty"`
+			Error    string `json:"error,omitempty"`
+		}
+		list := []folder{}
+		for _, e := range r.Folders {
+			f := folder{Folder: e.Folder, Space: e.Space, Server: e.Server, State: "stopped"}
+			if running {
+				f.State = "starting"
+				if st, ok := board.Folders[e.Folder]; ok {
+					switch {
+					case st.Error != "":
+						f.State, f.Error = "error", st.Error
+					case !st.LastSync.IsZero():
+						f.State = "in-sync"
+					}
+					if !st.LastSync.IsZero() {
+						f.LastSync = st.LastSync.UTC().Format(time.RFC3339)
+					}
+				}
+			}
+			list = append(list, f)
+		}
+		return printJSON(out, map[string]any{"serviceRunning": running, "folders": list})
 	}
 	if len(r.Folders) == 0 {
 		fmt.Fprintln(out, "No folders registered. Add one with mtsync add SPACE FOLDER.")
 		return nil
 	}
-	board := readStatus()
-	running := serviceRunning()
 	for _, e := range r.Folders {
 		state := "service not running"
 		if running {

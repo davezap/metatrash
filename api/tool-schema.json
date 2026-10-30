@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.17.1",
+  "schemaVersion": "0.17.2",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.61.0"},
@@ -877,6 +877,23 @@
                   "type": "string",
                   "pattern": "^[0-9a-f]{40}$",
                   "description": "Git blob hash of the text; pass it to read as ifBlob."
+                },
+                "stale": {
+                  "type": "object",
+                  "description": "Set on a virtual file whose refreshes from its source are failing: since (RFC 3339) and reason; read says so too.",
+                  "properties": {
+                    "since": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "since",
+                    "reason"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [

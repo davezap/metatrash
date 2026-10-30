@@ -31,7 +31,7 @@ Usage: mtsync [flags] <command>
 
 Set up:
   login                    connect this computer; choose spaces in the browser
-  spaces                   list the spaces this computer may use
+  spaces                   list the spaces this computer may use (-json)
   logout                   forget this computer's sign-in
   whoami                   the account this computer signs in as (-json)
 
@@ -39,7 +39,7 @@ Folders (the service syncs every registered folder):
   add SPACE[/PATH] FOLDER  register FOLDER to sync with SPACE (owner/slug, or public),
                            or only with the folder PATH in it (owner/slug/site)
   remove FOLDER|SPACE      stop syncing a folder; its files stay
-  list                     registered folders and how each is doing
+  list                     registered folders and how each is doing (-json)
 
 Service:
   install                  run the service at every login, and start it now
@@ -103,7 +103,7 @@ func run(args []string) error {
 	interval := flags.Duration("interval", 5*time.Second, "time between scans of each folder")
 	limit := flags.Int("limit", 10, "history: how many changes to list (1..100)")
 	offset := flags.Int("offset", 0, "history: skip this many of the newest changes")
-	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions, review and whoami: answer in JSON")
+	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions, review, whoami, spaces and list: answer in JSON")
 	published := flags.Int("published", 0, "submit: answer this published version of the form's folder, as Slate Viewer shows it")
 	keyEnv := flags.String("key-env", "", "one-off sync and export: name of an environment variable holding a space key, for spaces configured with keys instead of sign-in")
 	flags.Usage = func() {
@@ -139,7 +139,7 @@ func run(args []string) error {
 		fmt.Println("Signed out on this computer. Remove the connection on Your account -> Services to revoke it on the site too.")
 		return nil
 	case cmd == "spaces" && len(rest) == 1:
-		return listSpaces(ctx, base)
+		return listSpaces(ctx, base, tokenSource(base), *asJSON, os.Stdout)
 	case cmd == "whoami" && len(rest) == 1:
 		return whoami(ctx, base, tokenSource(base), *asJSON, os.Stdout)
 	case cmd == "add" && len(rest) == 3:
@@ -147,7 +147,7 @@ func run(args []string) error {
 	case cmd == "remove" && len(rest) == 2:
 		return removeFolder(rest[1], os.Stdout)
 	case (cmd == "list" || cmd == "status") && len(rest) == 1:
-		return listFolders(os.Stdout)
+		return listFolders(*asJSON, os.Stdout)
 	case cmd == "run" && len(rest) == 1:
 		logFile, err := openLog("mtsync.log")
 		if err != nil {
@@ -319,8 +319,9 @@ func whoami(ctx context.Context, server string, token func(context.Context, bool
 	return nil
 }
 
-func listSpaces(ctx context.Context, server string) error {
-	c := newClient(server, "", tokenSource(server), true)
+// listSpaces prints the spaces this computer may use on server.
+func listSpaces(ctx context.Context, server string, token func(context.Context, bool) (string, error), asJSON bool, w io.Writer) error {
+	c := newClient(server, "", token, true)
 	c.base = strings.TrimSuffix(c.base, "/")
 	var out struct {
 		Spaces []struct {
@@ -330,12 +331,24 @@ func listSpaces(ctx context.Context, server string) error {
 	if err := c.do(ctx, "GET", "", nil, nil, &out); err != nil {
 		return err
 	}
+	if asJSON {
+		type space struct {
+			Space  string `json:"space"`
+			Name   string `json:"name"`
+			Access string `json:"access"`
+		}
+		list := []space{}
+		for _, s := range out.Spaces {
+			list = append(list, space{s.Space, s.Name, s.Access})
+		}
+		return printJSON(w, map[string]any{"server": server, "spaces": list})
+	}
 	for _, s := range out.Spaces {
 		access := "read and write"
 		if s.Access == "read_only" {
 			access = "read only"
 		}
-		fmt.Printf("%-40s %-15s %s\n", s.Space, access, s.Name)
+		fmt.Fprintf(w, "%-40s %-15s %s\n", s.Space, access, s.Name)
 	}
 	return nil
 }
