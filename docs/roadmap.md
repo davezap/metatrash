@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of Metatrash 0.67.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.68.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -205,7 +205,6 @@ history and the settled decisions are in
 [roadmap-archive.md](roadmap-archive.md#binary-files-and-conversion); rules in
 [api-contract.md](api-contract.md#virtual-files). Still open:
 
-- **Uploads hold one file in memory** (up to 100 MB); stream them instead.
 - **`md.metatrash.com`** (Dave, 2026-10-27), if wanted, on top of
   `?format=md`: DNS, TLS and Apache only.
 - **Raw bytes for MCP agents** (Dave's Q&A, 2026-10-29): today `read` gives

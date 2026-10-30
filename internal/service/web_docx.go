@@ -28,7 +28,13 @@ const relNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationshi
 // docxToMarkdown returns a Word file's title (its first heading, if any)
 // and its text as Markdown.
 func docxToMarkdown(body []byte) (string, string, error) {
-	z, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	return docxReaderToMarkdown(bytes.NewReader(body), int64(len(body)))
+}
+
+// docxReaderToMarkdown reads the Word file from r, which holds size bytes,
+// a part at a time.
+func docxReaderToMarkdown(r io.ReaderAt, size int64) (string, string, error) {
+	z, err := zip.NewReader(r, size)
 	if err != nil {
 		return "", "", fmt.Errorf("not a Word file: %v", err)
 	}

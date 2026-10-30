@@ -39,8 +39,12 @@ func findPDFToText() string {
 	return path
 }
 
-// pdfToText runs pdftotext at path.
+// pdfFileTextFunc extracts the text of a PDF already in a file.
+type pdfFileTextFunc func(ctx context.Context, name string) (string, error)
+
+// pdfToText runs pdftotext at path on a temporary copy of the PDF.
 func pdfToText(path string) pdfTextFunc {
+	run := pdfFileToText(path)
 	return func(ctx context.Context, body []byte) (string, error) {
 		f, err := os.CreateTemp("", "metatrash-*.pdf")
 		if err != nil {
@@ -54,14 +58,21 @@ func pdfToText(path string) pdfTextFunc {
 		if err := f.Close(); err != nil {
 			return "", fmt.Errorf("cannot read the PDF")
 		}
+		return run(ctx, f.Name())
+	}
+}
+
+// pdfFileToText runs pdftotext at path on the PDF in file name.
+func pdfFileToText(path string) pdfFileTextFunc {
+	return func(ctx context.Context, name string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, pdfTextTimout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, path, "-q", "-enc", "UTF-8", "-l", strconv.Itoa(maxPDFPages), f.Name(), "-")
+		cmd := exec.CommandContext(ctx, path, "-q", "-enc", "UTF-8", "-l", strconv.Itoa(maxPDFPages), name, "-")
 		cmd.Env = []string{}
 		var out limitedBuffer
 		out.limit = maxPDFText
 		cmd.Stdout = &out
-		err = cmd.Run()
+		err := cmd.Run()
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("the PDF took too long to read")
 		}

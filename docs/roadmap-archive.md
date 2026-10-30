@@ -203,6 +203,10 @@ tokens. Prompt caching for MiniMax is still open (roadmap).
 
 ## Binary files and conversion
 
+Streamed uploads (0.68.0, T005, 2026-10-30): `PUT …/content` spools the
+body to a temporary file beside the repositories while hashing it and sends
+the file to the bucket, so an upload no longer holds up to 100 MB in memory.
+
 Dave's direction, 2026-10-26:
 
 Spaces stay plain UTF-8 text in Git, so they stay small, diffable and

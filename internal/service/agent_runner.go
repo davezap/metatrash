@@ -70,8 +70,10 @@ type agentRunner struct {
 	webSchemas map[string]*jsonschema.Resolved
 	webRefs    webRefStore
 	fetcher    webFetcher
-	// pdfText reads a PDF's text; nil without pdftotext.
+	// pdfText reads a PDF's text; nil without pdftotext. pdfFile reads one
+	// already in a file (uploads, 0.68.0).
 	pdfText pdfTextFunc
+	pdfFile pdfFileTextFunc
 	// refreshes holds virtual files' refresh schedules (virtual_refresh.go);
 	// nil without the account database. refreshSlots bounds the refreshes
 	// running at once.
@@ -209,6 +211,7 @@ func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*
 	a.fetcher = newWebFetcher(false)
 	if settings.pdftotext != "" {
 		a.pdfText = pdfToText(settings.pdftotext)
+		a.pdfFile = pdfFileToText(settings.pdftotext)
 	}
 	if s.ownedDB != nil {
 		a.webRefs = dbWebStore{s.ownedDB.db}

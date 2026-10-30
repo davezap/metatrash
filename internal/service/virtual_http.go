@@ -42,7 +42,12 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 			sendError(w, invalid("ifInState must be a commit hash from read/list."))
 			return
 		}
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxVirtualBytes))
+		if err := h.service.virtualUploadReady(repo, path); err != nil {
+			sendError(w, err)
+			return
+		}
+		// The body goes to disk as it arrives (0.68.0), never all in memory.
+		spooled, err := spoolUpload(uploadDir(repo), http.MaxBytesReader(w, r.Body, maxVirtualBytes))
 		if err != nil {
 			var tooLarge *http.MaxBytesError
 			if errors.As(err, &tooLarge) {
@@ -52,7 +57,8 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 			}
 			return
 		}
-		result, err := h.service.putVirtual(ctx, repo, space, path, ifInState, body, r.Header.Get("Content-Type"), "", "")
+		defer spooled.close()
+		result, err := h.service.putVirtualUpload(ctx, repo, space, path, ifInState, spooled, r.Header.Get("Content-Type"))
 		if err != nil {
 			sendError(w, err)
 			return

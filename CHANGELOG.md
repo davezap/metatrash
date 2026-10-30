@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.68.0 - Streamed virtual-file uploads (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing.
+
+- **Uploads don't sit in memory.** `PUT …/content` (mtsync and Slate Viewer uploads of pictures, PDFs, Word files and text over the file limit) used to read the whole file, up to 100 MB, into memory before storing it, so a few at once could run the server out. Now the body goes to a temporary file beside the repositories (`.upload-*` in the data directory, not `/tmp`, which can be memory) as it arrives, while its SHA-256, Git blob hash, type sniff and text check are worked out; the file is then streamed to the bucket, signed with that hash, and removed. Word files are read a part at a time and PDFs by pdftotext straight from the file; only HTML is still read whole to make its Markdown. Path, space and bucket checks happen before the body is read, so a refused upload isn't spooled first.
+- A body cut off part way is refused (400) with nothing stored and nothing left on disk. The 100 MB limit, the hashes and the pointer are unchanged.
+- Folder actions' `web_fetch` with `path`, refreshes and GitHub pulls still store content they already hold in memory (bounded by their own limits).
+- Task T005 from `build/`.
+- Tested: UTF-8 checking across every split of multi-byte characters, NUL, bad and cut-off bytes; spooling 3 MB (hashes, sniffed head, the file's bytes, nothing left after close or after a cut-off body); the bucket's streamed PUT (signed payload hash, length, the file from its start); against MariaDB, a 40 MB upload generated as it is read stored by stream with under 16 MB allocated in all, its pointer's hash, size and type, and a cut-off upload (400, nothing stored, no temporary file left). Full suite.
+
 ## 0.67.0 - Delete a space (2026-10-30)
 
 **Schema v20 and grants.** Before starting 0.67.0: stop the service, back up, apply `deploy/account-schema-v20.sql` as the schema administrator, then `deploy/account-grants.sql` (new: `UPDATE (deleted_at, slug)` on `metatrash_spaces`). No `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. CI needs `.github/workflows/ci.yml` to apply v1–v20 (in this delivery).

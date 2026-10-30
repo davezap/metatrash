@@ -27,6 +27,12 @@ type objectStore interface {
 	open(ctx context.Context, key string) (io.ReadCloser, int64, error)
 }
 
+// objectFilePutter stores an object from a file without reading it into
+// memory (0.68.0). sha256 is the content's hex SHA-256, which signs it.
+type objectFilePutter interface {
+	putFile(ctx context.Context, key, contentType string, body io.ReadSeeker, size int64, sha256 string) error
+}
+
 // storedObject is one object a listing found.
 type storedObject struct {
 	Key      string
@@ -68,6 +74,33 @@ func (s *s3Store) put(ctx context.Context, key, contentType string, body []byte)
 	req.Header.Set("Content-Type", contentType)
 	s.sign(req, body)
 	resp, err := s.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("downloads bucket unreachable")
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("downloads bucket refused the upload (%d)", resp.StatusCode)
+	}
+	return nil
+}
+
+// putFile sends the object as it is read. The client's timeout would cover
+// sending the body, so it uses a client without one; ctx bounds it instead.
+func (s *s3Store) putFile(ctx context.Context, key, contentType string, body io.ReadSeeker, size int64, sha256 string) error {
+	if _, err := body.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, s.objectURL(key), io.NopCloser(body))
+	if err != nil {
+		return err
+	}
+	req.ContentLength = size
+	req.Header.Set("Content-Type", contentType)
+	s.signPayload(req, sha256)
+	client := *s.http
+	client.Timeout = 0
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("downloads bucket unreachable")
 	}
@@ -192,14 +225,18 @@ func (s *s3Store) remove(ctx context.Context, key string) error {
 // sign adds the Signature Version 4 headers, signing host, the payload hash,
 // the date and any Content-Type or Range.
 func (s *s3Store) sign(req *http.Request, body []byte) {
+	sum := sha256.Sum256(body)
+	s.signPayload(req, hex.EncodeToString(sum[:]))
+}
+
+// signPayload signs a request whose body has this hex SHA-256.
+func (s *s3Store) signPayload(req *http.Request, payload string) {
 	now := time.Now
 	if s.now != nil {
 		now = s.now
 	}
 	t := now().UTC()
 	date, stamp := t.Format("20060102"), t.Format("20060102T150405Z")
-	sum := sha256.Sum256(body)
-	payload := hex.EncodeToString(sum[:])
 	req.Header.Set("x-amz-date", stamp)
 	req.Header.Set("x-amz-content-sha256", payload)
 	headers := map[string]string{"host": req.URL.Host}
