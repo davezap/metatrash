@@ -48,6 +48,10 @@ type Service struct {
 	githubSourceHook func(ctx context.Context, r *repository, repo string) (githubSource, error)
 	// githubPushHook replaces the GitHub writer in tests.
 	githubPushHook func(ctx context.Context, r *repository, repo string) (githubPusher, error)
+	// githubInstalledHook replaces the linked-installation check in tests.
+	githubInstalledHook func(userID string, installation int64) bool
+	// autoPull runs automatic pulls of GitHub folders (github_autopull.go).
+	autoPull autoPulls
 	// githubLocks holds one mutex per GitHub folder (see githubFolderLock).
 	githubLocks sync.Map
 	// githubHints holds, per GitHub folder, the earliest time the next
@@ -139,6 +143,8 @@ func (s *Service) Close() {
 		a.stop()
 	}
 	close(s.stop)
+	// Automatic pulls see the stop and give up.
+	s.autoPull.wg.Wait()
 	<-s.done
 	if s.accounts != nil {
 		_ = s.accounts.store.Close()

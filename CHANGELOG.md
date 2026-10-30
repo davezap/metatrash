@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.69.0 - GitHub changes arrive on their own (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. The GitHub App already sends push events (its "Subscribe to events" has Push).
+
+- **Pushes to GitHub are pulled into the space.** When the app receives a `push` delivery for a branch, every GitHub folder that mirrors that repository and branch is pulled in the background, exactly as the `pull` tool does, as the space's owner (history shows the app `GitHub auto-pull`). Only spaces whose owner linked the installation that sent the delivery are looked at. The webhook still answers at once.
+- **Conflicts stop it, as before.** A file changed both here and on GitHub, a first pull that doesn't match, or the pull allowance stops that folder's pull with nothing changed, logged as `github auto-pull:`; the next push, or a pull by hand, tries again. Pushes that arrive while a folder is being pulled make one more pull when it finishes.
+- **Opting out:** `"pull": "agent"` in the folder's github service pulls only through the tool. `"auto"` stays the default, so existing GitHub folders start following their branch.
+- Tags, deleted branches and other events are still acknowledged and ignored.
+- Task T011 from `build/`.
+- Tested: reading push deliveries (a branch with a slash; tags, deleted branches, no installation, a bad repository name and broken JSON ignored); against a fake GitHub, a push pulled into the matching folder (repository name in another case) but not one set to `agent` or one on another branch, the pull commit's app, nothing pulled for another installation or one the owner hasn't linked, a conflicting change left in place, and a push during a running pull kept for one more pull. Full suite.
+
 ## 0.68.0 - Streamed virtual-file uploads (2026-10-30)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing.

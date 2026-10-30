@@ -201,6 +201,15 @@ per step), lets an action list its `tools`, and warns the agent with 3 calls
 left; with 0.57.1 to 0.57.4 a news job went from 341,000 to about 37,000
 tokens. Prompt caching for MiniMax is still open (roadmap).
 
+## GitHub → space
+
+Done in 0.69.0 (T011, 2026-10-30): the app's `push` deliveries pull every
+folder that mirrors the repository and branch with `pull` `auto` (the
+default), in spaces whose owner linked the installation, in the background
+and as the owner (app `GitHub auto-pull`). Conflicts stop the pull and are
+logged. `pull` `agent` opts a folder out. Not built: telling anyone about a
+stopped auto-pull other than the log (the next `pending` or pull shows it).
+
 ## Binary files and conversion
 
 Streamed uploads (0.68.0, T005, 2026-10-30): `PUT …/content` spools the

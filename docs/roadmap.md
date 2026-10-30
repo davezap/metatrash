@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of Metatrash 0.68.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.69.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -142,10 +142,8 @@ binaries travel as virtual files (archive). Still open, from the 2026-10-03
 design session:
 
 1. **`auto` push mode**: quiet-period batches (`push` still works).
-2. **GitHub → space**: repo changes appear in the folder (`pull` auto),
-   triggered by the push webhooks the app already receives (today they are
-   acknowledged and ignored). Until then pull and push happen only when an
-   agent or a REST call asks for them.
+
+GitHub → space is done (0.69.0): a push to the branch pulls the folder.
 
 Also wanted (Dave, 2026-10-28): **Pull and Push in Slate Viewer**, a button
 on a GitHub folder that shows `pending` and pushes with a message, so a

@@ -108,9 +108,18 @@ uninstalled there; each connection links to its installation's settings page.
 `POST /github/webhook` accepts only deliveries whose `X-Hub-Signature-256`
 matches the webhook secret (HMAC-SHA256 of the raw body, up to 8 MiB);
 anything else gets 401. `installation` events for this app update links:
-`deleted` removes the link, `suspend` and `unsuspend` set its status. Other
-events, including `push`, are acknowledged with 204 and ignored (automatic
-pulls on push events are on the roadmap).
+`deleted` removes the link, `suspend` and `unsuspend` set its status. A
+`push` to a branch (0.69.0) is answered with 204 at once and then pulls, in
+the background, every GitHub folder whose service names that repository
+(any case) and branch with `pull` `auto` (the default), in the spaces whose
+owner linked the installation that sent it (active, not suspended). Each
+pull is the pull tool's, as the space's owner with app `GitHub auto-pull` in
+history, and counts toward the space's pull allowance. A conflict or other
+refusal stops that pull as it would for an agent, is logged (`github
+auto-pull:` lines) and leaves the folder for the next push or a pull by
+hand. Pushes that arrive while a folder is being pulled make one more pull
+afterwards. Tags, deleted branches and other events are acknowledged with
+204 and ignored.
 A database failure answers 503, and the delivery can be redelivered from the
 app's Advanced settings page on GitHub.
 
@@ -258,6 +267,10 @@ is: the earliest commit after the change's baseline revision whose message
 names a pending path. Over 30 minutes → `hint` in the result; the next check
 for that folder waits 30 minutes (or until the oldest change turns 30
 minutes), kept in memory, so a restart may give one extra hint.
+
+Pull modes (0.69.0): `auto` (default) pulls on GitHub's push deliveries
+(Webhook, above) as well as through the tool; `agent` pulls only through the
+tool.
 
 Push modes: `agent` (default) and `auto` push only through the tool
 (quiet-period pushing for `auto` is on the roadmap); `review` refuses until a

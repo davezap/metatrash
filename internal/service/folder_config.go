@@ -107,8 +107,8 @@ func checkGitHubService(svc folderService) error {
 	if svc.Push != "" && svc.Push != "agent" && svc.Push != "auto" && svc.Push != "review" {
 		return folderConfigError(`github push must be "agent" (the default: only the push tool sends), "auto" or "review".`)
 	}
-	if svc.Pull != "" && svc.Pull != "auto" {
-		return folderConfigError(`github pull must be "auto".`)
+	if svc.Pull != "" && svc.Pull != "auto" && svc.Pull != "agent" {
+		return folderConfigError(`github pull must be "auto" (the default: GitHub's pushes are pulled as they happen) or "agent" (only the pull tool pulls).`)
 	}
 	if svc.Files != nil {
 		return folderConfigError("github takes no files.")

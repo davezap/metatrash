@@ -338,8 +338,9 @@ func (h *httpAdapter) githubConnections(r *http.Request, user userAccount) ([]gi
 }
 
 // githubWebhook receives the app's webhook deliveries. Only signed deliveries
-// are accepted. Installation removal and suspension update the stored links;
-// other events (push and the rest) are acknowledged and ignored for now.
+// are accepted. Installation removal and suspension update the stored links,
+// and a push to a branch pulls the GitHub folders that mirror it (0.69.0,
+// github_autopull.go); other events are acknowledged and ignored.
 func (h *httpAdapter) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	g := h.github
 	if r.Method != http.MethodPost {
@@ -358,6 +359,14 @@ func (h *httpAdapter) githubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event := r.Header.Get("X-GitHub-Event")
+	if event == "push" {
+		// GitHub waits ten seconds for an answer: the pulls run afterwards.
+		if repo, branch, installation, ok := parseGitHubPush(body); ok {
+			h.service.githubPushed(repo, branch, installation)
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if event != "installation" {
 		w.WriteHeader(http.StatusNoContent)
 		return
