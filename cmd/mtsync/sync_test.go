@@ -489,3 +489,46 @@ func TestSyncRestoresLockedFiles(t *testing.T) {
 		t.Fatal("locked file changed in the space")
 	}
 }
+
+// A new empty local folder gets a .metatrash.json, so it reaches the space,
+// which adds its AGENTS.md (0.66.0).
+func TestSyncStartsEmptyFolders(t *testing.T) {
+	server, _ := testSpace(t)
+	h := newHarness(t, server, "writer", t.TempDir())
+	for _, dir := range []string{"notes/drafts", "New folder", ".hidden"} {
+		if err := os.MkdirAll(filepath.Join(h.dir, filepath.FromSlash(dir)), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.sync()
+	h.sync()
+	_, remote := h.remote()
+	for _, p := range []string{"notes/drafts/.metatrash.json", "notes/drafts/AGENTS.md", "notes/.metatrash.json", "notes/AGENTS.md"} {
+		if _, ok := remote[p]; !ok {
+			t.Fatalf("%s not in the space: %v", p, h.logs)
+		}
+	}
+	if text := h.remoteText("notes/drafts/.metatrash.json"); text != newFolderConfig {
+		t.Fatalf("settings %q", text)
+	}
+	if _, ok := h.localText("notes/drafts/AGENTS.md"); !ok {
+		t.Fatal("AGENTS.md not downloaded")
+	}
+	// Names the space refuses are left alone.
+	for _, dir := range []string{"New folder", ".hidden"} {
+		if _, ok := h.localText(dir + "/.metatrash.json"); ok {
+			t.Fatalf("%s was started", dir)
+		}
+	}
+
+	// Inside a GitHub folder everything belongs to the repository, and a
+	// folder a deletion emptied is not brought back.
+	h.put("site/.metatrash.json", `{"services":[{"type":"github","repo":"o/r"}]}`)
+	if _, ok := h.s.startFolder("site/css"); ok {
+		t.Fatal("started a folder in a GitHub folder")
+	}
+	h.s.leftEmpty = map[string]bool{"gone": true}
+	if _, ok := h.s.startFolder("gone"); ok {
+		t.Fatal("started a folder a deletion emptied")
+	}
+}

@@ -34,6 +34,10 @@ Linux and macOS.
   - Changed in the space: downloaded. Deleted there: deleted here (empty
     folders are removed).
   - Renamed here: a `move` in the space, so the file keeps its ID and history.
+  - A new empty folder here (mtsync 0.66.0): mtsync puts a `.metatrash.json`
+    (`{"inherit": true}`) in it, so the folder reaches the space, which adds
+    its `AGENTS.md`. Not inside a GitHub folder, not in a read-only space, and
+    not for names the space refuses (`New folder` waits until you rename it).
   - Changed on both sides: the space's version keeps the name and yours is
     saved beside it as `name.conflict-<UTC time>.ext`, then uploaded too.
 - **Virtual files** (mtsync 0.61.0, metatrash 0.60.0 on the site, signed-in

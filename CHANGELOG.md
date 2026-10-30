@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.66.0 - mtsync brings new empty folders to the space (2026-10-30)
+
+No schema, grant or `accounts.json` change; tool-schema 0.17.3 (one description); mtsync's `minVersion` stays 0.61.0. Release the server (for the tool description) and mtsync.
+
+- **New empty folders reach the space.** A folder only exists in a space once it holds a file, so a new empty folder used to stay on your computer. mtsync now puts a `.metatrash.json` (`{"inherit": true}`) in a new empty local folder; it syncs up and the space adds the folder's `AGENTS.md`, which comes back down. Slate Viewer's New Folder gets this through mtsync. Left alone: folders inside a GitHub folder (everything there belongs to the repository), every folder of a read-only space, names the space refuses (`New folder`, dot names: they are started once renamed), and a folder a deletion emptied but couldn't remove because another program held it open.
+- **Making an empty folder from an agent:** the `write` tool's description now says that writing a folder's `AGENTS.md` or `.metatrash.json` makes an empty folder, which the space has always allowed. No new tool, so no extra tokens per session.
+
 ## 0.65.0 - Download a space from Your account (2026-10-30)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing.

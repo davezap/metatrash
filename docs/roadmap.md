@@ -269,13 +269,11 @@ scheduled yet. To settle when it is:
 - **Open pictures in Slate Viewer** (Dave, 2026-10-28): clicking a virtual
   picture (and perhaps a PDF) shows it in the Viewer instead of handing it
   to the system's app. Planned as Slate Viewer 0.21.0.
-- **Create folder** (Dave, 2026-10-25): a folder only exists in Git once it
-  holds a file, so a new empty folder has no `.metatrash.json` or `AGENTS.md`
-  until a file arrives, and people make them by hand (one became
-  `metatrash.json.md`). Add a create-folder operation (REST and MCP) that
-  commits the starter `AGENTS.md` and `.metatrash.json` at once; Slate
-  Viewer's New Folder calls it, and mtsync calls it when it finds a new empty
-  local folder. Folders stay paths, not objects.
+- **Create folder in Slate Viewer**: since 0.66.0 mtsync starts a new empty
+  local folder itself (it adds `.metatrash.json`, and the space its
+  `AGENTS.md`), so the Viewer's New Folder works through mtsync. Still to do
+  there: naming a new file `.metatrash.json` should open the folder's
+  settings instead of making `metatrash.json.md` (see Folder agent tasks).
 - **Slate Viewer folder tree is hard to read** (Dave, 2026-10-25): with
   hidden files shown, the indentation doesn't make clear which folder a
   `.metatrash.json` belongs to. Stronger indent guides (a line per level),

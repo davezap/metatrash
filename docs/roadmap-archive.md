@@ -20,6 +20,14 @@ transfer ownership, space export (REST, `mt spaces export`, `mtsync export`),
 and Download on Your account (0.65.0: `/spaces/<owner>/<slug>/?export`, owner
 and members only).
 
+## Create folder
+
+Done in 0.66.0 (T004, 2026-10-30) without a new operation: the space already
+starts a folder when its `AGENTS.md` or `.metatrash.json` is written (the
+write tool says so since tool-schema 0.17.3), and mtsync writes
+`.metatrash.json` into a new empty local folder. A separate create-folder
+tool would only have added tool-definition tokens.
+
 ## Sign-in
 
 Passkeys, the authenticator app, recovery codes and the per-account email

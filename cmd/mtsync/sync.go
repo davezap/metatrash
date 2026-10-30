@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,6 +107,8 @@ type syncer struct {
 	// reported once and retried only after the file changes.
 	warned   map[string]string
 	readOnly bool
+	// leftEmpty holds folders a deletion emptied but could not remove.
+	leftEmpty map[string]bool
 	// noChanges is set when the server can't list changes (before 0.37.0).
 	noChanges bool
 	// onPass, when set, hears how each pass ended (nil when it completed).
@@ -208,6 +211,7 @@ func (s *syncer) full(p string) string { return filepath.Join(s.root, filepath.F
 func (s *syncer) scan() (map[string]localFile, map[string]bool, error) {
 	files, unstable := map[string]localFile{}, map[string]bool{}
 	seen := map[string]bool{}
+	var empty []string
 	err := filepath.WalkDir(s.root, func(full string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if full == s.root {
@@ -223,6 +227,11 @@ func (s *syncer) scan() (map[string]localFile, map[string]bool, error) {
 			// folder (for your own history) is left alone.
 			if p == stateDir || strings.EqualFold(d.Name(), ".git") {
 				return filepath.SkipDir
+			}
+			if full != s.root {
+				if entries, err := os.ReadDir(full); err == nil && len(entries) == 0 {
+					empty = append(empty, p)
+				}
 			}
 			return nil
 		}
@@ -252,12 +261,88 @@ func (s *syncer) scan() (map[string]localFile, map[string]bool, error) {
 		files[p] = file
 		return nil
 	})
+	for _, dir := range empty {
+		if p, ok := s.startFolder(dir); ok {
+			seen[p] = true
+			files[p] = s.cache[p].file
+		}
+	}
 	for p := range s.cache {
 		if !seen[p] {
 			delete(s.cache, p)
 		}
 	}
 	return files, unstable, err
+}
+
+// folderNamePattern is a folder name the space accepts (no dot names, which
+// only GitHub folders allow).
+var folderNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// newFolderConfig is the .metatrash.json mtsync puts in a new empty folder,
+// as the space does for a folder's first file.
+const newFolderConfig = "{\"inherit\": true}\n"
+
+// startFolder gives a new empty local folder its .metatrash.json, so the
+// folder reaches the space, which adds its AGENTS.md (0.66.0). A folder in a
+// GitHub folder, or with a name the space refuses, is left alone, and so is
+// every folder of a read-only space. It returns the file's path.
+func (s *syncer) startFolder(dir string) (string, bool) {
+	if s.readOnly || s.leftEmpty[dir] || strings.Count(dir, "/") > 6 || len(dir) > 200 {
+		return "", false
+	}
+	for _, name := range strings.Split(dir, "/") {
+		if !folderNamePattern.MatchString(name) {
+			return "", false
+		}
+	}
+	for parent := path.Dir(dir); ; parent = path.Dir(parent) {
+		if parent == "." {
+			parent = ""
+		}
+		if githubConfig(s.full(path.Join(parent, ".metatrash.json"))) {
+			return "", false
+		}
+		if parent == "" {
+			break
+		}
+	}
+	p := dir + "/.metatrash.json"
+	b := []byte(newFolderConfig)
+	if err := writeFileAtomic(s.full(p), b, 0644); err != nil {
+		s.logf("cannot start folder %s: %v", dir, err)
+		return "", false
+	}
+	info, err := os.Stat(s.full(p))
+	if err != nil {
+		return "", false
+	}
+	s.cache[p] = localEntry{size: info.Size(), mtime: info.ModTime(), file: hashes(b)}
+	s.logf("new folder %s: added .metatrash.json", dir)
+	return p, true
+}
+
+// githubConfig reports whether the .metatrash.json at full attaches a GitHub
+// repository.
+func githubConfig(full string) bool {
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return false
+	}
+	var c struct {
+		Services []struct {
+			Type string `json:"type"`
+		} `json:"services"`
+	}
+	if json.Unmarshal(b, &c) != nil {
+		return false
+	}
+	for _, service := range c.Services {
+		if service.Type == "github" {
+			return true
+		}
+	}
+	return false
 }
 
 // currentBlob hashes a local file now; "" when it does not exist.
@@ -649,10 +734,18 @@ func (p *pass) writeLocal(path string, b []byte) error {
 	return nil
 }
 
-// pruneDirs removes folders left empty by a deletion, up to the root.
+// pruneDirs removes folders left empty by a deletion, up to the root. One
+// it cannot remove (another program holds it open) is remembered, so scan
+// does not take it for a new folder and bring it back to the space.
 func (p *pass) pruneDirs(file string) {
 	for dir := path.Dir(file); dir != "." && dir != "/"; dir = path.Dir(dir) {
 		if os.Remove(p.full(dir)) != nil {
+			if entries, err := os.ReadDir(p.full(dir)); err == nil && len(entries) == 0 {
+				if p.leftEmpty == nil {
+					p.leftEmpty = map[string]bool{}
+				}
+				p.leftEmpty[dir] = true
+			}
 			return
 		}
 	}
