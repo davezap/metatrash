@@ -152,8 +152,8 @@ design session:
 
 Also wanted (Dave, 2026-10-28): **Pull and Push in Slate Viewer**, a button
 on a GitHub folder that shows `pending` and pushes with a message, so a
-person can do it without asking an agent. Slate Viewer only runs mtsync
-commands, so this needs pull, pending and push in mtsync first.
+person can do it without asking an agent. mtsync has `pull`, `pending` and
+`push` (with `-json`) since 0.64.0; the Viewer part is still to build.
 
 Later: letting push send `.github/workflows/` changes (needs the app's
 `workflows` permission; refused for now because workflows can reach CI

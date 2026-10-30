@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.64.0 - mtsync pulls and pushes GitHub folders (2026-10-30)
+
+No server, schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only mtsync needs releasing.
+
+- **`mtsync pull FOLDER`, `mtsync pending FOLDER` and `mtsync -m MESSAGE push FOLDER`** ask the server to pull, compare or push a GitHub folder inside a registered folder (the existing REST routes), so a person can without an agent. FOLDER is a local folder; mtsync names it by its path in the space, with a registered folder's prefix, and shows paths as they are in the synced folder (a pull's skipped files by their path in the repository). `-json` answers with the server's fields for editors (a refusal as `{"error": ...}`), the first step towards Pull and Push in Slate Viewer. These requests may take ten minutes, as the server allows. Push sends what the space holds, so edits still waiting to upload are not in it.
+- Task T010 from `build/`, written by the conductor.
+- Tested: against a fake server, pull naming `docs/site/` for `site/` in a folder registered as `dave/work/docs` and reporting skipped and local changes; pending with paths cut to the synced folder and `-json` lists never null; push refused without a message, sending the message, and a refusal printed as JSON; the registered folder itself, a folder outside any registered one, and the root of a whole space (refused).
+
 ## 0.63.0 - list marks stale virtual files; browsers forget unknown passkeys (2026-10-30)
 
 No schema, grant or `accounts.json` change. tool-schema.json is 0.17.2 (`stale` on list's files); mtsync's `minVersion` stays 0.61.0.

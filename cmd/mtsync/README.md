@@ -239,6 +239,24 @@ where REVIEW is a JSON file or `-`: `{"status": "approved", "note": "Enjoy"}`
 or `"declined"` for a form, `{"marks": {"why": true}, "note": "..."}` for a
 quiz (a tick or cross for every free-text answer; the score decides).
 
+A GitHub folder (a folder whose `.metatrash.json` has a `github` service,
+see the server's docs/github.md) can be pulled and pushed from this computer
+(mtsync 0.64.0), without asking an agent. FOLDER is the GitHub folder inside a
+registered folder:
+
+- `mtsync pull FOLDER` brings it up to its branch on GitHub. The server does
+  the pull; the files reach this computer with the next sync.
+- `mtsync pending FOLDER` lists what a push would send (added, modified,
+  deleted), and what it refuses or leaves out.
+- `mtsync -m "Fix the install steps" push FOLDER` sends those changes as one
+  commit. It pushes what the space holds, so let the sync upload your last
+  edits first (a few seconds; `mtsync list` shows the folder in sync).
+
+All three take `-json` for editors (with `-json`, a refusal is printed as
+`{"error": {...}}` too) and need a signed-in space with write access (read
+access for `pending`). Refusals are the server's: a folder never pulled, a
+branch that moved on GitHub (pull, then push again), push mode `review`.
+
 `mtsync list` shows, per folder, "in sync, checked <time>", the last error
 (for example signed out, or the space no longer connected; the service tries
 such a folder again every minute), or "service not running".
@@ -263,6 +281,9 @@ All commands:
 | `show FILE REVISION` | print a synced file's text at a revision (short or full, as `history` prints it; a virtual file's content) |
 | `virtual PLACE` | the virtual files in a folder: type, size, source (`-json`; mtsync 0.61.0) |
 | `text FILE` | print the space's text for a file, such as a PDF's Markdown (mtsync 0.61.0) |
+| `pull FOLDER` | bring a GitHub folder up to its branch (`-json`; mtsync 0.64.0) |
+| `pending FOLDER` | what a push of a GitHub folder would send (`-json`; mtsync 0.64.0) |
+| `push FOLDER` | push a GitHub folder's changes as one commit; needs `-m MESSAGE` (`-json`; mtsync 0.64.0) |
 | `policies PLACE` | published folders and files, and what you still have to read (`-json`) |
 | `ack FILE VERSION` | confirm you read FILE as published in VERSION |
 | `readers PLACE` | who has read what (read-write access; `-json`) |
@@ -282,7 +303,8 @@ Flags go before the command:
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |
 | `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
-| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`, `virtual`, `spaces`, `list`: answer in JSON |
+| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`, `virtual`, `spaces`, `list`, `pull`, `pending`, `push`: answer in JSON |
+| `-m MESSAGE` | | `push`: the commit message |
 | `-published` | `0` | `submit`: answer this published version of the form's folder, as Slate Viewer shows it |
 | `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |
 

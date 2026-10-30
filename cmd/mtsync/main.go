@@ -60,6 +60,11 @@ Virtual files (content kept outside Git: PDFs, pictures, large files):
   virtual PLACE            the virtual files in PLACE: type, size, source (-json)
   text FILE                print the space's text for FILE (a PDF's Markdown)
 
+GitHub folders (FOLDER is a GitHub folder inside a registered folder):
+  pull FOLDER              bring it up to its GitHub branch (-json)
+  pending FOLDER           what a push would send (-json)
+  push FOLDER              send those changes as one commit; needs -m MESSAGE (-json)
+
 Published versions (PLACE is a registered folder or anything in it):
   policies PLACE           published folders, their files, and which you still
                            have to read (-json for editors)
@@ -103,7 +108,8 @@ func run(args []string) error {
 	interval := flags.Duration("interval", 5*time.Second, "time between scans of each folder")
 	limit := flags.Int("limit", 10, "history: how many changes to list (1..100)")
 	offset := flags.Int("offset", 0, "history: skip this many of the newest changes")
-	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions, review, whoami, spaces and list: answer in JSON")
+	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions, review, whoami, spaces, list, pull, pending and push: answer in JSON")
+	message := flags.String("m", "", "push: the commit message")
 	published := flags.Int("published", 0, "submit: answer this published version of the form's folder, as Slate Viewer shows it")
 	keyEnv := flags.String("key-env", "", "one-off sync and export: name of an environment variable holding a space key, for spaces configured with keys instead of sign-in")
 	flags.Usage = func() {
@@ -180,6 +186,12 @@ func run(args []string) error {
 		return nil
 	case cmd == "history" && len(rest) == 2:
 		return showHistory(ctx, rest[1], *limit, *offset, *asJSON, os.Stdout)
+	case cmd == "pull" && len(rest) == 2:
+		return githubPull(ctx, rest[1], *asJSON, os.Stdout)
+	case cmd == "pending" && len(rest) == 2:
+		return githubPending(ctx, rest[1], *asJSON, os.Stdout)
+	case cmd == "push" && len(rest) == 2:
+		return githubPush(ctx, rest[1], *message, *asJSON, os.Stdout)
 	case cmd == "policies" && len(rest) == 2:
 		return showPolicies(ctx, rest[1], *asJSON, os.Stdout)
 	case cmd == "ack" && len(rest) == 3:
