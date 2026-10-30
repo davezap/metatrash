@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.72.1 - Site API from the address bar (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change. Only the server needs releasing.
+
+- **`/api/v1/site/session` opens in the browser's address bar.** 0.72.0 refused every request whose `Sec-Fetch-Site` wasn't `same-origin`, and a browser sends `none` for an address you type or a bookmark, so the check after deploying answered "Unrecognized origin." Reads now accept `none`; writes still need `same-origin` (as well as the Origin and CSRF checks).
+- Tested: an address-bar read answers 200 and an address-bar write 403, with the rest of the site API test as before.
+
 ## 0.72.0 - Site API for the signed-in browser (2026-10-30)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Step 2 of "Slate Viewer's UI on the website" in the roadmap: nothing on the site uses it yet.

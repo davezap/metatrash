@@ -109,6 +109,13 @@ func TestSiteAPIAgainstDatabase(t *testing.T) {
 	if res := siteCall(w, "GET", owned+"/files", "", ownerSession, "", "Sec-Fetch-Site", "cross-site"); res.Code != 403 {
 		t.Fatalf("cross-site read: %d", res.Code)
 	}
+	// Opened from the address bar (0.72.1): reading is fine, writing is not.
+	if res := siteCall(w, "GET", "/api/v1/site/session", "", ownerSession, "", "Sec-Fetch-Site", "none"); res.Code != 200 {
+		t.Fatalf("address bar read: %d", res.Code)
+	}
+	if res := siteCall(w, "PUT", owned+"/file?path=web.md", write, ownerSession, csrf, "Sec-Fetch-Site", "none"); res.Code != 403 {
+		t.Fatalf("address bar write: %d", res.Code)
+	}
 	if res := siteCall(w, "PUT", owned+"/file?path=web.md", write, nil, csrf); res.Code != 401 {
 		t.Fatalf("signed-out write: %d", res.Code)
 	}

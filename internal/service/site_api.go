@@ -93,14 +93,15 @@ func (h *httpAdapter) serveSiteAPI(w http.ResponseWriter, r *http.Request, clien
 	}
 	// Only this site's own pages call it. A browser names the page's origin
 	// on every write and on cross-origin reads; Sec-Fetch-Site says the same
-	// where the browser sends it.
+	// where the browser sends it. "none" is the person opening the address
+	// themselves (typed or bookmarked), which is fine for reading.
 	origins := r.Header.Values("Origin")
 	read := r.Method == http.MethodGet || r.Method == http.MethodHead
 	if len(origins) > 1 || len(origins) == 1 && origins[0] != h.publicOrigin || !read && len(origins) == 0 {
 		sendError(w, problem(403, "forbidden", "Unrecognized origin."))
 		return
 	}
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && !(read && site == "none") {
 		sendError(w, problem(403, "forbidden", "Unrecognized origin."))
 		return
 	}
