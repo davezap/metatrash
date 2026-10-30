@@ -210,3 +210,26 @@ func mailMessage(cfg accountConfig, email, subject, body string) ([]byte, error)
 	header := "From: Metatrash <" + cfg.SMTPFrom + ">\r\nTo: <" + email + ">\r\nSubject: " + subject + "\r\nDate: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + messageID + "@" + cfg.SMTPHost + ">\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
 	return append([]byte(header), encoded.Bytes()...), nil
 }
+
+// accountDeletionRequestedMail confirms a request to delete the account.
+func accountDeletionRequestedMail(origin string, when, purge time.Time) string {
+	return "You asked to delete your Metatrash account.\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"You have been signed out everywhere and your connected apps were disconnected. Your account will be deleted for good on " + purge.UTC().Format("2 January 2006") + ".\n\n" +
+		"To keep it, sign in again before then at " + origin + "/login. Signing in cancels the deletion.\n" +
+		"If you did not ask for this, sign in now to cancel it, then review Sign-in methods on Your account.\n"
+}
+
+// accountDeletionCancelledMail tells the account that signing in kept it.
+func accountDeletionCancelledMail(origin string, when time.Time) string {
+	return "Your Metatrash account will not be deleted: you signed in after asking to delete it, which cancels the deletion.\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"Your connected apps were disconnected when you asked, so connect them again if you want them. To delete the account after all, use Delete account on " + origin + "/account/profile.\n"
+}
+
+// accountDeletedMail is the last message to a deleted account's address.
+func accountDeletedMail(origin string) string {
+	return "Your Metatrash account has been deleted, as you asked 30 days ago.\n\n" +
+		"Your sign-in methods, memberships, agents and connected services are gone, and this address is no longer linked to Metatrash. " +
+		"You can sign up again with it at any time at " + origin + "/login, as a new account.\n"
+}

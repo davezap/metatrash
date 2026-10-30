@@ -9,9 +9,9 @@ import (
 )
 
 // loop syncs until ctx ends. A pass runs when the space changes (the server
-// tells a waiting request at once) or when a scan of the folder, every
-// interval, finds a local change; a quiet folder costs no requests beyond
-// the waiting one. A pass interrupted by a change in the space runs again at
+// tells a waiting request at once), when a scan of the folder, every
+// interval, finds a local change, or when poked (mtsync sync); a quiet
+// folder costs no requests beyond the waiting one. A pass interrupted by a change in the space runs again at
 // once.
 func (s *syncer) loop(ctx context.Context, interval time.Duration, once bool) error {
 	if once {
@@ -28,6 +28,11 @@ func (s *syncer) loop(ctx context.Context, interval time.Duration, once bool) er
 		if !dirty {
 			local, unstable, err := s.scan()
 			dirty = err != nil || len(unstable) > 0 || !maps.Equal(local, lastScan)
+			// Nothing changed here, and the space is being watched: that is a
+			// check too, so the status shows the folder is still in sync.
+			if !dirty && s.remoteLive.Load() && s.onPass != nil {
+				s.onPass(nil)
+			}
 		}
 		wait := interval
 		if dirty {
@@ -46,7 +51,7 @@ func (s *syncer) loop(ctx context.Context, interval time.Duration, once bool) er
 				wait = 0
 			case err != nil:
 				failures++
-				wait = interval * time.Duration(min(failures, 12))
+				wait = retryWait(interval, failures)
 				s.logf("sync failed, retrying in %s: %v", wait, err)
 			default:
 				failures = 0
@@ -60,9 +65,18 @@ func (s *syncer) loop(ctx context.Context, interval time.Duration, once bool) er
 			return nil
 		case <-remote:
 			dirty = true
+		case <-s.poke:
+			dirty = true
 		case <-time.After(wait):
 		}
 	}
+}
+
+// retryWait is how long to wait after the failures-th failure in a row:
+// growing to 12 times the interval, and never under 5 s a step, so a short
+// interval doesn't press a server that is struggling.
+func retryWait(interval time.Duration, failures int) time.Duration {
+	return max(interval, 5*time.Second) * time.Duration(min(failures, 12))
 }
 
 // syncOnce runs one complete pass, retrying a pass the space interrupted.
@@ -117,6 +131,7 @@ func (s *syncer) watchRemote(ctx context.Context, interval time.Duration, change
 			wait = ""
 		}
 		state, err := s.c.waitHead(ctx, wait)
+		s.remoteLive.Store(err == nil)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -127,7 +142,7 @@ func (s *syncer) watchRemote(ctx context.Context, interval time.Duration, change
 				continue
 			}
 			failures++
-			if sleepContext(ctx, interval*time.Duration(min(failures, 12))) != nil {
+			if sleepContext(ctx, retryWait(interval, failures)) != nil {
 				return
 			}
 			continue

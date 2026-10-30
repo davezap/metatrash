@@ -29,6 +29,16 @@ Manage sharing, needs a recent sign-in and the typed name, and offers the
 Download link first. GitHub repositories are never touched. The docs space
 can't be deleted while `docsSpace` names it.
 
+**Delete account** (0.71.0, 2026-10-30), as planned on 2026-10-06: refused
+while the account owns a space, a step-up and the typed email, then signed
+out everywhere with connected apps and opt-ins removed and a notice emailed;
+signing in within 30 days cancels; then the daily housekeeping purges it and
+sends a final email. One change from the plan: the user row is anonymised
+(email `deleted-<id>@deleted.invalid`, no username, `deleted_at`) instead of
+deleted, because other people's acknowledgements and form submissions and
+purged spaces reference it. Invitations the account accepted become
+cancelled; the inviter's list keeps the address they typed.
+
 ## Create folder
 
 Done in 0.66.0 (T004, 2026-10-30) without a new operation: the space already

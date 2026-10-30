@@ -614,6 +614,12 @@ func printUser(w io.Writer, u service.AdminUserDetail) {
 		codes = fmt.Sprintf("%d left, created %s", u.RecoveryCodes, day(u.RecoveryCodesCreated))
 	}
 	fmt.Fprintf(t, "Recovery codes\t%s\n", codes)
+	switch {
+	case u.DeletedAt != nil:
+		fmt.Fprintf(t, "Deleted\t%s\n", minute(*u.DeletedAt))
+	case u.DeletionRequestedAt != nil:
+		fmt.Fprintf(t, "Deletion\tasked %s; purged after %s unless they sign in\n", minute(*u.DeletionRequestedAt), day(u.DeletionRequestedAt.Add(service.AccountDeletionGrace)))
+	}
 	t.Flush()
 	section(w, "Passkeys", len(u.PasskeyList), func(t *tabwriter.Writer) {
 		for _, p := range u.PasskeyList {
@@ -711,6 +717,9 @@ func oneLine(s string) string {
 }
 
 func signInMethods(u service.AdminUser) string {
+	if u.DeletedAt != nil {
+		return "deleted"
+	}
 	methods := []string{"email"}
 	if !u.EmailLogin {
 		methods[0] = "email off"
@@ -723,6 +732,9 @@ func signInMethods(u service.AdminUser) string {
 	}
 	if u.RecoveryCodes > 0 {
 		methods = append(methods, count(u.RecoveryCodes, "recovery code", "recovery codes"))
+	}
+	if u.DeletionRequestedAt != nil {
+		methods = append(methods, "deletion pending")
 	}
 	return strings.Join(methods, ", ")
 }

@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); 0.67.0 needs v20.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); 0.67.0 needs v20 and 0.71.0 v21.
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -67,12 +67,14 @@ limits from the database on each request).
   configuration and before restarting.
 - **`users list`** shows username, email, creation date, owned spaces against
   the limit, active memberships and sign-in methods (email on or off,
-  passkeys, authenticator app, recovery codes left).
+  passkeys, authenticator app, recovery codes left), and from 0.71.0
+  `deletion pending` or `deleted` (Deleted accounts).
 - **`users show`** adds passkey names and last use, the authenticator app (or an
   unfinished setup), when recovery codes were made, owned spaces, memberships,
   invitations waiting, connected apps, GitHub installations and, from 0.32.0,
   signed-in browsers (device, sign-in address, since, last use; last use in
-  the database lags by up to five minutes).
+  the database lags by up to five minutes), and when a deletion was asked or
+  done (0.71.0).
 - **`users email-login on|off`** is the switch on Security. Turning it off still
   needs a passkey or authenticator app and recovery codes. The account is
   emailed a notice through the service's SMTP settings (`-no-notice` skips it);
@@ -158,7 +160,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v20 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v21 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -580,6 +582,32 @@ their own copies for as long as restic keeps snapshots (up to 12 months).
 The site's docs space (`docsSpace`) cannot be deleted until that setting
 names another space.
 
+### Deleted accounts
+
+A person deletes their account from the bottom of Profile (0.71.0), after a
+recent sign-in or confirmation and typing their email address. It is refused
+while they own a space that isn't deleted: they delete it or offer it to a
+member first. At once their sessions end everywhere, their connected apps
+(OAuth grants and tokens) and the folder actions they opted into are
+removed, ownership offers to them are withdrawn, `deletion_requested_at` is
+set and a notice is emailed. Signing in again within 30 days cancels it, with
+another email (log: `account deletion cancelled by sign-in`).
+
+After 30 days the folder actions runner's daily housekeeping (with the
+deleted spaces purge) purges the account: its connected apps, opt-ins,
+agents with their sealed keys, memberships, transfer rows, old addresses,
+GitHub installations, passkeys, authenticator app, recovery codes, sessions
+and web references are deleted, invitations it accepted become `cancelled`,
+and the user row keeps only its ID and dates: email `deleted-<user id>@deleted.invalid`,
+no username, `deleted_at` set. The row stays because other people's
+acknowledgements and form submissions, and purged spaces, still name it. The
+old address can then sign up again as a new account. A final email goes to
+it. Log lines start `deleted accounts:`; an account that owns a space again
+is skipped and logged. As with spaces, a server without folder actions does
+not purge, and backups keep their own copies (up to 12 months). There is no
+`mt` command to undo a purge; during the 30 days the person signs in to keep
+the account.
+
 ## Backups
 
 `deploy/backup.sh` (from 0.53.0) copies everything needed to rebuild the
@@ -799,7 +827,7 @@ roadmap.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v20 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v21 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -829,6 +857,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.61.0 | none; release mtsync 0.61.0 with it (`minVersion` rises to 0.61.0). Recommended: `ProxyTimeout 660` in Apache (Apache) | 0.60.2 (no schema change); pointers with a `git` line and virtual files pulled from GitHub read as before, and 0.60 push leaves them out again |
 | 0.61.1 | none | 0.61.0 (no schema change) |
 | 0.67.0 | schema v20 (`deleted_at` on spaces, the `deleted` and `purged` states) and grants (`UPDATE (deleted_at, slug)` on spaces) | 19, but only while no space is deleted or purged: 0.66 does not start with such a row. Restore deleted spaces first (`mt spaces list` shows them); after the first purge (30 days on), stay on 0.67 |
+| 0.71.0 | schema v21 (`deletion_requested_at` and `deleted_at` on users) and grants (`UPDATE (deletion_requested_at, deleted_at)` on users) | 20. An account waiting to be deleted is then neither purged nor cancelled by signing in (it still waits when 0.71 comes back); a purged account stays purged, with no way to sign in |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer
@@ -885,7 +914,7 @@ addresses are only in the notice emails.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v20 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v21 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - CI runs both on every push (see Automated builds and releases).
 

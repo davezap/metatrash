@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -14,7 +15,16 @@ import (
 // runLoop starts loop in the background with logs collected safely.
 func runLoop(t *testing.T, server, dir string, interval time.Duration) (*harness, func() []string) {
 	t.Helper()
+	return runLoopWith(t, server, dir, interval, nil)
+}
+
+// runLoopWith is runLoop with setup applied to the syncer before it starts.
+func runLoopWith(t *testing.T, server, dir string, interval time.Duration, setup func(*syncer)) (*harness, func() []string) {
+	t.Helper()
 	h := newHarness(t, server, "writer", dir)
+	if setup != nil {
+		setup(h.s)
+	}
 	var mu sync.Mutex
 	logs := []string{}
 	h.s.logf = func(format string, args ...any) {
@@ -95,5 +105,54 @@ func TestLoopFallsBackToPolling(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no fallback notice: %v", logs())
+	}
+}
+
+// mtsync sync pokes the loop: a local save goes up at once, without waiting
+// for the next scan.
+func TestLoopSyncsWhenPoked(t *testing.T) {
+	server, _ := testSpace(t)
+	dir := t.TempDir()
+	poke := make(chan struct{}, 1)
+	h, _ := runLoopWith(t, server, dir, time.Minute, func(s *syncer) { s.poke = poke })
+	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("AGENTS.md"); return ok })
+	if err := os.WriteFile(filepath.Join(dir, "mine.txt"), []byte("now\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	poke <- struct{}{}
+	eventually(t, 5*time.Second, "poked save uploaded", func() bool {
+		text, err := h.agent.read(context.Background(), "mine.txt", "")
+		return err == nil && text == "now\n"
+	})
+}
+
+// A scan that finds nothing new, with the space being watched, still counts
+// as a check, so the status's time keeps up; while the space can't be
+// reached it doesn't.
+func TestQuietScansCountAsChecks(t *testing.T) {
+	server, _ := testSpace(t)
+	dir := t.TempDir()
+	var passes atomic.Int32
+	var failed atomic.Bool
+	h, _ := runLoopWith(t, server, dir, 50*time.Millisecond, func(s *syncer) {
+		s.onPass = func(err error) {
+			if err != nil {
+				failed.Store(true)
+			}
+			passes.Add(1)
+		}
+	})
+	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("AGENTS.md"); return ok })
+	start := passes.Load()
+	eventually(t, 5*time.Second, "quiet checks", func() bool { return passes.Load() >= start+5 })
+	if failed.Load() {
+		t.Fatal("a pass failed")
+	}
+	h.s.remoteLive.Store(false)
+	time.Sleep(100 * time.Millisecond)
+	before := passes.Load()
+	time.Sleep(300 * time.Millisecond)
+	if n := passes.Load() - before; n > 0 {
+		t.Fatalf("%d checks counted while the space wasn't watched", n)
 	}
 }

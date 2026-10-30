@@ -33,6 +33,10 @@ type AdminUser struct {
 	Passkeys         int       `json:"passkeys"`
 	AuthenticatorApp bool      `json:"authenticatorApp"`
 	RecoveryCodes    int       `json:"recoveryCodes"`
+	// DeletionRequestedAt is set while the account waits to be deleted;
+	// DeletedAt once it was (its email and username are then replaced).
+	DeletionRequestedAt *time.Time `json:"deletionRequestedAt,omitempty"`
+	DeletedAt           *time.Time `json:"deletedAt,omitempty"`
 }
 
 // AdminUserDetail is one account as users show prints it.
@@ -121,7 +125,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v20.
+// a notice is sent, its SMTP settings) and checks the schema is v21.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -143,9 +147,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 20 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 21 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v20 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v21 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -157,7 +161,8 @@ const adminUserQuery = `SELECT u.user_id, u.email, u.created_at, u.max_private_s
 	(SELECT COUNT(*) FROM metatrash_memberships m WHERE m.user_id = u.user_id AND m.status = 'active'),
 	(SELECT COUNT(*) FROM metatrash_passkeys p WHERE p.user_id = u.user_id),
 	(SELECT COUNT(*) FROM metatrash_totp t WHERE t.user_id = u.user_id AND t.enabled_at > 0),
-	(SELECT COUNT(*) FROM metatrash_recovery_codes r WHERE r.user_id = u.user_id)
+	(SELECT COUNT(*) FROM metatrash_recovery_codes r WHERE r.user_id = u.user_id),
+	u.deletion_requested_at, u.deleted_at
 FROM metatrash_users u`
 
 func scanAdminUser(row accountScanner) (AdminUser, error) {
@@ -165,8 +170,17 @@ func scanAdminUser(row accountScanner) (AdminUser, error) {
 	var created string
 	var username sql.NullString
 	var emailLogin, totp int
-	if err := row.Scan(&u.ID, &u.Email, &created, &u.MaxPrivateSpaces, &username, &emailLogin, &u.OwnedSpaces, &u.Memberships, &u.Passkeys, &totp, &u.RecoveryCodes); err != nil {
+	var requested, deleted sql.NullInt64
+	if err := row.Scan(&u.ID, &u.Email, &created, &u.MaxPrivateSpaces, &username, &emailLogin, &u.OwnedSpaces, &u.Memberships, &u.Passkeys, &totp, &u.RecoveryCodes, &requested, &deleted); err != nil {
 		return u, err
+	}
+	if requested.Valid {
+		at := time.Unix(requested.Int64, 0).UTC()
+		u.DeletionRequestedAt = &at
+	}
+	if deleted.Valid {
+		at := time.Unix(deleted.Int64, 0).UTC()
+		u.DeletedAt = &at
 	}
 	// Show what is stored even when it would fail the service's checks,
 	// since the console is where an administrator looks when it does.
@@ -603,7 +617,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v20 ready") {
+	if !add("schema", store.ready(ctx), "v21 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -718,6 +732,7 @@ var accountGrants = []string{
 	"metatrash_virtual_refresh UPDATE (every)", "metatrash_virtual_refresh UPDATE (next_run_at)", "metatrash_virtual_refresh UPDATE (last_run_at)",
 	"metatrash_virtual_refresh UPDATE (stale_since)", "metatrash_virtual_refresh UPDATE (stale_reason)",
 	"metatrash_spaces UPDATE (deleted_at)", "metatrash_spaces UPDATE (slug)",
+	"metatrash_users UPDATE (deletion_requested_at)", "metatrash_users UPDATE (deleted_at)",
 }
 
 // checkPrivileges compares the login's privileges in this database with

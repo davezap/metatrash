@@ -195,3 +195,60 @@ func TestInstallFiles(t *testing.T) {
 		t.Fatal(cmd)
 	}
 }
+
+// mtsync sync asks the running service for a pass now, in one folder or all.
+func TestRequestSync(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	serviceTick, workerRetry = 50*time.Millisecond, 100*time.Millisecond
+	server, _ := testSpace(t)
+	folderClient = func(e folderEntry, _ func(context.Context, bool) (string, error)) *client {
+		key := func(context.Context, bool) (string, error) { return "writer", nil }
+		return newClient(e.Server, e.Space, key, false)
+	}
+	agent := newClient(server, "private", func(context.Context, bool) (string, error) { return "writer", nil }, false)
+
+	if err := requestSync(context.Background(), "", &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("without a service: %v", err)
+	}
+
+	a := filepath.Join(t.TempDir(), "a")
+	if err := saveRegistry(registry{Folders: []folderEntry{{Space: "private", Folder: a, Server: server}}}); err != nil {
+		t.Fatal(err)
+	}
+	logs := &syncedBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	// Scans a minute apart: only a sync request sends a local save soon.
+	go func() { done <- runService(ctx, time.Minute, logs) }()
+	defer func() { cancel(); <-done }()
+	eventually(t, 5*time.Second, "first download", func() bool { _, err := os.Stat(filepath.Join(a, "AGENTS.md")); return err == nil })
+
+	if err := requestSync(context.Background(), filepath.Join(t.TempDir(), "elsewhere"), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("unregistered folder: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(a, "mine.txt"), []byte("now\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond) // a file must settle for a second before it goes up
+	var out bytes.Buffer
+	if err := requestSync(context.Background(), a, &out); err != nil || !strings.Contains(out.String(), "Syncing "+a) {
+		t.Fatalf("sync %s: %v %s", a, err, out.String())
+	}
+	eventually(t, 5*time.Second, "save uploaded", func() bool {
+		text, err := agent.read(context.Background(), "mine.txt", "")
+		return err == nil && text == "now\n"
+	})
+	if !strings.Contains(logs.String(), "[private] sync requested") {
+		t.Fatalf("no log line: %s", logs.String())
+	}
+	// By space, and every folder.
+	if err := requestSync(context.Background(), "private", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := requestSync(context.Background(), "", &out); err != nil || !strings.Contains(out.String(), "every folder") {
+		t.Fatalf("sync all: %v %s", err, out.String())
+	}
+}

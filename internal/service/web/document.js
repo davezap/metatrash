@@ -225,9 +225,58 @@
     }
   });
 
-  // The tree scrolls on its own: show the open file's entry in a long tree.
-  const current = tree && tree.querySelector("a[aria-current]");
-  if (current) current.scrollIntoView({ block: "nearest" });
+  // Small screens: the explorer is a drawer over the document, opened by the
+  // Files button and closed by choosing a file, the backdrop or Escape. The
+  // drawer only exists once this has run (body.drawer), so without
+  // JavaScript the tree stays above the document.
+  const aside = document.getElementById("explorer");
+  const toggle = main.querySelector(".files-toggle");
+  const narrow = window.matchMedia ? window.matchMedia("(max-width: 800px)") : null;
+  function drawerShown() {
+    return document.body.classList.contains("files-open");
+  }
+  function showCurrent() {
+    const current = tree && tree.querySelector("a[aria-current]");
+    if (current) current.scrollIntoView({ block: "nearest" });
+  }
+  function setDrawer(open, focus) {
+    if (!toggle || drawerShown() === open) return;
+    document.body.classList.toggle("files-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open) {
+      showCurrent();
+      const target = (tree && (tree.querySelector("a[aria-current]") || tree.querySelector("a, summary"))) || aside;
+      if (focus && target) target.focus({ preventScroll: true });
+    } else if (focus) {
+      toggle.focus({ preventScroll: true });
+    }
+  }
+  if (aside && toggle && narrow) {
+    const backdrop = document.createElement("div");
+    backdrop.className = "drawer-backdrop";
+    backdrop.addEventListener("click", () => setDrawer(false, true));
+    aside.after(backdrop);
+    document.body.classList.add("drawer");
+    toggle.hidden = false;
+    toggle.addEventListener("click", () => setDrawer(!drawerShown(), true));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && drawerShown()) setDrawer(false, true);
+    });
+    // Choosing a file closes the drawer, before it opens in place.
+    aside.addEventListener("click", (event) => {
+      if (event.target.closest("a[href]")) setDrawer(false, false);
+    });
+    const widened = () => {
+      if (narrow.matches) return;
+      setDrawer(false, false);
+      showCurrent();
+    };
+    if (narrow.addEventListener) narrow.addEventListener("change", widened);
+  }
+
+  // The tree scrolls on its own: show the open file's entry in a long tree
+  // (in the drawer, when it opens).
+  if (!narrow || !narrow.matches || !toggle) showCurrent();
 
   if (!tree || !window.fetch || !window.DOMParser || !window.history.pushState) return;
 

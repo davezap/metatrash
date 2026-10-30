@@ -223,6 +223,7 @@ func (a *accounts) startSessionLocked(ctx context.Context, userID string, now ti
 		}
 	}
 	a.sessions[key] = session
+	a.cancelDeletionOnSignIn(userID, now)
 	return token, nil
 }
 

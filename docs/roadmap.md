@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of Metatrash 0.69.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.71.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -24,16 +24,10 @@ What is left needs measuring first:
 
 ## Account lifecycle
 
-Agreed with Dave 2026-10-06 (done parts in the archive). Still to build, in
-this order:
+Agreed with Dave 2026-10-06 (done parts in the archive, including Delete
+account in 0.71.0). Still to do:
 
-1. **Delete account.** Refused while the account owns any space (delete or
-   transfer first). On confirm (step-up): the account is locked at once,
-   sessions and OAuth grants revoked, and a notice is sent. **30-day grace
-   period**: signing in during it cancels the deletion. Then purge:
-   memberships, invitations, GitHub installations, passkeys, TOTP, recovery
-   codes and the user row. Final notice email.
-2. **Update the privacy policy** (`legal/privacy.md` in the
+1. **Update the privacy policy** (`legal/privacy.md` in the
    `dave-zap/metatrash-com` space) once deletion exists: what sign-in methods
    store (passkey public keys, sealed authenticator secrets, hashed recovery
    codes), how account deletion and the grace period work, and concrete
@@ -423,14 +417,22 @@ From 0.53.0 (2026-10-25):
   versions hidden, not refused). Setup, nightly runs and the emailed
   configuration are done.
 
+From 0.69.1 (2026-10-30):
+
+- **File viewer on a phone:** on a phone (or a window under 800 px) open a
+  long document in `/docs/`, an owned space and the public explorer. The
+  document fills the screen under a one-line header and space bar; Files
+  opens the tree over it with the current file highlighted; choosing a file
+  closes the tree and shows that file; tapping outside the tree closes it;
+  turning the phone sideways keeps the drawer.
+
 From 0.52.2 (2026-10-24):
 
 - **Document viewer layout:** on a long document in `/docs/`, an owned space
   and the public explorer, the browser shows no page scroll bar at any window
   height; header and footer stay put; Slate's status bar sits on the footer;
   the document and the explorer tree each scroll on their own; a file deep in
-  a long tree is scrolled into view on load. Check a phone width too (tree
-  above the document, at most a quarter of the height).
+  a long tree is scrolled into view on load. (Phone widths: see 0.69.1.)
 
 From 0.30.0 (2026-10-09):
 

@@ -48,7 +48,36 @@ body.viewer .document{display:grid;grid-template-rows:auto auto minmax(0,1fr);gr
 body.viewer .tab{justify-self:start}
 body.viewer pre{min-height:0}
 @media(max-width:800px){body.viewer footer{flex-direction:row;flex-wrap:wrap;padding:12px 5%}}
-@media(max-width:540px){body.viewer>.workspace{grid-template-rows:auto minmax(0,1fr)}body.viewer aside{max-height:25vh;max-height:25dvh}}
+@media(max-width:540px){body.viewer:not(.drawer)>.workspace{grid-template-rows:auto minmax(0,1fr)}body.viewer:not(.drawer) aside{max-height:25vh;max-height:25dvh}}
+/* Small screens: the document gets the window. The explorer becomes a drawer
+   that the Files button opens over the document (document.js adds .drawer;
+   without JavaScript the tree stays above the document as before), and the
+   header, space bar, file heading and footer shrink to a line each. */
+.document-bar{display:flex;align-items:stretch;min-width:0}
+.document-bar .tab{min-width:0}
+.files-toggle{display:none}
+.drawer-backdrop{display:none}
+@media(max-width:800px){
+body.viewer>header{min-height:0;padding:10px 16px;flex-wrap:nowrap;gap:12px}
+body.viewer .brand{font-size:20px;letter-spacing:-1px}
+body.viewer>header nav{gap:14px;font-size:12px;text-align:right}
+body.viewer>.space-bar{padding:7px 16px;font-size:11px;flex-direction:row}
+body.viewer>.space-bar>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.viewer>.space-bar>span+span{display:none}
+body.viewer .document{grid-template-rows:auto minmax(0,1fr)}
+body.viewer .document-heading{display:none}
+body.viewer .tab{padding:10px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal;flex:1 1 auto}
+body.viewer pre{padding:12px 16px 30px;font-size:13px}
+body.viewer>footer{padding:7px 16px;gap:4px 16px}
+body.viewer>footer>span:first-child{display:none}
+body.viewer.drawer>.workspace{grid-template-columns:minmax(0,1fr)}
+body.viewer.drawer .files-toggle{display:flex;align-items:center;gap:7px;flex:none;font:12px ui-monospace,Consolas,monospace;color:var(--accent);background:var(--panel);border:0;border-right:1px solid var(--line);border-top:2px solid transparent;padding:10px 14px;cursor:pointer}
+body.viewer.drawer .files-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+body.viewer.drawer aside{position:fixed;top:0;bottom:0;left:0;z-index:20;width:min(320px,86vw);max-height:none;border-right:1px solid var(--line);border-bottom:0;box-shadow:0 0 40px rgba(0,0,0,.5);transform:translateX(-105%);visibility:hidden;transition:transform .2s ease,visibility 0s linear .2s}
+body.viewer.drawer.files-open aside{transform:none;visibility:visible;transition:transform .2s ease}
+body.viewer.drawer.files-open .drawer-backdrop{display:block;position:fixed;inset:0;z-index:19;background:rgba(0,0,0,.45)}
+}
+@media(max-width:800px) and (prefers-reduced-motion:reduce){body.viewer.drawer aside,body.viewer.drawer.files-open aside{transition:none}}
 
 .owned-spaces{list-style:none;margin:20px 0;padding:0}.owned-spaces li{padding:18px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.owned-spaces .hint{margin:6px 0}.owned-spaces .button{margin-top:8px}.account-card h3{font-size:18px;font-weight:550;margin-top:26px}.space-bar>span{overflow-wrap:anywhere;min-width:0}
 .account-panel select{display:block;width:100%;margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);font:inherit;font-size:15px}.account-panel select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.consent-spaces label{margin:0;font-size:16px;line-height:1.5}.consent-spaces label .hint{display:block;margin:2px 0 0;font-size:13px}.account-panel .button-quiet{background:transparent;color:var(--text);border:1px solid var(--line);margin-left:10px}.account-panel .button-quiet:hover{background:var(--panel);color:var(--accent)}.link-button{background:none;padding:0;color:var(--accent);font-size:inherit;text-decoration:underline}.signed-in-as{margin-top:28px}

@@ -8,12 +8,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 // serviceTick is how often the service rereads the registry, writes its
-// status and looks for a stop request.
+// status and looks for a stop or sync request.
 var serviceTick = 3 * time.Second
 
 // workerRetry is the wait before a folder that stopped with an error (signed
@@ -35,6 +36,8 @@ func runService(ctx context.Context, interval time.Duration, logOut io.Writer) e
 	defer lock.release()
 	stopPath, _ := configFile("mtsync-service.stop")
 	os.Remove(stopPath)
+	syncPath, _ := configFile("mtsync-service.sync")
+	os.Remove(syncPath)
 	logger := log.New(logOut, "", log.LstdFlags)
 	logger.Printf("mtsync service started")
 	ctx, cancel := context.WithCancel(ctx)
@@ -93,6 +96,16 @@ func runService(ctx context.Context, interval time.Duration, logOut io.Writer) e
 			logger.Printf("stop requested")
 			return nil
 		}
+		if b, err := os.ReadFile(syncPath); err == nil {
+			os.Remove(syncPath)
+			folder := strings.TrimSpace(string(b))
+			for f, w := range workers {
+				if folder == "" || samePath(f, folder) {
+					w.entry.logf(logger)("sync requested")
+					w.nudge()
+				}
+			}
+		}
 		status.write()
 		select {
 		case <-ctx.Done():
@@ -106,6 +119,22 @@ type worker struct {
 	entry  folderEntry
 	cancel context.CancelFunc
 	done   chan struct{}
+	// poke asks the folder for a pass at once, or to stop waiting to try
+	// again after an error.
+	poke chan struct{}
+}
+
+// nudge asks the worker's folder for a pass now (mtsync sync).
+func (w *worker) nudge() {
+	select {
+	case w.poke <- struct{}{}:
+	default:
+	}
+}
+
+// logf is how a folder's lines start in the service log: [owner/slug].
+func (e folderEntry) logf(logger *log.Logger) func(string, ...any) {
+	return func(format string, args ...any) { logger.Printf("[%s] "+format, append([]any{e.Space}, args...)...) }
 }
 
 func (w *worker) stop() {
@@ -117,26 +146,29 @@ func (w *worker) stop() {
 // stops with an error.
 func startWorker(parent context.Context, e folderEntry, token func(context.Context, bool) (string, error), interval time.Duration, logger *log.Logger, status *statusWriter) *worker {
 	ctx, cancel := context.WithCancel(parent)
-	w := &worker{entry: e, cancel: cancel, done: make(chan struct{})}
-	logf := func(format string, args ...any) { logger.Printf("[%s] "+format, append([]any{e.Space}, args...)...) }
+	w := &worker{entry: e, cancel: cancel, done: make(chan struct{}), poke: make(chan struct{}, 1)}
+	logf := e.logf(logger)
 	go func() {
 		defer close(w.done)
 		for {
-			err := syncFolder(ctx, e, token, interval, logf, status)
+			err := syncFolder(ctx, e, token, interval, logf, status, w.poke)
 			if ctx.Err() != nil {
 				return
 			}
 			status.set(e, err)
 			logf("stopped: %v; trying again in %s", err, workerRetry)
-			if sleepContext(ctx, workerRetry) != nil {
+			select {
+			case <-ctx.Done():
 				return
+			case <-w.poke:
+			case <-time.After(workerRetry):
 			}
 		}
 	}()
 	return w
 }
 
-func syncFolder(ctx context.Context, e folderEntry, token func(context.Context, bool) (string, error), interval time.Duration, logf func(string, ...any), status *statusWriter) error {
+func syncFolder(ctx context.Context, e folderEntry, token func(context.Context, bool) (string, error), interval time.Duration, logf func(string, ...any), status *statusWriter, poke <-chan struct{}) error {
 	c := folderClient(e, token)
 	s, err := openSyncer(c, e.Folder, e.Server, e.Space, logf)
 	if err != nil {
@@ -148,6 +180,7 @@ func syncFolder(ctx context.Context, e folderEntry, token func(context.Context, 
 	}
 	defer unlock()
 	s.onPass = func(err error) { status.set(e, err) }
+	s.poke = poke
 	err = s.loop(ctx, interval, false)
 	if err == nil && ctx.Err() == nil {
 		err = fmt.Errorf("sync ended")
@@ -221,6 +254,60 @@ func requestStop(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("the service did not stop within 30 seconds")
 	}
 	fmt.Fprintln(out, "The service stopped. Login starts it again if it is installed; mtsync uninstall removes that.")
+	return nil
+}
+
+// requestSync asks the running service for a pass now, in every folder or
+// in the one registered folder named by its path or space, and waits for
+// the service to take the request (it looks every few seconds).
+func requestSync(ctx context.Context, target string, out io.Writer) error {
+	if !serviceRunning() {
+		return fmt.Errorf("the service is not running; start it with mtsync start")
+	}
+	folder := ""
+	if target != "" {
+		r, err := loadRegistry()
+		if err != nil {
+			return err
+		}
+		abs, _ := filepath.Abs(target)
+		for _, e := range r.Folders {
+			if samePath(e.Folder, abs) || e.Space == target {
+				if folder != "" {
+					return fmt.Errorf("several folders sync %s; name the folder", target)
+				}
+				folder = e.Folder
+			}
+		}
+		if folder == "" {
+			return fmt.Errorf("%s is not registered; mtsync list shows what is", target)
+		}
+	}
+	syncPath, err := configFile("mtsync-service.sync")
+	if err != nil {
+		return err
+	}
+	if err := writeFileAtomic(syncPath, []byte(folder), 0600); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := os.Stat(syncPath); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) || !serviceRunning() {
+			os.Remove(syncPath)
+			return fmt.Errorf("the service did not take the request; mtsync log may say why")
+		}
+		if sleepContext(ctx, 100*time.Millisecond) != nil {
+			return ctx.Err()
+		}
+	}
+	if folder == "" {
+		fmt.Fprintln(out, "Syncing every folder now. mtsync list shows when each was checked.")
+	} else {
+		fmt.Fprintf(out, "Syncing %s now. mtsync list shows when it was checked.\n", folder)
+	}
 	return nil
 }
 

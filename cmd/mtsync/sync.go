@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -111,8 +112,15 @@ type syncer struct {
 	leftEmpty map[string]bool
 	// noChanges is set when the server can't list changes (before 0.37.0).
 	noChanges bool
-	// onPass, when set, hears how each pass ended (nil when it completed).
+	// onPass, when set, hears how each pass ended (nil when it completed),
+	// and hears nil after a scan that found the folder and the space as they
+	// were, so the status shows when the folder was last checked.
 	onPass func(err error)
+	// poke, when set, asks for a pass at once (mtsync sync).
+	poke <-chan struct{}
+	// remoteLive is true while watchRemote's last request to the space
+	// succeeded, so a quiet scan can count as a check of both sides.
+	remoteLive atomic.Bool
 }
 
 // lock keeps a second mtsync (the service and a command, say) from syncing

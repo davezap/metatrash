@@ -196,6 +196,18 @@ CSRF value, bounded form fields and a per-user attempt limit.
   schedules and refresh rows, in that order so an interrupted purge repeats.
   `mt spaces restore` sets a deleted space back to `ready` (the service opens
   it on restart).
+- **Delete account** (0.71.0, schema v21, `account_delete.go`). Refused while
+  the account owns a `provisioning` or `ready` space; checked in the same
+  transaction that sets `deletion_requested_at`, with the user row locked as
+  space creation and transfer acceptance lock it. That transaction also
+  deletes the account's OAuth grants (tokens cascade), action opt-ins and
+  transfer offers to it; then every session ends. Any new session
+  (`startSessionLocked`) clears a pending request. Thirty days on, the
+  runner's daily housekeeping deletes the account's personal rows in one
+  transaction and anonymises the user row (`deleted-<id>@deleted.invalid`,
+  username NULL, `deleted_at`) rather than deleting it, because
+  acknowledgements, form submissions and purged spaces reference it with
+  `ON DELETE RESTRICT`. The address is free, so it can sign up again.
 - **Virtual files** (0.60.0, `virtual.go`): content that isn't kept in Git
   (PDFs, Word files, pictures, anything uploaded or fetched to a path) lives
   in the `agents.downloads` bucket under `files/<space ID>/<sha256>`, with

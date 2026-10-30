@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.71.0 - Delete your account (2026-10-30)
+
+**Schema v21 and grants.** Before starting 0.71.0: stop the service, back up, apply `deploy/account-schema-v21.sql` as the schema administrator, then `deploy/account-grants.sql` (new: `UPDATE (deletion_requested_at, deleted_at)` on `metatrash_users`). No `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. CI needs `.github/workflows/ci.yml` to apply v1–v21 (in this delivery).
+
+- **Delete account** at the bottom of Profile. It needs a sign-in or confirmation within the last 10 minutes and your email address typed (case and surrounding spaces don't matter). It's refused while you own a space that isn't deleted; the card says how many and points to Manage sharing, where you delete each one or offer it to a member.
+- **At once:** you're signed out everywhere and land on the sign-in page with a notice, your connected apps and their tokens are removed, folder actions you opted into stop, ownership offers to you are withdrawn, and you're emailed.
+- **30 days to change your mind.** Signing in again in that time cancels the deletion, with an email saying so. Connected apps have to be connected again.
+- **Then purged** by the folder actions runner's daily housekeeping, with deleted spaces: memberships, agents and their keys, GitHub connections, passkeys, the authenticator app, recovery codes, sessions, old addresses and web references go, and invitations you accepted become cancelled. The account row stays with its ID only (email `deleted-<id>@deleted.invalid`, no username), because other people's acknowledgements, form submissions and purged spaces still name it. The address can sign up again as a new account. A final email goes to it. Log lines start `deleted accounts:`.
+- `mt users list` shows `deletion pending` or `deleted`, and `mt users show` when the deletion was asked and when it will be purged.
+- Tested against MariaDB: Profile hides the form until confirmed (403 without) and while a space is owned (409 when posted), a wrong address (400), another form's token (403), then the email in other case; afterwards both of the account's sessions are signed out, the session cookie cleared, the connected app refused (401), the notice sent; a new sign-in cancels it (with its email) and a purge 30 days on leaves it alone; asked again, nothing purged at 29 days 23 hours, then at 30 days the row anonymised, memberships, sessions and app connections gone, the acknowledgement kept, the old address no longer finding it, the final email sent, and the address signing up as a new account. Full suite with schema v21 and the grants check.
+
+## 0.70.0 - mtsync: Sync now and live check times (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only mtsync needs releasing (the server is unchanged from 0.69.1). For Slate Viewer 0.21.0's sync menu.
+
+- **`mtsync sync [FOLDER|SPACE]`** asks the running service to sync now, every folder or one: a pass runs even if nothing seems to have changed, and a folder waiting a minute to retry after an error (signed out, say) tries at once. The command leaves a request file (`mtsync-service.sync` beside `mtsync-service.stop`) that the service picks up at its next 3-second tick, waits for it to be taken, and says so; the log shows `[owner/slug] sync requested`. It refuses when the service isn't running or the folder isn't registered. Slate Viewer's **Sync now** runs it.
+- **"in sync, checked <time>" is the last check.** It used to be the end of the last pass, so a quiet folder showed the same time for hours. Now a scan that finds nothing new while the waiting request to the space is answering counts as a check too, so the time stays within a few seconds of now; while the space can't be reached it stops moving.
+- **The folder is scanned every 2 seconds** (`-interval` default, was 5), so saves start uploading sooner. Scans only read file sizes and times. Retries after a failure still wait at least 5 seconds a step (up to a minute), as before.
+- Tested: a poke sends a local save at once with a one-minute interval; quiet scans count as checks only while the space is watched; against a running service, `mtsync sync FOLDER` sends a save the one-minute scan hadn't reached, by space and for every folder, the log line, and the refusals (service not running, unregistered folder). Full mtsync suite, also with `-race` for the loop and service tests; `GOOS=windows go vet`.
+
+## 0.69.1 - The file viewer on a phone (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing (the site's page, style and script).
+
+- **The document gets the screen.** On a window 800 px wide or less, the explorer tree no longer sits above the document taking a quarter of the height (and the 210 px column between 540 and 800 px is gone). It is a drawer: a **Files** button beside the file's tab slides it in over the document, with the open file shown and focused. Choosing a file closes it and opens the file in place as before; tapping outside it or Escape closes it too.
+- The rest of the chrome shrinks to a line each on small screens: a shorter header, the space bar's first part only, no repeated file heading (the tab names the file), and a footer with just its links.
+- Without JavaScript the tree stays above the document as before. Wider windows are unchanged.
+- Docs pages (`/docs/`), owned spaces and the public explorer all use it.
+- Tested in Chromium at 390×844 (touch) against a page rendered from the real template: before and after screenshots, the drawer opening with the current file focused, a file chosen from it opening in place with the drawer closed, Escape and the backdrop closing it (focus back on Files), no sideways scroll, 1280 px unchanged, and the no-JavaScript fallback.
+
 ## 0.69.0 - GitHub changes arrive on their own (2026-10-30)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. The GitHub App already sends push events (its "Subscribe to events" has Push).

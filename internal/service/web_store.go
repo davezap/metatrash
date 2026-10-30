@@ -73,7 +73,7 @@ type dbWebStore struct{ db *sql.DB }
 const webRefColumns = "ref_id, user_id, url, original_hash, text_hash, kind, extension, title, text_lines, etag, last_modified, created_at, expires_at"
 
 func (db *accountDatabase) checkWebSchema(ctx context.Context) error {
-	bad := fmt.Errorf("account schema v20 required (web tools, schedules, virtual file refresh and deleted spaces); follow docs/deployment.md")
+	bad := fmt.Errorf("account schema v21 required (web tools, schedules, virtual file refresh, deleted spaces and accounts); follow docs/deployment.md")
 	for _, query := range []string{
 		"SELECT " + webRefColumns + " FROM metatrash_web_refs LIMIT 0",
 		"SELECT object_hash, content_type, bytes, uploaded_at FROM metatrash_web_objects LIMIT 0",
@@ -81,6 +81,7 @@ func (db *accountDatabase) checkWebSchema(ctx context.Context) error {
 		"SELECT timezone FROM metatrash_spaces LIMIT 0",
 		"SELECT " + refreshColumns + " FROM metatrash_virtual_refresh LIMIT 0",
 		"SELECT deleted_at FROM metatrash_spaces LIMIT 0",
+		"SELECT deletion_requested_at, deleted_at FROM metatrash_users LIMIT 0",
 	} {
 		rows, err := db.db.QueryContext(ctx, query)
 		if err != nil {

@@ -47,6 +47,7 @@ Service:
   start                    start the service in the background
   run                      run the service in this window (Ctrl+C to stop)
   stop                     stop the running service
+  sync [FOLDER|SPACE]      ask the running service to sync now (every folder, or one)
   log [N]                  show the last N lines of the service log (default 40)
 
 History (FILE is a file in a registered folder):
@@ -105,7 +106,7 @@ func run(args []string) error {
 	flags := flag.NewFlagSet("mtsync", flag.ContinueOnError)
 	server := flags.String("server", defaultServer, "metatrash site (login, logout, spaces, add and one-off sync)")
 	once := flags.Bool("once", false, "one-off sync: one pass, then exit")
-	interval := flags.Duration("interval", 5*time.Second, "time between scans of each folder")
+	interval := flags.Duration("interval", 2*time.Second, "time between scans of each folder")
 	limit := flags.Int("limit", 10, "history: how many changes to list (1..100)")
 	offset := flags.Int("offset", 0, "history: skip this many of the newest changes")
 	asJSON := flags.Bool("json", false, "history, policies, readers, submit, submissions, review, whoami, spaces, list, pull, pending and push: answer in JSON")
@@ -169,6 +170,12 @@ func run(args []string) error {
 		return startService(ctx, os.Stdout)
 	case cmd == "stop" && len(rest) == 1:
 		return requestStop(ctx, os.Stdout)
+	case cmd == "sync" && len(rest) <= 2:
+		target := ""
+		if len(rest) == 2 {
+			target = rest[1]
+		}
+		return requestSync(ctx, target, os.Stdout)
 	case cmd == "install" && len(rest) == 1:
 		return install(ctx, os.Stdout)
 	case cmd == "uninstall" && len(rest) == 1:

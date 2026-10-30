@@ -25,10 +25,10 @@ Linux and macOS.
   requests a minute. When the space changes, mtsync asks for just the changes
   since the last sync (one request listing the changed and removed files) and
   downloads only the changed files; the whole space is listed only on the
-  first sync. The folder itself is scanned every 5 seconds, without
-  any network traffic unless something changed. Either one starts a pass.
-  Against a server older than 0.34.0 it checks the space every 5 seconds
-  instead. Each file is compared three ways: the folder, the
+  first sync. The folder itself is scanned every 2 seconds (5 before
+  mtsync 0.70.0), without any network traffic unless something changed.
+  Either one starts a pass, and so does `mtsync sync`. Against a server older
+  than 0.34.0 it checks the space every 2 seconds instead. Each file is compared three ways: the folder, the
   space, and the version both last agreed on (kept in `.mtsync/state.json`).
   - Changed here: uploaded. Deleted here: deleted in the space.
   - Changed in the space: downloaded. Deleted there: deleted here (empty
@@ -263,7 +263,16 @@ branch that moved on GitHub (pull, then push again), push mode `review`.
 
 `mtsync list` shows, per folder, "in sync, checked <time>", the last error
 (for example signed out, or the space no longer connected; the service tries
-such a folder again every minute), or "service not running".
+such a folder again every minute), or "service not running". From mtsync
+0.70.0 the time is the last check: a scan that finds nothing new while the
+space is being watched counts, so it stays within a few seconds of now.
+
+`mtsync sync` asks the running service to sync every folder now (`mtsync sync
+FOLDER` or `SPACE` for one): a pass runs even if nothing seems to have
+changed, and a folder waiting a minute to try again after an error tries at
+once. It returns when the service has taken the request (the service looks
+every 3 seconds); `mtsync list` then shows the new check time. Slate Viewer's
+**Sync now** uses it.
 
 All commands:
 
@@ -279,6 +288,7 @@ All commands:
 | `start` | start the service in the background (no window) |
 | `run` | run the service in this window instead (Ctrl+C stops it) |
 | `stop` | stop the running service |
+| `sync [FOLDER\|SPACE]` | ask the running service to sync now, every folder or one (mtsync 0.70.0) |
 | `log [N]` | the last N lines of the service log |
 | `export SPACE [FILE]` | save the space as it is now to a zip, for backups |
 | `history FILE` | a synced file's changes, newest first (`-limit`, `-offset`, `-json`) |
@@ -303,7 +313,7 @@ Flags go before the command:
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-server` | `https://metatrash.com` | the metatrash site, for `login`, `logout`, `spaces`, `add`, `export` and a one-off sync |
-| `-interval` | `5s` | time between scans of each folder (and between checks of an older server) |
+| `-interval` | `2s` | time between scans of each folder (and between checks of an older server) |
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |
 | `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
