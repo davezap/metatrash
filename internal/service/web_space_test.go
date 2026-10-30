@@ -1,6 +1,8 @@
 package service
 
 import (
+	"archive/zip"
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -140,6 +142,67 @@ func writePrivateReadme(w *oauthWorld) {
 	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
 	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "README.md", "text": "# Private space\n", "ifInState": state}, "")
+}
+
+// Your account offers each space as a zip (0.65.0): the space's top folder
+// with ?export, for its owner and members only, even when it is readable on
+// the web.
+func TestDownloadSpaceAgainstDatabase(t *testing.T) {
+	w := newOAuthWorld(t)
+	writePrivateReadme(w)
+	ownerSession, strangerSession := w.session(w.owner), w.session(w.user("stranger"))
+	download := "/spaces/" + w.ownedName + "/?export"
+
+	res := oauthCall(w.h, "GET", download, nil, ownerSession)
+	if res.Code != 200 || res.Header().Get("Content-Type") != "application/zip" || !strings.HasPrefix(res.Header().Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("owner: %d %v", res.Code, res.Header())
+	}
+	body := res.Body.Bytes()
+	archive, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, f := range archive.File {
+		names[f.Name] = true
+	}
+	if !names["README.md"] || !names[exportManifestName] {
+		t.Fatalf("zip holds %v", names)
+	}
+	// A member downloads the space they joined.
+	if res := oauthCall(w.h, "GET", "/spaces/"+w.joinName+"/?export", nil, ownerSession); res.Code != 200 {
+		t.Fatalf("member: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "GET", download, nil, strangerSession); res.Code != 404 {
+		t.Fatalf("stranger: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "GET", download, nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
+		t.Fatalf("signed out: %d %s", res.Code, res.Header().Get("Location"))
+	}
+	// Only the top folder takes it.
+	for _, path := range []string{"README.md?export", "?export=1"} {
+		if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/"+path, nil, ownerSession); res.Code != 404 {
+			t.Fatalf("%s: %d", path, res.Code)
+		}
+	}
+	if body := oauthCall(w.h, "GET", "/account", nil, ownerSession).Body.String(); !strings.Contains(body, `href="`+download+`"`) || !strings.Contains(body, `href="/spaces/`+w.joinName+`/?export"`) {
+		t.Fatal("account page lacks the Download links")
+	}
+
+	// Readable on the web: visitors still cannot download it.
+	csrf := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
+	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {csrf}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 303 {
+		t.Fatalf("make web: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "GET", download, nil, strangerSession); res.Code != 404 {
+		t.Fatalf("stranger, web: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "GET", download, nil); res.Code != 404 {
+		t.Fatalf("signed out, web: %d", res.Code)
+	}
+	if res := oauthCall(w.h, "GET", download, nil, ownerSession); res.Code != 200 {
+		t.Fatalf("owner, web: %d", res.Code)
+	}
 }
 
 func TestFileTreeOpensSelectedFolders(t *testing.T) {

@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of Metatrash 0.61.1 and Slate Viewer 0.20.2 (2026-10-28). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.65.0 and Slate Viewer 0.20.4 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -29,16 +29,14 @@ this order:
 
 1. **Delete a space** (owner, step-up, type the name). Members and connected
    apps lose access; GitHub folders are unlinked, the repo is untouched.
-2. **Download a space** from Your account (the zip the REST export and the
-   console already make), offered before deleting; also answers access
-   requests.
-3. **Delete account.** Refused while the account owns any space (delete or
+   Offer the Download link (0.65.0) on the confirm page.
+2. **Delete account.** Refused while the account owns any space (delete or
    transfer first). On confirm (step-up): the account is locked at once,
    sessions and OAuth grants revoked, and a notice is sent. **30-day grace
    period**: signing in during it cancels the deletion. Then purge:
    memberships, invitations, GitHub installations, passkeys, TOTP, recovery
    codes and the user row. Final notice email.
-4. **Update the privacy policy** (`legal/privacy.md` in the
+3. **Update the privacy policy** (`legal/privacy.md` in the
    `dave-zap/metatrash-com` space) once deletion exists: what sign-in methods
    store (passkey public keys, sealed authenticator secrets, hashed recovery
    codes), how account deletion and the grace period work, and concrete

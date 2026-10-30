@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.65.0 - Download a space from Your account (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing.
+
+- **Download a space** from Your account: each space row (yours and the ones you joined) has a Download icon that saves the space as a zip, the same one the REST export makes, virtual files included, with `.metatrash-export.json`. The link is `/spaces/<owner>/<slug>/?export`, for the space's owner and members only: a space readable on the web is still not downloadable by visitors (404), and only the top folder takes `?export`. It shares the export allowances (60 per space and 10 per client in ten minutes).
+
 ## 0.64.1 - Slate 0.20.0: line breaks in tables (2026-10-30)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing.

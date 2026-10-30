@@ -146,7 +146,10 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	// ?format=md (or Accept: text/markdown) a file's text as it is.
 	raw := r.URL.RawQuery == "raw"
 	asked := r.URL.RawQuery == markdownQuery
-	if r.URL.RawQuery != "" && !raw && !asked {
+	// ?export on the space's top folder downloads the whole space as a zip,
+	// for its owner and members (0.65.0).
+	export := r.URL.RawQuery == "export"
+	if r.URL.RawQuery != "" && !raw && !asked && !export {
 		sendError(w, missing())
 		return
 	}
@@ -256,6 +259,17 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 			target += "?" + r.URL.RawQuery
 		}
 		http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+		return
+	}
+	if export {
+		// A space readable on the web is still downloaded by members only.
+		if docs || !member || path != "" {
+			sendError(w, missing())
+			return
+		}
+		// serveExport knows only ?virtual=list.
+		r.URL.RawQuery = ""
+		h.serveExport(w, r, repo, owner+"/"+space.Slug)
 		return
 	}
 	defaulted := path == ""

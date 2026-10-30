@@ -16,7 +16,9 @@ documented; 0.52.1 only made append's refusals clearer.
 ## Account lifecycle
 
 Agreed with Dave 2026-10-06. Done: change email address, sign out everywhere,
-transfer ownership, space export (REST, `mt spaces export`, `mtsync export`).
+transfer ownership, space export (REST, `mt spaces export`, `mtsync export`),
+and Download on Your account (0.65.0: `/spaces/<owner>/<slug>/?export`, owner
+and members only).
 
 ## Sign-in
 
