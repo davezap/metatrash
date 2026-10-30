@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.64.1 - Slate 0.20.0: line breaks in tables (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing.
+
+- **Slate 0.20.0 on the website**, as in Slate Viewer 0.20.4: documents show `<br>` as a line break (several lines in one table cell) and a few plain inline tags (`<b>`, `<i>`, `<sub>`, `<sup>` and the like). Tags with attributes and any other HTML still show as typed.
+
 ## 0.64.0 - mtsync pulls and pushes GitHub folders (2026-10-30)
 
 No server, schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only mtsync needs releasing.
