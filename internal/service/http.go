@@ -206,6 +206,10 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveAccountREST(w, r, client)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/site/") {
+		h.serveSiteAPI(w, r, client)
+		return
+	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	if len(parts) != 5 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "spaces" {
 		sendError(w, missing())
@@ -230,9 +234,12 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // transport's access check once (before quotas and Git) and dispatches to the
 // repository that check admitted, under the canonical space name it returns.
 // On the OAuth resource, metadataPath is set and an insufficient_scope denial
-// carries an RFC 6750 challenge.
+// carries an RFC 6750 challenge. The site API passes no metadataPath but marks
+// its requests (siteRequest).
 func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request, resource, metadataPath string, access func(write bool) (*repository, string, error)) {
 	op, allow := "", "GET"
+	// The OAuth resource and the site API may use what the account database keeps.
+	accountResource := metadataPath != "" || siteRequest(r.Context())
 	switch resource {
 	case "file":
 		allow = "GET, PUT, DELETE"
@@ -271,7 +278,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		}
 	case "acknowledgements", "submissions":
 		// Kept in the account database, so only the OAuth resource offers them.
-		if metadataPath == "" {
+		if !accountResource {
 			sendError(w, missing())
 			return
 		}
@@ -281,7 +288,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		}
 	case "reviews":
 		// Reviews of filed form copies (0.50.0), kept in the account database.
-		if metadataPath == "" {
+		if !accountResource {
 			sendError(w, missing())
 			return
 		}
@@ -291,7 +298,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		}
 	case "content":
 		// Virtual files (0.60.0) exist only in owned spaces.
-		if metadataPath == "" {
+		if !accountResource {
 			sendError(w, missing())
 			return
 		}
@@ -303,7 +310,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		}
 	case "configure":
 		// A virtual file's source and refresh (0.60.2).
-		if metadataPath == "" {
+		if !accountResource {
 			sendError(w, missing())
 			return
 		}
@@ -313,7 +320,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		}
 	case "pull", "push", "pending":
 		// GitHub folders exist only in owned spaces, so only the OAuth resource offers these.
-		if metadataPath == "" {
+		if !accountResource {
 			sendError(w, missing())
 			return
 		}

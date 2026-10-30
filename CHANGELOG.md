@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.72.0 - Site API for the signed-in browser (2026-10-30)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Step 2 of "Slate Viewer's UI on the website" in the roadmap: nothing on the site uses it yet.
+
+- **`/api/v1/site/`** is the account REST resource again for the website's own pages, signed in with the session cookie instead of an OAuth token, and running the same handlers. `GET /api/v1/site/session` says who is signed in, gives the page its CSRF token and lists their spaces with `read_only` or `read_write`; `/api/v1/site/spaces/{owner}/{slug}/{resource}` (or `spaces/public/…`) offers `file`, `files`, `history`, `search`, `edit`, `move`, `append`, `export`, reading `content`, `acknowledgements`, `submissions` and `reviews`. GitHub pull/pending/push, uploads and `configure` stay with the OAuth resource for now. See Site API in `docs/api-contract.md`.
+- **The person's own access:** the owner can change a space, a member as their permission allows (the same one mtsync uses), and anyone, signed in or not, can read a space that is readable on the web. Signed out, a private space and a missing one both answer 401.
+- **Three locks on writes:** a signed-in session, an `Origin` header that is the site's, and the session's token in `X-Metatrash-CSRF`; reads refuse another origin or a cross-site `Sec-Fetch-Site` too. The cookie stays SameSite=Strict and writes must be JSON.
+- Changes show in history as the account's username through `Metatrash website`, as a person (so, like Slate Viewer, it can change files locked to `agents`).
+- Tested against MariaDB: the session signed out and in (token, spaces and access), owner reads and writes, a stranger (404) and signed out (401) refused, writes without a token, with another session's token, without or with another Origin, and signed out refused, a cross-site read refused, the author in history, a read-only member refused and a read-write one allowed, a suspended member refused, a web-readable space read signed out but not written by a stranger, acknowledgements and submissions for the signed-in person, the routes not offered (404) and wrong methods (405). Full suite.
+
 ## 0.71.0 - Delete your account (2026-10-30)
 
 **Schema v21 and grants.** Before starting 0.71.0: stop the service, back up, apply `deploy/account-schema-v21.sql` as the schema administrator, then `deploy/account-grants.sql` (new: `UPDATE (deletion_requested_at, deleted_at)` on `metatrash_users`). No `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. CI needs `.github/workflows/ci.yml` to apply v1–v21 (in this delivery).

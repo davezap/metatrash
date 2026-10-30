@@ -45,6 +45,12 @@ Plan (each step its own release):
    routes again under a cookie-authenticated prefix (session cookie, plus
    an Origin check and a CSRF header on writes), reusing the same handlers,
    and a cheap "what changed" call (`list since`) for the open folder.
+   *Done in 0.72.0:* `/api/v1/site/session` (account, CSRF token, spaces
+   with access) and `/api/v1/site/spaces/{owner}/{slug}/{resource}` with
+   the person's own access (owner, member permission, web-readable spaces
+   for anyone); writes need the session, the site's Origin and
+   `X-Metatrash-CSRF`. `files?since=` already answers "what changed".
+   Left for later: GitHub pull/push, uploads and `configure` there.
 3. **Web backend and build.** `web.ts` implements `Backend` with `fetch`; a
    `vite build --mode web` writes hashed files that the Go binary embeds and
    serves for owned spaces (`/spaces/{owner}/{slug}/`). Saves use
