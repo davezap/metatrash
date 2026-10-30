@@ -2,6 +2,91 @@
 
 Open work as of Metatrash 0.71.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
+## Next: Slate Viewer's UI on the website (Dave, 2026-10-30)
+
+Dave: the Viewer's UI is far more complete than the site's file explorer and
+works the way Dave likes, so reuse it on the site rather than grow the site's
+own. Assessed 2026-10-30 against Viewer 0.21.0 and Metatrash 0.71.0:
+
+- **Most of it carries over.** The Viewer frontend is Svelte 5 + TypeScript
+  (about 8,800 lines in `src/`), with no inline `style=` attributes, so a
+  Vite build fits the site's CSP (no `'unsafe-inline'`), and it already
+  embeds the same Slate the site uses. The sidebar, file tree, search, quick
+  open, outline, history panel, Compare, Folder Properties and the
+  form/review/policy banners are UI over data and can be reused as they are.
+- **It is not a drop-in swap for Tauri.** The frontend calls about 48 Tauri
+  commands (`invoke`, plus the dialog, opener, window and webview APIs),
+  20 of them inline in the 3,100-line `App.svelte`, and its model is a local
+  folder that mtsync keeps in step: writes go to disk, files are found by
+  OS path, changes arrive from file watchers and conflicts arrive as conflict
+  copies. On the site a save is a server write with `ifInState`, paths are
+  space paths, and there is nothing to watch. A fake `invoke` that maps
+  command names to `fetch` would do for a prototype, but not to keep.
+- **The site has no browser API for this.** `/api/v1/account/...` takes
+  OAuth bearer tokens; the site signs in with a session cookie and renders
+  pages on the server (`browser.go`, `document.js`).
+
+Plan (each step its own release):
+
+1. **Viewer: one backend interface.** Move every Tauri call behind
+   `src/lib/backend/` (a typed `Backend`: read, write, list, move, delete,
+   search, history/show, virtual files, policies/ack/readers,
+   submit/review/submissions, changes, plus a capabilities object), with
+   `desktop.ts` holding today's `invoke` code. Treat a path as a space
+   path plus a root, not an OS path. No change in behaviour; Viewer release.
+   *Written 2026-10-30 (Slate Viewer, after 0.21.0):* `src/lib/backend/`
+   has `types.ts` (the `Backend` interface: files, sync, app, window,
+   dialogs, opener, events, and `capabilities`), `desktop.ts` (Tauri) and
+   `index.ts` (picks the backend). Nothing else imports `@tauri-apps`. Paths
+   stay full paths: the web backend will use a root like
+   `/spaces/{owner}/{slug}` and strip it to get the space path, so the
+   components keep using `joinPath(root, relative)` unchanged.
+2. **Server: a same-origin API for the signed-in browser.** The account REST
+   routes again under a cookie-authenticated prefix (session cookie, plus
+   an Origin check and a CSRF header on writes), reusing the same handlers,
+   and a cheap "what changed" call (`list since`) for the open folder.
+3. **Web backend and build.** `web.ts` implements `Backend` with `fetch`; a
+   `vite build --mode web` writes hashed files that the Go binary embeds and
+   serves for owned spaces (`/spaces/{owner}/{slug}/`). Saves use
+   `ifInState`; a conflict opens Compare with the server copy instead of a
+   conflict file. Watchers become polling `list since` while the tab is
+   visible.
+4. **Desktop-only parts hidden by capability.** Updates, windows, log
+   folder, developer tools, default apps, attention badge, mtsync
+   setup/login/Sync menu and conflict copies stay in the Viewer. Open
+   externally becomes a link or download; native dialogs become in-page ones.
+5. **Phones and the fallback.** The Viewer layout is desktop-first: bring
+   in the site's Files drawer (0.69.1) for narrow screens. Keep the
+   server-rendered pages for no-JS and search engines.
+
+Decided with Dave (2026-10-30):
+
+- **One UI codebase, in Slate Viewer.** The web build's files are copied
+  into `internal/service/web` and embedded, as slate.js is today; no fork.
+  The builds differ only in the backend (`desktop.ts` or `web.ts`) and in
+  what its capabilities switch on or off in the same components.
+- **Read-only or editing.** A space opens read-only when the user may not
+  write to it. When they may, editing is an option they switch on, and the
+  choice is remembered for their session.
+- **No menu bar on the site.** The Viewer's menus are HTML (`MenuBar.svelte`)
+  and would run, but the site doesn't need them: what they hold is either
+  desktop-only or already in the rest of the UI. The site header keeps
+  today's Metatrash logo (it's all about Metatrash) and has only:
+  - a theme selector;
+  - Change Space, which for now goes to `/account` (a proper space picker
+    later).
+
+  Print moves to an icon in Slate's tools header.
+- **Landing page.** metatrash.com opens the public `dave-zap/metatrash-com`
+  space (the docs) in the app. Its `introduction.md` takes over today's
+  homepage text. The homepage's direct link to the public space and its
+  recent activity are dropped for now, to be worked back in later.
+
+Size: medium-large, not a rewrite. About 5 to 8 working sessions over four
+or five releases (step 1 one or two, step 2 one or two, steps 3 and 4 two or
+three, step 5 one or two). The payoff is one UI to maintain: site features
+from then on come with the Viewer's.
+
 ## Fewer tokens per change
 
 Shipped work is in [roadmap-archive.md](roadmap-archive.md#fewer-tokens-per-change).
