@@ -159,7 +159,7 @@ CSRF value, bounded form fields and a per-user attempt limit.
   creations count), then provisions the repository through the write queue and
   marks it ready. Startup retries unfinished creations under their original ID
   and refuses to start if a ready repository is missing. Allowance is never
-  refunded automatically.
+  refunded automatically, except by deleting a space.
 - `metatrash_spaces.owner_user_id` is the only record of ownership; owners have
   no membership row.
 - **Transfer** (0.30.0, schema v9). The owner offers the space to an active
@@ -183,6 +183,19 @@ CSRF value, bounded form fields and a per-user attempt limit.
   the old owner/slug (results use the current name). The old owner cannot
   create or accept another space at that slug. If the space comes back to
   them it takes its address back and that alias is deleted.
+- **Delete** (0.67.0, schema v20, `space_delete.go`). The owner deletes a
+  ready space (step-up, typed name) in one transaction with the space row
+  locked: state `deleted` with `deleted_at`, pending invitations cancelled,
+  any transfer offer deleted. The open repository is then dropped from the
+  service after the write queue drains; startup does not load deleted or
+  purged spaces, and every access path already requires `ready`. The slug
+  stays reserved (creation says until when) but the space leaves the
+  allowance count. Thirty days on, the runner's daily housekeeping removes
+  the bucket's `files/<space ID>/` objects, then the repository, then marks
+  the row `purged` with slug `deleted-<space ID>` and deletes its aliases,
+  schedules and refresh rows, in that order so an interrupted purge repeats.
+  `mt spaces restore` sets a deleted space back to `ready` (the service opens
+  it on restart).
 - **Virtual files** (0.60.0, `virtual.go`): content that isn't kept in Git
   (PDFs, Word files, pictures, anything uploaded or fetched to a path) lives
   in the `agents.downloads` bucket under `files/<space ID>/<sha256>`, with

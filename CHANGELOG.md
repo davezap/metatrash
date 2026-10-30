@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.67.0 - Delete a space (2026-10-30)
+
+**Schema v20 and grants.** Before starting 0.67.0: stop the service, back up, apply `deploy/account-schema-v20.sql` as the schema administrator, then `deploy/account-grants.sql` (new: `UPDATE (deleted_at, slug)` on `metatrash_spaces`). No `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. CI needs `.github/workflows/ci.yml` to apply v1–v20 (in this delivery).
+
+- **Delete a space** from the bottom of its Manage sharing page. It needs a sign-in or confirmation within the last 10 minutes and the space's name typed (case and surrounding spaces don't matter), and the section offers Download first. The space disappears for everyone at once: the website, the owner's and members' connected apps, folder actions, schedules, and the account lists. Pending invitations and an ownership offer end. It stops counting toward the owner's allowance straight away.
+- **Kept 30 days.** The repository, virtual files and address stay for 30 days; creating a space at that address says until when it is held. `mt spaces restore <owner/slug|id>` brings a deleted space back (restart the service afterwards), and `mt spaces list` shows `deleted (purged <date>)`; `mt spaces export` still works on it.
+- **Purged after 30 days** by the folder actions runner's daily housekeeping, before the virtual files sweep: the space's objects under `files/<space id>/` in the bucket, then its repository, then the row becomes `purged` with slug `deleted-<space id>` (the address is free again), and its old transfer addresses, schedules and refresh rows are deleted. Log lines start `deleted spaces:`. A server without folder actions doesn't purge. Backups keep their own copies (up to 12 months).
+- The site's docs space can't be deleted while `docsSpace` names it.
+- Also: connected apps and member opt-in lists no longer show spaces that aren't ready.
+- Task T006 from `build/`.
+- Tested against MariaDB: the sharing page hides the form until confirmed (403 without), a wrong name (400), a member (404), another form's token (403), then a delete with the name in other case; afterwards the owner and member get 404 on the website and errors from their apps, neither account lists it, the pending invitation is cancelled, a second delete is 404, the address is refused as held and the allowance count is 0; the operator's view (purge 30 days on), restore, a second restore refused, the space reopening for the member's app; deleting again, nothing purged at 29 days 23 hours, then at 30 days the repository and only that space's bucket objects gone, the row purged with its new slug, restore refused, and the address reusable. Full suite with schema v20 and the grants check.
+
 ## 0.66.0 - mtsync brings new empty folders to the space (2026-10-30)
 
 No schema, grant or `accounts.json` change; tool-schema 0.17.3 (one description); mtsync's `minVersion` stays 0.61.0. Release the server (for the tool description) and mtsync.

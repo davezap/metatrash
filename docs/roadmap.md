@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of Metatrash 0.65.0 and Slate Viewer 0.20.4 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.67.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Fewer tokens per change
 
@@ -27,20 +27,19 @@ What is left needs measuring first:
 Agreed with Dave 2026-10-06 (done parts in the archive). Still to build, in
 this order:
 
-1. **Delete a space** (owner, step-up, type the name). Members and connected
-   apps lose access; GitHub folders are unlinked, the repo is untouched.
-   Offer the Download link (0.65.0) on the confirm page.
-2. **Delete account.** Refused while the account owns any space (delete or
+1. **Delete account.** Refused while the account owns any space (delete or
    transfer first). On confirm (step-up): the account is locked at once,
    sessions and OAuth grants revoked, and a notice is sent. **30-day grace
    period**: signing in during it cancels the deletion. Then purge:
    memberships, invitations, GitHub installations, passkeys, TOTP, recovery
    codes and the user row. Final notice email.
-3. **Update the privacy policy** (`legal/privacy.md` in the
+2. **Update the privacy policy** (`legal/privacy.md` in the
    `dave-zap/metatrash-com` space) once deletion exists: what sign-in methods
    store (passkey public keys, sealed authenticator secrets, hashed recovery
    codes), how account deletion and the grace period work, and concrete
    retention for logs and backups (backups: 12 monthly snapshots, from 0.53.0).
+   The space-deletion paragraph (30 days, then purged; backups up to 12
+   months) can go in as soon as 0.67.0 is live.
 
 ## Sign-in
 

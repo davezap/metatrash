@@ -54,6 +54,7 @@ type accountPage struct {
 	MembershipCSRF          map[string]string
 	SpaceCSRF, SpaceName    string
 	VisibilityCSRF          string
+	DeleteCSRF              string
 	// TimezoneCSRF guards each space's time zone form; DefaultTimezone is
 	// the zone of spaces without their own.
 	TimezoneCSRF, DefaultTimezone string
@@ -292,6 +293,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 		}
 		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
 		page.VisibilityCSRF = h.service.accounts.mac("space-visibility:" + cookieToken(r, h.sessionCookieName()))
+		page.DeleteCSRF = h.service.accounts.mac("space-delete:" + cookieToken(r, h.sessionCookieName()))
 		page.TimezoneCSRF = h.service.accounts.mac("space-timezone:" + cookieToken(r, h.sessionCookieName()))
 		page.DefaultTimezone = defaultAgentTimezone
 		if a := h.service.agents.Load(); a != nil {
@@ -351,7 +353,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/spaces/timezone" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/spaces/delete" && path != "/account/spaces/timezone" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -520,6 +522,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	if path == "/account/spaces/visibility" {
 		allowed["space"], allowed["visibility"] = true, true
 	}
+	if path == "/account/spaces/delete" {
+		allowed["space"], allowed["name"] = true, true
+	}
 	if path == "/account/spaces/timezone" {
 		allowed["space"], allowed["timezone"] = true, true
 	}
@@ -567,7 +572,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || transferRoute || githubRoute || agentRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/spaces/timezone" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if membershipRoute || transferRoute || githubRoute || agentRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/spaces/delete" || path == "/account/spaces/timezone" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
@@ -587,6 +592,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		}
 		if path == "/account/spaces/visibility" {
 			csrf = a.mac("space-visibility:" + session)
+		}
+		if path == "/account/spaces/delete" {
+			csrf = a.mac("space-delete:" + session)
 		}
 		if path == "/account/spaces/timezone" {
 			csrf = a.mac("space-timezone:" + session)
@@ -637,6 +645,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	if path == "/account/spaces/visibility" {
 		h.submitSpaceVisibility(w, r, session)
+		return true
+	}
+	if path == "/account/spaces/delete" {
+		h.submitSpaceDelete(w, r, session)
 		return true
 	}
 	if path == "/account/spaces/timezone" {

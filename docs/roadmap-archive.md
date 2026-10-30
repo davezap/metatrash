@@ -20,6 +20,15 @@ transfer ownership, space export (REST, `mt spaces export`, `mtsync export`),
 and Download on Your account (0.65.0: `/spaces/<owner>/<slug>/?export`, owner
 and members only).
 
+**Delete a space** (0.67.0, T006, 2026-10-30). Decisions (Dave, 2026-10-30):
+a deleted space is hidden from everyone at once and kept 30 days, restorable
+only by the operator (`mt spaces restore`), then purged; its virtual files in
+B2 stay the same 30 days, then go; its address is held for the 30 days, then
+freed. It leaves the allowance count at once. The delete is at the bottom of
+Manage sharing, needs a recent sign-in and the typed name, and offers the
+Download link first. GitHub repositories are never touched. The docs space
+can't be deleted while `docsSpace` names it.
+
 ## Create folder
 
 Done in 0.66.0 (T004, 2026-10-30) without a new operation: the space already

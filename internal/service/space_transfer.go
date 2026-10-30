@@ -187,7 +187,7 @@ func (db *accountDatabase) acceptSpaceTransfer(ctx context.Context, userID, spac
 		if err == nil && movedID != spaceID {
 			return problem(409, "reserved", "This space would move to "+to.Username+"/"+space.Slug+", but that address still leads to a space you transferred to someone else, so it cannot be reused.")
 		}
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_spaces WHERE owner_user_id = ?", userID).Scan(&owned); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_spaces WHERE owner_user_id = ? AND provisioning_state IN ('provisioning', 'ready')", userID).Scan(&owned); err != nil {
 			return fmt.Errorf("cannot check your spaces")
 		}
 		if owned >= to.MaxPrivateSpaces {

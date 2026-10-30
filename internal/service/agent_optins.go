@@ -67,7 +67,7 @@ func (db *accountDatabase) userOptIns(ctx context.Context, userID string) ([]opt
 		JOIN metatrash_spaces s ON s.space_id = o.space_id
 		JOIN metatrash_users u ON u.user_id = s.owner_user_id
 		JOIN metatrash_agents a ON a.agent_id = o.agent_id
-		WHERE o.user_id = ? ORDER BY o.created_at DESC, o.optin_id LIMIT ?`, userID, maxOptInsPerUser)
+		WHERE o.user_id = ? AND s.provisioning_state = 'ready' ORDER BY o.created_at DESC, o.optin_id LIMIT ?`, userID, maxOptInsPerUser)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read opt-ins")
 	}

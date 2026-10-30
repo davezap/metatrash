@@ -37,6 +37,7 @@ var commandUsage = map[string]string{
 	"users rename":      "users rename <email|username|id> <new-username> [-no-notice]",
 	"spaces list":       "spaces list [-json]",
 	"spaces export":     "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
+	"spaces restore":    "spaces restore <owner/slug|id>",
 }
 
 const usage = `metatrash %s
@@ -64,6 +65,8 @@ Commands:
   spaces export <space> [FILE]  write the space as it is now to a zip (- for stdout;
                                 default <owner>-<slug>-<date>-<state>.zip here)
   spaces export -all DIR        export every space into DIR, for backups
+  spaces restore <space>        bring back a space its owner deleted in the last 30
+                                days (restart the service afterwards)
 
 <who> is an email address, username or user ID. list and show take -json.
 <space> is owner/slug or a space ID, or a spaces.json name such as public.
@@ -297,9 +300,12 @@ func spacesCommand(args []string) error {
 	if len(args) > 0 && args[0] == "export" {
 		return spacesExport(args[1:])
 	}
+	if len(args) > 0 && args[0] == "restore" {
+		return spacesRestore(args[1:])
+	}
 	if len(args) == 0 || args[0] != "list" {
 		printUsage(os.Stderr)
-		return fmt.Errorf("spaces needs a subcommand: spaces list or spaces export")
+		return fmt.Errorf("spaces needs a subcommand: spaces list, spaces export or spaces restore")
 	}
 	flags := flag.NewFlagSet("spaces list", flag.ContinueOnError)
 	accountsConfig := accountsConfigFlag(flags)
@@ -328,10 +334,44 @@ func spacesCommand(args []string) error {
 	t := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(t, "SPACE\tNAME\tVISIBILITY\tSTATE\tMEMBERS\tINVITED\tCREATED")
 	for _, s := range spaces {
-		fmt.Fprintf(t, "%s/%s\t%s\t%s\t%s\t%d\t%d\t%s\n", s.Owner, s.Slug, oneLine(s.Name), s.Visibility, s.State, s.Members, s.Invited, day(s.CreatedAt))
+		state := s.State
+		if s.PurgeAt != nil {
+			state += " (purged " + day(*s.PurgeAt) + ")"
+		}
+		fmt.Fprintf(t, "%s/%s\t%s\t%s\t%s\t%d\t%d\t%s\n", s.Owner, s.Slug, oneLine(s.Name), s.Visibility, state, s.Members, s.Invited, day(s.CreatedAt))
 	}
 	t.Flush()
 	fmt.Println(count(len(spaces), "owned space", "owned spaces") + " (spaces.json spaces are not listed)")
+	return nil
+}
+
+// spacesRestore makes a space its owner deleted ready again, while it is
+// still kept. The running service loads it when it next starts.
+func spacesRestore(args []string) error {
+	flags := flag.NewFlagSet("spaces restore", flag.ContinueOnError)
+	accountsConfig := accountsConfigFlag(flags)
+	rest, err := parseArgs(flags, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return fmt.Errorf("usage: metatrash %s", commandUsage["spaces restore"])
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	db, err := service.OpenAdminDB(ctx, *accountsConfig)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	space, err := db.FindSpace(ctx, rest[0])
+	if err != nil {
+		return err
+	}
+	if err := db.RestoreSpace(ctx, space); err != nil {
+		return err
+	}
+	fmt.Printf("Restored %s/%s (%s). Restart the service to open it: sudo systemctl restart metatrash\n", space.Owner, space.Slug, oneLine(space.Name))
 	return nil
 }
 

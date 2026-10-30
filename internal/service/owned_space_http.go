@@ -44,7 +44,7 @@ func (h *httpAdapter) accountSpaces(ctx context.Context, user userAccount) ([]ac
 	if err != nil {
 		return nil, err
 	}
-	rows, err := h.service.ownedDB.db.QueryContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? ORDER BY created_at, space_id", user.ID)
+	rows, err := h.service.ownedDB.db.QueryContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? AND provisioning_state IN ('provisioning', 'ready') ORDER BY created_at, space_id", user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list owned spaces")
 	}

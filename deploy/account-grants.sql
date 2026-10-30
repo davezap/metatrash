@@ -80,5 +80,7 @@ GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_web_refs TO 'metatrash_accou
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_virtual_refresh TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (every, next_run_at, last_run_at, stale_since, stale_reason)
     ON metatrash.metatrash_virtual_refresh TO 'metatrash_accounts'@'localhost';
+-- v20 deleting a space
+GRANT UPDATE (deleted_at, slug) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

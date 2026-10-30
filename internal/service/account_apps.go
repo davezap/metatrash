@@ -66,7 +66,7 @@ func (h *httpAdapter) connectedApps(ctx context.Context, user userAccount) ([]co
 	if len(apps) == 0 {
 		return apps, nil
 	}
-	rows, err = db.db.QueryContext(ctx, `SELECT g.grant_id, s.name, gs.permission, s.owner_user_id, m.status, m.agent_permission FROM metatrash_oauth_grants g JOIN metatrash_oauth_grant_spaces gs ON gs.grant_id = g.grant_id JOIN metatrash_spaces s ON s.space_id = gs.space_id LEFT JOIN metatrash_memberships m ON m.space_id = gs.space_id AND m.user_id = g.user_id WHERE g.user_id = ? AND g.expires_at > ? ORDER BY s.name, s.space_id LIMIT 2000`, user.ID, now)
+	rows, err = db.db.QueryContext(ctx, `SELECT g.grant_id, s.name, gs.permission, s.owner_user_id, m.status, m.agent_permission FROM metatrash_oauth_grants g JOIN metatrash_oauth_grant_spaces gs ON gs.grant_id = g.grant_id JOIN metatrash_spaces s ON s.space_id = gs.space_id LEFT JOIN metatrash_memberships m ON m.space_id = gs.space_id AND m.user_id = g.user_id WHERE g.user_id = ? AND g.expires_at > ? AND s.provisioning_state = 'ready' ORDER BY s.name, s.space_id LIMIT 2000`, user.ID, now)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list connection spaces")
 	}

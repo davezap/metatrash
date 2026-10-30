@@ -31,6 +31,11 @@ const (
 	spaceWeb     = "web"
 )
 
+// spaceStates are the stored provisioning states. A deleted space is hidden
+// from everyone and kept for deletedSpaceHold (space_delete.go); a purged one
+// is gone, its row kept because other tables still name it.
+var spaceStates = map[string]bool{"provisioning": true, "ready": true, "deleted": true, "purged": true}
+
 const ownedSpaceColumns = "space_id, owner_user_id, name, slug, provisioning_state, created_at, visibility"
 
 func (db *accountDatabase) checkOwnedSpaceSchema(ctx context.Context) error {
@@ -135,7 +140,7 @@ func scanOwnedSpace(row accountScanner, extra ...any) (ownedSpace, error) {
 		return space, err
 	}
 	name, slug, err := normalizeSpaceName(space.Name, space.Slug)
-	if err != nil || name != space.Name || slug != space.Slug || !idPattern.MatchString(space.ID) || !idPattern.MatchString(space.OwnerID) || (space.Visibility != spacePrivate && space.Visibility != spaceWeb) || (space.State != "provisioning" && space.State != "ready") {
+	if err != nil || name != space.Name || slug != space.Slug || !idPattern.MatchString(space.ID) || !idPattern.MatchString(space.OwnerID) || (space.Visibility != spacePrivate && space.Visibility != spaceWeb) || !spaceStates[space.State] {
 		return space, fmt.Errorf("invalid stored space metadata")
 	}
 	space.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
@@ -161,7 +166,13 @@ func (db *accountDatabase) reserveOwnedSpace(ctx context.Context, ownerID, id, n
 	if owner.Username == "" {
 		return ownedSpace{}, invalid("Choose a public username before creating a space.")
 	}
-	existing, err := scanOwnedSpace(tx.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE owner_user_id = ? AND slug = ?", ownerID, slug))
+	var deletedAt sql.NullInt64
+	existing, err := scanOwnedSpace(tx.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+", deleted_at FROM metatrash_spaces WHERE owner_user_id = ? AND slug = ?", ownerID, slug), &deletedAt)
+	if err == nil && existing.State == "deleted" {
+		// A deleted space keeps its address while it can still be restored.
+		until := time.Unix(deletedAt.Int64, 0).Add(deletedSpaceHold).UTC().Format("2 January 2006")
+		return ownedSpace{}, problem(409, "reserved", "The address "+owner.Username+"/"+slug+" is held until "+until+": you deleted a space there, and it can be restored until then. Choose a different name.")
+	}
 	if err == nil {
 		if existing.Name != name {
 			return ownedSpace{}, problem(409, "conflict", "That space slug is already in use.")
@@ -181,7 +192,7 @@ func (db *accountDatabase) reserveOwnedSpace(ctx context.Context, ownerID, id, n
 		return ownedSpace{}, fmt.Errorf("cannot read space reservation")
 	}
 	var count int
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_spaces WHERE owner_user_id = ?", ownerID).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_spaces WHERE owner_user_id = ? AND provisioning_state IN ('provisioning', 'ready')", ownerID).Scan(&count); err != nil {
 		return ownedSpace{}, fmt.Errorf("cannot check owned-space allowance")
 	}
 	if count >= owner.MaxPrivateSpaces {
@@ -323,6 +334,9 @@ func (s *Service) loadOwnedSpaces(ctx context.Context, db *accountDatabase) erro
 		if _, exists := s.config.Spaces[space.ID]; exists {
 			rows.Close()
 			return fmt.Errorf("owned space conflicts with configured space ID")
+		}
+		if space.State == "deleted" || space.State == "purged" {
+			continue
 		}
 		spaces = append(spaces, space)
 	}

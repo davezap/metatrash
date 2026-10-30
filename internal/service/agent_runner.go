@@ -332,8 +332,9 @@ func (a *agentRunner) loop() {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	var housekeeping time.Time
-	// The first sweep of virtual files runs an hour after start, then daily,
-	// so restarts neither skip it for long nor repeat it.
+	// The first sweep of virtual files (after purging spaces deleted 30 days
+	// ago) runs an hour after start, then daily, so restarts neither skip it
+	// for long nor repeat it.
 	swept := a.clock().Add(time.Hour - 24*time.Hour)
 	for {
 		if now := a.clock(); now.Sub(swept) >= 24*time.Hour {
@@ -343,6 +344,7 @@ func (a *agentRunner) loop() {
 				defer a.wg.Done()
 				ctx, cancel := context.WithTimeout(a.ctx, time.Hour)
 				defer cancel()
+				a.s.purgeDeletedSpaces(ctx, now)
 				a.s.sweepVirtual(ctx, now)
 			}()
 		}

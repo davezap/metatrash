@@ -80,6 +80,10 @@ type AdminSpace struct {
 	Members    int       `json:"members"`
 	Invited    int       `json:"invited"`
 	CreatedAt  time.Time `json:"createdAt"`
+	// DeletedAt is when the owner deleted the space (state "deleted" or
+	// "purged"); PurgeAt is when a deleted space is purged.
+	DeletedAt *time.Time `json:"deletedAt,omitempty"`
+	PurgeAt   *time.Time `json:"purgeAt,omitempty"`
 }
 
 type AdminMembership struct {
@@ -117,7 +121,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v19.
+// a notice is sent, its SMTP settings) and checks the schema is v20.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -139,9 +143,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 19 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 20 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v19 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v20 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -149,7 +153,7 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 func (d *AdminDB) Close() error { return d.store.Close() }
 
 const adminUserQuery = `SELECT u.user_id, u.email, u.created_at, u.max_private_spaces, u.username, u.email_login,
-	(SELECT COUNT(*) FROM metatrash_spaces s WHERE s.owner_user_id = u.user_id),
+	(SELECT COUNT(*) FROM metatrash_spaces s WHERE s.owner_user_id = u.user_id AND s.provisioning_state <> 'purged'),
 	(SELECT COUNT(*) FROM metatrash_memberships m WHERE m.user_id = u.user_id AND m.status = 'active'),
 	(SELECT COUNT(*) FROM metatrash_passkeys p WHERE p.user_id = u.user_id),
 	(SELECT COUNT(*) FROM metatrash_totp t WHERE t.user_id = u.user_id AND t.enabled_at > 0),
@@ -366,13 +370,22 @@ func (d *AdminDB) spaces(ctx context.Context, where string, args ...any) ([]Admi
 	err := eachRow(ctx, d.store.db, func(scan func(...any) error) error {
 		var s AdminSpace
 		var created string
-		if err := scan(&s.ID, &s.OwnerID, &s.Owner, &s.Slug, &s.Name, &s.Visibility, &s.State, &created, &s.Members, &s.Invited); err != nil {
+		var deleted sql.NullInt64
+		if err := scan(&s.ID, &s.OwnerID, &s.Owner, &s.Slug, &s.Name, &s.Visibility, &s.State, &created, &deleted, &s.Members, &s.Invited); err != nil {
 			return err
 		}
 		s.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		if deleted.Valid {
+			at := time.Unix(deleted.Int64, 0).UTC()
+			s.DeletedAt = &at
+			if s.State == "deleted" {
+				purge := at.Add(deletedSpaceHold)
+				s.PurgeAt = &purge
+			}
+		}
 		spaces = append(spaces, s)
 		return nil
-	}, `SELECT s.space_id, s.owner_user_id, COALESCE(o.username, o.email), s.slug, s.name, s.visibility, s.provisioning_state, s.created_at,
+	}, `SELECT s.space_id, s.owner_user_id, COALESCE(o.username, o.email), s.slug, s.name, s.visibility, s.provisioning_state, s.created_at, s.deleted_at,
 	(SELECT COUNT(*) FROM metatrash_memberships m WHERE m.space_id = s.space_id AND m.status = 'active'),
 	(SELECT COUNT(*) FROM metatrash_invitations i WHERE i.space_id = s.space_id AND i.status = 'pending' AND i.expires_at > UNIX_TIMESTAMP())
 FROM metatrash_spaces s JOIN metatrash_users o ON o.user_id = s.owner_user_id `+where+` ORDER BY s.created_at, s.space_id LIMIT 10001`, args...)
@@ -402,6 +415,26 @@ func (d *AdminDB) FindSpace(ctx context.Context, ref string) (AdminSpace, error)
 		return AdminSpace{}, ErrNoSpace
 	}
 	return spaces[0], nil
+}
+
+// ErrNotDeleted is returned when spaces restore finds a space that is not
+// waiting to be purged.
+var ErrNotDeleted = errors.New("that space is not deleted, or has already been purged")
+
+// RestoreSpace makes a deleted space ready again, before it is purged. The
+// service loads it on its next start. Invitations and ownership offers that
+// ended with the delete stay ended.
+func (d *AdminDB) RestoreSpace(ctx context.Context, space AdminSpace) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	res, err := d.store.db.ExecContext(ctx, "UPDATE metatrash_spaces SET provisioning_state = 'ready', deleted_at = NULL WHERE space_id = ? AND provisioning_state = 'deleted'", space.ID)
+	if err != nil {
+		return fmt.Errorf("account database unavailable")
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return ErrNotDeleted
+	}
+	return nil
 }
 
 // SetEmailLogin turns sign-in by emailed code on or off for an account.
@@ -570,7 +603,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v19 ready") {
+	if !add("schema", store.ready(ctx), "v20 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -684,6 +717,7 @@ var accountGrants = []string{
 	"metatrash_virtual_refresh SELECT", "metatrash_virtual_refresh INSERT", "metatrash_virtual_refresh DELETE",
 	"metatrash_virtual_refresh UPDATE (every)", "metatrash_virtual_refresh UPDATE (next_run_at)", "metatrash_virtual_refresh UPDATE (last_run_at)",
 	"metatrash_virtual_refresh UPDATE (stale_since)", "metatrash_virtual_refresh UPDATE (stale_reason)",
+	"metatrash_spaces UPDATE (deleted_at)", "metatrash_spaces UPDATE (slug)",
 }
 
 // checkPrivileges compares the login's privileges in this database with

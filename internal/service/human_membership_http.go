@@ -24,7 +24,7 @@ type humanSharingPage struct {
 	Members             []humanMember
 	// Transfer is the pending ownership offer; Candidates are the members it
 	// can go to (active, with a username). TransferFresh: the owner signed
-	// in or confirmed recently enough to offer it.
+	// in or confirmed recently enough to offer it, or to delete the space.
 	Transfer      *spaceTransferPending
 	Candidates    []humanMember
 	TransferFresh bool
@@ -220,6 +220,7 @@ var accountNotices = map[string]string{
 	"invite-daily":            "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
 	"space-web":               "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
 	"space-private":           "The space is private again: only you and its members can browse it.",
+	"space-deleted":           "The space is deleted: no one can open it, and its address is held for 30 days. If that was a mistake, ask the site’s operator to restore it within those 30 days.",
 	"space-timezone":          "The space's time zone is saved. Its schedules run on it from now on.",
 	"transfer-offered":        "Ownership offered. We’ve emailed them; they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-offered-unsent": "Ownership offered, but the email could not be sent, so let them know: they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",

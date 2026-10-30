@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); the server runs 0.61.1 (2026-10-28).
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); 0.67.0 needs v20.
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -31,7 +31,7 @@ Command line: `metatrash [-listen 127.0.0.1:8080] [-data DIR] [-config spaces.js
 [-keys keys.json] [-accounts-config accounts.json] [-trusted-proxies CIDRs]
 [-public-url URL]`, plus the subcommands `help`, `version`, `keygen`,
 `accounts-migrate`, `check`, `users …` (list, show, email-login, set-limit,
-rename), `spaces list` and `spaces export`. `metatrash help`
+rename), `spaces list`, `spaces export` and `spaces restore`. `metatrash help`
 lists them.
 
 ### Console commands
@@ -49,6 +49,7 @@ mt users rename dave david       # change the username (old addresses break)
 mt spaces list                   # every owned space (-json for JSON)
 mt spaces export dave/notes      # one space as a zip in the current folder
 mt spaces export -all /srv/backup/metatrash   # every space, for backups
+mt spaces restore dave/notes     # bring back a space deleted in the last 30 days
 ```
 
 They use the same `accounts.json` and account database as the service, with
@@ -89,8 +90,10 @@ limits from the database on each request).
   it and restart; the command warns. The account is emailed a notice
   (`-no-notice` skips it); if the email fails the rename still stands.
 - **`spaces list`** shows owned spaces with owner, name, visibility, state,
-  active members and invitations waiting. Spaces from `spaces.json` are not in
-  the database and are not listed.
+  active members and invitations waiting. A space its owner deleted shows
+  `deleted (purged <date>)`, and a purged one `purged` with the slug
+  `deleted-<space id>`. Spaces from `spaces.json` are not in the database and
+  are not listed.
 - **`spaces export <space> [FILE]`** writes a space's current files to a zip,
   with `.metatrash-export.json` naming the state and each file's ID (the same
   archive as the REST export, see docs/api-contract.md). `<space>` is
@@ -108,6 +111,14 @@ limits from the database on each request).
   `mt spaces export -all /srv/backup/metatrash && find /srv/backup/metatrash -name '*.zip' -mtime +30 -delete`.
   An export holds current files only, not history; the nightly backup
   (Backups below) keeps whole repositories.
+- **`spaces restore <space>`** (0.67.0) makes a space its owner deleted
+  ready again, if it has not been purged yet (30 days after the delete; see
+  Deleted spaces). `<space>` is `owner/slug` or the space ID. Restart the
+  service afterwards (`sudo systemctl restart metatrash`): it opens the space
+  at start. Invitations and ownership offers that the delete ended stay
+  ended. The restored space counts toward its owner's allowance again, even
+  if that takes them over it. Before restoring, `mt spaces export <space>`
+  works on a deleted space too.
 - **`spaces readme`** was removed in 0.45.0: README.md is an ordinary file
   now. At startup the service gives every folder of every space the
   `AGENTS.md` and `.metatrash.json` it lacks (one commit per space; owned
@@ -147,7 +158,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v19 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v20 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -547,6 +558,28 @@ Use the console commands above (`mt users set-limit`, `mt users rename`,
 ownership moves only through Transfer ownership on Manage sharing, which also
 moves memberships and app connections and keeps the old address.
 
+### Deleted spaces
+
+An owner deletes a space at the bottom of its Manage sharing page (0.67.0),
+after a recent sign-in or confirmation and typing its name; the page offers
+Download first. The space is hidden from everyone at once (website, apps,
+folder actions, account lists), its pending invitations and ownership offers
+end, and it stops counting toward the owner's allowance. Its row is
+`deleted` with `deleted_at`, and its repository, virtual files and address
+(`owner/slug`) are kept for 30 days so `mt spaces restore` can bring it back.
+
+After 30 days the folder actions runner's daily housekeeping (an hour after
+start, then daily, before the virtual files sweep) purges it: the space's
+objects under `files/<space id>/` in the space-files bucket, then its
+repository, then the row becomes `purged` with slug `deleted-<space id>` (the
+address is free again) and its old transfer addresses, schedules and refresh
+rows go. The row stays because other tables still name the space. Log lines
+start `deleted spaces:`. A server without folder actions (no `agents` in
+`accounts.json`) does not purge: deleted spaces stay deleted. Backups keep
+their own copies for as long as restic keeps snapshots (up to 12 months).
+The site's docs space (`docsSpace`) cannot be deleted until that setting
+names another space.
+
 ## Backups
 
 `deploy/backup.sh` (from 0.53.0) copies everything needed to rebuild the
@@ -766,7 +799,7 @@ roadmap.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v19 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v20 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -795,6 +828,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.60.2 | schema v19 (`metatrash_virtual_refresh`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (every, next_run_at, last_run_at, stale_since, stale_reason)` on it) | 18; pointers keep their `refresh` line but nothing refreshes them, and 0.60.0/0.60.1 read them as before. Rows stay in the table, unused |
 | 0.61.0 | none; release mtsync 0.61.0 with it (`minVersion` rises to 0.61.0). Recommended: `ProxyTimeout 660` in Apache (Apache) | 0.60.2 (no schema change); pointers with a `git` line and virtual files pulled from GitHub read as before, and 0.60 push leaves them out again |
 | 0.61.1 | none | 0.61.0 (no schema change) |
+| 0.67.0 | schema v20 (`deleted_at` on spaces, the `deleted` and `purged` states) and grants (`UPDATE (deleted_at, slug)` on spaces) | 19, but only while no space is deleted or purged: 0.66 does not start with such a row. Restore deleted spaces first (`mt spaces list` shows them); after the first purge (30 days on), stay on 0.67 |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer
@@ -851,7 +885,7 @@ addresses are only in the notice emails.
 - Unit tests run anywhere: `go test ./...`.
 - MariaDB integration tests run when `METATRASH_TEST_DB_CONFIG` points at a
   database config file for a **freshly recreated, disposable** database at
-  schema v19 with `account-grants.sql` applied (leftover owned spaces break the
+  schema v20 with `account-grants.sql` applied (leftover owned spaces break the
   run). See `internal/service/db_integration_test.go`.
 - CI runs both on every push (see Automated builds and releases).
 
