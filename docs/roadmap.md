@@ -164,6 +164,33 @@ Locked-out users email Dave, who runs `mt users email-login`. Open:
 - Rotating the authenticator-app key (`totpKeyFile`); today changing it
   breaks every authenticator app.
 
+### Sign in with Google and Microsoft (Azure / Entra ID) (Dave, 2026-10-31)
+
+Dave: offer other ways to sign in, Google and Microsoft. The case that
+matters first is Dave's workplace: people in its Azure (Entra ID) tenant
+should open a private space with their work account, without a separate
+Metatrash login, and the tenant's groups or roles should decide what they
+can do there. Not designed yet. To work out:
+
+- **Linking to accounts.** Sign in with OpenID Connect (Google, Entra ID).
+  A new person gets an account on first sign-in; an existing account adds
+  Google or Microsoft under Sign-in methods. Key on the provider's subject
+  id (Entra: tenant id + object id), never on the email address alone.
+- **A space tied to a tenant.** The space owner connects a space to one
+  Entra tenant (the owner, or a tenant admin, consents to the app once).
+  Anyone signing in from that tenant then gets in without an invite, and
+  people from other tenants don't.
+- **Groups and roles set access.** Map Entra groups or app roles to space
+  access (read-only, read-write, owner), read from the token's `groups` or
+  `roles` claim at each sign-in, so removing someone in Azure removes them
+  here at their next sign-in. Later the same mapping could feed the roles
+  in Per-folder permissions (Policies and permissions), such as employees
+  read-only on `policies/`.
+- **Agents and tools.** How MCP connections, mtsync and Slate Viewer sign in
+  for these people (the same OAuth sign-in page, with the new buttons).
+- **What stays.** Passkeys, the authenticator app and recovery codes stay;
+  decide whether a tenant can require its people to use Microsoft only.
+
 ## Owner control of files and folders
 
 Agreed with Dave 2026-10-18.
