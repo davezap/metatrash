@@ -10,30 +10,23 @@ import (
 func TestAccountSectionsAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
-	// Spaces, sharing and Profile moved to the site app's Settings dialog in
-	// 0.79.0, Services in 0.80.0 (TestAccountPagesRedirectToSettings);
-	// Security stays.
-	sections := []struct{ path, nav, want, absent string }{
-		{"/account/security", "/account/security", "Confirm it’s you", `id="connected-apps"`},
+	// Every section moved to the site app's Settings dialog: Spaces, sharing
+	// and Profile in 0.79.0, Services in 0.80.0, Security in 0.81.0
+	// (TestAccountPagesRedirectToSettings). The old Security page still
+	// renders until the clean-up release; its form routes post there.
+	res := legacySecurity(w.h, session)
+	body := res.Body.String()
+	if res.Code != 200 || !strings.Contains(body, "Confirm it’s you") || strings.Contains(body, `id="connected-apps"`) {
+		t.Fatalf("security: %d\n%s", res.Code, body)
 	}
-	for _, s := range sections {
-		res := oauthCall(w.h, "GET", s.path, nil, session)
-		body := res.Body.String()
-		if res.Code != 200 || !strings.Contains(body, s.want) || strings.Contains(body, s.absent) {
-			t.Fatalf("%s: %d want %q absent %q\n%s", s.path, res.Code, s.want, s.absent, body)
-		}
-		if strings.HasPrefix(s.want, `href="/account`) && strings.Count(body, `aria-current="true"`) != 1 {
-			t.Fatalf("%s: filters do not mark exactly one", s.path)
-		}
-		if !strings.Contains(body, `href="`+s.nav+`" aria-current="page"`) || strings.Count(body, `aria-current="page"`) != 1 {
-			t.Fatalf("%s: navigation does not mark exactly this section", s.path)
-		}
-		if !strings.Contains(body, `src="/assets/account.js"`) {
-			t.Fatalf("%s: account.js not loaded", s.path)
-		}
-		if res := oauthCall(w.h, "GET", s.path, nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
-			t.Fatalf("%s without a session: %d", s.path, res.Code)
-		}
+	if !strings.Contains(body, `href="/account/security" aria-current="page"`) || strings.Count(body, `aria-current="page"`) != 1 {
+		t.Fatal("navigation does not mark exactly Security")
+	}
+	if !strings.Contains(body, `src="/assets/account.js"`) {
+		t.Fatal("account.js not loaded")
+	}
+	if res := oauthCall(w.h, "GET", "/account/security", nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
+		t.Fatalf("security without a session: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", "/assets/account.js", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "details.pop") {
 		t.Fatalf("account.js: %d", res.Code)

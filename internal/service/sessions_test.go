@@ -43,7 +43,7 @@ func TestSignOutEverywhereAgainstDatabase(t *testing.T) {
 	here, phone, laptop := w.session(w.owner), w.session(w.owner), w.session(w.owner)
 	member := w.session(w.member)
 
-	body := html.UnescapeString(oauthCall(w.h, "GET", "/account/security", nil, here).Body.String())
+	body := html.UnescapeString(legacySecurity(w.h, here).Body.String())
 	if strings.Count(body, `action="/account/sessions/remove"`) != 2 || !strings.Contains(body, `action="/account/sessions/end"`) {
 		t.Fatal("other sessions not listed")
 	}
@@ -64,7 +64,7 @@ func TestSignOutEverywhereAgainstDatabase(t *testing.T) {
 	if _, ok, _ := a.currentUser(ctx, member.Value); !ok {
 		t.Fatal("another account's session signed out")
 	}
-	body = html.UnescapeString(oauthCall(w.h, "GET", "/account/security", nil, here).Body.String())
+	body = html.UnescapeString(legacySecurity(w.h, here).Body.String())
 	if !strings.Contains(body, "Only this device is signed in.") || strings.Contains(body, `action="/account/sessions/end"`) || strings.Contains(body, `action="/account/sessions/remove"`) {
 		t.Fatal("security page after signing out everywhere else")
 	}
@@ -221,7 +221,7 @@ func TestSignOutSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie := &http.Cookie{Name: sessionCookie, Value: token}
-	body := oauthCall(w.h, "GET", "/account/security", nil, cookie).Body.String()
+	body := legacySecurity(w.h, cookie).Body.String()
 	m := regexp.MustCompile(`action="/logout">\s*<input type="hidden" name="csrf" value="([0-9a-f]{64})"`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatal("no sign-out form")
@@ -291,7 +291,7 @@ func TestSignedInDevices(t *testing.T) {
 	member := start(w.member, "Firefox on Linux", "192.0.2.99", time.Hour)
 
 	page := func() string {
-		res := oauthCall(w.h, "GET", "/account/security", nil, here)
+		res := legacySecurity(w.h, here)
 		if res.Code != 200 {
 			t.Fatalf("security page: %d", res.Code)
 		}

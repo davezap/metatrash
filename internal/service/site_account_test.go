@@ -218,7 +218,7 @@ func TestAccountPagesRedirectToSettings(t *testing.T) {
 		"/account/services":             "/app/#settings/services",
 		"/account/apps/" + w.ownedID:    "/app/#settings/services/apps/" + w.ownedID,
 		"/account/actions/" + w.ownedID: "/app/#settings/services/actions/" + w.ownedID,
-		"/account/security":             "",
+		"/account/security":             "/app/#settings/security",
 	} {
 		res := siteCall(w, "GET", path, "", session, "")
 		if got := res.Header().Get("Location"); got != want || want == "" && res.Code != 200 {

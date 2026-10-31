@@ -18,7 +18,7 @@ decisions in the Claude Doc "Settings dialog and space picker: plan".
   guard. Each form handler is split into a function both the old form route
   and the JSON route call, until the form route is retired.
 - **Releases:** 1 space picker and account menu (*done in 0.78.0*); 2 the
-  dialog, Profile, Spaces and space sharing (*done in 0.79.0*); 3 Services (*done in 0.80.0*); 4 Security;
+  dialog, Profile, Spaces and space sharing (*done in 0.79.0*); 3 Services (*done in 0.80.0*); 4 Security (*done in 0.81.0*);
   5 clean-up (delete `account.html` and the form routes, emails point at the
   new addresses, `/spaces/...` and `/docs/...` redirect into `/app/...`).
   Workplace spaces come after release 2, so their screens are built once,

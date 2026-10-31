@@ -254,14 +254,14 @@ func TestAccountsHTTP(t *testing.T) {
 	if session == nil {
 		t.Fatal("missing session")
 	}
-	// Spaces moved to the site app's Settings dialog (0.79.0); Security is
-	// still a page here. This harness has no owned-space database, so it may
+	// Spaces (0.79.0) and Security (0.81.0) moved to the site app's Settings
+	// dialog. This harness has no owned-space database, so it may
 	// report the account as temporarily unavailable (503).
 	if w := call("GET", "/account", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/app/#settings/spaces" {
 		t.Fatal("account not sent to Settings")
 	}
-	if w := call("GET", "/account/security", "", nil, session); (w.Code != 200 && w.Code != 503) || !strings.Contains(w.Body.String(), "person@example.com") {
-		t.Fatal("account unavailable")
+	if w := call("GET", "/account/security", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/app/#settings/security" {
+		t.Fatal("security not sent to Settings")
 	}
 	usernameForm := url.Values{"username": {"Dave-C"}, "csrf": {s.accounts.mac("username:" + session.Value)}}
 	if w := call("POST", "/account/username", "https://other.example", usernameForm, session); w.Code != 403 {

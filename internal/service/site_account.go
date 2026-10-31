@@ -27,6 +27,7 @@ import (
 //	GET  /api/v1/site/account/confirm                  how this session can confirm it's you
 //	POST /api/v1/site/account/confirm/{send|verify|totp|passkey}
 //	     /api/v1/site/account/services/...             connected apps, agents and GitHub (0.80.0, site_services.go)
+//	     /api/v1/site/account/security/...             sign-in methods, email address, devices (0.81.0, site_security.go)
 //
 // They sit behind the site API's checks (site address, Origin, Sec-Fetch-Site,
 // and on writes the session's X-Metatrash-CSRF token), and every route needs a
@@ -163,6 +164,13 @@ type siteAccountBody struct {
 	Cap      string            `json:"cap"`
 	Agent    string            `json:"agent"`
 	Spaces   map[string]string `json:"spaces"`
+	// Security (0.81.0, site_security.go).
+	Attestation string `json:"attestation"`
+	Transports  string `json:"transports"`
+	Passkey     string `json:"passkey"`
+	EmailLogin  string `json:"email_login"`
+	Session     string `json:"session"`
+	Identity    string `json:"identity"`
 }
 
 type siteNotice struct {
@@ -190,6 +198,7 @@ var stepUpMessages = map[string]string{
 	"delete":         "Deleting a space needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"account-delete": "Deleting your account needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"app-spaces":     "Giving an app more of your spaces needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"security":       "Changing how you sign in needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"agent-add":      "Adding an agent needs a sign-in within the last 10 minutes, because its endpoint receives the files your folder actions read. Confirm it’s you first.",
 }
 
@@ -205,7 +214,12 @@ func sendSiteAccountError(w http.ResponseWriter, err error, route string) {
 		return
 	}
 	var p *Error
-	if !errors.As(err, &p) {
+	if errors.As(err, &p) && p.Code == "confirm_required" {
+		// Another step-up with its own words (changing the email address).
+		sendError(w, problem(403, "step_up_needed", p.Message))
+		return
+	}
+	if p == nil {
 		log.Printf("site account %s failed: %v", route, err)
 		err = problem(503, "unavailable", "That could not be saved just now. Try again shortly.")
 	}
@@ -245,6 +259,10 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 	route := strings.Join(parts, "/")
 	if len(parts) > 0 && parts[0] == "services" {
 		h.serveSiteServices(w, r, user, session, parts[1:])
+		return
+	}
+	if len(parts) > 0 && parts[0] == "security" {
+		h.serveSiteSecurity(w, r, user, session, client, parts[1:])
 		return
 	}
 	switch {

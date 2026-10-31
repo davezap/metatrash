@@ -288,21 +288,54 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return
 	}
-	db := h.service.ownedDB
-	if db == nil {
+	if h.service.ownedDB == nil {
 		sendError(w, problem(503, "unavailable", "Sign-in methods are temporarily unavailable."))
 		return
 	}
+	notice, redirect, err := h.signInChange(w, r, session, client, path, user, r.PostForm.Get)
+	if err == nil && redirect != "" {
+		http.Redirect(w, r, redirect, http.StatusSeeOther)
+		return
+	}
+	if err == nil {
+		if notice != "" {
+			accountCookie(w, h.noticeCookieName(), notice, 60)
+		}
+		http.Redirect(w, r, h.basePath+"/account/security", http.StatusSeeOther)
+		return
+	}
+	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "That change could not be saved. Reload the page and try again."}
+	status := http.StatusServiceUnavailable
+	var p *Error
+	if errors.As(err, &p) {
+		status, page.Message = p.Status, p.Message
+		if p.RetryAfterSeconds > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
+		}
+	}
+	h.renderAccount(w, r, status, page)
+}
+
+// signInChange makes one Security change (path is its form route,
+// /account/...) for the session's user, reading its fields with get: for the
+// Security forms and the Settings dialog's Security tab (0.81.0). It answers
+// the notice to show, or where to send the browser next (Microsoft, to link
+// an account).
+func (h *httpAdapter) signInChange(w http.ResponseWriter, r *http.Request, session, client, path string, user userAccount, get func(string) string) (string, string, error) {
+	a, db := h.service.accounts, h.service.ownedDB
+	if db == nil {
+		return "", "", problem(503, "unavailable", "Sign-in methods are temporarily unavailable.")
+	}
 	ctx, now := r.Context(), time.Now()
 	notice := ""
-	err = h.service.rates.take(allowance{"signin:user:" + user.ID, 30, 600})
+	err := h.service.rates.take(allowance{"signin:user:" + user.ID, 30, 600})
 	if err == nil && strings.HasPrefix(path, "/account/microsoft/") && a.microsoft == nil {
 		err = missing()
 	}
 	if err == nil && path == "/account/microsoft/link" {
 		if fresh, _ := a.sessionFresh(session, now); fresh {
-			h.startMicrosoft(w, r, client, user.ID, session)
-			return
+			redirect, err := h.beginMicrosoft(w, client, user.ID, session)
+			return "", redirect, err
 		}
 		err = errConfirmFirst
 	}
@@ -325,7 +358,7 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 			a.mu.Lock()
 			a.cleanup(now)
 			var email string
-			email, err = a.checkCodeLocked(confirmKey(session), strings.TrimSpace(r.PostForm.Get("code")))
+			email, err = a.checkCodeLocked(confirmKey(session), strings.TrimSpace(get("code")))
 			a.mu.Unlock()
 			if err == nil && email != user.Email {
 				err = problem(400, "invalid_code", "That code is invalid or expired. Try again, or request a new code.")
@@ -336,35 +369,35 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 			}
 		case "/account/confirm/passkey":
 			var in passkeyAssertion
-			if in, err = readPasskeyAssertion(r); err == nil {
+			if in, err = passkeyAssertionFrom(get); err == nil {
 				err = h.confirmWithPasskey(ctx, session, user, in, now)
 			}
 			if err == nil {
 				notice = "signin-confirmed"
 			}
 		case "/account/confirm/totp", "/account/totp/start", "/account/totp/enable", "/account/totp/remove":
-			notice, err = h.submitTOTP(ctx, path, session, user, r.PostForm.Get("code"), now)
+			notice, err = h.submitTOTP(ctx, path, session, user, get("code"), now)
 		case "/account/recovery/create":
 			err = h.createRecoveryCodes(ctx, session, user, now)
 			notice = "recovery-created"
 		case "/account/email-login":
-			notice, err = h.switchEmailLogin(ctx, session, user, r.PostForm.Get("email_login"), now)
+			notice, err = h.switchEmailLogin(ctx, session, user, get("email_login"), now)
 		case "/account/email/change":
-			err = h.startEmailChange(ctx, session, client, user, r.PostForm.Get("email"), now)
+			err = h.startEmailChange(ctx, session, client, user, get("email"), now)
 			notice = "email-change-sent"
 		case "/account/email/verify":
-			_, err = h.finishEmailChange(ctx, session, user, strings.TrimSpace(r.PostForm.Get("code")), now)
+			_, err = h.finishEmailChange(ctx, session, user, strings.TrimSpace(get("code")), now)
 			notice = "email-changed"
 		case "/account/email/cancel":
 			a.cancelEmailChange(session)
 			notice = "email-change-cancelled"
 		case "/account/passkeys/add":
-			err = h.addPasskey(r, session, user, now)
+			err = h.addPasskey(ctx, session, user, get, now)
 			notice = "passkey-added"
 		case "/account/passkeys/rename":
 			var name string
-			if name, err = validPasskeyName(r.PostForm.Get("name")); err == nil {
-				err = db.renamePasskey(ctx, user.ID, r.PostForm.Get("passkey"), name)
+			if name, err = validPasskeyName(get("name")); err == nil {
+				err = db.renamePasskey(ctx, user.ID, get("passkey"), name)
 			}
 			notice = "passkey-renamed"
 		case "/account/passkeys/remove":
@@ -373,7 +406,7 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 				break
 			}
 			var name string
-			if name, err = db.removePasskey(ctx, user.ID, r.PostForm.Get("passkey")); err == nil {
+			if name, err = db.removePasskey(ctx, user.ID, get("passkey")); err == nil {
 				h.notifySignInChange(user, "removed", "passkey \""+name+"\"")
 			}
 			notice = "passkey-removed"
@@ -390,7 +423,7 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 				break
 			}
 			var label string
-			if label, err = db.removeIdentity(ctx, user.ID, r.PostForm.Get("identity")); err == nil {
+			if label, err = db.removeIdentity(ctx, user.ID, get("identity")); err == nil {
 				h.notifySignInChange(user, "removed", "Microsoft account "+label)
 			}
 			notice = "microsoft-removed"
@@ -404,7 +437,7 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 			notice = "sessions-ended"
 		case "/account/sessions/remove":
 			var found bool
-			found, err = a.endSessionByID(user.ID, session, r.PostForm.Get("session"))
+			found, err = a.endSessionByID(user.ID, session, get("session"))
 			log.Printf("account session-end user=%s found=%v stored=%v", user.ID, found, err == nil)
 			switch {
 			case err != nil:
@@ -420,23 +453,7 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 		// with the method or address they could have used to get back in.
 		a.endOtherSessions(user.ID, session)
 	}
-	if err == nil {
-		if notice != "" {
-			accountCookie(w, h.noticeCookieName(), notice, 60)
-		}
-		http.Redirect(w, r, h.basePath+"/account/security", http.StatusSeeOther)
-		return
-	}
-	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "That change could not be saved. Reload the page and try again."}
-	status := http.StatusServiceUnavailable
-	var p *Error
-	if errors.As(err, &p) {
-		status, page.Message = p.Status, p.Message
-		if p.RetryAfterSeconds > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-		}
-	}
-	h.renderAccount(w, r, status, page)
+	return notice, "", err
 }
 
 func (h *httpAdapter) confirmWithPasskey(ctx context.Context, session string, user userAccount, in passkeyAssertion, now time.Time) error {
@@ -459,24 +476,24 @@ func (h *httpAdapter) confirmWithPasskey(ctx context.Context, session string, us
 	return nil
 }
 
-func (h *httpAdapter) addPasskey(r *http.Request, session string, user userAccount, now time.Time) error {
+func (h *httpAdapter) addPasskey(ctx context.Context, session string, user userAccount, get func(string) string, now time.Time) error {
 	a, db := h.service.accounts, h.service.ownedDB
 	if fresh, _ := a.sessionFresh(session, now); !fresh {
 		return errConfirmFirst
 	}
-	name, err := validPasskeyName(r.PostForm.Get("name"))
+	name, err := validPasskeyName(get("name"))
 	if err != nil {
 		return err
 	}
-	clientData, err := formBytes(r, "client_data", 4096, true)
+	clientData, err := fieldBytes(get("client_data"), 4096, true)
 	if err != nil {
 		return err
 	}
-	attestation, err := formBytes(r, "attestation", 6144, true)
+	attestation, err := fieldBytes(get("attestation"), 6144, true)
 	if err != nil {
 		return err
 	}
-	p, err := a.verifyPasskeyRegistration(session, user.ID, clientData, attestation, r.PostForm.Get("transports"), now)
+	p, err := a.verifyPasskeyRegistration(session, user.ID, clientData, attestation, get("transports"), now)
 	if err != nil {
 		return err
 	}
@@ -484,7 +501,7 @@ func (h *httpAdapter) addPasskey(r *http.Request, session string, user userAccou
 		return err
 	}
 	p.Name, p.CreatedAt = name, now.Unix()
-	if err := db.addPasskey(r.Context(), p); err != nil {
+	if err := db.addPasskey(ctx, p); err != nil {
 		return err
 	}
 	h.notifySignInChange(user, "added", "passkey \""+name+"\"")

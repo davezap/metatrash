@@ -466,33 +466,40 @@ func (h *httpAdapter) microsoftWaiting(r *http.Request) (oidcIdentity, bool) {
 // startMicrosoft sends the browser to Microsoft to sign in: from the sign-in
 // page (userID empty) or to link an account from Security.
 func (h *httpAdapter) startMicrosoft(w http.ResponseWriter, r *http.Request, client, userID, session string) {
-	p := h.service.accounts.microsoft
-	if p == nil {
-		sendError(w, missing())
-		return
-	}
-	if err := h.service.rates.take(allowance{"microsoft:start:" + client, 30, 600}); err != nil {
+	target, err := h.beginMicrosoft(w, client, userID, session)
+	if err != nil {
 		sendError(w, err)
 		return
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// beginMicrosoft remembers a Microsoft sign-in (or link) for this browser and
+// answers the Microsoft address to send it to.
+func (h *httpAdapter) beginMicrosoft(w http.ResponseWriter, client, userID, session string) (string, error) {
+	p := h.service.accounts.microsoft
+	if p == nil {
+		return "", missing()
+	}
+	if err := h.service.rates.take(allowance{"microsoft:start:" + client, 30, 600}); err != nil {
+		return "", err
 	}
 	attempt := oidcPending{UserID: userID, Session: session}
 	values := make([]string, 4)
 	for i := range values {
 		v, err := randomHex(32)
 		if err != nil {
-			sendError(w, err)
-			return
+			return "", err
 		}
 		values[i] = v
 	}
 	browser := values[0]
 	attempt.State, attempt.Nonce, attempt.Verifier = values[1], values[2], values[3]
 	if err := p.begin(browser, attempt); err != nil {
-		sendError(w, err)
-		return
+		return "", err
 	}
 	h.setMicrosoftCookie(w, browser)
-	http.Redirect(w, r, p.authorizeURL(h.microsoftRedirect(), attempt), http.StatusSeeOther)
+	return p.authorizeURL(h.microsoftRedirect(), attempt), nil
 }
 
 // serveMicrosoft handles /login/microsoft/callback, Microsoft's return. It
@@ -564,7 +571,7 @@ func (h *httpAdapter) microsoftCallback(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if attempt.UserID != "" {
-		login = h.basePath + "/account/security"
+		login = h.basePath + "/app/#settings/security"
 	}
 	if query.Has("error") {
 		h.setMicrosoftCookie(w, "")
@@ -656,7 +663,7 @@ func (h *httpAdapter) microsoftCallback(w http.ResponseWriter, r *http.Request, 
 // finishMicrosoftLink ends Link a Microsoft account, started on Security.
 func (h *httpAdapter) finishMicrosoftLink(w http.ResponseWriter, r *http.Request, attempt oidcPending, id oidcIdentity, linked identity, found bool, entry *loginLog) {
 	a := h.service.accounts
-	back := h.basePath + "/account/security"
+	back := h.basePath + "/app/#settings/security"
 	entry.kind = "microsoft-link"
 	user, signedIn, err := a.currentUser(r.Context(), attempt.Session)
 	fresh, _ := a.sessionFresh(attempt.Session, time.Now())

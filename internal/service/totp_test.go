@@ -179,7 +179,7 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 
 	// Without a recent confirmation, setup is not offered or accepted.
 	stale := w.session(w.owner)
-	body := oauthCall(w.h, "GET", "/account/security", nil, stale).Body.String()
+	body := legacySecurity(w.h, stale).Body.String()
 	if !strings.Contains(body, "To set up an authenticator app, confirm it’s you above.") || strings.Contains(body, "/account/totp/start") || strings.Contains(body, "/account/confirm/totp") {
 		t.Fatal("setup offered without confirming")
 	}
@@ -190,16 +190,18 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	// Start setup on a fresh session: the page shows a QR code and the key.
 	session := w.session(w.owner)
 	a.markConfirmed(session.Value, w.owner.ID, time.Now())
-	body = oauthCall(w.h, "GET", "/account/security", nil, session).Body.String()
+	body = legacySecurity(w.h, session).Body.String()
 	res := oauthCall(w.h, "POST", "/account/totp/start", url.Values{"csrf": {formCSRF(t, body, "/account/totp/start")}}, session)
 	if res.Code != 303 || res.Header().Get("Location") != "/account/security" {
 		t.Fatalf("start: %d %s", res.Code, res.Body)
 	}
-	page := oauthCall(w.h, "GET", "/account/security", nil, session)
+	page := legacySecurity(w.h, session)
 	body = page.Body.String()
 	m := setupKeyPattern.FindStringSubmatch(body)
-	if m == nil || !strings.Contains(body, `<svg class="qr"`) || page.Header().Get("Cache-Control") != "no-store" {
-		t.Fatal("setup page without QR code or key, or cacheable")
+	// (The Settings dialog's GET security is checked for no-store in
+	// TestSiteSecurityAgainstDatabase.)
+	if m == nil || !strings.Contains(body, `<svg class="qr"`) {
+		t.Fatal("setup page without QR code or key")
 	}
 	secret, err := totpEncoding.DecodeString(strings.ReplaceAll(m[1], " ", ""))
 	if err != nil || len(secret) != totpSecretBytes {
@@ -214,7 +216,7 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	if res.Code != 303 {
 		t.Fatalf("restart: %d", res.Code)
 	}
-	body = oauthCall(w.h, "GET", "/account/security", nil, session).Body.String()
+	body = legacySecurity(w.h, session).Body.String()
 	m = setupKeyPattern.FindStringSubmatch(body)
 	if m == nil {
 		t.Fatal("no setup key after restart")
@@ -242,7 +244,7 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 		t.Fatalf("enable: %d %s", res.Code, res.Body)
 	}
 	expectNotice("A sign-in method was added on your Metatrash account: authenticator app")
-	body = oauthCall(w.h, "GET", "/account/security", nil, session).Body.String()
+	body = legacySecurity(w.h, session).Body.String()
 	if setupKeyPattern.MatchString(body) || strings.Contains(body, `<svg class="qr"`) || !strings.Contains(body, "/account/totp/remove") {
 		t.Fatal("key still shown after setup, or no remove")
 	}
@@ -317,7 +319,7 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	if _, err := w.db.db.ExecContext(ctx, "UPDATE metatrash_totp SET last_used_step = ? WHERE user_id = ?", step-5, w.owner.ID); err != nil {
 		t.Fatal(err)
 	}
-	body = oauthCall(w.h, "GET", "/account/security", nil, stale).Body.String()
+	body = legacySecurity(w.h, stale).Body.String()
 	if !strings.Contains(body, "your authenticator app or a code we email") {
 		t.Fatal("confirm with the app not offered")
 	}
@@ -385,7 +387,7 @@ func TestAuthenticatorAppOffWithoutKey(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
 	w.s.accounts.markConfirmed(session.Value, w.owner.ID, time.Now())
-	body := oauthCall(w.h, "GET", "/account/security", nil, session).Body.String()
+	body := legacySecurity(w.h, session).Body.String()
 	if strings.Contains(body, "Authenticator app") || strings.Contains(body, "/account/totp/") {
 		t.Fatal("authenticator app offered without a key")
 	}

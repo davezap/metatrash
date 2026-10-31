@@ -41,7 +41,7 @@ func TestChangeEmailAgainstDatabase(t *testing.T) {
 		return oauthCall(w.h, "POST", path, form, session).Result()
 	}
 	page := func(session *http.Cookie) string {
-		return html.UnescapeString(oauthCall(w.h, "GET", "/account/security", nil, session).Body.String())
+		return html.UnescapeString(legacySecurity(w.h, session).Body.String())
 	}
 	old := w.owner.Email
 	fresh := randomName(t, "moved-") + "@example.com"

@@ -269,10 +269,10 @@ func TestMicrosoftSignIn(t *testing.T) {
 
 	// After signing in another way (a fresh session), Security asks first.
 	session := fresh(w.owner)
-	if res := oauthCall(w.h, "GET", "/login", nil, session, waiting); res.Code != 303 || res.Header().Get("Location") != "/account/security" {
+	if res := oauthCall(w.h, "GET", "/login", nil, session, waiting); res.Code != 303 || res.Header().Get("Location") != "/app/#settings/security" {
 		t.Fatalf("signed in with a waiting account: %d %q", res.Code, res.Header().Get("Location"))
 	}
-	page := oauthCall(w.h, "GET", "/account/security", nil, session, waiting)
+	page := legacySecurity(w.h, session, waiting)
 	if !strings.Contains(page.Body.String(), "Link this Microsoft account") {
 		t.Fatalf("no link offer: %s", page.Body)
 	}
@@ -324,7 +324,7 @@ func TestMicrosoftSignIn(t *testing.T) {
 	other := "0000bbbb-1111-2222-3333-444455556666"
 	cookie, q = microsoftStart(t, w, f, memberSession)
 	res = microsoftReturn(w, f, cookie, q, other, "")
-	if res.Code != 200 || !strings.Contains(res.Body.String(), `url=/account/security"`) {
+	if res.Code != 200 || !strings.Contains(res.Body.String(), `url=/app/#settings/security"`) {
 		t.Fatalf("link return: %d %s", res.Code, res.Body)
 	}
 	expect("Sign-in method added on your Metatrash account", "Microsoft account Test Person")

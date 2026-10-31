@@ -211,6 +211,8 @@ func settingsAddress(path string) string {
 		return "/app/#settings/profile"
 	case "/account/services":
 		return "/app/#settings/services"
+	case "/account/security":
+		return "/app/#settings/security"
 	}
 	if id, ok := strings.CutPrefix(path, "/account/sharing/"); ok && idPattern.MatchString(id) {
 		return "/app/#settings/spaces/" + id
@@ -1009,7 +1011,7 @@ func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 	// A Microsoft account no one has linked waits in this browser: offer to
 	// link it (Security asks first; it is never linked by itself).
 	if _, ok := h.microsoftWaiting(r); ok {
-		http.Redirect(w, r, h.basePath+"/account/security", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/app/#settings/security", http.StatusSeeOther)
 		return
 	}
 	// Go back to the page that sent this browser to sign in.
