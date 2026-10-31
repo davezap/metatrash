@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.74.0 - The site's header for Slate Viewer's UI (2026-10-31)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing, with a new website build of Slate Viewer copied into `internal/service/web/app/` first. Step 4 of "Slate Viewer's UI on the website" in the roadmap.
+
+- **Spaces open for reading.** An **Edit** switch in the header turns editing on; it stays on for the browser tab's session, in every space. It isn't shown where the person can only read (the public space signed out, a read-only member, a space readable on the web). New files, renaming and moving follow the switch too.
+- **Header:** Print, a theme selector (Match system, Light, Dark, Paper) and **Change Space**, which goes to Your account for now. The Metatrash wordmark goes to the home page as before.
+- **Desktop-only parts hidden:** the browser keeps its own Ctrl+N, Ctrl+W, Ctrl+O, Ctrl+Shift+R, Ctrl+1…9 and zoom keys; the Files menu offers Copy Address instead of Show in Explorer and Copy Path, Open in New Tab instead of New Window; new folders (not on the site API yet) and Close Folder are gone; the status chip shows only files still to read and the file's size, with no sync menu. Messages are titled Metatrash.
+- **A save the server refuses** because the file changed since it was read now asks again with the server's version (Compare, Keep Mine or Cancel), as when the change is noticed before saving, instead of saying to copy your changes and reload.
+- Tested in headless Chromium against a local server: the page opens read-only with the switch off, the switch turns editing on and off, a save goes through, a change made on the server meanwhile brings up the question and Compare shows both versions, the switch stays on after a reload, the theme selector switches to dark, and the public space signed out shows no switch. No Go code changed besides the version.
+
 ## 0.73.0 - Slate Viewer's UI on the site, first look (2026-10-31)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Step 3 of "Slate Viewer's UI on the website" in the roadmap. Nothing links to it yet: the `/spaces/` pages are unchanged.

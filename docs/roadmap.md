@@ -71,6 +71,16 @@ Plan (each step its own release):
    folder, developer tools, default apps, attention badge, mtsync
    setup/login/Sync menu and conflict copies stay in the Viewer. Open
    externally becomes a link or download; native dialogs become in-page ones.
+   *Done in 0.74.0 (Slate Viewer source, no Viewer release):* the site's
+   header has an Edit switch (spaces open for reading; on lasts for the
+   browser tab's session, hidden where the person can only read), Print, a
+   theme selector and Change Space (to `/account`). The browser keeps its own
+   Ctrl+N/W/O/R, Ctrl+1…9 and zoom keys. Show in Explorer becomes Copy
+   Address, New Window becomes New Tab, new folders and Close Folder are
+   hidden, the status chip shows only files to read and size. A save the
+   server refuses (409) asks again with its version: Compare, Keep Mine or
+   Cancel. Print sits in the site header, not yet in Slate's own toolbar
+   (that needs a Slate release).
 5. **Phones and the fallback.** The Viewer layout is desktop-first: bring
    in the site's Files drawer (0.69.1) for narrow screens. Keep the
    server-rendered pages for no-JS and search engines.
