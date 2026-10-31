@@ -306,6 +306,9 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
 		return true
 	}
+	if path == "/" && h.serveAppHome(w, r, client) {
+		return true
+	}
 	if path == "/about" {
 		if r.URL.RawQuery != "" {
 			sendError(w, invalid("Unknown or duplicate query parameter."))

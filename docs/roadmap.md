@@ -84,6 +84,15 @@ Plan (each step its own release):
 5. **Phones and the fallback.** The Viewer layout is desktop-first: bring
    in the site's Files drawer (0.69.1) for narrow screens. Keep the
    server-rendered pages for no-JS and search engines.
+   *Done in 0.75.0:* at 800 pixels wide or less the sidebar is a drawer
+   over the document, one section at a time, closing when a file opens; the
+   header drops Back/Forward, the folder name, Print and the status chip.
+   metatrash.com (/) opens the docs space's `introduction.md` in the app
+   (indexed, with a no-JavaScript link to `/docs/introduction.md`) while
+   the docs space is readable on the web; otherwise the built-in home page.
+   The address bar follows the open file (`/app/…`), signed out the header
+   shows Sign In instead of Change Space. `/spaces/` and `/docs/` stay
+   server-rendered.
 
 Decided with Dave (2026-10-30):
 

@@ -21,7 +21,11 @@ import (
 //
 // The page opens the space at the file in the path, and the UI reads and
 // changes files through the site API with the person's own access. The
-// /spaces/ pages stay as they are.
+// /spaces/ and /docs/ pages stay as they are, for browsers without
+// JavaScript and for search engines.
+//
+// With a docs space readable on the web, the home page (/) is the same page
+// on the docs space's introduction.md (0.75.0).
 
 //go:embed all:web/app
 var appFiles embed.FS
@@ -61,9 +65,9 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
+{{if .Home}}<meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">{{else}}<meta name="robots" content="noindex">{{end}}
 <meta name="metatrash-app" content="{{.Config}}">
-<title>{{.Title}} — Metatrash</title>
+<title>{{.Title}}</title>
 <script src="{{.BasePath}}/assets/app-start.js" nonce="{{.Nonce}}"></script>
 <link rel="stylesheet" href="{{.BasePath}}/assets/slate.css">
 {{range .Build.CSS}}<link rel="stylesheet" href="{{$.BasePath}}/app/{{.}}">
@@ -71,6 +75,7 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 </head>
 <body>
 <div id="app"></div>
+<noscript><p>This page needs JavaScript. Without it, read <a href="{{.BasePath}}{{.Plain}}">the same page</a>{{if .Home}} or <a href="{{.BasePath}}/docs/">the documentation</a>{{end}}.</p></noscript>
 <script type="module" src="{{.BasePath}}/app/{{.Build.Entry}}"></script>
 </body>
 </html>
@@ -168,26 +173,70 @@ func (h *httpAdapter) serveApp(w http.ResponseWriter, r *http.Request, client st
 		return true
 	}
 
-	root := "/spaces/" + name
-	config := map[string]any{"root": root, "file": nil}
 	title := name
 	if file != "" && !strings.HasSuffix(file, "/") {
-		config["file"] = root + "/" + file
 		title = path.Base(file)
+	}
+	h.writeAppPage(w, build, appPage{Space: name, File: file, Title: title + " — Metatrash", Plain: "/spaces/" + name + "/" + file})
+	return true
+}
+
+// appPage is what one page of the app opens.
+type appPage struct {
+	// Space is owner/slug or public, File the path in it ("" or a folder
+	// for none). Plain is the server-rendered page of the same file.
+	Space, File, Title, Plain string
+	// Home is the home page: indexed, its address kept as /.
+	Home bool
+}
+
+func (h *httpAdapter) writeAppPage(w http.ResponseWriter, build *appBuild, page appPage) {
+	root := "/spaces/" + page.Space
+	config := map[string]any{"root": root, "file": nil}
+	if page.File != "" && !strings.HasSuffix(page.File, "/") {
+		config["file"] = root + "/" + page.File
+	}
+	if page.Home {
+		config["address"] = "/"
+		w.Header().Del("X-Robots-Tag")
 	}
 	encoded, _ := json.Marshal(config)
 	// The editor's <style> elements carry this nonce (web/app-start.js).
 	nonce, err := randomHex(16)
 	if err != nil {
 		sendError(w, problem(503, "unavailable", "Try again."))
-		return true
+		return
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'nonce-"+nonce+"'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' https: data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = appTemplate.Execute(w, struct {
-		Config, Title, BasePath, Nonce string
-		Build                          *appBuild
-	}{string(encoded), title, h.basePath, nonce, build})
+		Config, Title, BasePath, Nonce, Plain string
+		Home                                  bool
+		Build                                 *appBuild
+	}{string(encoded), page.Title, h.basePath, nonce, page.Plain, page.Home, build})
+}
+
+// serveAppHome answers / with the app on the docs space's introduction.md
+// (or its first note), when there is a docs space readable on the web and a
+// build of the app. Otherwise it leaves / to the built-in home page.
+func (h *httpAdapter) serveAppHome(w http.ResponseWriter, r *http.Request, client string) bool {
+	ref, build := h.docsSpace(), appBuildOnce()
+	if ref == "" || build == nil || r.URL.RawQuery != "" || !strings.EqualFold(r.Host, h.publicHost) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	// The docs are the same for everyone: no account is looked up.
+	repo, name, err := h.service.siteSpaceAccess(ctx, userAccount{}, false, ref, client, false)
+	if err != nil {
+		return false
+	}
+	file := "introduction.md"
+	if _, files, err := repo.snapshot(ctx, ""); err != nil || files[file].Blob == "" {
+		file = ""
+	}
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	h.writeAppPage(w, build, appPage{Space: name, File: file, Title: "Metatrash — shared liminal spaces", Plain: "/docs/" + file, Home: true})
 	return true
 }
 

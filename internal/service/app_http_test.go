@@ -91,3 +91,42 @@ func TestAppPagesAgainstDatabase(t *testing.T) {
 		t.Fatalf("query: %d", res.Code)
 	}
 }
+
+// The home page (0.75.0): the app on the docs space's introduction.md, while
+// the docs space is readable on the web; the built-in page otherwise.
+func TestAppHomeAgainstDatabase(t *testing.T) {
+	w := newOAuthWorld(t)
+	if appBuildOnce() == nil {
+		t.Skip("no website build in web/app")
+	}
+	home := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "https://metatrash.com/", nil)
+		r.RemoteAddr = "192.0.2.14:1"
+		res := httptest.NewRecorder()
+		w.h.ServeHTTP(res, r)
+		return res
+	}
+	w.s.accounts.config.DocsSpace = w.ownedName
+	// Private: the built-in home page.
+	if res := home(); res.Code != 200 || strings.Contains(res.Body.String(), "metatrash-app") {
+		t.Fatalf("private docs space: %d", res.Code)
+	}
+	if _, err := w.db.db.ExecContext(context.Background(), "UPDATE metatrash_spaces SET visibility = 'web' WHERE space_id = ?", w.ownedID); err != nil {
+		t.Fatal(err)
+	}
+	// No introduction.md yet: the space's first note.
+	if res := home(); res.Code != 200 || !strings.Contains(res.Body.String(), "&#34;file&#34;:null") {
+		t.Fatalf("no introduction: %d %s", res.Code, res.Body)
+	}
+	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
+	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
+	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "introduction.md", "text": "# Welcome\n", "ifInState": state}, "")
+	res := home()
+	body := res.Body.String()
+	if res.Code != 200 || !strings.Contains(body, "&#34;file&#34;:&#34;/spaces/"+w.ownedName+"/introduction.md&#34;") || !strings.Contains(body, "&#34;address&#34;:&#34;/&#34;") {
+		t.Fatalf("home: %d %s", res.Code, body)
+	}
+	if strings.Contains(body, "noindex") || res.Header().Get("X-Robots-Tag") != "" || !strings.Contains(body, `href="/docs/introduction.md"`) {
+		t.Fatalf("home should be indexed, with a link for no JavaScript: %v %s", res.Header(), body)
+	}
+}

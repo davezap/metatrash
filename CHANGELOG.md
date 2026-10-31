@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.75.0 - The home page and phones in Slate Viewer's UI (2026-10-31)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing, with a new website build of Slate Viewer copied into `internal/service/web/app/` first. Step 5 of "Slate Viewer's UI on the website" in the roadmap.
+
+- **metatrash.com opens the docs.** `/` is the app on the docs space's `introduction.md` (its first note if there is none), while the docs space is readable on the web; otherwise the built-in home page as before. It is indexed, keeps `/` in the address bar for the introduction, and has a link to `/docs/introduction.md` for browsers without JavaScript. The old home page's MCP addresses, public-space link and recent activity are not shown there for now.
+- **Phones:** at 800 pixels wide or less the sidebar becomes a drawer over the document, one section at a time from the icon bar, closing when a file opens or when you tap beside it. The header drops Back/Forward, the folder name, Print and the status chip, and Change Space shortens to Spaces.
+- **The address bar follows the open file** (`/app/owner/slug/file`), so a reload or a copied address opens it again.
+- **Signed out,** the header has Sign In instead of Change Space, there is no Edit switch on a space readable on the web, and the app no longer asks for read records (no more 404 in the console).
+- Every `/app/` page has a `<noscript>` link to the same file's server-rendered page; `/spaces/` and `/docs/` are unchanged.
+- Tested against MariaDB: the home page falls back to the built-in one while the docs space is private, opens the first note without `introduction.md` and `introduction.md` once it exists, with the address kept, no `noindex` and the no-JavaScript link. In headless Chromium against a local server: the home page signed out (Sign In, no switch, no console errors) and signed in as the owner (Change Space, the switch), a link from it moving the address to `/app/…`, and at phone size the drawer opening from the icon bar and closing when a file is picked. Full suite.
+
 ## 0.74.0 - The site's header for Slate Viewer's UI (2026-10-31)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing, with a new website build of Slate Viewer copied into `internal/service/web/app/` first. Step 4 of "Slate Viewer's UI on the website" in the roadmap.
