@@ -178,6 +178,18 @@ func cookieToken(r *http.Request, name string) string {
 	return cookie.Value
 }
 
+// signOut ends this browser's session and forgets its sign-in challenges:
+// the account pages' Sign out and the site app's (POST /api/v1/site/logout).
+func (a *accounts) signOut(w http.ResponseWriter, browser, session string) {
+	a.endSession(session)
+	a.mu.Lock()
+	delete(a.challenges, secretDigest(browser))
+	delete(a.challenges, confirmKey(session))
+	a.mu.Unlock()
+	accountCookie(w, sessionCookie, "", -1)
+	accountCookie(w, loginCookie, "", -1)
+}
+
 // accountSectionPaths are the account pages. Each is one section of Your
 // account, with the sections listed down the left like a space's explorer.
 var accountSectionPaths = map[string]string{
@@ -821,13 +833,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return true
 	}
 	if path == "/logout" {
-		a.endSession(session)
-		a.mu.Lock()
-		delete(a.challenges, secretDigest(browser))
-		delete(a.challenges, confirmKey(session))
-		a.mu.Unlock()
-		accountCookie(w, sessionCookie, "", -1)
-		accountCookie(w, loginCookie, "", -1)
+		a.signOut(w, browser, session)
 		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return true
 	}

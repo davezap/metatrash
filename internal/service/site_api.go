@@ -16,6 +16,7 @@ import (
 // instead of an OAuth token, the same handlers behind it.
 //
 //	GET  /api/v1/site/session                           who is signed in, the CSRF token, their spaces
+//	POST /api/v1/site/logout                            sign this browser out (0.78.0)
 //	*    /api/v1/site/spaces/public/{resource}          the public space
 //	*    /api/v1/site/spaces/{owner}/{slug}/{resource}  an owned space
 //
@@ -58,6 +59,9 @@ type siteSpace struct {
 	Name   string `json:"name"`
 	Owner  string `json:"owner"`
 	Access string `json:"access"`
+	// Owned is a space the person owns; Web one anyone can read on the website.
+	Owned bool `json:"owned,omitempty"`
+	Web   bool `json:"web,omitempty"`
 }
 
 type siteSession struct {
@@ -65,6 +69,9 @@ type siteSession struct {
 	Account  string      `json:"account,omitempty"`
 	CSRF     string      `json:"csrf,omitempty"`
 	Spaces   []siteSpace `json:"spaces"`
+	// Waiting counts the invitations and ownership offers waiting for the
+	// person, for the space picker; 0 when they can't be read just now.
+	Waiting int `json:"waiting,omitempty"`
 }
 
 func (h *httpAdapter) siteCSRF(token string) string {
@@ -151,6 +158,18 @@ func (h *httpAdapter) serveSiteAPI(w http.ResponseWriter, r *http.Request, clien
 		sendJSON(w, 200, value)
 		return
 	}
+	if rest == "logout" {
+		// The app's account menu. Its page sends Origin: null on a plain
+		// form post (no-referrer), so it signs out here, with the token.
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			sendError(w, problem(405, "invalid_request", "Use POST."))
+			return
+		}
+		h.service.accounts.signOut(w, cookieToken(r, loginCookie), token)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	parts := strings.Split(rest, "/")
 	if parts[0] != "spaces" || len(parts) < 3 || len(parts) > 4 {
 		sendError(w, missing())
@@ -226,7 +245,13 @@ func (h *httpAdapter) siteSession(ctx context.Context, user userAccount, signedI
 		if s.CanWrite {
 			access = "read_write"
 		}
-		out.Spaces = append(out.Spaces, siteSpace{Space: s.Owner + "/" + s.Slug, Name: s.Name, Owner: s.Owner, Access: access})
+		out.Spaces = append(out.Spaces, siteSpace{Space: s.Owner + "/" + s.Slug, Name: s.Name, Owner: s.Owner, Access: access, Owned: s.Owned, Web: s.Web})
+	}
+	// The count is a hint on the picker's Settings link: a failure leaves it out.
+	if invitations, _, err := h.accountMemberships(ctx, user); err == nil {
+		if offers, err := h.service.ownedDB.transferOffers(ctx, user.ID, time.Now()); err == nil {
+			out.Waiting = len(invitations) + len(offers)
+		}
 	}
 	return out, nil
 }

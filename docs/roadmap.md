@@ -1,8 +1,40 @@
 # Roadmap
 
-Open work as of Metatrash 0.71.0 and Slate Viewer 0.20.5 (2026-10-30). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.78.0 and Slate Viewer 0.21.0 (2026-10-31). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
-## Next: Slate Viewer's UI on the website (Dave, 2026-10-30)
+## Next: Settings dialog and space picker (Dave, 2026-10-31)
+
+Dave: retire the old account pages (`/account/...`, `web/account.html`,
+about 50 forms) and move everything account-related into the site app as a
+modal Settings dialog, with a real space picker for Change Space. Plan and
+decisions in the Claude Doc "Settings dialog and space picker: plan".
+
+- **Dialog:** tabs Spaces (with each space's sharing settings inside it),
+  Security, Services and Profile, opened from the account button; address
+  `#settings/<tab>` on any app page, and `/account/...` redirects to it.
+  A "Confirm it's you" sheet asks for a recent sign-in when an action needs
+  one and then carries on (a JSON write answers 403 `step_up_needed`).
+- **Built on** JSON routes under `/api/v1/site/account/` with the site API's
+  guard. Each form handler is split into a function both the old form route
+  and the JSON route call, until the form route is retired.
+- **Releases:** 1 space picker and account menu (*done in 0.78.0*); 2 the
+  dialog, Profile, Spaces and space sharing; 3 Services; 4 Security;
+  5 clean-up (delete `account.html` and the form routes, emails point at the
+  new addresses, `/spaces/...` and `/docs/...` redirect into `/app/...`).
+  Workplace spaces come after release 2, so their screens are built once,
+  in the dialog.
+- **Before release 2 (Dave: controls against malicious code):** settings
+  will share a page with Markdown other people write. Keep the app's CSP
+  (`script-src 'self'`, no inline script or eval) with a test that fails if
+  it loosens; audit Slate's raw HTML handling, its `innerHTML` uses and the
+  Mermaid settings, with a hostile-Markdown test file; require a recent
+  sign-in to make a space readable on the web and to change a connected
+  app's spaces.
+- Stays as its own page: `/login`, OAuth consent, the GitHub and Microsoft
+  return pages. Slate Viewer on the desktop opens the site's Settings in the
+  browser for now, and later adopts the same settings style.
+
+## Done: Slate Viewer's UI on the website (Dave, 2026-10-30)
 
 Dave: the Viewer's UI is far more complete than the site's file explorer and
 works the way Dave likes, so reuse it on the site rather than grow the site's
@@ -109,7 +141,7 @@ Decided with Dave (2026-10-30):
   today's Metatrash logo (it's all about Metatrash) and has only:
   - a theme selector;
   - Change Space, which for now goes to `/account` (a proper space picker
-    later).
+    later; *done in 0.78.0*, see Settings dialog and space picker).
 
   Print moves to an icon in Slate's tools header.
 - **Landing page.** metatrash.com opens the public `dave-zap/metatrash-com`
@@ -174,9 +206,9 @@ can do there. Designed 2026-10-31 (Claude Doc "Sign in with Microsoft and
 Google: design"); Dave chose **app roles** (Metatrash.Reader,
 Metatrash.Editor) over groups, and a 7-day recheck for agents. Releases:
 0.77.0 Sign in with Microsoft for one's own account (done, see the
-changelog); 0.78.0 workplace spaces (a space tied to a tenant, app roles set
+changelog); then workplace spaces, after the Settings dialog's Spaces tab (a space tied to a tenant, app roles set
 access, rechecked at each Microsoft sign-in, agents' workplace access ends
-after 7 days without one); 0.79.0 Sign in with Google (`sub`, only verified
+after 7 days without one); then Sign in with Google (`sub`, only verified
 addresses). The notes below were the starting questions:
 
 - **Linking to accounts.** Sign in with OpenID Connect (Google, Entra ID).

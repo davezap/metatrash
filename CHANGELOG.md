@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.78.0 - Space picker and account menu in the site app (2026-10-31)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release the server together with a new Slate Viewer website build (`npm run build:web`, copied into `internal/service/web/app/`). Step 1 of "Settings dialog and space picker" in the roadmap.
+
+- **Change Space opens a space picker** under the button instead of going to Your account: a filter box, then Recent (the last five spaces opened in this browser), Public, Your spaces and Shared with you, each with its address and *can edit*, *read only* and *public* (readable on the web) marks. Below a line, **Visited** lists other people's web-readable spaces this browser opened, each with × to forget it. Arrow keys and Enter pick, Esc closes; picking opens the space at `/app/owner/slug/`. Signed out, the picker shows the public space and visited spaces, next to Sign In.
+- **An account button** next to it shows who is signed in, with **Settings** (Your account for now) and **Sign out**.
+- **`GET /api/v1/site/session`** now marks each space `owned` and `web` (readable on the web) and gives `waiting`, the invitations and ownership offers waiting for the person, which the picker shows as Invitations (n).
+- **`POST /api/v1/site/logout`** signs the browser out, with the same Origin, Sec-Fetch-Site and `X-Metatrash-CSRF` checks as other site API writes. The app needs it because its pages send no referrer, so a plain form post to `/logout` arrives with `Origin: null` and is refused. `/logout` and this route share one sign-out.
+- Tested against MariaDB: the session marks, `waiting` counted for the invited person only, and logout refused without the token, from another origin and by GET, ending only that session. Browser-checked with the website build against a local server: the picker for an owner, a member and a stranger who opened a web-readable space, filtering, Enter, Recent, the account menu and sign out, and a phone-width screen signed out.
+
 ## 0.77.1 - Lock the public space's AGENTS.md (2026-10-31)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Optional new `people` in `spaces.json` (deployment.md, Public space).

@@ -25,6 +25,7 @@ type accessibleSpace struct {
 	ID, Name, Slug, Owner string
 	Owned                 bool
 	CanWrite              bool // owner, or member with read_write agent permission
+	Web                   bool // readable on the web by anyone
 }
 
 // oauthTokenPair is returned to the client once; only digests are stored.
@@ -65,25 +66,26 @@ func (db *accountDatabase) accessibleSpaces(ctx context.Context, user userAccoun
 			rows.Close()
 			return nil, err
 		}
-		spaces = append(spaces, accessibleSpace{ID: space.ID, Name: space.Name, Slug: space.Slug, Owner: user.Username, Owned: true, CanWrite: true})
+		spaces = append(spaces, accessibleSpace{ID: space.ID, Name: space.Name, Slug: space.Slug, Owner: user.Username, Owned: true, CanWrite: true, Web: space.Visibility == spaceWeb})
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return nil, fmt.Errorf("cannot list spaces")
 	}
-	rows, err = db.db.QueryContext(ctx, `SELECT s.space_id, s.name, s.slug, COALESCE(u.username, ''), m.agent_permission FROM metatrash_memberships m JOIN metatrash_spaces s ON s.space_id = m.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE m.user_id = ? AND m.status = 'active' AND s.provisioning_state = 'ready' ORDER BY m.joined_at, s.space_id LIMIT 200`, user.ID)
+	rows, err = db.db.QueryContext(ctx, `SELECT s.space_id, s.name, s.slug, COALESCE(u.username, ''), m.agent_permission, s.visibility FROM metatrash_memberships m JOIN metatrash_spaces s ON s.space_id = m.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE m.user_id = ? AND m.status = 'active' AND s.provisioning_state = 'ready' ORDER BY m.joined_at, s.space_id LIMIT 200`, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list joined spaces")
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var item accessibleSpace
-		var permission string
-		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Owner, &permission); err != nil {
+		var permission, visibility string
+		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Owner, &permission, &visibility); err != nil {
 			return nil, fmt.Errorf("cannot list joined spaces")
 		}
 		item.CanWrite = permission == "read_write"
+		item.Web = visibility == spaceWeb
 		spaces = append(spaces, item)
 	}
 	if rows.Err() != nil {
