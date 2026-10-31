@@ -46,7 +46,12 @@ type Global struct {
 type SpaceConfig struct {
 	Visibility string          `json:"visibility"`
 	Overrides  json.RawMessage `json:"overrides"`
-	Limits     Limits          `json:"-"`
+	// People are the usernames whose Metatrash Sync writes count as a
+	// person's in this space, so they can lift its locks (see locks.go). A
+	// configured space has no owner, and anyone may sign in to Sync on the
+	// public space, so nobody else does.
+	People []string `json:"people,omitempty"`
+	Limits Limits   `json:"-"`
 }
 
 type Config struct {
@@ -117,6 +122,14 @@ func loadConfig(path, keyPath string) (Config, map[string]Keys, error) {
 	for name, sc := range c.Spaces {
 		if !spacePattern.MatchString(name) || (name != "public" && sc.Visibility != "private") {
 			return c, nil, fmt.Errorf("invalid space configuration: %s", name)
+		}
+		if len(sc.People) > 50 {
+			return c, nil, fmt.Errorf("invalid people: %s: at most 50 usernames", name)
+		}
+		for _, u := range sc.People {
+			if len(u) > 32 || !usernamePattern.MatchString(u) {
+				return c, nil, fmt.Errorf("invalid people: %s: %q is not a username", name, u)
+			}
 		}
 		sc.Limits = c.Defaults
 		if len(sc.Overrides) > 0 {

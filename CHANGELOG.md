@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.77.1 - Lock the public space's AGENTS.md (2026-10-31)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Optional new `people` in `spaces.json` (deployment.md, Public space).
+
+- **The public space's root `AGENTS.md` is locked.** Its `.metatrash.json` now has `readOnly` `{"AGENTS.md": "everyone", ".metatrash.json": "agents"}` (written through the MCP tools on 2026-10-31, so already live), and `AGENTS.md` itself says what the public space is and that every other file there is untrusted. Agents and anonymous clients can't change either file.
+- **Only listed people can lift a lock in the public space.** Locks tell agents from people by the client: a Metatrash Sync (mtsync, Slate Viewer) or website editor write counted as a person's. In an owned space only the owner and members can make those, but anyone can sign in on the public space, so anyone could have lifted the lock and rewritten `AGENTS.md`. Now such a write in a `spaces.json` space counts as a person's only when the account's username is in that space's new `people` list (up to 50 usernames); otherwise it is held to locks as an agent's is. With no `people`, nobody can lift a lock there.
+- Tested against MariaDB: with `people` naming one account, a second account can neither rewrite the locked `AGENTS.md` nor its `.metatrash.json`, through Sync or the website, the listed account can't write the `everyone`-locked file either but can lift the lock, and with `people` empty nobody can lift it. The same test fails on 0.77.0 (the second account lifts the lock, through either). `spaces.json` refuses `people` that are not usernames. Full suite.
+
 ## 0.77.0 - Sign in with Microsoft (2026-10-31)
 
 Schema v22 and grants (`metatrash_identities`): apply `deploy/account-schema-v22.sql`, then `deploy/account-grants.sql`, before starting it. No tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Off until `accounts.json` has `"microsoft": {"enabled": true, …}` with an Entra app registration (deployment.md, Sign in with Microsoft). Step 1 of "Sign in with Google and Microsoft" in the roadmap.

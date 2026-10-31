@@ -277,6 +277,24 @@ lines from the example. Set the account `origin` to `https://example.com`,
 without the folder. A folder is not an isolation boundary from other
 applications on the same host.
 
+## Public space
+
+The public space is `public` in `spaces.json`. Anyone can sign in and change
+it, so by default no write there (Metatrash Sync, Slate Viewer, the website's
+editor) counts as a person's for locks (`locked` and `readOnly` in
+`.metatrash.json`): everyone is held to them as agents are, and a lock can't be
+lifted. List the usernames that may lift them (up to 50) in `people`:
+
+```json
+"public": {"visibility": "public", "overrides": {}, "people": ["dave-zap"]}
+```
+
+Restart after changing it, and after a listed account changes or gives up its
+username. Its root `AGENTS.md` is locked for everyone and its `.metatrash.json`
+for agents (0.77.1): to change `AGENTS.md`, a listed person removes the
+`AGENTS.md` entry from `readOnly` with Slate Viewer, mtsync or the website,
+edits it, then puts the entry back.
+
 ## Key spaces (optional)
 
 Add a space to `spaces.json` with `"visibility": "private"` and any `overrides`
@@ -910,6 +928,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.67.0 | schema v20 (`deleted_at` on spaces, the `deleted` and `purged` states) and grants (`UPDATE (deleted_at, slug)` on spaces) | 19, but only while no space is deleted or purged: 0.66 does not start with such a row. Restore deleted spaces first (`mt spaces list` shows them); after the first purge (30 days on), stay on 0.67 |
 | 0.71.0 | schema v21 (`deletion_requested_at` and `deleted_at` on users) and grants (`UPDATE (deletion_requested_at, deleted_at)` on users) | 20. An account waiting to be deleted is then neither purged nor cancelled by signing in (it still waits when 0.71 comes back); a purged account stays purged, with no way to sign in |
 | 0.76.0 | none. Recommended: the Cloudflare lines in Apache if the site is proxied by Cloudflare (Apache) | 0.75.0 (no schema change) |
+| 0.77.1 | nothing; optional `people` in `spaces.json` (Public space) | 22, after removing `people` from `spaces.json` (0.77.0 refuses keys it doesn't know) |
 | 0.77.0 | schema v22 (`metatrash_identities`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (email_hint, display_name, last_used_at)` on it); optional `microsoft` in `accounts.json` (Sign in with Microsoft) | 21; linked Microsoft accounts stay in the table, unused, and those people sign in another way |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,

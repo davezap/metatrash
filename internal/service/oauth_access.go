@@ -174,6 +174,28 @@ func (s *Service) listConnectedSpaces(ctx context.Context, id oauthIdentity) (co
 	return result, nil
 }
 
+// configuredSpacePerson reports whether a Metatrash Sync connection counts as
+// a person in a configured space (the public space): only when its account's
+// username is listed in the space's people. Anyone can sign in to Sync there,
+// so otherwise its writes are held to locks as an agent's are.
+func (s *Service) configuredSpacePerson(ctx context.Context, id oauthIdentity, sc SpaceConfig) bool {
+	if len(sc.People) == 0 {
+		return false
+	}
+	username, err := s.connectionAccount(ctx, id)
+	return err == nil && sc.listsPerson(username)
+}
+
+// listsPerson reports whether username is in the space's people.
+func (sc SpaceConfig) listsPerson(username string) bool {
+	for _, u := range sc.People {
+		if username != "" && u == username {
+			return true
+		}
+	}
+	return false
+}
+
 // connectionAccount returns the username of the account a connection signs
 // in as.
 func (s *Service) connectionAccount(ctx context.Context, id oauthIdentity) (string, error) {

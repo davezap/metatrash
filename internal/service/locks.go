@@ -11,7 +11,9 @@ import (
 // Locks. A folder's .metatrash.json can lock its own keys (locked) and the
 // files in it (readOnly), each at one of two levels:
 //   - "agents": agents can't add, change or remove the key, or write, edit,
-//     move, rename, delete or create the file. People can (see personWrite).
+//     move, rename, delete or create the file. People can (see personWrite):
+//     Metatrash Sync and the website's editor, and in a spaces.json space
+//     such as the public space only the usernames its people lists.
 //   - "everyone": nobody can, people included, until a person lifts the lock.
 //
 // Anything not listed is read-write for everyone. A person can always edit

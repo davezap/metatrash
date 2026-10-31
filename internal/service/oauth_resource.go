@@ -169,6 +169,9 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 	// The identity rides along for push, which signs commits with it.
 	ctx := context.WithValue(r.Context(), mcpIdentityKey{}, mcpIdentity{client: client, oauth: &id})
 	person := id.ClientID == syncClient(h.oauth.issuer).ID
+	if sc, configured := h.service.config.Spaces[space]; configured && person {
+		person = h.service.configuredSpacePerson(r.Context(), id, sc)
+	}
 	if person {
 		ctx = context.WithValue(ctx, personWriteKey{}, true)
 	}

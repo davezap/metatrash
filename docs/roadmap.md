@@ -204,9 +204,6 @@ Agreed with Dave 2026-10-18.
 
 - **Members' sync clients:** whether they count as the owner's for locks
   (today any Metatrash Sync write counts as a person's).
-- **Public space AGENTS.md.** Anyone can rewrite the public space's root
-  `AGENTS.md`, and agents read it first, so anyone can plant instructions
-  there. Lock it with `readOnly` at level `everyone` (or `agents`).
 - **Folder Properties in Slate Viewer:** still to add there: triggers
   (GitHub, and folder actions under Folder agent tasks).
 

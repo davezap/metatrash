@@ -178,7 +178,11 @@ func (h *httpAdapter) serveSiteAPI(w http.ResponseWriter, r *http.Request, clien
 		// no grant: nothing on these routes looks one up.
 		id := oauthIdentity{UserID: user.ID, ClientID: siteAppName, Scope: scopeReadWrite}
 		ctx = context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{client: client, oauth: &id})
-		ctx = context.WithValue(ctx, personWriteKey{}, true)
+		// In a spaces.json space (the public space) anyone may sign in, so
+		// only the usernames its people lists count as a person for locks.
+		if sc, configured := h.service.config.Spaces[space]; !configured || sc.listsPerson(user.Username) {
+			ctx = context.WithValue(ctx, personWriteKey{}, true)
+		}
 		author := changeAuthor{Name: accountName(user), App: siteAppName, Kind: "person"}
 		ctx = withAuthor(ctx, func() changeAuthor { return author })
 	}

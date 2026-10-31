@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -503,5 +505,92 @@ func TestOAuthSyncClientAgainstDatabase(t *testing.T) {
 	apps, err := w.h.connectedApps(context.Background(), w.owner)
 	if err != nil || len(apps) != 1 || apps[0].Name != "Metatrash Sync" || apps[0].Kind != "REST" {
 		t.Fatalf("connected apps: %+v %v", apps, err)
+	}
+}
+
+// In the public space (a configured space with no owner) Metatrash Sync
+// counts as a person only for the usernames in its people, so anyone else
+// signing in to Sync there is held to locks as an agent is.
+func TestPublicSpaceSyncPeopleAgainstDatabase(t *testing.T) {
+	w := newOAuthWorld(t)
+	listed, stranger := w.syncToken(w.owner, w.ownedID, "read_write"), w.syncToken(w.member, w.joinID, "read_write")
+	setPeople := func(people ...string) {
+		sc := w.s.config.Spaces["public"]
+		sc.People = people
+		w.s.config.Spaces["public"] = sc
+	}
+	t.Cleanup(func() { setPeople() })
+	const base = "/api/v1/account/spaces/public/"
+	put := func(token, path, text string, want int, code string) {
+		t.Helper()
+		list := w.rest(token, "GET", base+"files", "")
+		var files ListResult
+		if list.Code != 200 || json.Unmarshal(list.Body.Bytes(), &files) != nil {
+			t.Fatalf("list: %d %s", list.Code, list.Body)
+		}
+		res := w.rest(token, "PUT", base+"file?path="+url.QueryEscape(path), mustJSON(map[string]any{"text": text, "ifInState": files.State}))
+		ok := res.Code == want || want == 200 && res.Code == 201
+		if !ok || code != "" && !strings.Contains(res.Body.String(), `"`+code+`"`) {
+			t.Fatalf("write %s: wanted %d %s, got %d %s", path, want, code, res.Code, res.Body)
+		}
+	}
+	folder := randomName(t, "locks-") + "/"
+	lock := `{"readOnly":{"AGENTS.md":"everyone",".metatrash.json":"agents"}}`
+	put(listed, folder+"a.md", "a\n", 200, "")
+
+	setPeople(w.owner.Username)
+	put(listed, folder+".metatrash.json", lock, 200, "")
+	put(stranger, folder+"AGENTS.md", "planted\n", 403, "read_only_file")
+	put(stranger, folder+".metatrash.json", `{}`, 403, "read_only_file")
+	// The website's editor is held to the same rule.
+	site := func(user userAccount, path, text string, want int) {
+		t.Helper()
+		session := w.session(user)
+		csrf := w.s.accounts.mac("site-api:" + session.Value)
+		state := siteJSON(t, siteCall(w, "GET", "/api/v1/site/spaces/public/files", "", session, ""))["state"].(string)
+		res := siteCall(w, "PUT", "/api/v1/site/spaces/public/file?path="+url.QueryEscape(path), mustJSON(map[string]any{"text": text, "ifInState": state}), session, csrf)
+		if res.Code != want {
+			t.Fatalf("site write %s: wanted %d, got %d %s", path, want, res.Code, res.Body)
+		}
+	}
+	site(w.member, folder+".metatrash.json", `{}`, 403)
+	site(w.owner, folder+".metatrash.json", `{"readOnly":{"AGENTS.md":"everyone",".metatrash.json":"agents"},"purpose":"x"}`, 200)
+	put(listed, folder+"AGENTS.md", "nobody\n", 403, "read_only_file") // everyone means the listed person too
+	put(listed, folder+".metatrash.json", `{}`, 200, "")               // until they lift it
+	put(stranger, folder+"AGENTS.md", "unlocked\n", 200, "")
+
+	// With nobody listed, no Sync connection can lift a lock.
+	setPeople()
+	put(listed, folder+".metatrash.json", lock, 200, "") // adding a lock needs no person
+	put(listed, folder+".metatrash.json", `{}`, 403, "read_only_file")
+	setPeople(w.owner.Username)
+	put(listed, folder+".metatrash.json", `{}`, 200, "")
+}
+
+func TestConfigPeople(t *testing.T) {
+	dir := t.TempDir()
+	write := func(people string) error {
+		b, err := os.ReadFile("../../config/spaces.example.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg map[string]any
+		_ = json.Unmarshal(b, &cfg)
+		var p any
+		_ = json.Unmarshal([]byte(people), &p)
+		cfg["spaces"].(map[string]any)["public"].(map[string]any)["people"] = p
+		b, _ = json.Marshal(cfg)
+		path := filepath.Join(dir, "spaces.json")
+		_ = os.WriteFile(path, b, 0600)
+		_, _, err = loadConfig(path, "")
+		return err
+	}
+	if err := write(`["dave-zap"]`); err != nil {
+		t.Fatalf("valid people refused: %v", err)
+	}
+	for _, bad := range []string{`["Dave"]`, `["a b"]`, `[""]`, `"dave"`} {
+		if err := write(bad); err == nil {
+			t.Fatalf("people %s accepted", bad)
+		}
 	}
 }

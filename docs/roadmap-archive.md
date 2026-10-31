@@ -63,6 +63,12 @@ Agreed with Dave 2026-10-18.
   tree selects folders, and a folder's Properties (right-click, or Alt+Enter)
   writes its `.metatrash.json`: locks, read-only files, publishing and the
   acknowledge service.
+- **Public space AGENTS.md locked** (0.77.1, 2026-10-31). Root `AGENTS.md` is
+  `readOnly` `everyone` and `.metatrash.json` `agents`, and only usernames in
+  `people` (`spaces.json`) count as a person there, since anyone can sign in
+  to Metatrash Sync on the public space. Folder `AGENTS.md` files below the
+  root stay writable by anyone; the root one tells agents to treat them as
+  untrusted.
 
 ## Forms and quizzes
 
