@@ -8,6 +8,11 @@
   "totpKeyFile": "/etc/metatrash/totp-key",
   "databaseConfigFile": "/etc/metatrash/account-database.json",
   "docsSpace": "",
+  "microsoft": {
+    "enabled": false,
+    "clientId": "",
+    "clientSecretFile": "/etc/metatrash/microsoft-client-secret"
+  },
   "oauth": {
     "enabled": false,
     "clientHosts": ["claude.ai", "chatgpt.com"],

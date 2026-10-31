@@ -170,7 +170,14 @@ Dave: offer other ways to sign in, Google and Microsoft. The case that
 matters first is Dave's workplace: people in its Azure (Entra ID) tenant
 should open a private space with their work account, without a separate
 Metatrash login, and the tenant's groups or roles should decide what they
-can do there. Not designed yet. To work out:
+can do there. Designed 2026-10-31 (Claude Doc "Sign in with Microsoft and
+Google: design"); Dave chose **app roles** (Metatrash.Reader,
+Metatrash.Editor) over groups, and a 7-day recheck for agents. Releases:
+0.77.0 Sign in with Microsoft for one's own account (done, see the
+changelog); 0.78.0 workplace spaces (a space tied to a tenant, app roles set
+access, rechecked at each Microsoft sign-in, agents' workplace access ends
+after 7 days without one); 0.79.0 Sign in with Google (`sub`, only verified
+addresses). The notes below were the starting questions:
 
 - **Linking to accounts.** Sign in with OpenID Connect (Google, Entra ID).
   A new person gets an account on first sign-in; an existing account adds
@@ -454,6 +461,12 @@ scheduled yet. To settle when it is:
 ## Owner checks still to run
 
 Live checks not yet reported done.
+
+From 0.77.0 (2026-10-31), after schema v22, the grants and the Entra app registration (deployment.md, Sign in with Microsoft):
+
+- **First Microsoft sign-in:** in a private window press Sign in with Microsoft and sign in with your work account. Back on Metatrash the sign-in page says it isn't linked yet, with its address filled in; sign in by email code, and Security asks Link this Microsoft account?. Link it and get the "Sign-in method added" email.
+- **Signing in with it:** sign out, press Sign in with Microsoft again: straight to Your account. Security → Microsoft accounts shows it with today as last used; `journalctl -u metatrash | grep 'login microsoft'` shows `result=waiting`, then `result=ok`.
+- **Link from Security and remove:** confirm it's you, Link a Microsoft account with a personal Microsoft account, then remove it (notice, other sessions signed out).
 
 From 0.76.0 (2026-10-31):
 

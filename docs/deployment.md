@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); 0.67.0 needs v20 and 0.71.0 v21.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); 0.67.0 needs v20, 0.71.0 v21 and 0.77.0 v22.
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -160,7 +160,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v21 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v22 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -363,6 +363,46 @@ changing it makes every authenticator app unusable (those accounts sign in
 with a passkey or an emailed code and set the app up again); there is no
 rotation yet. Empty or absent: the authenticator app is not offered and
 `/login/totp` answers 503.
+
+### Sign in with Microsoft
+
+From 0.77.0, optional. People can link a work, school or personal Microsoft
+account under Security and then sign in with it. Accounts are matched by the
+Microsoft tenant and object IDs, never by the email address Microsoft sends,
+and a Microsoft account nobody has linked never signs anyone in: the person
+signs in another way once and confirms linking it.
+
+1. In the Microsoft Entra admin center (entra.microsoft.com), **App
+   registrations → New registration**. Name: Metatrash. Supported account
+   types: **Accounts in any organizational directory and personal Microsoft
+   accounts**. Redirect URI: platform **Web**,
+   `https://metatrash.com/login/microsoft/callback` (the `-public-url` plus
+   `/login/microsoft/callback`). Register.
+2. Copy the **Application (client) ID** from Overview.
+3. **Certificates & secrets → Client secrets → New client secret.** Copy the
+   secret's **Value** (shown once) into the server, readable only by the
+   service, and note its expiry date: sign-in with Microsoft stops when it
+   expires, so make a new one before then.
+
+   ```sh
+   sudo install -o root -g metatrash -m 0640 /dev/null /etc/metatrash/microsoft-client-secret
+   sudo nano /etc/metatrash/microsoft-client-secret   # paste the Value, save
+   ```
+
+4. Optional: **Token configuration → Add optional claim → ID → email**, so
+   Security shows the account's address rather than its name.
+5. Add to `accounts.json` and restart:
+
+   ```json
+   "microsoft": {"enabled": true, "clientId": "<Application (client) ID>", "clientSecretFile": "/etc/metatrash/microsoft-client-secret"}
+   ```
+
+The sign-in page then has **Sign in with Microsoft**, and Security a
+**Microsoft accounts** list. Each sign-in writes a `login microsoft` line to
+the journal (`result=waiting` for an account nobody linked yet,
+`login microsoft-link` when linking from Security). The service makes
+outbound HTTPS requests to `login.microsoftonline.com`. Absent or
+`"enabled": false`: nothing is shown and linked accounts sign in another way.
 
 ### GitHub
 
@@ -838,7 +878,7 @@ roadmap.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v21 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v22 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -870,6 +910,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.67.0 | schema v20 (`deleted_at` on spaces, the `deleted` and `purged` states) and grants (`UPDATE (deleted_at, slug)` on spaces) | 19, but only while no space is deleted or purged: 0.66 does not start with such a row. Restore deleted spaces first (`mt spaces list` shows them); after the first purge (30 days on), stay on 0.67 |
 | 0.71.0 | schema v21 (`deletion_requested_at` and `deleted_at` on users) and grants (`UPDATE (deletion_requested_at, deleted_at)` on users) | 20. An account waiting to be deleted is then neither purged nor cancelled by signing in (it still waits when 0.71 comes back); a purged account stays purged, with no way to sign in |
 | 0.76.0 | none. Recommended: the Cloudflare lines in Apache if the site is proxied by Cloudflare (Apache) | 0.75.0 (no schema change) |
+| 0.77.0 | schema v22 (`metatrash_identities`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (email_hint, display_name, last_used_at)` on it); optional `microsoft` in `accounts.json` (Sign in with Microsoft) | 21; linked Microsoft accounts stay in the table, unused, and those people sign in another way |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

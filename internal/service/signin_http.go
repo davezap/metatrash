@@ -24,47 +24,55 @@ import (
 // signInRoutes are the POST routes of the Sign-in methods section. Each has
 // its own session-bound CSRF token.
 var signInRoutes = map[string]bool{
-	"/account/confirm/send":    true,
-	"/account/confirm/verify":  true,
-	"/account/confirm/passkey": true,
-	"/account/passkeys/add":    true,
-	"/account/passkeys/rename": true,
-	"/account/passkeys/remove": true,
-	"/account/confirm/totp":    true,
-	"/account/totp/start":      true,
-	"/account/totp/enable":     true,
-	"/account/totp/remove":     true,
-	"/account/recovery/create": true,
-	"/account/email-login":     true,
-	"/account/email/change":    true,
-	"/account/email/verify":    true,
-	"/account/email/cancel":    true,
-	"/account/sessions/end":    true,
-	"/account/sessions/remove": true,
+	"/account/confirm/send":      true,
+	"/account/confirm/verify":    true,
+	"/account/confirm/passkey":   true,
+	"/account/passkeys/add":      true,
+	"/account/passkeys/rename":   true,
+	"/account/passkeys/remove":   true,
+	"/account/confirm/totp":      true,
+	"/account/totp/start":        true,
+	"/account/totp/enable":       true,
+	"/account/totp/remove":       true,
+	"/account/recovery/create":   true,
+	"/account/email-login":       true,
+	"/account/email/change":      true,
+	"/account/email/verify":      true,
+	"/account/email/cancel":      true,
+	"/account/sessions/end":      true,
+	"/account/sessions/remove":   true,
+	"/account/microsoft/link":    true,
+	"/account/microsoft/confirm": true,
+	"/account/microsoft/forget":  true,
+	"/account/microsoft/remove":  true,
 }
 
 // signInFormFields are the fields each route accepts besides csrf.
 var signInFormFields = map[string][]string{
-	"/account/confirm/send":    nil,
-	"/account/confirm/verify":  {"code"},
-	"/account/confirm/passkey": passkeyAssertionFields,
-	"/account/passkeys/add":    {"name", "client_data", "attestation", "transports"},
-	"/account/passkeys/rename": {"passkey", "name"},
-	"/account/passkeys/remove": {"passkey"},
-	"/login/passkey":           passkeyAssertionFields,
-	"/account/confirm/totp":    {"code"},
-	"/account/totp/start":      nil,
-	"/account/totp/enable":     {"code"},
-	"/account/totp/remove":     nil,
-	"/login/totp":              {"email", "code"},
-	"/account/recovery/create": nil,
-	"/account/email-login":     {"email_login"},
-	"/login/recovery":          {"email", "code"},
-	"/account/email/change":    {"email"},
-	"/account/email/verify":    {"code"},
-	"/account/email/cancel":    nil,
-	"/account/sessions/end":    nil,
-	"/account/sessions/remove": {"session"},
+	"/account/confirm/send":      nil,
+	"/account/confirm/verify":    {"code"},
+	"/account/confirm/passkey":   passkeyAssertionFields,
+	"/account/passkeys/add":      {"name", "client_data", "attestation", "transports"},
+	"/account/passkeys/rename":   {"passkey", "name"},
+	"/account/passkeys/remove":   {"passkey"},
+	"/login/passkey":             passkeyAssertionFields,
+	"/account/confirm/totp":      {"code"},
+	"/account/totp/start":        nil,
+	"/account/totp/enable":       {"code"},
+	"/account/totp/remove":       nil,
+	"/login/totp":                {"email", "code"},
+	"/account/recovery/create":   nil,
+	"/account/email-login":       {"email_login"},
+	"/login/recovery":            {"email", "code"},
+	"/account/email/change":      {"email"},
+	"/account/email/verify":      {"code"},
+	"/account/email/cancel":      nil,
+	"/account/sessions/end":      nil,
+	"/account/sessions/remove":   {"session"},
+	"/account/microsoft/link":    nil,
+	"/account/microsoft/confirm": nil,
+	"/account/microsoft/forget":  nil,
+	"/account/microsoft/remove":  {"identity"},
 }
 
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
@@ -103,6 +111,21 @@ type signInPage struct {
 	// counts the rest.
 	Sessions      []sessionView
 	OtherSessions int
+	// Microsoft is the Microsoft accounts card; nil while Sign in with
+	// Microsoft is off.
+	Microsoft *microsoftView
+}
+
+type microsoftView struct {
+	Accounts []identityView
+	// Waiting names an unlinked Microsoft account this browser signed in
+	// with, which the user can link or forget.
+	Waiting string
+	Max     bool
+}
+
+type identityView struct {
+	ID, Label, Created, LastUsed string
 }
 
 func (a *accounts) signInCSRF(path, session string) string {
@@ -163,6 +186,25 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 	c, waiting := a.challenges[confirmKey(session)]
 	page.ConfirmSent = waiting && c.Ready && now.Before(c.Expires)
 	a.mu.Unlock()
+	if a.microsoft != nil {
+		ids, err := h.service.ownedDB.identities(r.Context(), user.ID)
+		if err != nil {
+			page.Unavailable = true
+			return page, false
+		}
+		view := &microsoftView{Max: len(ids) >= maxIdentitiesPerUser}
+		for _, id := range ids {
+			v := identityView{ID: id.ID, Label: id.Label(), Created: time.Unix(id.CreatedAt, 0).UTC().Format("2 Jan 2006"), LastUsed: "never"}
+			if id.LastUsedAt > 0 {
+				v.LastUsed = time.Unix(id.LastUsedAt, 0).UTC().Format("2 Jan 2006")
+			}
+			view.Accounts = append(view.Accounts, v)
+		}
+		if id, ok := h.microsoftWaiting(r); ok {
+			view.Waiting = id.Label()
+		}
+		page.Microsoft = view
+	}
 	page.MaxPasskeys = len(list) >= maxPasskeysPerUser
 	if page.Fresh && !page.MaxPasskeys {
 		page.CreateOptions = a.creationOptions(session, user, list, now)
@@ -215,10 +257,11 @@ func readPasskeyAssertion(r *http.Request) (passkeyAssertion, error) {
 // signsOutOthers are the changes after which the account's other sessions
 // are signed out: removing a sign-in method or changing the address.
 var signsOutOthers = map[string]bool{
-	"passkey-removed": true,
-	"totp-removed":    true,
-	"email-login-off": true,
-	"email-changed":   true,
+	"passkey-removed":   true,
+	"totp-removed":      true,
+	"email-login-off":   true,
+	"email-changed":     true,
+	"microsoft-removed": true,
 }
 
 var errConfirmFirst = problem(403, "confirm_required", "Confirm it’s you first. Adding or removing a sign-in method needs a sign-in or confirmation within the last 10 minutes.")
@@ -244,6 +287,16 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 	ctx, now := r.Context(), time.Now()
 	notice := ""
 	err = h.service.rates.take(allowance{"signin:user:" + user.ID, 30, 600})
+	if err == nil && strings.HasPrefix(path, "/account/microsoft/") && a.microsoft == nil {
+		err = missing()
+	}
+	if err == nil && path == "/account/microsoft/link" {
+		if fresh, _ := a.sessionFresh(session, now); fresh {
+			h.startMicrosoft(w, r, client, user.ID, session)
+			return
+		}
+		err = errConfirmFirst
+	}
 	if err == nil && (path == "/account/confirm/send" || path == "/account/confirm/verify") {
 		var state signInState
 		if state, err = db.signInState(ctx, user.ID); err == nil && !state.EmailLogin {
@@ -315,6 +368,23 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 				h.notifySignInChange(user, "removed", "passkey \""+name+"\"")
 			}
 			notice = "passkey-removed"
+		case "/account/microsoft/confirm":
+			err = h.confirmMicrosoftLink(r, session, user, now)
+			notice = "microsoft-linked"
+		case "/account/microsoft/forget":
+			a.microsoft.takeWaiting(cookieToken(r, h.microsoftCookieName()))
+			h.setMicrosoftCookie(w, "")
+			notice = "microsoft-forgotten"
+		case "/account/microsoft/remove":
+			if fresh, _ := a.sessionFresh(session, now); !fresh {
+				err = errConfirmFirst
+				break
+			}
+			var label string
+			if label, err = db.removeIdentity(ctx, user.ID, r.PostForm.Get("identity")); err == nil {
+				h.notifySignInChange(user, "removed", "Microsoft account "+label)
+			}
+			notice = "microsoft-removed"
 		case "/account/sessions/end":
 			var n int
 			n, err = a.endOtherSessions(user.ID, session)

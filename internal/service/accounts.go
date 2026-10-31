@@ -40,6 +40,8 @@ type accountConfig struct {
 	// DocsSpace, when set, is the owner/slug of a space shown as the site's
 	// documentation under /docs/ while its owner keeps it readable on the web.
 	DocsSpace string `json:"docsSpace"`
+	// Microsoft turns on Sign in with Microsoft (microsoft.go).
+	Microsoft *microsoftConfig `json:"microsoft"`
 }
 
 type userAccount struct {
@@ -111,6 +113,8 @@ type accounts struct {
 	github *githubSettings
 	// agents is nil unless the account configuration enables folder actions.
 	agents *agentSettings
+	// microsoft is nil unless Sign in with Microsoft is on (microsoft.go).
+	microsoft *oidcProvider
 	// totpKey seals authenticator-app secrets; nil without totpKeyFile.
 	totpKey cipher.AEAD
 	// recoveryReveals holds new recovery codes until their page shows them
@@ -256,6 +260,11 @@ func loadAccountSettings(configPath string) (*accounts, string, error) {
 	}
 	if cfg.Agents != nil && cfg.Agents.Enabled {
 		if a.agents, err = cfg.Agents.settings(); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.Microsoft != nil && cfg.Microsoft.Enabled {
+		if a.microsoft, err = cfg.Microsoft.settings(); err != nil {
 			return nil, "", err
 		}
 	}

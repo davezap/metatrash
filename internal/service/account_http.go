@@ -80,6 +80,10 @@ type accountPage struct {
 	// TOTPEmail show that form again after it failed.
 	TOTPLogin, TOTPOpen bool
 	TOTPEmail           string
+	// MicrosoftLogin offers Sign in with Microsoft; MicrosoftWaiting names
+	// an unlinked Microsoft account waiting in this browser (microsoft.go).
+	MicrosoftLogin   bool
+	MicrosoftWaiting string
 	// RecoveryOpen and RecoveryEmail show the recovery-code form again
 	// after it failed.
 	RecoveryOpen  bool
@@ -329,7 +333,7 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 }
 
 func (a *accounts) loginPage(browser string) accountPage {
-	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now()), TOTPLogin: a.totpKey != nil}
+	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now()), TOTPLogin: a.totpKey != nil, MicrosoftLogin: a.microsoft != nil}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cleanup(time.Now())
@@ -359,7 +363,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/spaces/delete" && path != "/account/delete" && path != "/account/spaces/timezone" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
+	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/microsoft" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/spaces/delete" && path != "/account/delete" && path != "/account/spaces/timezone" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
 		return false
 	}
 	formAction := "'self'"
@@ -367,6 +371,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		// Connect GitHub posts here and is redirected to GitHub; browsers check
 		// form-action against the redirect target too.
 		formAction += " " + h.github.settings.webBase
+	}
+	if a := h.service.accounts; a != nil && a.microsoft != nil {
+		// Sign in with Microsoft and Link a Microsoft account post here and
+		// are redirected to Microsoft.
+		formAction += " " + a.microsoft.authority
 	}
 	// script-src 'self' is for login.js (the login form's proof of work) and
 	// passkey.js (the browser's passkey prompts).
@@ -456,7 +465,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 					return true
 				}
 			}
-			http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
+			h.afterSignIn(w, r)
 			return true
 		}
 		if browser == "" {
@@ -470,6 +479,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		accountCookie(w, loginCookie, browser, 1200)
 		page := a.loginPage(browser)
 		page.Notice = h.takeNotice(w, r)
+		if id, ok := h.microsoftWaiting(r); ok {
+			page.MicrosoftWaiting = id.Label()
+			if !page.Verify {
+				page.Email = id.Email
+			}
+		}
 		h.renderAccount(w, r, 200, page)
 		return true
 	}
@@ -792,6 +807,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 		return true
 	}
+	if path == "/login/microsoft" {
+		h.startMicrosoft(w, r, client, "", "")
+		return true
+	}
 	if path == "/login/restart" {
 		// Try another way: forget the code waiting for this browser, so the
 		// sign-in page offers every method again.
@@ -943,19 +962,31 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	a.endSession(session)
 	accountCookie(w, sessionCookie, token, int(sessionLifetime/time.Second))
 	accountCookie(w, loginCookie, "", -1)
+	h.afterSignIn(w, r)
+	return true
+}
+
+// afterSignIn sends a browser that just signed in (or came back to /login
+// signed in) on to where it was going.
+func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 	// Continue an app connection that sent this browser to sign in. The pending
 	// request lives server-side; the browser only holds its random cookie.
 	if h.oauth != nil && h.oauth.pendingFor(cookieToken(r, h.oauthCookieName())) != nil {
 		http.Redirect(w, r, h.basePath+"/oauth/consent", http.StatusSeeOther)
-		return true
+		return
+	}
+	// A Microsoft account no one has linked waits in this browser: offer to
+	// link it (Security asks first; it is never linked by itself).
+	if _, ok := h.microsoftWaiting(r); ok {
+		http.Redirect(w, r, h.basePath+"/account/security", http.StatusSeeOther)
+		return
 	}
 	// Go back to the page that sent this browser to sign in.
 	if target := h.takeReturn(w, r); target != "" {
 		http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
-		return true
+		return
 	}
 	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
-	return true
 }
 
 // submitAppSpaces saves Change spaces for one connection after the form,

@@ -76,12 +76,18 @@ func (h *httpAdapter) githubCookieName() string {
 // githubPage is the page shown on return from GitHub.
 type githubPage struct {
 	BasePath, Title, Message, ContinueURL string
-	OK, Legal                             bool
+	// Eyebrow and Button default to GitHub's; Sign in with Microsoft uses
+	// this page too (microsoft.go).
+	Eyebrow, Button string
+	OK, Legal       bool
 }
 
 func (h *httpAdapter) renderGitHub(w http.ResponseWriter, status int, page githubPage) {
 	page.BasePath = h.basePath
 	page.Legal = h.docsSpace() != ""
+	if page.Eyebrow == "" {
+		page.Eyebrow, page.Button = "GitHub", "Back to Your account →"
+	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")

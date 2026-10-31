@@ -84,5 +84,8 @@ GRANT UPDATE (every, next_run_at, last_run_at, stale_since, stale_reason)
 GRANT UPDATE (deleted_at, slug) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 -- v21 deleting an account
 GRANT UPDATE (deletion_requested_at, deleted_at) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
+-- v22 sign in with Microsoft
+GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_identities TO 'metatrash_accounts'@'localhost';
+GRANT UPDATE (email_hint, display_name, last_used_at) ON metatrash.metatrash_identities TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

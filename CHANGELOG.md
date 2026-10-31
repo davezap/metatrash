@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.77.0 - Sign in with Microsoft (2026-10-31)
+
+Schema v22 and grants (`metatrash_identities`): apply `deploy/account-schema-v22.sql`, then `deploy/account-grants.sql`, before starting it. No tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Off until `accounts.json` has `"microsoft": {"enabled": true, …}` with an Entra app registration (deployment.md, Sign in with Microsoft). Step 1 of "Sign in with Google and Microsoft" in the roadmap.
+
+- **Sign in with Microsoft** on the sign-in page, for work, school and personal Microsoft accounts. An account is recognised by its Microsoft tenant and object IDs, never by the email address Microsoft sends, which a tenant's admin can set to anyone's.
+- **First time:** a Microsoft account no Metatrash account has linked signs no one in. The sign-in page says so and fills in its address; after signing in another way (new people make an account with an emailed code), Security asks **Link this Microsoft account?** or **Don't link it**. It waits ten minutes, only in that browser.
+- **Security → Microsoft accounts** lists linked accounts (up to 10) with when each was linked and last used. **Link a Microsoft account** and removing one need a sign-in or confirmation in the last 10 minutes, email the usual sign-in method notice, and removing one signs out your other sessions.
+- Checks: the ID token's RS256 signature against Microsoft's published keys (fetched again at most every five minutes for an unknown key), the issuer for the token's own tenant, the audience, its times with two minutes' slack, and a nonce; a random state and a PKCE verifier per attempt, held server-side for ten minutes and bound to the browser by a Lax cookie (the Strict ones don't come back from Microsoft), single-use. Each attempt writes a `login microsoft` journal line.
+- Workplace spaces (access from Entra app roles) and Sign in with Google follow in 0.78.0 and 0.79.0.
+- Tested against MariaDB with a fake Microsoft that signs its own tokens: the sign-in, its state, nonce and PKCE checks, a replayed reply, a cancelled one and a refused code; a token claiming another account's address waiting instead of signing in; linking after signing in, linking from Security (refused without a fresh session), refusing a Microsoft account already linked to another account, removing one, and the notices. Every ID token refusal (other tenant's issuer, audience, expired, no nonce, other signer, unknown key, `none` and `HS256`). Full suite, and the sign-in tests with `-race`.
+
 ## 0.76.0 - Fixes from the sign-in security review (2026-10-31)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. The review is [docs/security-review-2026-10-31.md](docs/security-review-2026-10-31.md): it found no way into an account without a sign-in method; these are its budget and availability findings.

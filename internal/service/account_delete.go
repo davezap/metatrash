@@ -175,6 +175,7 @@ func (db *accountDatabase) purgeAccount(ctx context.Context, userID string, befo
 		"DELETE FROM metatrash_github_installations WHERE user_id = ?",
 		"DELETE FROM metatrash_passkeys WHERE user_id = ?",
 		"DELETE FROM metatrash_totp WHERE user_id = ?",
+		"DELETE FROM metatrash_identities WHERE user_id = ?",
 		"DELETE FROM metatrash_recovery_codes WHERE user_id = ?",
 		"DELETE FROM metatrash_sessions WHERE user_id = ?",
 		"DELETE FROM metatrash_web_refs WHERE user_id = ?",
