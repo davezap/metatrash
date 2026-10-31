@@ -209,9 +209,17 @@ func settingsAddress(path string) string {
 		return "/app/#settings/spaces"
 	case "/account/profile":
 		return "/app/#settings/profile"
+	case "/account/services":
+		return "/app/#settings/services"
 	}
 	if id, ok := strings.CutPrefix(path, "/account/sharing/"); ok && idPattern.MatchString(id) {
 		return "/app/#settings/spaces/" + id
+	}
+	if id, ok := strings.CutPrefix(path, "/account/apps/"); ok && idPattern.MatchString(id) {
+		return "/app/#settings/services/apps/" + id
+	}
+	if id, ok := strings.CutPrefix(path, "/account/actions/"); ok && idPattern.MatchString(id) {
+		return "/app/#settings/services/actions/" + id
 	}
 	return ""
 }
@@ -735,11 +743,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			sendError(w, missing())
 			return true
 		}
-		err = h.service.rates.take(allowance{"apps:user:" + user.ID, 30, 600})
-		if err == nil {
-			err = h.service.ownedDB.revokeConnection(r.Context(), user.ID, r.PostForm.Get("grant"))
-		}
-		if err != nil {
+		if err = h.revokeApp(r.Context(), user, r.PostForm.Get("grant")); err != nil {
 			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The connection could not be revoked. Reload before retrying."}
 			status := http.StatusServiceUnavailable
 			var p *Error
@@ -1048,11 +1052,7 @@ func (h *httpAdapter) submitAppSpaces(w http.ResponseWriter, r *http.Request, se
 			return
 		}
 	}
-	err = h.service.rates.take(allowance{"apps:user:" + user.ID, 30, 600})
-	if err == nil {
-		err = h.service.ownedDB.changeGrantSpaces(r.Context(), user.ID, grantID, choices, time.Now())
-	}
-	if err == nil {
+	if err = h.changeAppSpaces(r.Context(), user, session, grantID, choices); err == nil {
 		http.Redirect(w, r, h.basePath+"/account/services", http.StatusSeeOther)
 		return
 	}

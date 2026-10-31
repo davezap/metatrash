@@ -11,10 +11,10 @@ func TestAccountSectionsAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
 	// Spaces, sharing and Profile moved to the site app's Settings dialog in
-	// 0.79.0 (TestAccountPagesRedirectToSettings); Security and Services stay.
+	// 0.79.0, Services in 0.80.0 (TestAccountPagesRedirectToSettings);
+	// Security stays.
 	sections := []struct{ path, nav, want, absent string }{
 		{"/account/security", "/account/security", "Confirm it’s you", `id="connected-apps"`},
-		{"/account/services", "/account/services", `id="connected-apps"`, "Confirm it’s you"},
 	}
 	for _, s := range sections {
 		res := oauthCall(w.h, "GET", s.path, nil, session)

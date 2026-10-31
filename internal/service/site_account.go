@@ -26,6 +26,7 @@ import (
 //	POST /api/v1/site/account/delete                   {"email"}
 //	GET  /api/v1/site/account/confirm                  how this session can confirm it's you
 //	POST /api/v1/site/account/confirm/{send|verify|totp|passkey}
+//	     /api/v1/site/account/services/...             connected apps, agents and GitHub (0.80.0, site_services.go)
 //
 // They sit behind the site API's checks (site address, Origin, Sec-Fetch-Site,
 // and on writes the session's X-Metatrash-CSRF token), and every route needs a
@@ -154,6 +155,14 @@ type siteAccountBody struct {
 	AuthenticatorData string  `json:"authenticator_data"`
 	Signature         string  `json:"signature"`
 	UserHandle        string  `json:"user_handle"`
+	// Services (0.80.0, site_services.go).
+	Provider string            `json:"provider"`
+	Model    string            `json:"model"`
+	Key      string            `json:"key"`
+	Endpoint string            `json:"endpoint"`
+	Cap      string            `json:"cap"`
+	Agent    string            `json:"agent"`
+	Spaces   map[string]string `json:"spaces"`
 }
 
 type siteNotice struct {
@@ -162,6 +171,10 @@ type siteNotice struct {
 	Space string `json:"space,omitempty"`
 	// SignedOut: the session ended (the account was marked for deletion).
 	SignedOut bool `json:"signedOut,omitempty"`
+	// Failed: the notice says something did not work (an agent's test).
+	Failed bool `json:"failed,omitempty"`
+	// Redirect is where to go next (GitHub, to connect it).
+	Redirect string `json:"redirect,omitempty"`
 }
 
 // siteSpaceActions are the POST routes /account/spaces/{id}/{action}.
@@ -176,6 +189,8 @@ var stepUpMessages = map[string]string{
 	"transfer-offer": "Offering a space to someone needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"delete":         "Deleting a space needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"account-delete": "Deleting your account needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"app-spaces":     "Giving an app more of your spaces needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"agent-add":      "Adding an agent needs a sign-in within the last 10 minutes, because its endpoint receives the files your folder actions read. Confirm it’s you first.",
 }
 
 // sendSiteAccountError answers a failed account route. A missing step-up is
@@ -228,6 +243,10 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 		return read
 	}
 	route := strings.Join(parts, "/")
+	if len(parts) > 0 && parts[0] == "services" {
+		h.serveSiteServices(w, r, user, session, parts[1:])
+		return
+	}
 	switch {
 	case len(parts) == 0:
 		if get() {
@@ -263,32 +282,13 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 		sendError(w, missing())
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		sendError(w, problem(405, "invalid_request", "Use POST."))
-		return
-	}
-	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || kind != "application/json" {
-		sendError(w, problem(415, "invalid_request", "Use application/json."))
-		return
-	}
-	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16*1024))
-	if err != nil {
-		sendError(w, problem(413, "payload_too_large", "Request exceeds the byte limit."))
-		return
-	}
-	var body siteAccountBody
-	if !validUnicodeJSON(b) || noDuplicateKeys(b) != nil || strictJSON(b, &body) != nil {
-		sendError(w, invalid("Send a JSON object with the fields this route takes."))
-		return
-	}
-	if h.service.ownedDB == nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
+	body, ok := h.readSiteAccountBody(w, r, 16*1024)
+	if !ok {
 		return
 	}
 	ctx := r.Context()
 	var value siteNotice
+	var err error
 	switch {
 	case route == "username":
 		err = h.service.rates.take(allowance{"username:user:" + user.ID, 20, 600})
@@ -318,6 +318,36 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 		return
 	}
 	sendSiteNotice(w, value)
+}
+
+// readSiteAccountBody checks an account write is a POST of strict JSON of at
+// most limit bytes, and reads it; it answers the problem itself otherwise.
+func (h *httpAdapter) readSiteAccountBody(w http.ResponseWriter, r *http.Request, limit int64) (siteAccountBody, bool) {
+	var body siteAccountBody
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		sendError(w, problem(405, "invalid_request", "Use POST."))
+		return body, false
+	}
+	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || kind != "application/json" {
+		sendError(w, problem(415, "invalid_request", "Use application/json."))
+		return body, false
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil {
+		sendError(w, problem(413, "payload_too_large", "Request exceeds the byte limit."))
+		return body, false
+	}
+	if !validUnicodeJSON(b) || noDuplicateKeys(b) != nil || strictJSON(b, &body) != nil {
+		sendError(w, invalid("Send a JSON object with the fields this route takes."))
+		return body, false
+	}
+	if h.service.ownedDB == nil {
+		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
+		return body, false
+	}
+	return body, true
 }
 
 // siteAccountOverview is GET /account. A part that can't be read is named

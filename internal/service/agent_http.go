@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Agents in Your account → Services (0.55.0): add an agent (provider, model,
+// Agents in Services (0.55.0; in the Settings dialog since 0.80.0, site_services.go): add an agent (provider, model,
 // API key, daily cap), test it with one tiny call, make it the default,
 // change its name, daily cap or key (0.58.0), or remove it. Since 0.56.0 it also lists the actions the user pays for, and
 // /account/actions/<job> shows an action that skipped one of the user's
@@ -125,12 +125,21 @@ type actionOffer struct {
 
 // actionOfferPage builds the page for a job whose file the user brought.
 func (h *httpAdapter) actionOfferPage(r *http.Request, user userAccount, jobID string) (*actionOffer, error) {
+	offer, err := h.actionOfferFor(r.Context(), user, jobID)
+	if err == nil {
+		offer.CSRF = h.service.accounts.agentCSRF("/account/agents/optin", cookieToken(r, h.sessionCookieName()))
+	}
+	return offer, err
+}
+
+// actionOfferFor is what an action that skipped one of user's files does and
+// who pays for it (the action page, and Settings → Services, 0.80.0).
+func (h *httpAdapter) actionOfferFor(ctx context.Context, user userAccount, jobID string) (*actionOffer, error) {
 	runner := h.service.agents.Load()
 	db := h.service.ownedDB
 	if runner == nil || db == nil {
 		return nil, missing()
 	}
-	ctx := r.Context()
 	j, ok, err := runner.store.get(ctx, jobID)
 	if err != nil {
 		return nil, err
@@ -164,8 +173,7 @@ func (h *httpAdapter) actionOfferPage(r *http.Request, user userAccount, jobID s
 		folder = "/"
 	}
 	offer := &actionOffer{JobID: j.ID, Space: runner.spaceAddress(ctx, j.SpaceID), Folder: folder, Action: j.Action, File: strings.TrimPrefix(j.File, j.Folder),
-		Status: j.Status, Reason: strings.TrimPrefix(j.Error, "skipped: "), Model: action.Model, ModelName: modelName(action.Model), Steps: action.steps(), Pays: "owner",
-		CSRF: h.service.accounts.agentCSRF("/account/agents/optin", cookieToken(r, h.sessionCookieName()))}
+		Status: j.Status, Reason: strings.TrimPrefix(j.Error, "skipped: "), Model: action.Model, ModelName: modelName(action.Model), Steps: action.steps(), Pays: "owner"}
 	if provider, _, ok := actionModel(action.Model); ok {
 		offer.KeysURL = agentProviders[provider].keysURL
 	}
@@ -211,12 +219,10 @@ func (h *httpAdapter) submitAgent(w http.ResponseWriter, r *http.Request, sessio
 		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 		return
 	}
-	runner := h.service.agents.Load()
-	if runner == nil || h.service.ownedDB == nil {
+	if h.service.agents.Load() == nil || h.service.ownedDB == nil {
 		sendError(w, missing())
 		return
 	}
-	db := h.service.ownedDB
 	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Section: "services"}
 	fail := func(err error, form *agentForm) {
 		status, message := http.StatusServiceUnavailable, "The agent could not be saved. Reload before retrying."
@@ -233,165 +239,26 @@ func (h *httpAdapter) submitAgent(w http.ResponseWriter, r *http.Request, sessio
 	}
 	agentID := r.PostForm.Get("agent")
 	switch path {
-	case "/account/agents/add":
-		form := agentForm{Name: r.PostForm.Get("name"), Provider: r.PostForm.Get("provider"), Model: r.PostForm.Get("model"), Key: r.PostForm.Get("key"), Endpoint: r.PostForm.Get("endpoint"), Cap: r.PostForm.Get("cap")}
-		if err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600}); err != nil {
-			fail(err, &form)
-			return
-		}
-		u, err := newUserAgent(runner.settings.seal, user.ID, form, time.Now())
-		if err == nil {
-			err = db.addUserAgent(r.Context(), u)
-		}
-		if err != nil {
-			form.Key = ""
-			fail(err, &form)
-			return
-		}
-		accountCookie(w, h.noticeCookieName(), "agent-added", 60)
-	case "/account/agents/change":
-		if !idPattern.MatchString(agentID) {
-			fail(invalid("Choose one of your agents."), nil)
-			return
-		}
-		if err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600}); err != nil {
-			fail(err, nil)
-			return
-		}
-		agents, err := db.userAgents(r.Context(), user.ID)
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		var found *userAgent
-		for i := range agents {
-			if agents[i].ID == agentID {
-				found = &agents[i]
-			}
-		}
-		if found == nil {
-			fail(missing(), nil)
-			return
-		}
-		form := agentForm{Name: r.PostForm.Get("name"), Cap: r.PostForm.Get("cap"), Key: r.PostForm.Get("key")}
-		u, err := changedUserAgent(runner.settings.seal, *found, form)
-		if err == nil {
-			err = db.changeUserAgent(r.Context(), u)
+	case "/account/agents/optin", "/account/agents/optout":
+		var notice string
+		if path == "/account/agents/optin" {
+			notice, err = h.optInToAction(r.Context(), user, r.PostForm.Get("job"), agentID)
+		} else {
+			notice, err = h.optOutOfAction(r.Context(), user, r.PostForm.Get("optin"))
 		}
 		if err != nil {
 			fail(err, nil)
 			return
-		}
-		notice := "agent-changed"
-		if strings.TrimSpace(form.Key) != "" {
-			notice = "agent-key-changed"
 		}
 		accountCookie(w, h.noticeCookieName(), notice, 60)
-	case "/account/agents/default", "/account/agents/remove":
-		if !idPattern.MatchString(agentID) {
-			fail(invalid("Choose one of your agents."), nil)
-			return
-		}
-		err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600})
-		if err == nil && path == "/account/agents/default" {
-			err = db.setDefaultUserAgent(r.Context(), user.ID, agentID)
-		} else if err == nil {
-			err = db.removeUserAgent(r.Context(), user.ID, agentID)
-		}
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		notice := "agent-default"
-		if path == "/account/agents/remove" {
-			notice = "agent-removed"
-		}
-		accountCookie(w, h.noticeCookieName(), notice, 60)
-	case "/account/agents/optin":
-		if !idPattern.MatchString(r.PostForm.Get("job")) || !idPattern.MatchString(agentID) {
-			fail(invalid("Choose one of your agents."), nil)
-			return
-		}
-		if err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600}); err != nil {
-			fail(err, nil)
-			return
-		}
-		offer, err := h.actionOfferPage(r, user, r.PostForm.Get("job"))
-		if err == nil && offer.Pays != "contributor" {
-			err = problem(409, "conflict", "This action is not paid for by whoever brings the file, so there is nothing to opt in to.")
-		}
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		found := false
-		for _, u := range offer.Agents {
-			found = found || u.ID == agentID
-		}
-		if !found {
-			fail(invalid("Choose one of your "+offer.ModelName+" agents."), nil)
-			return
-		}
-		j, _, err := runner.store.get(r.Context(), offer.JobID)
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		id, err := randomHex(16)
-		if err == nil {
-			err = db.saveOptIn(r.Context(), actionOptIn{ID: id, UserID: user.ID, SpaceID: j.SpaceID, Folder: j.Folder, Action: j.Action, AgentID: agentID, Created: time.Now()})
-		}
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		notice := "action-optin"
-		// The file that was skipped runs now.
-		if j.Status == jobSkipped {
-			if err := runner.requeue(r.Context(), j); err == nil {
-				notice = "action-optin-run"
-			}
-		}
-		accountCookie(w, h.noticeCookieName(), notice, 60)
-		http.Redirect(w, r, h.basePath+"/account/services#paying", http.StatusSeeOther)
-		return
-	case "/account/agents/optout":
-		if !idPattern.MatchString(r.PostForm.Get("optin")) {
-			fail(invalid("Choose one of the actions you pay for."), nil)
-			return
-		}
-		err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600})
-		if err == nil {
-			err = db.removeOptIn(r.Context(), user.ID, r.PostForm.Get("optin"))
-		}
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		accountCookie(w, h.noticeCookieName(), "action-optout", 60)
 		http.Redirect(w, r, h.basePath+"/account/services#paying", http.StatusSeeOther)
 		return
 	case "/account/agents/test":
-		if err := h.service.rates.take(allowance{"agents-test:user:" + user.ID, 10, 600}); err != nil {
-			fail(err, nil)
-			return
-		}
-		agents, err := db.userAgents(r.Context(), user.ID)
+		result, ok, err := h.testUserAgent(r.Context(), user, agentID)
 		if err != nil {
 			fail(err, nil)
 			return
 		}
-		var found *userAgent
-		for i := range agents {
-			if agents[i].ID == agentID {
-				found = &agents[i]
-			}
-		}
-		if found == nil {
-			fail(missing(), nil)
-			return
-		}
-		result, ok := runner.testAgent(r.Context(), *found)
 		if ok {
 			page.Notice = result
 		} else {
@@ -400,7 +267,167 @@ func (h *httpAdapter) submitAgent(w http.ResponseWriter, r *http.Request, sessio
 		h.renderAccount(w, r, http.StatusOK, page)
 		return
 	}
+	form := agentForm{Name: r.PostForm.Get("name"), Provider: r.PostForm.Get("provider"), Model: r.PostForm.Get("model"), Key: r.PostForm.Get("key"), Endpoint: r.PostForm.Get("endpoint"), Cap: r.PostForm.Get("cap")}
+	notice, err := h.saveAgent(r.Context(), user, session, strings.TrimPrefix(path, "/account/agents/"), agentID, form)
+	if err != nil {
+		if path == "/account/agents/add" {
+			form.Key = ""
+			fail(err, &form)
+		} else {
+			fail(err, nil)
+		}
+		return
+	}
+	accountCookie(w, h.noticeCookieName(), notice, 60)
 	http.Redirect(w, r, h.basePath+"/account/services#agents", http.StatusSeeOther)
+}
+
+// errAgentsUnavailable: folder actions are off on this server.
+var errAgentsUnavailable = problem(404, "not_found", "Agents are not available on this server.")
+
+// findUserAgent is one of user's agents by id, or not_found.
+func (h *httpAdapter) findUserAgent(ctx context.Context, user userAccount, agentID string) (userAgent, error) {
+	if !idPattern.MatchString(agentID) {
+		return userAgent{}, invalid("Choose one of your agents.")
+	}
+	agents, err := h.service.ownedDB.userAgents(ctx, user.ID)
+	if err != nil {
+		return userAgent{}, err
+	}
+	for _, u := range agents {
+		if u.ID == agentID {
+			return u, nil
+		}
+	}
+	return userAgent{}, missing()
+}
+
+// saveAgent adds (action "add"), changes, makes default or removes one of
+// user's agents, for the Agents forms and Settings → Services, and answers the
+// notice to show. Adding one needs a sign-in within the last 10 minutes
+// (0.80.0): an agent's endpoint receives the files its folder actions read,
+// so a script in a page must not be able to add one of its own.
+func (h *httpAdapter) saveAgent(ctx context.Context, user userAccount, session, action, agentID string, form agentForm) (string, error) {
+	runner := h.service.agents.Load()
+	db := h.service.ownedDB
+	if runner == nil || db == nil {
+		return "", errAgentsUnavailable
+	}
+	if action != "add" && !idPattern.MatchString(agentID) {
+		return "", invalid("Choose one of your agents.")
+	}
+	if err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600}); err != nil {
+		return "", err
+	}
+	switch action {
+	case "add":
+		if fresh, _ := h.service.accounts.sessionFresh(session, time.Now()); !fresh {
+			return "", errConfirmFirst
+		}
+		u, err := newUserAgent(runner.settings.seal, user.ID, form, time.Now())
+		if err == nil {
+			err = db.addUserAgent(ctx, u)
+		}
+		return "agent-added", err
+	case "change":
+		found, err := h.findUserAgent(ctx, user, agentID)
+		if err != nil {
+			return "", err
+		}
+		u, err := changedUserAgent(runner.settings.seal, found, agentForm{Name: form.Name, Cap: form.Cap, Key: form.Key})
+		if err == nil {
+			err = db.changeUserAgent(ctx, u)
+		}
+		if strings.TrimSpace(form.Key) != "" {
+			return "agent-key-changed", err
+		}
+		return "agent-changed", err
+	case "default":
+		return "agent-default", db.setDefaultUserAgent(ctx, user.ID, agentID)
+	case "remove":
+		return "agent-removed", db.removeUserAgent(ctx, user.ID, agentID)
+	}
+	return "", missing()
+}
+
+// testUserAgent makes one tiny call with one of user's agents; ok says
+// whether it worked, and the text says how it went either way.
+func (h *httpAdapter) testUserAgent(ctx context.Context, user userAccount, agentID string) (string, bool, error) {
+	runner := h.service.agents.Load()
+	if runner == nil || h.service.ownedDB == nil {
+		return "", false, errAgentsUnavailable
+	}
+	if err := h.service.rates.take(allowance{"agents-test:user:" + user.ID, 10, 600}); err != nil {
+		return "", false, err
+	}
+	found, err := h.findUserAgent(ctx, user, agentID)
+	if err != nil {
+		return "", false, err
+	}
+	result, ok := runner.testAgent(ctx, found)
+	return result, ok, nil
+}
+
+// optInToAction lets user pay with one of their agents for an action whose
+// owner set whoever brings a file to pay, and runs the file it skipped.
+func (h *httpAdapter) optInToAction(ctx context.Context, user userAccount, jobID, agentID string) (string, error) {
+	runner := h.service.agents.Load()
+	db := h.service.ownedDB
+	if runner == nil || db == nil {
+		return "", errAgentsUnavailable
+	}
+	if !idPattern.MatchString(jobID) || !idPattern.MatchString(agentID) {
+		return "", invalid("Choose one of your agents.")
+	}
+	if err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600}); err != nil {
+		return "", err
+	}
+	offer, err := h.actionOfferFor(ctx, user, jobID)
+	if err == nil && offer.Pays != "contributor" {
+		err = problem(409, "conflict", "This action is not paid for by whoever brings the file, so there is nothing to opt in to.")
+	}
+	if err != nil {
+		return "", err
+	}
+	found := false
+	for _, u := range offer.Agents {
+		found = found || u.ID == agentID
+	}
+	if !found {
+		return "", invalid("Choose one of your " + offer.ModelName + " agents.")
+	}
+	j, _, err := runner.store.get(ctx, offer.JobID)
+	if err != nil {
+		return "", err
+	}
+	id, err := randomHex(16)
+	if err == nil {
+		err = db.saveOptIn(ctx, actionOptIn{ID: id, UserID: user.ID, SpaceID: j.SpaceID, Folder: j.Folder, Action: j.Action, AgentID: agentID, Created: time.Now()})
+	}
+	if err != nil {
+		return "", err
+	}
+	// The file that was skipped runs now.
+	if j.Status == jobSkipped {
+		if err := runner.requeue(ctx, j); err == nil {
+			return "action-optin-run", nil
+		}
+	}
+	return "action-optin", nil
+}
+
+// optOutOfAction stops user paying for an action in someone else's space.
+func (h *httpAdapter) optOutOfAction(ctx context.Context, user userAccount, optInID string) (string, error) {
+	if h.service.agents.Load() == nil || h.service.ownedDB == nil {
+		return "", errAgentsUnavailable
+	}
+	if !idPattern.MatchString(optInID) {
+		return "", invalid("Choose one of the actions you pay for.")
+	}
+	if err := h.service.rates.take(allowance{"agents:user:" + user.ID, 20, 600}); err != nil {
+		return "", err
+	}
+	return "action-optout", h.service.ownedDB.removeOptIn(ctx, user.ID, optInID)
 }
 
 // testAgent makes one tiny call with an agent and says how it went.

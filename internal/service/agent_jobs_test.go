@@ -164,15 +164,25 @@ func TestDatabaseAgentsPage(t *testing.T) {
 	w.s.agents.Store(runner)
 	t.Cleanup(func() { w.s.agents.Store(nil) })
 	user := w.user("agents")
-	session := w.session(user)
+	// Adding an agent needs a recent sign-in (0.80.0).
+	stale := w.session(user)
+	session := w.freshSession(user)
 	csrf := func(action string) string { return w.s.accounts.agentCSRF("/account/agents/"+action, session.Value) }
-	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "No agents yet.") || !strings.Contains(body, "Add an agent") {
-		t.Fatalf("services page:\n%s", body)
+	services := func() string {
+		return siteCall(w, "GET", "/api/v1/site/account/services", "", session, "").Body.String()
+	}
+	if body := services(); !strings.Contains(body, `"agents":{"list":[]`) || !strings.Contains(body, `"providers":[{"value":`) {
+		t.Fatalf("services:\n%s", body)
 	}
 	add := url.Values{"csrf": {csrf("add")}, "name": {"MiniMax main"}, "provider": {"minimax"}, "model": {""}, "key": {"sk-test-5678"}, "endpoint": {""}, "cap": {"2000000"}}
 	if res := oauthCall(w.h, "POST", "/account/agents/add", url.Values{"csrf": {csrf("test")}, "name": {"x"}}, session); res.Code != 403 {
 		t.Errorf("add with the test form's CSRF: %d", res.Code)
 	}
+	add.Set("csrf", w.s.accounts.agentCSRF("/account/agents/add", stale.Value))
+	if res := oauthCall(w.h, "POST", "/account/agents/add", add, stale); res.Code != 403 || !strings.Contains(res.Body.String(), "Confirm it’s you") {
+		t.Fatalf("add without a recent sign-in: %d", res.Code)
+	}
+	add.Set("csrf", csrf("add"))
 	if res := oauthCall(w.h, "POST", "/account/agents/add", add, session); res.Code != 303 {
 		t.Fatalf("add: %d %s", res.Code, res.Body.String())
 	}
@@ -185,7 +195,7 @@ func TestDatabaseAgentsPage(t *testing.T) {
 	if err != nil || len(agents) != 1 || !agents[0].Default || agents[0].Model != "MiniMax-M3" {
 		t.Fatalf("agents %+v %v", agents, err)
 	}
-	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "MiniMax main") || !strings.Contains(body, "key ending 5678") || strings.Contains(body, "sk-test") {
+	if body := services(); !strings.Contains(body, `"name":"MiniMax main"`) || !strings.Contains(body, `"keyHint":"5678"`) || strings.Contains(body, "sk-test") {
 		t.Errorf("listed:\n%s", body)
 	}
 	res = oauthCall(w.h, "POST", "/account/agents/test", url.Values{"csrf": {csrf("test")}, "agent": {agents[0].ID}}, session)
@@ -219,7 +229,7 @@ func TestDatabaseAgentsPage(t *testing.T) {
 	if res.Code != 200 || len(called) != 2 || called[1].apiKey != "sk-new-4321" {
 		t.Errorf("test after a new key: %d %+v", res.Code, called)
 	}
-	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "key ending 4321") || !strings.Contains(body, "No cap") || strings.Contains(body, "sk-new") {
+	if body := services(); !strings.Contains(body, `"keyHint":"4321"`) || !strings.Contains(body, `"dailyCap":0`) || strings.Contains(body, "sk-new") {
 		t.Errorf("listed after change:\n%s", body)
 	}
 	change.Set("cap", "-1")
@@ -255,6 +265,41 @@ func TestDatabaseAgentsPage(t *testing.T) {
 	if len(agents) != 1 || agents[0].Name != "MiniMax main" || !agents[0].Default {
 		t.Errorf("after removing the default: %+v", agents)
 	}
+
+	// The same from Settings → Services (0.80.0).
+	api := "/api/v1/site/account/services/agents"
+	token, staleToken := siteToken(t, w, session), siteToken(t, w, stale)
+	addJSON := `{"name":"Dialog","provider":"anthropic","model":"","key":"sk-dialog-9999","endpoint":"","cap":"1000"}`
+	wantCode(t, siteCall(w, "POST", api, addJSON, stale, staleToken), 403, "step_up_needed")
+	wantCode(t, siteCall(w, "POST", api, `{"name":"x","unknown":1}`, session, token), 400, "")
+	if res := siteCall(w, "POST", api, addJSON, session, token); res.Code != 200 || !strings.Contains(res.Body.String(), "Agent added") {
+		t.Fatalf("dialog add: %d %s", res.Code, res.Body)
+	}
+	agents, _ = w.db.userAgents(ctx, user.ID)
+	if len(agents) != 2 || agents[1].Name != "Dialog" || agents[1].DailyCap != 1000 || agents[1].KeyHint != "9999" {
+		t.Fatalf("dialog agents %+v", agents)
+	}
+	dialog := api + "/" + agents[1].ID
+	if res := siteCall(w, "POST", dialog+"/test", `{}`, stale, staleToken); res.Code != 200 || !strings.Contains(res.Body.String(), "Dialog works") || strings.Contains(res.Body.String(), `"failed"`) {
+		t.Errorf("dialog test: %d %s", res.Code, res.Body)
+	}
+	if res := siteCall(w, "POST", dialog+"/change", `{"name":"Dialog 2","cap":"0","key":""}`, stale, staleToken); res.Code != 200 {
+		t.Errorf("dialog change: %d %s", res.Code, res.Body)
+	}
+	if res := siteCall(w, "POST", dialog+"/default", `{}`, stale, staleToken); res.Code != 200 {
+		t.Errorf("dialog default: %d %s", res.Code, res.Body)
+	}
+	otherSession := w.session(w.user("other2"))
+	wantCode(t, siteCall(w, "POST", dialog+"/remove", `{}`, otherSession, siteToken(t, w, otherSession)), 404, "")
+	if res := siteCall(w, "POST", dialog+"/remove", `{}`, stale, staleToken); res.Code != 200 {
+		t.Errorf("dialog remove: %d %s", res.Code, res.Body)
+	}
+	agents, _ = w.db.userAgents(ctx, user.ID)
+	if len(agents) != 1 || !agents[0].Default {
+		t.Errorf("after the dialog: %+v", agents)
+	}
+	wantCode(t, siteCall(w, "GET", dialog+"/remove", "", session, ""), 405, "")
+	wantCode(t, siteCall(w, "POST", api+"/"+agents[0].ID+"/rename", `{}`, session, token), 404, "")
 }
 
 // Bring your own key through the account database with the runtime grants:
@@ -340,19 +385,19 @@ func TestDatabaseActionOptIn(t *testing.T) {
 		t.Fatalf("not opted in: %+v %q", skipped, notices)
 	}
 	// The action's page: only for the person whose file it was.
+	// In Settings → Services since 0.80.0.
 	session := w.session(contributor)
-	page := oauthCall(w.h, "GET", "/account/actions/"+skipped.ID, nil, session)
-	if body := page.Body.String(); page.Code != 200 || !strings.Contains(body, "Opt in and run it") || !strings.Contains(body, "Their MiniMax") || strings.Contains(body, "Their Claude") || strings.Contains(body, "They can opt in at") {
+	token := siteToken(t, w, session)
+	actionPath := "/api/v1/site/account/services/actions/" + skipped.ID
+	page := siteCall(w, "GET", actionPath, "", session, "")
+	if body := page.Body.String(); page.Code != 200 || !strings.Contains(body, `"pays":"contributor"`) || !strings.Contains(body, `"status":"skipped"`) || !strings.Contains(body, `"name":"Their MiniMax"`) || strings.Contains(body, "Their Claude") || strings.Contains(body, "They can opt in at") {
 		t.Fatalf("page: %d\n%s", page.Code, body)
 	}
-	if res := oauthCall(w.h, "GET", "/account/actions/"+skipped.ID, nil, w.session(spaceOwner)); res.Code != 404 {
-		t.Errorf("the space owner opened it: %d", res.Code)
-	}
-	csrf := func(action string) string { return w.s.accounts.agentCSRF("/account/agents/"+action, session.Value) }
-	if res := oauthCall(w.h, "POST", "/account/agents/optin", url.Values{"csrf": {csrf("optin")}, "job": {skipped.ID}, "agent": {other.ID}}, session); res.Code != 400 || !strings.Contains(res.Body.String(), "MiniMax MiniMax-M3 agents") {
+	wantCode(t, siteCall(w, "GET", actionPath, "", w.session(spaceOwner), ""), 404, "")
+	if res := siteCall(w, "POST", actionPath+"/optin", `{"agent":"`+other.ID+`"}`, session, token); res.Code != 400 || !strings.Contains(res.Body.String(), "MiniMax MiniMax-M3 agents") {
 		t.Errorf("opt in with the wrong model: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/agents/optin", url.Values{"csrf": {csrf("optin")}, "job": {skipped.ID}, "agent": {theirs.ID}}, session); res.Code != 303 {
+	if res := siteCall(w, "POST", actionPath+"/optin", `{"agent":"`+theirs.ID+`"}`, session, token); res.Code != 200 || !strings.Contains(res.Body.String(), "is running now") {
 		t.Fatalf("opt in: %d %s", res.Code, res.Body.String())
 	}
 	// Jobs queued in the same second list in any order.
@@ -370,8 +415,8 @@ func TestDatabaseActionOptIn(t *testing.T) {
 	if rerun.Status != jobDone || rerun.AgentID != theirs.ID || rerun.File != "in/a.md" || len(called) != 1 || called[0].apiKey != "sk-The-1234" {
 		t.Fatalf("after opting in: %+v %+v", rerun, called)
 	}
-	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "Actions you pay for") || !strings.Contains(body, "<strong>tidy</strong>") || !strings.Contains(body, w.joinName) {
-		t.Errorf("services page:\n%s", body)
+	if body := siteCall(w, "GET", "/api/v1/site/account/services", "", session, "").Body.String(); !strings.Contains(body, `"optIns":[{"id":`) || !strings.Contains(body, `"action":"tidy"`) || !strings.Contains(body, w.joinName) {
+		t.Errorf("services:\n%s", body)
 	}
 	// The space owner's own file runs on the owner's agent.
 	write(context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: spaceOwner.ID}}), "in/b.md", "b\n")
@@ -383,8 +428,10 @@ func TestDatabaseActionOptIn(t *testing.T) {
 	if err != nil || len(optIns) != 1 || optIns[0].AgentName != "Their MiniMax" || optIns[0].Folder != "in/" {
 		t.Fatalf("opt-ins %+v %v", optIns, err)
 	}
-	if res := oauthCall(w.h, "POST", "/account/agents/optout", url.Values{"csrf": {csrf("optout")}, "optin": {optIns[0].ID}}, session); res.Code != 303 {
-		t.Fatalf("opt out: %d", res.Code)
+	ownerSession := w.session(spaceOwner)
+	wantCode(t, siteCall(w, "POST", "/api/v1/site/account/services/optins/"+optIns[0].ID+"/optout", `{}`, ownerSession, siteToken(t, w, ownerSession)), 404, "")
+	if res := siteCall(w, "POST", "/api/v1/site/account/services/optins/"+optIns[0].ID+"/optout", `{}`, session, token); res.Code != 200 {
+		t.Fatalf("opt out: %d %s", res.Code, res.Body.String())
 	}
 	if _, ok, err := w.db.optInFor(ctx, contributor.ID, w.joinID, "in/", "tidy"); ok || err != nil {
 		t.Errorf("still opted in: %v", err)

@@ -254,6 +254,9 @@ var accountNotices = map[string]string{
 	"action-optin":               "Opted in. Your next file for that action runs on the agent you chose.",
 	"action-optin-run":           "Opted in. The file that was skipped is running now on the agent you chose; its result appears in the folder’s runner.md.",
 	"action-optout":              "Opted out. Your files no longer run that action.",
+	"app-spaces":                 "Spaces saved. The app uses them from its next operation; it does not need to reconnect.",
+	"app-revoked":                "Access revoked. The app is signed out and its choices are forgotten.",
+	"github-disconnected":        "GitHub disconnected. The app stays installed on GitHub; uninstall it there to remove it completely.",
 	"passkey-removed":            "Passkey removed and your other sessions signed out. We’ve emailed you a notice of this change. Also delete it from the device or password manager that holds it, or it may keep offering it here.",
 }
 

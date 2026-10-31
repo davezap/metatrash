@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -129,7 +130,7 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, problem(405, "invalid_request", "Use GET."))
 		return
 	}
-	back := h.basePath + "/account/services"
+	back := h.basePath + "/app/#settings/services"
 	fail := func(status int, title, message string) {
 		h.renderGitHub(w, status, githubPage{Title: title, Message: message, ContinueURL: back})
 	}
@@ -274,27 +275,36 @@ func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pend
 	if len(taken) > 0 {
 		message += " Not connected, because another Metatrash account has it or you reached your limit: " + strings.Join(taken, ", ") + "."
 	}
-	h.renderGitHub(w, 200, githubPage{OK: len(taken) == 0, Title: "GitHub connected", Message: message, ContinueURL: h.basePath + "/account/services"})
+	h.renderGitHub(w, 200, githubPage{OK: len(taken) == 0, Title: "GitHub connected", Message: message, ContinueURL: h.basePath + "/app/#settings/services"})
 }
 
 // startGitHubConnect handles the Connect GitHub and Link an existing
 // installation forms (POST, after the account form checks): record the attempt
 // and send the browser to GitHub to install, or only to authorize.
 func (h *httpAdapter) startGitHubConnect(w http.ResponseWriter, r *http.Request, user userAccount, link bool) {
-	g := h.github
-	if err := h.service.rates.take(allowance{"github:connect:user:" + user.ID, 20, 600}); err != nil {
+	target, err := h.beginGitHubConnect(w, user, link)
+	if err != nil {
 		sendError(w, err)
 		return
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// beginGitHubConnect remembers a connect (or link) for this browser in a
+// cookie and answers the github.com address to send it to: the form route
+// redirects there, Settings → Services (0.80.0) goes there itself.
+func (h *httpAdapter) beginGitHubConnect(w http.ResponseWriter, user userAccount, link bool) (string, error) {
+	g := h.github
+	if err := h.service.rates.take(allowance{"github:connect:user:" + user.ID, 20, 600}); err != nil {
+		return "", err
 	}
 	browser, err := randomHex(32)
 	if err != nil {
-		sendError(w, err)
-		return
+		return "", err
 	}
 	state, err := randomHex(32)
 	if err != nil {
-		sendError(w, err)
-		return
+		return "", err
 	}
 	now := g.now()
 	g.mu.Lock()
@@ -305,18 +315,16 @@ func (h *httpAdapter) startGitHubConnect(w http.ResponseWriter, r *http.Request,
 	}
 	if len(g.pending) >= maxGitHubPending {
 		g.mu.Unlock()
-		sendError(w, problem(503, "busy", "Metatrash is busy. Please try again in a few minutes."))
-		return
+		return "", problem(503, "busy", "Metatrash is busy. Please try again in a few minutes.")
 	}
 	g.pending[secretDigest(browser)] = githubPending{UserID: user.ID, State: state, Expires: now.Add(githubPendingLifetime), Link: link}
 	g.mu.Unlock()
 	// Lax: the cookie must come back on the top-level return from github.com.
 	http.SetCookie(w, &http.Cookie{Name: h.githubCookieName(), Value: browser, Path: "/", MaxAge: int(githubPendingLifetime / time.Second), Expires: now.Add(githubPendingLifetime), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	target := g.settings.installURL(state)
 	if link {
-		target = g.settings.authorizeURL(state, h.publicOrigin+h.basePath+"/github/callback")
+		return g.settings.authorizeURL(state, h.publicOrigin+h.basePath+"/github/callback"), nil
 	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	return g.settings.installURL(state), nil
 }
 
 // githubInstallationView is one connection on Your account.
@@ -336,11 +344,15 @@ func (h *httpAdapter) githubConnections(r *http.Request, user userAccount) ([]gi
 	}
 	views := make([]githubInstallationView, 0, len(list))
 	for _, inst := range list {
-		views = append(views, githubInstallationView{ID: strconv.FormatInt(inst.InstallationID, 10), AccountLogin: inst.AccountLogin,
-			AccountType: strings.ToLower(inst.AccountType), GitHubLogin: inst.GitHubLogin, Status: inst.Status,
-			Connected: formatUnix(inst.CreatedAt), SettingsURL: h.github.settings.installationSettingsURL(inst)})
+		views = append(views, githubInstallationViewOf(h.github, inst))
 	}
 	return views, nil
+}
+
+func githubInstallationViewOf(g *githubServer, inst githubInstallation) githubInstallationView {
+	return githubInstallationView{ID: strconv.FormatInt(inst.InstallationID, 10), AccountLogin: inst.AccountLogin,
+		AccountType: strings.ToLower(inst.AccountType), GitHubLogin: inst.GitHubLogin, Status: inst.Status,
+		Connected: formatUnix(inst.CreatedAt), SettingsURL: g.settings.installationSettingsURL(inst)}
 }
 
 // githubWebhook receives the app's webhook deliveries. Only signed deliveries
@@ -447,15 +459,7 @@ func (h *httpAdapter) submitGitHub(w http.ResponseWriter, r *http.Request, sessi
 		h.startGitHubConnect(w, r, user, path == "/account/github/link")
 		return
 	}
-	installationID, parseErr := strconv.ParseInt(r.PostForm.Get("installation"), 10, 64)
-	err = h.service.rates.take(allowance{"github:disconnect:user:" + user.ID, 20, 600})
-	if err == nil && (parseErr != nil || installationID <= 0) {
-		err = invalid("Invalid GitHub connection.")
-	}
-	if err == nil {
-		err = h.service.ownedDB.unlinkGitHubInstallation(r.Context(), user.ID, installationID)
-	}
-	if err != nil {
+	if err = h.disconnectGitHub(r.Context(), user, r.PostForm.Get("installation")); err != nil {
 		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The GitHub connection could not be removed. Reload before retrying."}
 		status := http.StatusServiceUnavailable
 		var p *Error
@@ -469,4 +473,19 @@ func (h *httpAdapter) submitGitHub(w http.ResponseWriter, r *http.Request, sessi
 		return
 	}
 	http.Redirect(w, r, h.basePath+"/account/services", http.StatusSeeOther)
+}
+
+// disconnectGitHub stops Metatrash using one of user's GitHub installations.
+func (h *httpAdapter) disconnectGitHub(ctx context.Context, user userAccount, installation string) error {
+	if h.github == nil || h.service.ownedDB == nil {
+		return missing()
+	}
+	installationID, parseErr := strconv.ParseInt(installation, 10, 64)
+	if err := h.service.rates.take(allowance{"github:disconnect:user:" + user.ID, 20, 600}); err != nil {
+		return err
+	}
+	if parseErr != nil || installationID <= 0 {
+		return invalid("Invalid GitHub connection.")
+	}
+	return h.service.ownedDB.unlinkGitHubInstallation(ctx, user.ID, installationID)
 }

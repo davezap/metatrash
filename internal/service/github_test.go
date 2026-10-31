@@ -248,9 +248,17 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 		return w.s.accounts.mac("github-" + action + ":" + cookie.Value)
 	}
 
-	page := oauthCall(w.h, "GET", "/account/services", nil, owner)
-	if page.Code != 200 || !strings.Contains(page.Body.String(), "GitHub is not connected.") || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' "+settings.webBase) {
-		t.Fatalf("account page: %d %s", page.Code, page.Header().Get("Content-Security-Policy"))
+	// Services is in the Settings dialog since 0.80.0.
+	services := func() string {
+		return siteCall(w, "GET", "/api/v1/site/account/services", "", owner, "").Body.String()
+	}
+	if body := services(); !strings.Contains(body, `"github":{"list":[]}`) {
+		t.Fatalf("services: %s", body)
+	}
+	// The dialog's Connect GitHub: the same attempt, and the address to go to.
+	res := siteCall(w, "POST", "/api/v1/site/account/services/github/connect", `{}`, owner, siteToken(t, w, owner))
+	if out := siteJSON(t, res); res.Code != 200 || !strings.HasPrefix(fmt.Sprint(out["redirect"]), settings.webBase+"/apps/") || responseCookie(res, w.h.githubCookieName()) == nil {
+		t.Fatalf("dialog connect: %d %v", res.Code, out)
 	}
 
 	// connect starts an attempt and sends the browser to GitHub with a state.
@@ -326,7 +334,7 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	// The real thing.
 	browser, state = connect(owner)
 	resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "setup_action": {"install"}, "state": {state}, "future_param": {"1"}})
-	if resp.Code != 200 || !strings.Contains(resp.Body.String(), "GitHub connected") || !strings.Contains(resp.Body.String(), `http-equiv="refresh" content="2;url=/account/services"`) {
+	if resp.Code != 200 || !strings.Contains(resp.Body.String(), "GitHub connected") || !strings.Contains(resp.Body.String(), `http-equiv="refresh" content="2;url=/app/#settings/services"`) {
 		t.Fatalf("callback: %d %s", resp.Code, resp.Body.String())
 	}
 	if cleared := responseCookie(resp, w.h.githubCookieName()); cleared == nil || cleared.MaxAge >= 0 {
@@ -341,9 +349,8 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	if resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(orgID)}, "setup_action": {"update"}, "state": {state}}); resp.Code != 200 {
 		t.Fatalf("org: %d", resp.Code)
 	}
-	page = oauthCall(w.h, "GET", "/account/services", nil, owner)
-	body := page.Body.String()
-	if !strings.Contains(body, "<strong>dave-zap</strong>") || !strings.Contains(body, "suspended on GitHub") || !strings.Contains(body, "Connect another GitHub account") ||
+	body := services()
+	if !strings.Contains(body, `"accountLogin":"dave-zap"`) || !strings.Contains(body, `"status":"suspended"`) ||
 		!strings.Contains(body, settings.webBase+"/settings/installations/"+fmt.Sprint(mine)) || !strings.Contains(body, settings.webBase+"/organizations/zaptronics/settings/installations/"+fmt.Sprint(orgID)) {
 		t.Fatalf("account page after connect: %s", body)
 	}
@@ -485,9 +492,9 @@ func TestGitHubLinkExistingAgainstDatabase(t *testing.T) {
 		return m
 	}
 
-	page := oauthCall(w.h, "GET", "/account/services", nil, owner)
-	if !strings.Contains(page.Body.String(), "Link an existing installation") {
-		t.Fatal("account page lacks the link button")
+	res := siteCall(w, "POST", "/api/v1/site/account/services/github/link", `{}`, owner, siteToken(t, w, owner))
+	if out := siteJSON(t, res); res.Code != 200 || !strings.Contains(fmt.Sprint(out["redirect"]), "/login/oauth/authorize") {
+		t.Fatalf("dialog link: %d %v", res.Code, out)
 	}
 	// The no-state reply (installed from GitHub's page) points at the link button.
 	if resp := callback(nil, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(personal)}, "setup_action": {"install"}}); resp.Code != 400 || !strings.Contains(resp.Body.String(), "Link an existing installation") {

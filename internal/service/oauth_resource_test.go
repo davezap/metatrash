@@ -290,10 +290,11 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write", w.joinID: "read_write"}, "")
 	session := w.session(w.owner)
-	page := oauthCall(w.h, "GET", "/account/services", nil, session)
-	body := page.Body.String()
-	if page.Code != 200 || !strings.Contains(body, `id="connected-apps"`) || !strings.Contains(body, "https://metatrash.com/mcp/account") || !strings.Contains(body, "Owner notes — read and write") || !strings.Contains(body, "Shared plans — read and write") || !strings.Contains(body, "claude.ai · MCP") {
-		t.Fatalf("connected apps: %d %s", page.Code, body)
+	services := func() string {
+		return siteCall(w, "GET", "/api/v1/site/account/services", "", session, "").Body.String()
+	}
+	if body := services(); !strings.Contains(body, `"connectURL":"https://metatrash.com/mcp/account"`) || !strings.Contains(body, `{"name":"Owner notes","access":"read and write"}`) || !strings.Contains(body, `{"name":"Shared plans","access":"read and write"}`) || !strings.Contains(body, `"host":"claude.ai","kind":"MCP"`) {
+		t.Fatalf("connected apps: %s", body)
 	}
 	// The space owner lowers the member's app permission from the sharing page.
 	memberSession := w.session(w.member)
@@ -318,7 +319,7 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	}
 	state := w.tool(token, "list", map[string]any{"space": w.joinID}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.joinID, "path": "a.md", "text": "x", "ifInState": state}, "insufficient_scope")
-	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "Shared plans — read only") {
+	if body := services(); !strings.Contains(body, `{"name":"Shared plans","access":"read only"}`) {
 		t.Fatal("lowered permission not shown on connected apps")
 	}
 	// Revoke from Your account ends the connection at once.
@@ -340,88 +341,108 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	if res := w.mcp(token, "tools/list", map[string]any{}, ""); res.status != 401 {
 		t.Fatal("revoked token still works")
 	}
-	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, "No apps are connected.") {
+	if body := services(); !strings.Contains(body, `"list":[]`) {
 		t.Fatal("revoked app still listed")
 	}
 }
 
+// Change spaces for a connection, in Settings → Services since 0.80.0.
 func TestOAuthChangeSpacesAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	ctx := context.Background()
 	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
 	w.tool(token, "list", map[string]any{"space": w.joinName}, "not_found")
-	session, memberSession := w.session(w.owner), w.session(w.member)
+	// Giving an app more needs a recent sign-in; these signed in just now.
+	session, memberSession := w.freshSession(w.owner), w.freshSession(w.member)
+	ownerCSRF, memberCSRF := siteToken(t, w, session), siteToken(t, w, memberSession)
 	apps, err := w.h.connectedApps(ctx, w.owner)
 	if err != nil || len(apps) != 1 {
 		t.Fatalf("apps: %v %v", apps, err)
 	}
 	grant := apps[0].ID
-	if body := oauthCall(w.h, "GET", "/account/services", nil, session).Body.String(); !strings.Contains(body, `href="/account/apps/`+grant+`" title="Change spaces"`) {
-		t.Fatal("Change spaces link missing")
+	if body := siteCall(w, "GET", "/api/v1/site/account/services", "", session, "").Body.String(); !strings.Contains(body, `"list":[{"id":"`+grant+`"`) {
+		t.Fatalf("connection not listed: %s", body)
 	}
 
-	// The page is the consent chooser, pre-filled with the current choices.
-	page := oauthCall(w.h, "GET", "/account/apps/"+grant, nil, session)
-	body := page.Body.String()
-	if page.Code != 200 || !strings.Contains(body, `name="s-`+w.ownedID+`"><option value="none">Not connected</option><option value="read_only">Read only</option><option value="read_write" selected>`) ||
-		!strings.Contains(body, `name="s-`+w.joinID+`"><option value="none" selected>`) || !strings.Contains(body, w.joinName) {
-		t.Fatalf("change spaces page: %d %s", page.Code, body)
-	}
-	if res := oauthCall(w.h, "GET", "/account/apps/"+grant, nil, memberSession); res.Code != 404 {
-		t.Fatalf("another account's connection page: %d", res.Code)
-	}
-	if res := oauthCall(w.h, "GET", "/account/apps/"+strings.Repeat("0", 32), nil, session); res.Code != 404 {
-		t.Fatalf("unknown connection page: %d", res.Code)
-	}
-
-	csrf := w.s.accounts.mac("apps-spaces:" + session.Value)
-	change := func(cookie *http.Cookie, csrf, grant string, fields map[string]string) *httptest.ResponseRecorder {
-		form := url.Values{"csrf": {csrf}, "grant": {grant}}
-		for space, choice := range fields {
-			form.Set("s-"+space, choice)
+	// The connection's spaces: the consent chooser, with the current choices.
+	appPath := "/api/v1/site/account/services/apps/"
+	choices := func(cookie *http.Cookie, grant string) (map[string]any, map[string]map[string]any) {
+		t.Helper()
+		res := siteCall(w, "GET", appPath+grant, "", cookie, "")
+		if res.Code != 200 {
+			t.Fatalf("connection: %d %s", res.Code, res.Body)
 		}
-		return oauthCall(w.h, "POST", "/account/apps/spaces", form, cookie)
+		out := siteJSON(t, res)
+		spaces := map[string]map[string]any{}
+		for _, item := range out["spaces"].([]any) {
+			m := item.(map[string]any)
+			spaces[m["id"].(string)] = m
+		}
+		return out, spaces
+	}
+	out, spaces := choices(session, grant)
+	if out["canWrite"] != true || spaces[w.ownedID]["choice"] != "read_write" || spaces[w.ownedID]["writeAllowed"] != true || spaces[w.joinID]["choice"] != "none" || spaces[w.joinID]["space"] != w.joinName {
+		t.Fatalf("connection spaces: %v", out)
+	}
+	wantCode(t, siteCall(w, "GET", appPath+grant, "", memberSession, ""), 404, "")
+	wantCode(t, siteCall(w, "GET", appPath+strings.Repeat("0", 32), "", session, ""), 404, "")
+
+	change := func(cookie *http.Cookie, csrf, grant string, fields map[string]string) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(map[string]any{"spaces": fields})
+		return siteCall(w, "POST", appPath+grant+"/spaces", string(b), cookie, csrf)
 	}
 	// Adding a space applies to the same token at once; unlisted spaces keep their choice.
-	if res := change(session, csrf, grant, map[string]string{w.joinID: "read_only"}); res.Code != 303 {
+	if res := change(session, ownerCSRF, grant, map[string]string{w.joinID: "read_only"}); res.Code != 200 {
 		t.Fatalf("add space: %d %s", res.Code, res.Body)
 	}
 	state := w.tool(token, "list", map[string]any{"space": w.joinName}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.joinName, "path": "a.md", "text": "x", "ifInState": state}, "insufficient_scope")
 	ownedState := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "a.md", "text": "x", "ifInState": ownedState}, "")
-	if res := change(session, csrf, grant, map[string]string{w.joinID: "read_write"}); res.Code != 303 {
+	// Without a recent sign-in, narrowing works and widening asks to confirm it's you.
+	stale := w.session(w.owner)
+	staleCSRF := siteToken(t, w, stale)
+	wantCode(t, change(stale, staleCSRF, grant, map[string]string{w.joinID: "read_write"}), 403, "step_up_needed")
+	if res := change(stale, staleCSRF, grant, map[string]string{w.joinID: "read_only", w.ownedID: "read_only"}); res.Code != 200 {
+		t.Fatalf("narrow without a recent sign-in: %d %s", res.Code, res.Body)
+	}
+	if res := change(session, ownerCSRF, grant, map[string]string{w.joinID: "read_write", w.ownedID: "read_write"}); res.Code != 200 {
 		t.Fatalf("raise to read and write: %d %s", res.Code, res.Body)
 	}
 	w.tool(token, "write", map[string]any{"space": w.joinName, "path": "a.md", "text": "x", "ifInState": state}, "")
+	// The form route asks for the same confirmation (until the clean-up release).
+	form := url.Values{"csrf": {w.s.accounts.mac("apps-spaces:" + stale.Value)}, "grant": {grant}, "s-" + w.ownedID: {"none"}, "s-" + w.joinID: {"read_write"}}
+	if res := oauthCall(w.h, "POST", "/account/apps/spaces", form, stale); res.Code != 303 {
+		t.Fatalf("form narrow: %d", res.Code)
+	}
+	form.Set("s-"+w.ownedID, "read_write")
+	if res := oauthCall(w.h, "POST", "/account/apps/spaces", form, stale); res.Code != 403 || !strings.Contains(res.Body.String(), "Confirm it’s you") {
+		t.Fatalf("form widen without a recent sign-in: %d", res.Code)
+	}
+	if res := change(session, ownerCSRF, grant, map[string]string{w.ownedID: "read_write"}); res.Code != 200 {
+		t.Fatalf("restore owned space: %d", res.Code)
+	}
 
-	// Form checks: CSRF bound to the session, own connections only, known fields and values.
-	if res := change(memberSession, csrf, grant, map[string]string{w.ownedID: "none"}); res.Code != 403 {
-		t.Fatalf("another session's CSRF: %d", res.Code)
-	}
-	if res := change(memberSession, w.s.accounts.mac("apps-spaces:"+memberSession.Value), grant, map[string]string{w.joinID: "none"}); res.Code != 404 {
-		t.Fatalf("another account changed the connection: %d", res.Code)
-	}
+	// Checks: the token bound to the session, own connections only, known fields and values.
+	wantCode(t, change(memberSession, ownerCSRF, grant, map[string]string{w.ownedID: "none"}), 403, "")
+	wantCode(t, change(memberSession, memberCSRF, grant, map[string]string{w.joinID: "none"}), 404, "")
 	w.tool(token, "list", map[string]any{"space": w.joinName}, "")
-	if res := change(session, csrf, grant, map[string]string{w.joinID: "admin"}); res.Code != 400 {
-		t.Fatalf("invalid choice: %d", res.Code)
-	}
-	if res := oauthCall(w.h, "POST", "/account/apps/spaces", url.Values{"csrf": {csrf}, "grant": {grant}, "x": {"1"}}, session); res.Code != 400 {
-		t.Fatalf("unknown field: %d", res.Code)
-	}
+	wantCode(t, change(session, ownerCSRF, grant, map[string]string{w.joinID: "admin"}), 400, "")
+	wantCode(t, siteCall(w, "POST", appPath+grant+"/spaces", `{"spaces":{},"x":1}`, session, ownerCSRF), 400, "")
+	wantCode(t, change(session, ownerCSRF, grant, map[string]string{"not-an-id": "none"}), 400, "")
 	// A space the user cannot use is refused with the consent page's checks.
 	other := w.user("other")
 	otherSpace, err := w.s.createOwnedSpace(ctx, other.ID, "Other", randomName(t, "other-"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res := change(session, csrf, grant, map[string]string{otherSpace.ID: "read_only"}); res.Code != 409 || !strings.Contains(res.Body.String(), "no longer available") {
+	if res := change(session, ownerCSRF, grant, map[string]string{otherSpace.ID: "read_only"}); res.Code != 409 || !strings.Contains(res.Body.String(), "no longer available") {
 		t.Fatalf("unowned space: %d", res.Code)
 	}
 	w.tool(token, "list", map[string]any{"space": other.Username + "/" + otherSpace.Slug}, "not_found")
 
 	// Removing a space takes effect on the next operation.
-	if res := change(session, csrf, grant, map[string]string{w.ownedID: "none"}); res.Code != 303 {
+	if res := change(session, ownerCSRF, grant, map[string]string{w.ownedID: "none"}); res.Code != 200 {
 		t.Fatalf("remove space: %d", res.Code)
 	}
 	w.tool(token, "list", map[string]any{"space": w.ownedName}, "not_found")
@@ -430,10 +451,10 @@ func TestOAuthChangeSpacesAgainstDatabase(t *testing.T) {
 	if err := w.db.manageHumanMember(ctx, w.member.ID, w.joinID, w.owner.ID, "suspend"); err != nil {
 		t.Fatal(err)
 	}
-	if body := oauthCall(w.h, "GET", "/account/apps/"+grant, nil, session).Body.String(); !strings.Contains(body, "1 other connected space is suspended") || strings.Contains(body, `name="s-`+w.joinID+`"`) {
-		t.Fatal("suspended space not reported as kept")
+	if out, spaces := choices(session, grant); out["kept"] != float64(1) || spaces[w.joinID] != nil {
+		t.Fatalf("suspended space not reported as kept: %v", out)
 	}
-	if res := change(session, csrf, grant, map[string]string{w.ownedID: "read_write"}); res.Code != 303 {
+	if res := change(session, ownerCSRF, grant, map[string]string{w.ownedID: "read_write"}); res.Code != 200 {
 		t.Fatalf("change while suspended: %d", res.Code)
 	}
 	if err := w.db.manageHumanMember(ctx, w.member.ID, w.joinID, w.owner.ID, "restore"); err != nil {
@@ -448,18 +469,25 @@ func TestOAuthChangeSpacesAgainstDatabase(t *testing.T) {
 	if err != nil || len(memberApps) != 1 {
 		t.Fatalf("member apps: %v %v", memberApps, err)
 	}
-	memberCSRF := w.s.accounts.mac("apps-spaces:" + memberSession.Value)
-	if body := oauthCall(w.h, "GET", "/account/apps/"+memberApps[0].ID, nil, memberSession).Body.String(); !strings.Contains(body, "This connection is read-only") || strings.Contains(body, `value="read_write"`) {
-		t.Fatal("read-only connection offers write")
+	if out, spaces := choices(memberSession, memberApps[0].ID); out["canWrite"] != nil || spaces[w.joinID]["writeAllowed"] != nil {
+		t.Fatalf("read-only connection offers write: %v", out)
 	}
 	if res := change(memberSession, memberCSRF, memberApps[0].ID, map[string]string{w.joinID: "read_write"}); res.Code != 409 || !strings.Contains(res.Body.String(), "connected read-only") {
 		t.Fatalf("read-only connection raised: %d", res.Code)
 	}
-	if res := change(memberSession, memberCSRF, memberApps[0].ID, map[string]string{w.joinID: "none"}); res.Code != 303 {
+	if res := change(memberSession, memberCSRF, memberApps[0].ID, map[string]string{w.joinID: "none"}); res.Code != 200 {
 		t.Fatalf("member remove: %d", res.Code)
 	}
 	w.tool(memberToken, "list", map[string]any{"space": w.joinName}, "not_found")
 	w.tool(memberToken, "list", map[string]any{"space": "public"}, "")
+	// Revoking from the dialog ends the connection at once.
+	// Another account's revoke changes nothing, as on the form.
+	if res := siteCall(w, "POST", appPath+memberApps[0].ID+"/revoke", `{}`, session, ownerCSRF); res.Code != 200 || !w.valid(memberToken) {
+		t.Fatalf("another account revoked it: %d", res.Code)
+	}
+	if res := siteCall(w, "POST", appPath+memberApps[0].ID+"/revoke", `{}`, memberSession, memberCSRF); res.Code != 200 || w.valid(memberToken) {
+		t.Fatalf("revoke: %d %s", res.Code, res.Body)
+	}
 }
 
 // mtsync signs in like any app, with its built-in client ID and a loopback

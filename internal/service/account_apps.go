@@ -169,6 +169,56 @@ func (h *httpAdapter) appSpaces(ctx context.Context, user userAccount, grantID s
 	return page, nil
 }
 
+// accessRank orders a connection's access to a space, to tell a change that
+// widens it from one that narrows it.
+var accessRank = map[string]int{"none": 0, "read_only": 1, "read_write": 2}
+
+// changeAppSpaces saves Change spaces for one of user's connections, from the
+// form and from Settings → Services. Giving the app a space it did not have,
+// or write access where it could only read, needs a sign-in within the last
+// 10 minutes (0.80.0): a script in a page must not be able to open a space to
+// an app on its own. Narrowing never does.
+func (h *httpAdapter) changeAppSpaces(ctx context.Context, user userAccount, session, grantID string, choices []oauthSpaceChoice) error {
+	if h.oauth == nil || h.service.ownedDB == nil {
+		return missing()
+	}
+	if err := h.service.rates.take(allowance{"apps:user:" + user.ID, 30, 600}); err != nil {
+		return err
+	}
+	page, err := h.appSpaces(ctx, user, grantID)
+	if err != nil {
+		return err
+	}
+	current := map[string]string{}
+	for _, s := range page.Spaces {
+		current[s.ID] = s.Choice
+	}
+	for _, c := range choices {
+		was, ok := current[c.SpaceID]
+		if !ok {
+			was = "none"
+		}
+		if accessRank[c.Permission] > accessRank[was] {
+			if fresh, _ := h.service.accounts.sessionFresh(session, time.Now()); !fresh {
+				return errConfirmFirst
+			}
+			break
+		}
+	}
+	return h.service.ownedDB.changeGrantSpaces(ctx, user.ID, grantID, choices, time.Now())
+}
+
+// revokeApp ends one of user's connections.
+func (h *httpAdapter) revokeApp(ctx context.Context, user userAccount, grantID string) error {
+	if h.oauth == nil || h.service.ownedDB == nil {
+		return missing()
+	}
+	if err := h.service.rates.take(allowance{"apps:user:" + user.ID, 30, 600}); err != nil {
+		return err
+	}
+	return h.service.ownedDB.revokeConnection(ctx, user.ID, grantID)
+}
+
 // revokeConnection deletes one of the account's connections with its consent
 // and tokens (cascade). Called only after the account form checks.
 func (db *accountDatabase) revokeConnection(ctx context.Context, userID, grantID string) error {
