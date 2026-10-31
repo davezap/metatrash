@@ -406,6 +406,20 @@ func (w *runnerWorld) wait(n int) []agentJob {
 	return nil
 }
 
+// readUntil reads a file until it holds want, for up to 5 seconds: wait's
+// pause can be too short on a slow machine when runner.md already existed.
+func (w *runnerWorld) readUntil(path, want string) string {
+	w.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		text := w.read(path)
+		if strings.Contains(text, want) || time.Now().After(deadline) {
+			return text
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 const tidyConfig = `{"actions":[{"name":"tidy-draft","on":"inbound/*.md","do":"Rewrite this draft. Put the result in for-review/ under the same name, then move the draft to completed/."}]}`
 
 func TestRunnerTidyDraft(t *testing.T) {
@@ -811,7 +825,7 @@ func TestRunnerContributorPays(t *testing.T) {
 	if done.Status != jobDone || done.AgentID != mine.ID || done.Contributor != aliceID || len(w.models) != 1 || w.models[0].apiKey != "sk-Ali-1234" {
 		t.Fatalf("opted in: %+v %+v", done, w.models)
 	}
-	if log := w.read("hr/runner.md"); !strings.Contains(log, "- Paid by: alice") {
+	if log := w.readUntil("hr/runner.md", "- Paid by: alice"); !strings.Contains(log, "- Paid by: alice") {
 		t.Errorf("runner.md:\n%s", log)
 	}
 	var system contentBlock
@@ -860,7 +874,7 @@ func TestRunnerMemberAction(t *testing.T) {
 	if _, ok := files["hr/in/y.md"]; !ok {
 		t.Fatal("file missing")
 	}
-	if log := w.read("hr/runner.md"); !strings.Contains(log, "- Paid by: alice") {
+	if log := w.readUntil("hr/runner.md", "- Paid by: alice"); !strings.Contains(log, "- Paid by: alice") {
 		t.Errorf("runner.md:\n%s", log)
 	}
 	// Without an agent of hers, her file is skipped and she is told.
