@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.73.0 - Slate Viewer's UI on the site, first look (2026-10-31)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. Step 3 of "Slate Viewer's UI on the website" in the roadmap. Nothing links to it yet: the `/spaces/` pages are unchanged.
+
+- **`/app/{owner}/{slug}/[path]` and `/app/public/[path]`** open the space in Slate Viewer's own UI, at the file in the path: the Files tree, search, history, the editor and saving, with the person's own access through the site API (0.72.0). `/app/` goes to the public space. The space's bare address gets its trailing slash, and an address from before a transfer goes to the current one.
+- Signed out, a private space sends the browser to sign in and back to the same `/app/` page after; a link from another site reloads once first, as the `/spaces/` pages do. Signed in without access, 404.
+- **The Viewer's website build** (`npm run build:web` in Slate Viewer) is copied into `internal/service/web/app/` and embedded. The page names its entry script and stylesheet from the build's `.vite/manifest.json`; `/app/assets/…` serves the hashed files with a year's caching. Without a build there, `/app/` pages answer 404 "The new viewer is not in this build".
+- The page keeps the site's CSP (no inline script). `/assets/app-start.js` sets the saved theme before the page paints and gives the editor's `<style>` elements this page's nonce, which the CSP allows for styles only.
+- Tested against MariaDB: the owner's page carries the space and file, the top folder opens with no file, the bare address redirects, a stranger gets 404, signed out goes to sign in (with the return cookie) and a cross-site link reloads first, the public space and a web-readable space open signed out, the entry script is served and cached, the manifest, the README and other paths in the folder are not served. In headless Chromium against a local server: the page opens a note styled with no CSP errors, typing and Ctrl+S saves it through the site API, the public space opens signed out, and a private space signed out goes to sign in. Full suite.
+
 ## 0.72.1 - Site API from the address bar (2026-10-30)
 
 No schema, grant, `accounts.json` or tool-schema change. Only the server needs releasing.

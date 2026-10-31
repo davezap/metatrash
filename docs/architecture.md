@@ -21,6 +21,7 @@ counters and one write queue:
 | REST | `/api/v1/spaces/…` | `/api/v1/account/…` |
 | Website (read-only) | `/`, `/spaces/public/…`, spaces their owner made readable on the web, `/docs/…` (the configured docs space, while readable on the web) | `/spaces/{username}/{slug}/…`, `/account` |
 | Site API (the website's own pages, 0.72.0) | `/api/v1/site/…` reads of the public space and web-readable spaces | `/api/v1/site/…` with the session cookie and a CSRF token |
+| Slate Viewer's UI (0.73.0) | `/app/public/…`, `/app/{owner}/{slug}/…` of web-readable spaces | `/app/{owner}/{slug}/…`, reading and changing files through the site API |
 
 ## Spaces
 

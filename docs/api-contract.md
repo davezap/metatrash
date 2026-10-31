@@ -43,6 +43,8 @@ The website's own pages use the same REST resource with the session cookie inste
 
 Requests must use the configured site host. An `Origin` header, when sent, must be the site's origin, and `Sec-Fetch-Site`, when sent, must be `same-origin` (or `none`, an address typed or bookmarked, for reads; 0.72.1); otherwise 403. Anything but GET needs a signed-in session (else 401), an `Origin` header, and the session's token from `session` in `X-Metatrash-CSRF` (else 403 "The page is out of date"). Changes record the account's username, the app `Metatrash website` and kind `person`, so `agents`-locked files can be changed there as in Slate Viewer.
 
+`/app/public/[path]` and `/app/{owner}/{slug}/[path]` (0.73.0) are the page that runs Slate Viewer's UI on the site, opening the space at `path` (a folder, or the space's bare address, opens with no file). Whoever may read the space through the site API gets the page; signed out, a private or missing space goes to sign in and comes back after, and signed in it is 404. The page itself is not an API: it carries `<meta name="metatrash-app" content='{"root": "/spaces/…", "file": …}'>` and loads `/app/assets/…`, files named by their content's hash and cached for good.
+
 ## Files, identity, and paths
 
 A file has `id`, `path`, UTF-8 `bytes`, `protected` (a folder's `AGENTS.md` or `.metatrash.json`, below) and `deletable` (its opposite); read also returns `text`. Both are derived on every snapshot, not stored in the index (spaces from before 0.45.0 store `protected: true` on their README.md; it is ignored). Assign a random 32-character lowercase hexadecimal ID on creation. It survives edits and moves; a new file at a previously vacated path gets a new ID. IDs are unique within a space and never grant access.

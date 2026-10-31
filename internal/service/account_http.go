@@ -138,7 +138,7 @@ func (h *httpAdapter) returnCookieName() string {
 // the base path removed, is a page signing in may go back to: a space page or
 // an account page. Nothing else, so the cookie cannot send anyone off-site.
 func returnTarget(target string) bool {
-	return len(target) <= 2048 && (strings.HasPrefix(target, "/spaces/") || strings.HasPrefix(target, "/account/")) && !strings.ContainsAny(target, "\\\r\n")
+	return len(target) <= 2048 && (strings.HasPrefix(target, "/spaces/") || strings.HasPrefix(target, "/app/") || strings.HasPrefix(target, "/account/")) && !strings.ContainsAny(target, "\\\r\n")
 }
 
 // redirectToLogin sends a signed-out browser to sign in and remembers the

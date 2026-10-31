@@ -57,6 +57,16 @@ Plan (each step its own release):
    `ifInState`; a conflict opens Compare with the server copy instead of a
    conflict file. Watchers become polling `list since` while the tab is
    visible.
+   *Done in 0.73.0 (with Slate Viewer's `npm run build:web`):* the new UI is
+   at `/app/{owner}/{slug}/[path]` and `/app/public/[path]`, so the
+   `/spaces/` pages stay as they are until it replaces them. Go writes the
+   page itself (the site's CSP allows no inline script): the space and file
+   go in a `<meta name="metatrash-app">`, Slate comes from `/assets/`, and
+   the build's hashed files from `internal/service/web/app/` by its Vite
+   manifest. The editor's `<style>` elements carry a per-page CSP nonce.
+   Saves send `ifInState` with `strict: false`; a 409 says the file changed
+   (Compare on conflict moves to step 4). The open folder polls
+   `files?since=` every 5 seconds while the tab is visible.
 4. **Desktop-only parts hidden by capability.** Updates, windows, log
    folder, developer tools, default apps, attention badge, mtsync
    setup/login/Sync menu and conflict copies stay in the Viewer. Open

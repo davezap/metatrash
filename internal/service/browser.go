@@ -78,6 +78,8 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		data, kind = passkeyJS, "text/javascript; charset=utf-8"
 	case "/assets/account.js":
 		data, kind = accountJS, "text/javascript; charset=utf-8"
+	case "/assets/app-start.js":
+		data, kind = appStartJS, "text/javascript; charset=utf-8"
 	default:
 		name, ok := strings.CutPrefix(r.URL.Path, "/assets/mermaid/")
 		if !ok || !strings.HasSuffix(name, ".js") || strings.Contains(name, "..") {
