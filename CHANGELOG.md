@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.79.1 - Ship the Settings dialog's website build (2026-10-31)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0.
+
+- **0.79.0 shipped without the new website build**: `internal/service/web/app/` still held the 0.78.0 Slate Viewer build and `slate.js` was Slate 0.20.0, so the account menu's Settings went to `/account`, which now redirects to `/app/#settings/spaces`, and the old app opened the public space instead of the dialog. This release carries the Slate Viewer website build with the Settings dialog and Slate 0.20.1, built with `scripts/build-frontends.ps1`, and `internal/service/web/frontends.json` records which versions they are.
+
 ## 0.79.0 - Settings dialog in the site app (2026-10-31)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release the server together with a new Slate Viewer website build and Slate 0.20.1: run `scripts/build-frontends.ps1` first. Step 2 of "Settings dialog and space picker" in the roadmap.
