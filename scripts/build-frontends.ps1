@@ -37,15 +37,19 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Slate = (Join-Path $PSScriptRoot '..\..\Slate'),
-  [string]$Viewer = (Join-Path $PSScriptRoot '..\..\Slate_Viewer'),
+  [string]$Slate = '',
+  [string]$Viewer = '',
   [switch]$SkipSlate,
   [switch]$Install,
   [switch]$Test
 )
 
 $ErrorActionPreference = 'Stop'
-$Metatrash = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty inside param(), so the defaults are set here.
+$Here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $Slate) { $Slate = Join-Path $Here '..\..\Slate' }
+if (-not $Viewer) { $Viewer = Join-Path $Here '..\..\Slate_Viewer' }
+$Metatrash = (Resolve-Path (Join-Path $Here '..')).Path
 $Slate = (Resolve-Path $Slate).Path
 $Viewer = (Resolve-Path $Viewer).Path
 $Web = Join-Path $Metatrash 'internal\service\web'
