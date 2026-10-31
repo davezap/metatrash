@@ -70,7 +70,7 @@ func TestCrossSiteLinkAndSwitchingAccounts(t *testing.T) {
 	// The reload is same-origin: with the cookie it is the account, without
 	// it sign-in as before. Cookies sent cross-site (a future Lax cookie)
 	// skip the reload.
-	if w := call("GET", "/account", "same-origin", nil, owner); (w.Code != 200 && w.Code != 503) || !strings.Contains(w.Body.String(), "owner@example.com") {
+	if w := call("GET", "/account", "same-origin", nil, owner); w.Code != 303 || w.Header().Get("Location") != "/app/#settings/spaces" {
 		t.Fatalf("reloaded account: %d", w.Code)
 	}
 	if w := call("GET", "/account", "same-origin", nil); w.Code != 303 || w.Header().Get("Location") != "/login" {

@@ -57,17 +57,19 @@ func TestDeleteSpaceAgainstDatabase(t *testing.T) {
 		res := oauthCall(w.h, "POST", "/account/spaces/delete", url.Values{"csrf": {w.s.accounts.mac("space-delete:" + session.Value)}, "space": {space.ID}, "name": {typed}}, session)
 		return res.Code
 	}
-	page := oauthCall(w.h, "GET", "/account/sharing/"+space.ID, nil, aliceSession).Body.String()
-	if !strings.Contains(page, `id="delete"`) || !strings.Contains(page, `href="/spaces/`+name+`/?export"`) || strings.Contains(page, `action="/account/spaces/delete"`) {
-		t.Fatal("sharing page offers Delete without a fresh session, or no Download")
+	sharing := func() string {
+		return siteCall(w, "GET", "/api/v1/site/account/spaces/"+space.ID+"/sharing", "", aliceSession, "").Body.String()
+	}
+	if strings.Contains(sharing(), `"fresh":true`) {
+		t.Fatal("sharing says fresh without a confirmation")
 	}
 	if code := remove("Old notes", aliceSession); code != 403 {
 		t.Fatalf("delete without confirmation: %d", code)
 	}
 	w.s.accounts.markConfirmed(aliceSession.Value, alice.ID, time.Now())
 	w.s.accounts.markConfirmed(bobSession.Value, bob.ID, time.Now())
-	if page := oauthCall(w.h, "GET", "/account/sharing/"+space.ID, nil, aliceSession).Body.String(); !strings.Contains(page, `action="/account/spaces/delete"`) {
-		t.Fatal("no Delete form after confirming")
+	if !strings.Contains(sharing(), `"fresh":true`) {
+		t.Fatal("sharing not fresh after confirming")
 	}
 	if code := remove("Old note", aliceSession); code != 400 {
 		t.Fatalf("wrong name: %d", code)
@@ -90,7 +92,7 @@ func TestDeleteSpaceAgainstDatabase(t *testing.T) {
 		if res := oauthCall(w.h, "GET", "/spaces/"+name+"/", nil, session); res.Code != 404 {
 			t.Fatalf("%s opens it: %d", who, res.Code)
 		}
-		if strings.Contains(oauthCall(w.h, "GET", "/account", nil, session).Body.String(), slug) {
+		if strings.Contains(siteCall(w, "GET", "/api/v1/site/account", "", session, "").Body.String(), slug) {
 			t.Fatalf("%s's account still lists it", who)
 		}
 	}

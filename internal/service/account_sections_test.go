@@ -10,15 +10,11 @@ import (
 func TestAccountSectionsAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
-	// Spaces is one table of owned and joined spaces; All, Mine and Shared
-	// with me are filters of it at their own addresses, under one nav entry.
+	// Spaces, sharing and Profile moved to the site app's Settings dialog in
+	// 0.79.0 (TestAccountPagesRedirectToSettings); Security and Services stay.
 	sections := []struct{ path, nav, want, absent string }{
-		{"/account", "/account", `href="/account" aria-current="true">All`, "Confirm it’s you"},
-		{"/account/mine", "/account", `href="/account/mine" aria-current="true">Mine`, "Confirm it’s you"},
-		{"/account/shared", "/account", `href="/account/shared" aria-current="true">Shared with me`, `id="new-space"`},
 		{"/account/security", "/account/security", "Confirm it’s you", `id="connected-apps"`},
 		{"/account/services", "/account/services", `id="connected-apps"`, "Confirm it’s you"},
-		{"/account/profile", "/account/profile", "Public username", `id="connected-apps"`},
 	}
 	for _, s := range sections {
 		res := oauthCall(w.h, "GET", s.path, nil, session)
@@ -38,11 +34,6 @@ func TestAccountSectionsAgainstDatabase(t *testing.T) {
 		if res := oauthCall(w.h, "GET", s.path, nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
 			t.Fatalf("%s without a session: %d", s.path, res.Code)
 		}
-	}
-	// The sharing page belongs to Spaces.
-	res := oauthCall(w.h, "GET", "/account/sharing/"+w.ownedID, nil, session)
-	if res.Code != 200 || !strings.Contains(res.Body.String(), `href="/account" aria-current="page"`) || !strings.Contains(res.Body.String(), "Invite someone") {
-		t.Fatalf("sharing page: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", "/assets/account.js", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "details.pop") {
 		t.Fatalf("account.js: %d", res.Code)

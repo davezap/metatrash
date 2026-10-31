@@ -297,9 +297,9 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	}
 	// The space owner lowers the member's app permission from the sharing page.
 	memberSession := w.session(w.member)
-	sharing := oauthCall(w.h, "GET", "/account/sharing/"+w.joinID, nil, memberSession)
-	if sharing.Code != 200 || !strings.Contains(sharing.Body.String(), "Their connected apps may") {
-		t.Fatalf("sharing page: %d", sharing.Code)
+	sharing := siteCall(w, "GET", "/api/v1/site/account/spaces/"+w.joinID+"/sharing", "", memberSession, "")
+	if sharing.Code != 200 || !strings.Contains(sharing.Body.String(), `"apps":true`) || !strings.Contains(sharing.Body.String(), `"agentPermission":"read_write"`) {
+		t.Fatalf("sharing: %d %s", sharing.Code, sharing.Body)
 	}
 	agentCSRF := w.s.accounts.mac("membership:agent:" + memberSession.Value)
 	form := url.Values{"csrf": {agentCSRF}, "space": {w.joinID}, "member": {w.owner.ID}, "permission": {"read_only"}}

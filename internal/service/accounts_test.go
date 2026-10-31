@@ -254,9 +254,13 @@ func TestAccountsHTTP(t *testing.T) {
 	if session == nil {
 		t.Fatal("missing session")
 	}
-	// This harness has no owned-space database, so the page reports spaces as
-	// temporarily unavailable (503) while still rendering the signed-in account.
-	if w := call("GET", "/account", "", nil, session); (w.Code != 200 && w.Code != 503) || !strings.Contains(w.Body.String(), "person@example.com") {
+	// Spaces moved to the site app's Settings dialog (0.79.0); Security is
+	// still a page here. This harness has no owned-space database, so it may
+	// report the account as temporarily unavailable (503).
+	if w := call("GET", "/account", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/app/#settings/spaces" {
+		t.Fatal("account not sent to Settings")
+	}
+	if w := call("GET", "/account/security", "", nil, session); (w.Code != 200 && w.Code != 503) || !strings.Contains(w.Body.String(), "person@example.com") {
 		t.Fatal("account unavailable")
 	}
 	usernameForm := url.Values{"username": {"Dave-C"}, "csrf": {s.accounts.mac("username:" + session.Value)}}
@@ -271,7 +275,7 @@ func TestAccountsHTTP(t *testing.T) {
 	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
 		t.Fatal("username selection failed")
 	}
-	if w := call("GET", "/account/profile", "", nil, session); !strings.Contains(w.Body.String(), `class="big-mono">dave-c<`) || strings.Contains(w.Body.String(), "Save permanent username") {
+	if user, ok, err := s.accounts.currentUser(context.Background(), session.Value); err != nil || !ok || user.Username != "dave-c" {
 		t.Fatal("selected username not shown as fixed")
 	}
 	usernameForm.Set("username", "another-name")
@@ -282,7 +286,7 @@ func TestAccountsHTTP(t *testing.T) {
 	if w := call("POST", "/logout", "https://metatrash.com", url.Values{"csrf": {s.accounts.mac("logout:" + session.Value)}}, session); w.Code != 303 {
 		t.Fatal("logout failed")
 	}
-	if w := call("GET", "/account", "", nil, session); w.Code != 303 {
+	if w := call("GET", "/account", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/login" {
 		t.Fatal("logged-out session accepted")
 	}
 	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {

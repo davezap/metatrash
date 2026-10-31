@@ -214,17 +214,17 @@ func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Reque
 // Notices are fixed keys carried across the post-redirect in a short-lived cookie;
 // account routes take no query parameters.
 var accountNotices = map[string]string{
-	"invite-sent":                "Invitation emailed. They sign in with that address and accept from Your account.",
-	"invite-limited":             "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept from Your account.",
-	"invite-failed":              "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept from Your account.",
-	"invite-daily":               "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept from Your account, or invite again tomorrow to send the email.",
+	"invite-sent":                "Invitation emailed. They sign in with that address and accept it in Settings.",
+	"invite-limited":             "Invitation saved, but not emailed again because this address was emailed recently. Try again later, or ask them to sign in with that address and accept it in Settings.",
+	"invite-failed":              "Invitation saved, but the email could not be sent. Ask them to sign in with that address and accept it in Settings.",
+	"invite-daily":               "Invitation saved, but not emailed: you have used your five invitation emails for today. Ask them to sign in with that address and accept it in Settings, or invite again tomorrow to send the email.",
 	"space-web":                  "The space is now readable by anyone on the web, read-only. Agent access has not changed.",
 	"space-private":              "The space is private again: only you and its members can browse it.",
 	"space-deleted":              "The space is deleted: no one can open it, and its address is held for 30 days. If that was a mistake, ask the site’s operator to restore it within those 30 days.",
 	"account-deletion-requested": "Your account will be deleted in 30 days. You have been signed out everywhere, and we’ve emailed you. Signing in again before then cancels the deletion.",
 	"space-timezone":             "The space's time zone is saved. Its schedules run on it from now on.",
-	"transfer-offered":           "Ownership offered. We’ve emailed them; they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",
-	"transfer-offered-unsent":    "Ownership offered, but the email could not be sent, so let them know: they accept from Spaces on their account within seven days. Until then nothing changes, and you can cancel the offer.",
+	"transfer-offered":           "Ownership offered. We’ve emailed them; they accept it in Settings within seven days. Until then nothing changes, and you can cancel the offer.",
+	"transfer-offered-unsent":    "Ownership offered, but the email could not be sent, so let them know: they accept it in Settings within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-cancelled":         "Ownership offer cancelled. You still own the space.",
 	"transfer-declined":          "Ownership offer declined. Nothing changed.",
 	"transfer-accepted":          "You own the space now. Its address uses your username; old links and agents that use the previous address still reach it. Its GitHub folders, if any, now use your GitHub connection in Services.",

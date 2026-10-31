@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A space made readable on the web: anyone can browse it read-only in the
@@ -47,14 +48,15 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/spaces/"+w.owner.Username+"/no-such-space/", nil); res.Code != 303 {
 		t.Fatalf("signed out, missing: %d", res.Code)
 	}
-	account := oauthCall(w.h, "GET", "/account", nil, ownerSession)
-	if !strings.Contains(account.Body.String(), "Make readable on the web") || !strings.Contains(account.Body.String(), "Warning:") {
-		t.Fatal("account page lacks the web toggle and its warning")
-	}
-
 	// Only the owner may change it, with the form's token.
 	ownerCSRF := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
 	strangerCSRF := w.s.accounts.mac("space-visibility:" + strangerSession.Value)
+	// Opening it to everyone needs a recent sign-in or confirmation (0.79.0).
+	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 403 {
+		t.Fatalf("make web without confirming: %d", res.Code)
+	}
+	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
+	w.s.accounts.markConfirmed(strangerSession.Value, stranger.ID, time.Now())
 	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {strangerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, strangerSession); res.Code != 404 {
 		t.Fatalf("stranger toggles: %d", res.Code)
 	}
@@ -72,10 +74,11 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	if res.Code != 303 || res.Header().Get("Location") != "/account" {
 		t.Fatalf("make web: %d %s", res.Code, res.Body)
 	}
-	notice := responseCookie(res, w.h.noticeCookieName())
-	account = oauthCall(w.h, "GET", "/account", nil, ownerSession, notice)
-	if body := account.Body.String(); !strings.Contains(body, accountNotices["space-web"]) || !strings.Contains(body, `name="visibility" value="private"`) {
-		t.Fatal("account page after making the space web-readable")
+	if notice := responseCookie(res, w.h.noticeCookieName()); notice == nil || notice.Value != "space-web" {
+		t.Fatal("no notice after making the space web-readable")
+	}
+	if body := siteCall(w, "GET", "/api/v1/site/account", "", ownerSession, "").Body.String(); !strings.Contains(body, `"web":true`) {
+		t.Fatalf("Settings after making the space web-readable: %s", body)
 	}
 
 	// Web-readable: anyone may read, read-only, still not indexed.
@@ -185,12 +188,10 @@ func TestDownloadSpaceAgainstDatabase(t *testing.T) {
 			t.Fatalf("%s: %d", path, res.Code)
 		}
 	}
-	if body := oauthCall(w.h, "GET", "/account", nil, ownerSession).Body.String(); !strings.Contains(body, `href="`+download+`"`) || !strings.Contains(body, `href="/spaces/`+w.joinName+`/?export"`) {
-		t.Fatal("account page lacks the Download links")
-	}
 
 	// Readable on the web: visitors still cannot download it.
 	csrf := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
+	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
 	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {csrf}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 303 {
 		t.Fatalf("make web: %d", res.Code)
 	}
@@ -262,6 +263,7 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "legal/terms.md", "text": "# Terms\n", "ifInState": state}, "")
 	ownerCSRF := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
+	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
 	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 303 {
 		t.Fatalf("make web: %d", res.Code)
 	}

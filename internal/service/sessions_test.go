@@ -221,7 +221,7 @@ func TestSignOutSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie := &http.Cookie{Name: sessionCookie, Value: token}
-	body := oauthCall(w.h, "GET", "/account", nil, cookie).Body.String()
+	body := oauthCall(w.h, "GET", "/account/security", nil, cookie).Body.String()
 	m := regexp.MustCompile(`action="/logout">\s*<input type="hidden" name="csrf" value="([0-9a-f]{64})"`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatal("no sign-out form")

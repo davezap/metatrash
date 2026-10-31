@@ -217,7 +217,11 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 
 // formBytes decodes a base64url form field.
 func formBytes(r *http.Request, field string, limit int, required bool) ([]byte, error) {
-	value := r.PostForm.Get(field)
+	return fieldBytes(r.PostForm.Get(field), limit, required)
+}
+
+// fieldBytes decodes one base64url passkey field, from a form or JSON.
+func fieldBytes(value string, limit int, required bool) ([]byte, error) {
 	if value == "" && !required {
 		return nil, nil
 	}
@@ -236,21 +240,26 @@ type passkeyAssertion struct {
 }
 
 func readPasskeyAssertion(r *http.Request) (passkeyAssertion, error) {
+	return passkeyAssertionFrom(r.PostForm.Get)
+}
+
+// passkeyAssertionFrom reads an assertion's fields by their form names.
+func passkeyAssertionFrom(get func(string) string) (passkeyAssertion, error) {
 	var p passkeyAssertion
 	var err error
-	if p.credential, err = formBytes(r, "credential", maxCredentialIDBytes, true); err != nil {
+	if p.credential, err = fieldBytes(get("credential"), maxCredentialIDBytes, true); err != nil {
 		return p, err
 	}
-	if p.clientData, err = formBytes(r, "client_data", 4096, true); err != nil {
+	if p.clientData, err = fieldBytes(get("client_data"), 4096, true); err != nil {
 		return p, err
 	}
-	if p.authData, err = formBytes(r, "authenticator_data", 1024, true); err != nil {
+	if p.authData, err = fieldBytes(get("authenticator_data"), 1024, true); err != nil {
 		return p, err
 	}
-	if p.signature, err = formBytes(r, "signature", 1024, true); err != nil {
+	if p.signature, err = fieldBytes(get("signature"), 1024, true); err != nil {
 		return p, err
 	}
-	p.handle, err = formBytes(r, "user_handle", 64, false)
+	p.handle, err = fieldBytes(get("user_handle"), 64, false)
 	return p, err
 }
 

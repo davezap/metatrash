@@ -1,10 +1,13 @@
 # Slate Viewer's website build
 
 Metatrash serves Slate Viewer's UI at /app/ (0.73.0) from the files in this
-folder. They come from the Slate Viewer repository:
+folder. They come from the Slate Viewer repository's website build. Run, from
+the Metatrash checkout (with Slate and Slate_Viewer next to it):
 
-    npm run build:web
+    powershell -ExecutionPolicy Bypass -File scripts\build-frontends.ps1
 
-then replace everything here except this README with the contents of its
-dist-web folder (assets/ and .vite/manifest.json). Without them, /app/
-pages answer that the new viewer is not in this build.
+It builds Slate, copies it into Slate Viewer and into ../ (slate.js,
+slate.css, mermaid/), runs Slate Viewer's `npm run build:web`, replaces
+assets/ and .vite/ here with its dist-web folder, and records both versions
+and commits in ../frontends.json. Without these files, /app/ pages answer that
+the new viewer is not in this build.

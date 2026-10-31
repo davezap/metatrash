@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPrefersMarkdown(t *testing.T) {
@@ -116,6 +117,7 @@ func TestMarkdownPagesAgainstDatabase(t *testing.T) {
 	}
 
 	ownerCSRF := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
+	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
 	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 303 {
 		t.Fatalf("make web: %d", res.Code)
 	}

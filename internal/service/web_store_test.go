@@ -118,9 +118,8 @@ func TestDatabaseSchedulesAndTimezone(t *testing.T) {
 	if got := w.s.dbSpaceZone(ctx, w.ownedID); got != "Australia/Perth" {
 		t.Fatalf("zone %q", got)
 	}
-	account := oauthCall(w.h, "GET", "/account", nil, session)
-	if body := account.Body.String(); !strings.Contains(body, `value="Australia/Perth"`) || !strings.Contains(body, `list="timezones"`) {
-		t.Error("the account page lacks the zone")
+	if body := siteCall(w, "GET", "/api/v1/site/account", "", session, "").Body.String(); !strings.Contains(body, `"timezone":"Australia/Perth"`) {
+		t.Error("Settings lacks the zone")
 	}
 	if res := oauthCall(w.h, "POST", "/account/spaces/timezone", url.Values{"csrf": {csrf}, "space": {w.ownedID}, "timezone": {""}}, session); res.Code != 303 {
 		t.Fatalf("clear zone: %d", res.Code)

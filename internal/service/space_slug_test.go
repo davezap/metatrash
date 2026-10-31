@@ -50,10 +50,6 @@ func TestCreateSpaceFormAgainstDatabase(t *testing.T) {
 		res := oauthCall(w.h, "POST", "/account/spaces", fields, session)
 		return res.Code, res.Header().Get("Location"), res.Body.String()
 	}
-	page := oauthCall(w.h, "GET", "/account", nil, session).Body.String()
-	if strings.Contains(page, `name="slug"`) || !strings.Contains(page, "/spaces/"+maker.Username+"/bartco-notes") {
-		t.Fatal("create form still asks for a slug, or the address example is missing")
-	}
 	// Name problems are reported on the name field.
 	for name, message := range map[string]string{
 		"🙂🚀":                     "Use at least one letter or number in the name",

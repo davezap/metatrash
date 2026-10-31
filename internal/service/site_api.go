@@ -17,6 +17,7 @@ import (
 //
 //	GET  /api/v1/site/session                           who is signed in, the CSRF token, their spaces
 //	POST /api/v1/site/logout                            sign this browser out (0.78.0)
+//	*    /api/v1/site/account[/...]                     the Settings dialog (0.79.0, site_account.go)
 //	*    /api/v1/site/spaces/public/{resource}          the public space
 //	*    /api/v1/site/spaces/{owner}/{slug}/{resource}  an owned space
 //
@@ -168,6 +169,10 @@ func (h *httpAdapter) serveSiteAPI(w http.ResponseWriter, r *http.Request, clien
 		}
 		h.service.accounts.signOut(w, cookieToken(r, loginCookie), token)
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if rest == "account" || strings.HasPrefix(rest, "account/") {
+		h.serveSiteAccount(w, r, user, signedIn, token, client, strings.TrimPrefix(rest, "account"))
 		return
 	}
 	parts := strings.Split(rest, "/")

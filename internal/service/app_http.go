@@ -81,6 +81,14 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 </html>
 `))
 
+// appCSP is the app page's Content-Security-Policy. The page holds Markdown other
+// people wrote next to the account's settings, so it allows no inline script, no
+// eval, no plugins or frames and no other site's scripts: a document can't run
+// code even if Slate let markup through. TestAppCSP keeps it that way.
+func appCSP(nonce string) string {
+	return "default-src 'none'; style-src 'self' 'nonce-" + nonce + "'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' https: data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+}
+
 func (h *httpAdapter) serveApp(w http.ResponseWriter, r *http.Request, client string) bool {
 	if r.URL.Path != "/app" && !strings.HasPrefix(r.URL.Path, "/app/") {
 		return false
@@ -207,7 +215,7 @@ func (h *httpAdapter) writeAppPage(w http.ResponseWriter, build *appBuild, page 
 		sendError(w, problem(503, "unavailable", "Try again."))
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'nonce-"+nonce+"'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' https: data: blob:; font-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", appCSP(nonce))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = appTemplate.Execute(w, struct {
 		Config, Title, BasePath, Nonce, Plain string

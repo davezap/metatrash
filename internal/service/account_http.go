@@ -201,6 +201,21 @@ var accountSectionPaths = map[string]string{
 	"/account/profile":  "profile",
 }
 
+// settingsAddress is where an account page moved to in the site app's
+// Settings dialog, or "" for the pages still served here.
+func settingsAddress(path string) string {
+	switch path {
+	case "/account", "/account/mine", "/account/shared":
+		return "/app/#settings/spaces"
+	case "/account/profile":
+		return "/app/#settings/profile"
+	}
+	if id, ok := strings.CutPrefix(path, "/account/sharing/"); ok && idPattern.MatchString(id) {
+		return "/app/#settings/spaces/" + id
+	}
+	return ""
+}
+
 // accountSpaceFilters are the filters of Spaces, one table of the spaces the
 // user owns and the spaces they joined. Each filter is its own address, so
 // it works without JavaScript and an old link to Shared with me still works.
@@ -433,6 +448,12 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		if accountSectionPaths[path] != "" || sharingRoute || appRoute || actionRoute {
 			if !signedIn {
 				h.redirectToLogin(w, r)
+				return true
+			}
+			// Spaces, sharing and Profile live in the site app's Settings
+			// dialog (0.79.0); Security and Services follow.
+			if target := settingsAddress(path); target != "" {
+				http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
 				return true
 			}
 			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)}
@@ -1133,11 +1154,7 @@ func (h *httpAdapter) submitSpaceVisibility(w http.ResponseWriter, r *http.Reque
 		sendError(w, problem(503, "unavailable", "Your spaces are temporarily unavailable."))
 		return
 	}
-	visibility := r.PostForm.Get("visibility")
-	err = h.service.rates.take(allowance{"space-visibility:user:" + user.ID, 30, 600})
-	if err == nil {
-		err = h.service.ownedDB.setSpaceVisibility(r.Context(), user.ID, r.PostForm.Get("space"), visibility)
-	}
+	notice, err := h.changeSpaceVisibility(r.Context(), user, session, r.PostForm.Get("space"), r.PostForm.Get("visibility"))
 	if err != nil {
 		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The space setting could not be saved. Reload before retrying."}
 		status := http.StatusServiceUnavailable
@@ -1148,24 +1165,46 @@ func (h *httpAdapter) submitSpaceVisibility(w http.ResponseWriter, r *http.Reque
 				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
 			}
 		}
+		if err == errConfirmFirst {
+			page.Message = "Making a space readable on the web needs a sign-in within the last 10 minutes. Confirm it’s you in Security, then try again."
+		}
 		h.renderAccount(w, r, status, page)
 		return
 	}
-	notice := "space-private"
-	if visibility == spaceWeb {
-		notice = "space-web"
-		// Making a space readable keeps it open after the session ends, so
-		// the owner hears about it (security review 2026-10-31, F5).
-		name := "One of your spaces"
-		if spaces, err := h.accountSpaces(r.Context(), user); err == nil {
-			for _, s := range spaces {
-				if s.ID == r.PostForm.Get("space") {
-					name = "Your space \"" + mailText(s.Name) + "\" (" + user.Username + "/" + s.Slug + ")"
-				}
-			}
-		}
-		h.sendSecurityNotice(user, "A Metatrash space is now readable on the web", spaceWebMail(a.config.Origin, name, time.Now()))
-	}
 	accountCookie(w, h.noticeCookieName(), notice, 60)
 	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
+}
+
+// changeSpaceVisibility makes an owner's space readable on the web or private
+// again and returns the notice. Opening a space to everyone needs a recent
+// sign-in or confirmation (0.79.0), like handing it to someone else: a
+// script that got into the page can't publish a space on its own.
+func (h *httpAdapter) changeSpaceVisibility(ctx context.Context, user userAccount, session, spaceID, visibility string) (string, error) {
+	a := h.service.accounts
+	if err := h.service.rates.take(allowance{"space-visibility:user:" + user.ID, 30, 600}); err != nil {
+		return "", err
+	}
+	if visibility == spaceWeb {
+		if fresh, _ := a.sessionFresh(session, time.Now()); !fresh {
+			return "", errConfirmFirst
+		}
+	}
+	if err := h.service.ownedDB.setSpaceVisibility(ctx, user.ID, spaceID, visibility); err != nil {
+		return "", err
+	}
+	if visibility != spaceWeb {
+		return "space-private", nil
+	}
+	// Making a space readable keeps it open after the session ends, so
+	// the owner hears about it (security review 2026-10-31, F5).
+	name := "One of your spaces"
+	if spaces, err := h.accountSpaces(ctx, user); err == nil {
+		for _, s := range spaces {
+			if s.ID == spaceID {
+				name = "Your space \"" + mailText(s.Name) + "\" (" + user.Username + "/" + s.Slug + ")"
+			}
+		}
+	}
+	h.sendSecurityNotice(user, "A Metatrash space is now readable on the web", spaceWebMail(a.config.Origin, name, time.Now()))
+	return "space-web", nil
 }

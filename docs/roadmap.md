@@ -18,7 +18,7 @@ decisions in the Claude Doc "Settings dialog and space picker: plan".
   guard. Each form handler is split into a function both the old form route
   and the JSON route call, until the form route is retired.
 - **Releases:** 1 space picker and account menu (*done in 0.78.0*); 2 the
-  dialog, Profile, Spaces and space sharing; 3 Services; 4 Security;
+  dialog, Profile, Spaces and space sharing (*done in 0.79.0*); 3 Services; 4 Security;
   5 clean-up (delete `account.html` and the form routes, emails point at the
   new addresses, `/spaces/...` and `/docs/...` redirect into `/app/...`).
   Workplace spaces come after release 2, so their screens are built once,
@@ -29,7 +29,8 @@ decisions in the Claude Doc "Settings dialog and space picker: plan".
   it loosens; audit Slate's raw HTML handling, its `innerHTML` uses and the
   Mermaid settings, with a hostile-Markdown test file; require a recent
   sign-in to make a space readable on the web and to change a connected
-  app's spaces.
+  app's spaces. *Done in 0.79.0 (Slate 0.20.1), except the connected app
+  step-up, which comes with Services in release 3.*
 - Stays as its own page: `/login`, OAuth consent, the GitHub and Microsoft
   return pages. Slate Viewer on the desktop opens the site's Settings in the
   browser for now, and later adopts the same settings style.

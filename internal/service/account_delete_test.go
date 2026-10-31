@@ -65,10 +65,6 @@ func TestDeleteAccountAgainstDatabase(t *testing.T) {
 		t.Helper()
 		return oauthCall(w.h, "POST", "/account/delete", url.Values{"csrf": {w.s.accounts.mac("account-delete:" + session.Value)}, "email": {typed}}, session).Result()
 	}
-	page := oauthCall(w.h, "GET", "/account/profile", nil, session).Body.String()
-	if !strings.Contains(page, `id="delete-account"`) || !strings.Contains(page, "You still own a space") || strings.Contains(page, `action="/account/delete"`) {
-		t.Fatal("Profile offers Delete account while a space is owned")
-	}
 	if res := remove(carol.Email, session); res.StatusCode != 403 {
 		t.Fatalf("delete without confirmation: %d", res.StatusCode)
 	}
@@ -78,9 +74,6 @@ func TestDeleteAccountAgainstDatabase(t *testing.T) {
 	}
 	if _, err := w.s.deleteOwnedSpace(ctx, carol, own.ID, "Mine"); err != nil {
 		t.Fatal(err)
-	}
-	if page := oauthCall(w.h, "GET", "/account/profile", nil, session).Body.String(); !strings.Contains(page, `action="/account/delete"`) {
-		t.Fatal("no Delete account form once confirmed and owning nothing")
 	}
 	if res := remove("someone@example.com", session); res.StatusCode != 400 {
 		t.Fatalf("wrong email: %d", res.StatusCode)
@@ -105,7 +98,7 @@ func TestDeleteAccountAgainstDatabase(t *testing.T) {
 
 	// Signed out everywhere, apps disconnected, emailed.
 	for _, s := range []*http.Cookie{session, other} {
-		if res := oauthCall(w.h, "GET", "/account", nil, s); res.Code != 303 {
+		if res := oauthCall(w.h, "GET", "/account", nil, s); res.Code != 303 || res.Header().Get("Location") != "/login" {
 			t.Fatalf("a session still signed in: %d", res.Code)
 		}
 	}

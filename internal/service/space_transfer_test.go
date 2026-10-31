@@ -81,18 +81,24 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 		res := oauthCall(w.h, "POST", "/account/transfer/offer", url.Values{"csrf": {w.h.transferCSRF("offer", session.Value)}, "space": {space.ID}, "member": {member}}, session)
 		return res.Code
 	}
-	// The sharing page asks for a recent sign-in before offering.
-	page := oauthCall(w.h, "GET", "/account/sharing/"+space.ID, nil, aliceSession).Body.String()
-	if !strings.Contains(page, `id="transfer"`) || !strings.Contains(page, "Confirm it’s you in Security") || strings.Contains(page, `action="/account/transfer/offer"`) {
-		t.Fatal("sharing page offers a transfer without a fresh session")
+	// Sharing in the Settings dialog (0.79.0) says whether the session is fresh
+	// enough to offer, and lists who it can go to.
+	sharing := func() string {
+		return siteCall(w, "GET", "/api/v1/site/account/spaces/"+space.ID+"/sharing", "", aliceSession, "").Body.String()
+	}
+	overview := func(session *http.Cookie) map[string]any {
+		return siteJSON(t, siteCall(w, "GET", "/api/v1/site/account", "", session, ""))
+	}
+	if strings.Contains(sharing(), `"fresh":true`) {
+		t.Fatal("sharing says fresh without a confirmation")
 	}
 	if code := offer(bob.ID, aliceSession); code != 403 {
 		t.Fatalf("offer without confirmation: %d", code)
 	}
 	w.s.accounts.markConfirmed(aliceSession.Value, alice.ID, time.Now())
-	page = oauthCall(w.h, "GET", "/account/sharing/"+space.ID, nil, aliceSession).Body.String()
-	if !strings.Contains(page, `action="/account/transfer/offer"`) || !strings.Contains(page, `<option value="`+bob.ID+`">`) || strings.Contains(page, `<option value="`+carol.ID+`">`) || strings.Contains(page, `<option value="`+nameless.ID+`">`) {
-		t.Fatal("offer form should list only active members with a username")
+	page := siteJSON(t, siteCall(w, "GET", "/api/v1/site/account/spaces/"+space.ID+"/sharing", "", aliceSession, ""))
+	if candidates := page["candidates"].([]any); page["fresh"] != true || len(candidates) != 1 || candidates[0].(map[string]any)["id"] != bob.ID {
+		t.Fatalf("candidates should be only active members with a username: %v", page)
 	}
 	for name, member := range map[string]string{"suspended": carol.ID, "nameless": nameless.ID, "owner": alice.ID, "stranger": w.user("stranger").ID, "garbage": "x"} {
 		if code := offer(member, aliceSession); code != 400 {
@@ -114,21 +120,17 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	if m := mailTo(bob.Email, "A Metatrash space has been offered to you"); !strings.Contains(m, oldName) || !strings.Contains(m, newName) || !strings.Contains(m, "Moving house") {
 		t.Fatalf("offer mail: %s", m)
 	}
-	page = oauthCall(w.h, "GET", "/account/sharing/"+space.ID, nil, aliceSession).Body.String()
-	if !strings.Contains(page, "Offered to <strong>"+bob.Email) || !strings.Contains(page, `action="/account/transfer/cancel"`) {
+	if !strings.Contains(sharing(), `"transfer":{"toEmail":"`+bob.Email+`"`) {
 		t.Fatal("pending offer not shown to the owner")
 	}
-	// Bob sees it under All and Shared with me, and in the navigation count.
-	for path, want := range map[string]bool{"/account": true, "/account/shared": true, "/account/mine": false} {
-		body := oauthCall(w.h, "GET", path, nil, bobSession).Body.String()
-		if got := strings.Contains(body, `action="/account/transfer/accept"`); got != want {
-			t.Fatalf("%s shows the offer: %v", path, got)
-		}
-		if !strings.Contains(body, `aria-label="1 waiting for you"`) {
-			t.Fatalf("%s: offer not counted in navigation", path)
-		}
+	// Bob sees it, and it counts on the space picker; another member doesn't.
+	if offers := overview(bobSession)["offers"].([]any); len(offers) != 1 || offers[0].(map[string]any)["spaceId"] != space.ID {
+		t.Fatalf("bob's offers: %v", offers)
 	}
-	if strings.Contains(oauthCall(w.h, "GET", "/account", nil, w.session(carol)).Body.String(), `id="offers-heading"`) {
+	if got := siteJSON(t, siteCall(w, "GET", "/api/v1/site/session", "", bobSession, ""))["waiting"]; got != float64(1) {
+		t.Fatalf("bob waiting: %v", got)
+	}
+	if offers := overview(w.session(carol))["offers"].([]any); len(offers) != 0 {
 		t.Fatal("offer shown to another member")
 	}
 
@@ -211,7 +213,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	if code := accept(bob); code != 409 {
 		t.Fatalf("expired offer accepted: %d", code)
 	}
-	if !strings.Contains(oauthCall(w.h, "GET", "/account/sharing/"+space.ID, nil, aliceSession).Body.String(), "expired on") {
+	if !strings.Contains(sharing(), `"expired":true`) {
 		t.Fatal("expired offer not shown as expired")
 	}
 
@@ -242,11 +244,11 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 		t.Fatalf("repository owner: %s", got)
 	}
 	// Bob lists it under Mine; Alice under Shared with me.
-	if body := oauthCall(w.h, "GET", "/account/mine", nil, bobSession).Body.String(); !strings.Contains(body, newName) || strings.Contains(body, `id="offers-heading"`) {
-		t.Fatal("new owner's spaces")
+	if out := overview(bobSession); !strings.Contains(mustJSON(out["spaces"]), `"`+newName+`"`) || len(out["offers"].([]any)) != 0 {
+		t.Fatalf("new owner's spaces: %v", out)
 	}
-	if body := oauthCall(w.h, "GET", "/account/shared", nil, aliceSession).Body.String(); !strings.Contains(body, newName) {
-		t.Fatal("previous owner's shared spaces")
+	if out := overview(aliceSession); !strings.Contains(mustJSON(out["joined"]), `"`+newName+`"`) {
+		t.Fatalf("previous owner's shared spaces: %v", out)
 	}
 
 	// Both app connections carry on; the old name still works for agents and

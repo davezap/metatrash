@@ -5,9 +5,7 @@ import (
 	"errors"
 	"io"
 	"mime/quotedprintable"
-	"net/http"
 	"net/mail"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -74,25 +72,29 @@ func TestInvitationEmailAgainstDatabase(t *testing.T) {
 		return nil
 	}
 	session := w.session(w.member)
-	csrf := w.s.accounts.mac("membership:invite:" + session.Value)
+	token := siteToken(t, w, session)
+	sharing := func() string {
+		t.Helper()
+		return siteCall(w, "GET", "/api/v1/site/account/spaces/"+w.joinID+"/sharing", "", session, "").Body.String()
+	}
+	// Invites from the Settings dialog (0.79.0) and returns the notice's key.
 	invite := func(email string) string {
 		t.Helper()
-		res := oauthCall(w.h, "POST", "/account/membership/invite", url.Values{"csrf": {csrf}, "space": {w.joinID}, "email": {strings.ToUpper(email)}}, session)
-		if res.Code != 303 || res.Header().Get("Location") != "/account/sharing/"+w.joinID {
-			t.Fatalf("invite: %d %s %s", res.Code, res.Header().Get("Location"), res.Body)
+		res := siteCall(w, "POST", "/api/v1/site/account/spaces/"+w.joinID+"/invite", `{"email":"`+strings.ToUpper(email)+`"}`, session, token)
+		if res.Code != 200 {
+			t.Fatalf("invite: %d %s", res.Code, res.Body)
 		}
-		cookie := responseCookie(res, w.h.noticeCookieName())
-		if cookie == nil {
-			t.Fatal("no notice cookie")
+		notice, _ := siteJSON(t, res)["notice"].(string)
+		for key, text := range accountNotices {
+			if text == notice && strings.HasPrefix(key, "invite-") {
+				if !strings.Contains(sharing(), email) {
+					t.Fatalf("sharing after invite (%s) lacks %s", key, email)
+				}
+				return key
+			}
 		}
-		page := oauthCall(w.h, "GET", "/account/sharing/"+w.joinID, nil, session, cookie)
-		if page.Code != 200 || !strings.Contains(page.Body.String(), accountNotices[cookie.Value]) || !strings.Contains(page.Body.String(), email) {
-			t.Fatalf("sharing page after invite (%s): %d", cookie.Value, page.Code)
-		}
-		if cleared := responseCookie(page, w.h.noticeCookieName()); cleared == nil || cleared.MaxAge >= 0 {
-			t.Fatal("notice cookie not cleared")
-		}
-		return cookie.Value
+		t.Fatalf("invite notice: %q", notice)
+		return ""
 	}
 	if got := invite(guest.Email); got != "invite-sent" {
 		t.Fatalf("first invite: %s", got)
@@ -109,9 +111,8 @@ func TestInvitationEmailAgainstDatabase(t *testing.T) {
 	if got := invite(other.Email); got != "invite-failed" {
 		t.Fatalf("failed send: %s", got)
 	}
-	page := oauthCall(w.h, "GET", "/account/sharing/"+w.joinID, nil, session)
-	if strings.Contains(page.Body.String(), "secret detail") || !strings.Contains(page.Body.String(), other.Email) || strings.Contains(page.Body.String(), `class="notice"`) {
-		t.Fatalf("sharing page after failure: %s", page.Body)
+	if page := sharing(); strings.Contains(page, "secret detail") || !strings.Contains(page, other.Email) {
+		t.Fatalf("sharing after failure: %s", page)
 	}
 	// Five emails per owner per day (one failed send above counts). Three more
 	// addresses fill the allowance; the next invitation is saved but not emailed.
@@ -125,24 +126,11 @@ func TestInvitationEmailAgainstDatabase(t *testing.T) {
 	if got := invite(last.Email); got != "invite-daily" || len(sends) != 4 {
 		t.Fatalf("daily cap: %s %d", got, len(sends))
 	}
-	// An unknown notice value shows nothing.
-	page = oauthCall(w.h, "GET", "/account/sharing/"+w.joinID, nil, session, &http.Cookie{Name: w.h.noticeCookieName(), Value: "<script>"})
-	if page.Code != 200 || strings.Contains(page.Body.String(), `class="notice"`) {
-		t.Fatalf("unknown notice shown: %d", page.Code)
-	}
 	// The invited person can still accept by signing in with that address.
-	if got := oauthCall(w.h, "GET", "/account/shared", nil, w.session(guest)); !strings.Contains(got.Body.String(), "Shared plans") {
-		t.Fatal("guest does not see the invitation")
+	if got := siteJSON(t, siteCall(w, "GET", "/api/v1/site/account", "", w.session(guest), ""))["invitations"].([]any); len(got) != 1 || got[0].(map[string]any)["name"] != "Shared plans" {
+		t.Fatalf("guest invitations: %v", got)
 	}
-	// Waiting invitations lead Spaces under All and Shared with me, not Mine.
-	guestSession := w.session(guest)
-	accept := `action="/account/membership/accept"`
-	for path, want := range map[string]bool{"/account": true, "/account/shared": true, "/account/mine": false} {
-		if got := strings.Contains(oauthCall(w.h, "GET", path, nil, guestSession).Body.String(), accept); got != want {
-			t.Fatalf("guest %s shows the invitation: %v", path, got)
-		}
-	}
-	if strings.Contains(oauthCall(w.h, "GET", "/account", nil, session).Body.String(), `id="invites-heading"`) {
-		t.Fatal("invitations section shown without invitations")
+	if got := siteJSON(t, siteCall(w, "GET", "/api/v1/site/account", "", session, ""))["invitations"].([]any); len(got) != 0 {
+		t.Fatalf("owner invitations: %v", got)
 	}
 }
