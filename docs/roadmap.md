@@ -440,12 +440,28 @@ scheduled yet. To settle when it is:
   readers. Hardening from the same review: systemd resource limits, an
   allowlist for Markdown link schemes, structured security-event logging, and
   a dependency/advisory scan.
-- A focused security review of the account, sharing, OAuth and sign-in
-  (passkey, TOTP, recovery) code, which the 2026-09-30 review predates.
+- [Security review 2026-10-31](security-review-2026-10-31.md) of sign-in,
+  OAuth, sharing and the site API: F1, F2, F4 and F5 fixed in 0.76.0. Still
+  open: F3 (check whether the server sees Cloudflare addresses and, if so,
+  the `mod_remoteip` lines in deployment.md, Apache); F4's sign-in paths
+  (code, passkey, authenticator and recovery sign-in still hold the
+  accounts lock across their database writes); F6 (a short grace for a
+  repeated refresh token, only if apps are seen reconnecting for no reason);
+  F7 (persist the daily attempt counts); and asking to confirm before
+  connecting an app or making a space readable on the web (F5 sends a
+  notice for now).
 
 ## Owner checks still to run
 
-Live checks not yet reported done. The server is at schema v19 with current
+Live checks not yet reported done.
+
+From 0.76.0 (2026-10-31):
+
+- **Cloudflare addresses:** `sudo journalctl -u metatrash --since today | grep 'login ' | tail -3`. If `ip=` is a Cloudflare address, add the `mod_remoteip` lines (deployment.md, Apache), reload Apache, sign in again and see your own address there and on Security → Signed-in devices.
+- **Notices:** connect Claude (or reconnect it) and get "An app was connected to your Metatrash account"; make a test space readable on the web and get "A Metatrash space is now readable on the web"; make it private again (no email).
+- **Authenticator cap:** in a private window, enter ten wrong authenticator codes for your address at the sign-in page (five, wait 15 minutes, five more): the tenth brings the "Wrong authenticator codes tried" email, and the eleventh, even a right one, says to sign in another way today.
+
+The server is at schema v19 with current
 grants (0.60.2), so the schema and grant steps these once needed are behind
 us. Checks already passed are listed in the archive.
 

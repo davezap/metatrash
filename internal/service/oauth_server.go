@@ -607,6 +607,9 @@ func (h *httpAdapter) oauthConsentSubmit(w http.ResponseWriter, r *http.Request)
 		h.renderConsent(w, r, 503, user, session, pending, "The connection could not be saved. Please try again.")
 		return
 	}
+	// A connection keeps working after the session ends, so the owner hears
+	// about each one (security review 2026-10-31, F5).
+	h.sendSecurityNotice(user, "An app was connected to your Metatrash account", appConnectedMail(h.service.accounts.config.Origin, pending.Client.Name, pending.Client.Host, scope == scopeReadWrite, len(choices), now))
 	code, err := newOAuthToken("mt_ac_")
 	if err != nil {
 		sendError(w, err)

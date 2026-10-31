@@ -254,7 +254,8 @@ func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, sessi
 		switch path {
 		case "/account/confirm/send":
 			emailKey := a.mac("email:" + user.Email)
-			err = h.service.rates.reserve(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600})
+			err = h.service.rates.reserve(codeMailBudget, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600})
+			h.logMailBudget()
 			if err == nil {
 				err = a.issueCode(ctx, confirmKey(session), user.Email, a.sendConfirm)
 			}
@@ -463,10 +464,33 @@ func (h *httpAdapter) notifySignInChange(user userAccount, change, what string) 
 	h.sendSecurityNotice(user, "Sign-in method "+change+" on your Metatrash account", body)
 }
 
+// noticeBudget is the day's allowance for security notices. It is separate
+// from the codes' mail:global:day, so whoever spends that one cannot also
+// keep the owner from hearing about a new sign-in method or a recovery code
+// used (security review 2026-10-31, F2).
+var noticeBudget = allowance{"mail:notice:day", 200, 86400}
+
+// codeMailBudget is the day's allowance for emailed codes (sign-in,
+// confirmation and new-address codes), across the whole site.
+var codeMailBudget = allowance{"mail:global:day", 100, 86400}
+
+// logMailBudget writes one journal line an hour while the day's code budget
+// is used up, so a spent budget shows in the journal instead of only as
+// people not getting codes.
+func (h *httpAdapter) logMailBudget() {
+	if h.service.rates.full(codeMailBudget) && h.service.rates.take(allowance{"log:mail-budget", 1, 3600}) == nil {
+		log.Printf("mail budget used up: no more emailed codes are sent until 00:00 UTC")
+	}
+}
+
 // sendSecurityNotice emails the account a security notice in the background.
 func (h *httpAdapter) sendSecurityNotice(user userAccount, subject, body string) {
 	a := h.service.accounts
-	if a.sendNotice == nil || h.service.rates.take(allowance{"mail:global:day", 100, 86400}) != nil {
+	if a.sendNotice == nil {
+		return
+	}
+	if h.service.rates.take(noticeBudget) != nil {
+		log.Printf("security notice not sent user=%s: the day's notice budget is used up", user.ID)
 		return
 	}
 	go func() {

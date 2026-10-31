@@ -255,6 +255,17 @@ httpd`. If SELinux blocks the proxy connection, check the audit log.
   affected.
 - `-trusted-proxies 127.0.0.1/32` (in the unit) makes rate limits see the real
   client address. Configure any CDN in front of Apache first.
+- **Behind Cloudflare** (0.76.0, security review 2026-10-31 F3): when the
+  site's DNS is proxied by Cloudflare, the address that reaches Apache is a
+  Cloudflare edge, so every per-address limit, the login log and Signed-in
+  devices see Cloudflare instead of people. Check with
+  `sudo journalctl -u metatrash --since today | grep 'login ' | tail -3`: an
+  `ip=` of 104.x, 162.158.x, 172.64–71.x and so on is Cloudflare. Then turn
+  on the commented `RemoteIPHeader CF-Connecting-IP` and
+  `RemoteIPTrustedProxy` lines in the Apache example (mod_remoteip is in the
+  stock `httpd` package: `httpd -M | grep remoteip`), `apachectl
+  configtest`, reload, and sign in again: the new login line shows your own
+  address, and so does Security → Signed-in devices for the new session.
 - Never enable request body or header logging (`mod_dumpio`,
   `mod_log_forensic`): OAuth codes and tokens travel in headers and POST bodies.
 
@@ -858,6 +869,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.61.1 | none | 0.61.0 (no schema change) |
 | 0.67.0 | schema v20 (`deleted_at` on spaces, the `deleted` and `purged` states) and grants (`UPDATE (deleted_at, slug)` on spaces) | 19, but only while no space is deleted or purged: 0.66 does not start with such a row. Restore deleted spaces first (`mt spaces list` shows them); after the first purge (30 days on), stay on 0.67 |
 | 0.71.0 | schema v21 (`deletion_requested_at` and `deleted_at` on users) and grants (`UPDATE (deletion_requested_at, deleted_at)` on users) | 20. An account waiting to be deleted is then neither purged nor cancelled by signing in (it still waits when 0.71 comes back); a purged account stays purged, with no way to sign in |
+| 0.76.0 | none. Recommended: the Cloudflare lines in Apache if the site is proxied by Cloudflare (Apache) | 0.75.0 (no schema change) |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

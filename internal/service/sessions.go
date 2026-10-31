@@ -28,6 +28,11 @@ const sessionSweepEvery = time.Hour
 // maxSessions bounds sessions held at once, across all accounts.
 const maxSessions = 4096
 
+// cleanupEvery is how often a signed-in request also sweeps expired codes,
+// sessions and challenges out of memory; the paths that use them sweep
+// before they look.
+const cleanupEvery = time.Minute
+
 // maxUserSessions bounds one account's sessions; signing in again ends the
 // oldest.
 const maxUserSessions = 8
@@ -142,6 +147,15 @@ func (db *accountDatabase) sweepSessions(now time.Time) error {
 	ctx, cancel := sessionContext()
 	defer cancel()
 	_, err := db.db.ExecContext(ctx, "DELETE FROM metatrash_sessions WHERE expires_at <= ? LIMIT 1000", now.Unix())
+	return err
+}
+
+// updateSessionLastUsed records a session's last use alone, so it cannot
+// overwrite a confirmation (auth_at) saved meanwhile.
+func (db *accountDatabase) updateSessionLastUsed(key string, used time.Time) error {
+	ctx, cancel := sessionContext()
+	defer cancel()
+	_, err := db.db.ExecContext(ctx, "UPDATE metatrash_sessions SET last_used_at = ? WHERE session_digest = ?", used.Unix(), key)
 	return err
 }
 
@@ -327,23 +341,36 @@ func (a *accounts) markConfirmed(token string, userID string, now time.Time) boo
 	return true
 }
 
+// currentUser returns the account a session token is signed in to. Every
+// signed-in request comes through here, so the accounts lock is held only to
+// read the session (security review 2026-10-31, F4): the account lookup and
+// the last-used write run after it is released, and a slow database no longer
+// holds up every other request.
 func (a *accounts) currentUser(ctx context.Context, token string) (userAccount, bool, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	now := time.Now()
-	a.cleanup(now)
 	key := secretDigest(token)
+	a.mu.Lock()
+	if now.Sub(a.swept) >= cleanupEvery {
+		a.swept = now
+		a.cleanup(now)
+	}
 	session, ok := a.sessions[key]
+	if ok && !now.Before(session.Expires) {
+		delete(a.sessions, key)
+		ok = false
+	}
+	record := ok && now.Sub(session.LastUsed) >= lastUsedEvery
+	if record {
+		session.LastUsed = now
+		a.sessions[key] = session
+	}
+	a.mu.Unlock()
 	if !ok {
 		return userAccount{}, false, nil
 	}
-	if now.Sub(session.LastUsed) >= lastUsedEvery {
-		session.LastUsed = now
-		a.sessions[key] = session
-		if db := a.sessionDB(); db != nil {
-			if err := db.updateSessionTimes(key, session); err != nil {
-				log.Printf("account session-update failed user=%s", session.UserID)
-			}
+	if db := a.sessionDB(); record && db != nil {
+		if err := db.updateSessionLastUsed(key, now); err != nil {
+			log.Printf("account session-update failed user=%s", session.UserID)
 		}
 	}
 	return a.store.ByID(ctx, session.UserID)

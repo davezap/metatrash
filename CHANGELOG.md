@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.76.0 - Fixes from the sign-in security review (2026-10-31)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. The review is [docs/security-review-2026-10-31.md](docs/security-review-2026-10-31.md): it found no way into an account without a sign-in method; these are its budget and availability findings.
+
+- **Authenticator app: at most 10 codes a day per address** (and per account when confirming), on top of 5 per 15 minutes, so steady guessing of six-digit codes gets about 1% in a year instead of about 40%. When wrong codes at the sign-in page use up the day, the account gets one email saying so; until 00:00 UTC that address signs in with a passkey, an emailed code or a recovery code, and the page says that. (F1)
+- **Security notices have their own daily budget** (200), apart from the 100 emailed codes a day, so whoever spends the code budget can no longer also stop the "sign-in method added", "recovery code used" and similar emails. A spent code budget now writes `mail budget used up: …` to the journal (once an hour), and a skipped notice `security notice not sent …`. (F2)
+- **A slow database no longer holds up every signed-in request.** Looking up the account behind a session ran inside the lock every sign-in and session check shares; it now runs after the lock is released, saves only the last-used time, and expired entries are swept from memory once a minute instead of on every request. (F4)
+- **New emails to the owner:** "An app was connected to your Metatrash account" (which app, read or read-and-change, how many spaces) on every connection, and "A Metatrash space is now readable on the web" when a space is made readable. Both keep access after a session ends, so a stolen session can no longer add them unnoticed. (F5)
+- **Behind Cloudflare:** the Apache example and deployment.md (Apache) show the `mod_remoteip` lines that make Apache, the login log and the rate limits see people's own addresses instead of Cloudflare's, with a check for whether the server needs them. (F3; no code change)
+- Tested against MariaDB: the daily cap (ten wrong codes over two quarter hours, one notice, then even the right code refused with the new message and no second notice), notices with the code budget used up, the app-connected and readable-on-the-web emails (none for making a space private), and the account lookup running while another request takes the lock, with an expired session still refused between sweeps. Full suite, and the sign-in tests with `-race`.
+
 ## 0.75.0 - The home page and phones in Slate Viewer's UI (2026-10-31)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing, with a new website build of Slate Viewer copied into `internal/service/web/app/` first. Step 5 of "Slate Viewer's UI on the website" in the roadmap.

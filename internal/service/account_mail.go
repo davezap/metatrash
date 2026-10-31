@@ -73,6 +73,42 @@ func recoveryUsedMail(origin string, left int, when time.Time) string {
 		"If it was not, someone has one of your recovery codes: sign in, create new recovery codes (the old ones then stop working) and review your sign-in methods.\n"
 }
 
+// totpGuessesMail tells an account that the day's authenticator codes for
+// its address were used up by wrong codes at the sign-in page.
+func totpGuessesMail(origin string, when time.Time) string {
+	return "Several wrong authenticator-app codes were entered for your Metatrash address at the sign-in page.\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"Signing in with the authenticator app is paused for this address until 00:00 UTC. Passkeys, emailed codes (if you use them) and recovery codes still work.\n" +
+		"If this was you, there is nothing to do. If it was not, someone knows your address and is guessing codes: they have not signed in. You can check your sign-in methods and signed-in devices on Security at " + origin + "/account/security.\n"
+}
+
+// spaceWebMail tells an owner that one of their spaces was made readable by
+// anyone on the web. what names the space ("Your space \"Notes\" (a/b)").
+func spaceWebMail(origin, what string, when time.Time) string {
+	return what + " was made readable on the web: anyone with its address can read it, without signing in.\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"If this was you, there is nothing to do. If it was not, make it private again under Spaces at " + origin + "/account, then end the other devices on Security at " + origin + "/account/security.\n"
+}
+
+// appConnectedMail tells an account that an app (Claude, ChatGPT, Metatrash
+// Sync) was given access to its spaces.
+func appConnectedMail(origin, app, host string, write bool, spaces int, when time.Time) string {
+	access := "read"
+	if write {
+		access = "read and change"
+	}
+	count := strconv.Itoa(spaces) + " of your spaces"
+	if spaces == 1 {
+		count = "1 of your spaces"
+	}
+	if spaces == 0 {
+		count = "the public space only"
+	}
+	return mailText(app) + " (" + mailText(host) + ") was connected to your Metatrash account and can " + access + " " + count + ".\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"If this was you, there is nothing to do. If it was not, revoke it under Services at " + origin + "/account/services and end the other devices on Security at " + origin + "/account/security.\n"
+}
+
 // emailLoginOffMail is sent instead of a login code when the account has
 // turned email sign-in off.
 func emailLoginOffMail(origin string) string {

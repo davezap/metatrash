@@ -862,7 +862,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			fail(problem(400, "blocked", message))
 			return true
 		}
-		if err := h.service.rates.reserve(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
+		if err := h.service.rates.reserve(codeMailBudget, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
+			h.logMailBudget()
 			fail(err)
 			return true
 		}
@@ -1116,6 +1117,17 @@ func (h *httpAdapter) submitSpaceVisibility(w http.ResponseWriter, r *http.Reque
 	notice := "space-private"
 	if visibility == spaceWeb {
 		notice = "space-web"
+		// Making a space readable keeps it open after the session ends, so
+		// the owner hears about it (security review 2026-10-31, F5).
+		name := "One of your spaces"
+		if spaces, err := h.accountSpaces(r.Context(), user); err == nil {
+			for _, s := range spaces {
+				if s.ID == r.PostForm.Get("space") {
+					name = "Your space \"" + mailText(s.Name) + "\" (" + user.Username + "/" + s.Slug + ")"
+				}
+			}
+		}
+		h.sendSecurityNotice(user, "A Metatrash space is now readable on the web", spaceWebMail(a.config.Origin, name, time.Now()))
 	}
 	accountCookie(w, h.noticeCookieName(), notice, 60)
 	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)

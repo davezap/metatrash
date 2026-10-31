@@ -268,5 +268,5 @@ repository to update it.
   GitHub Actions CI and tagged releases.
 - [Roadmap](docs/roadmap.md): next work, open checks, ideas.
 - [Roadmap archive](docs/roadmap-archive.md): finished plans, decisions made while building, checks passed.
-- [Security review (2026-09-30)](docs/security-review-2026-09-30.md).
+- Security reviews: [2026-09-30](docs/security-review-2026-09-30.md) (service, REST/MCP) and [2026-10-31](docs/security-review-2026-10-31.md) (sign-in, OAuth, sharing, the site API).
 - [CHANGELOG](CHANGELOG.md).

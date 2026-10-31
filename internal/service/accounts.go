@@ -88,6 +88,8 @@ type accounts struct {
 	// sessionSwept is when expired sessions were last deleted from the
 	// database (sessions.go).
 	sessionSwept time.Time
+	// swept is when currentUser last swept expired entries from memory.
+	swept time.Time
 	// powUsed holds spent login proof-of-work challenges until they expire.
 	powUsed   map[string]time.Time
 	secret    []byte

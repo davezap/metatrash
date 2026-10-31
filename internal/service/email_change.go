@@ -62,7 +62,8 @@ func (h *httpAdapter) startEmailChange(ctx context.Context, session, client stri
 		return err
 	}
 	emailKey := a.mac("email:" + email)
-	if err := h.service.rates.reserve(allowance{"mail:global:day", 100, 86400}, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
+	if err := h.service.rates.reserve(codeMailBudget, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600}); err != nil {
+		h.logMailBudget()
 		return err
 	}
 	taken, err := a.store.Exists(ctx, email)

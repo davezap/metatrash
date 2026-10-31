@@ -34,6 +34,23 @@ const totpSecretBytes = 20
 // budget says nothing about which methods an address has.
 var totpAttempts = func(key string) allowance { return allowance{"totp:" + key, 5, 900} }
 
+// totpDaily caps codes per address (and per account) in a UTC day, so steady
+// guessing within the 15-minute budget gets about 1% in a year rather than
+// 40% (security review 2026-10-31, F1).
+var totpDaily = func(key string) allowance { return allowance{"totp:day:" + key, 10, 86400} }
+
+var errTOTPDaily = problem(429, "rate_limited", "Too many authenticator codes were tried for this address today. Sign in another way (a passkey, an emailed code or a recovery code), or try the app again tomorrow.")
+
+// totpBudget charges one code against the 15-minute and daily budgets for
+// key, both or neither.
+func (h *httpAdapter) totpBudget(key string) error {
+	daily := totpDaily(key)
+	if h.service.rates.full(daily) {
+		return errTOTPDaily
+	}
+	return h.service.rates.reserve(totpAttempts(key), daily)
+}
+
 var totpEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 // loadTOTPKey reads a key file holding 64 hex digits (32 bytes).
@@ -298,7 +315,8 @@ func (h *httpAdapter) totpSignIn(ctx context.Context, rawEmail, code string, ent
 		return "", userAccount{}, invalid("Enter a valid email address.")
 	}
 	a.logEmail(ctx, entry, email)
-	if err := h.service.rates.take(totpAttempts("email:" + a.mac("email:"+email))); err != nil {
+	budgetKey := "email:" + a.mac("email:"+email)
+	if err := h.totpBudget(budgetKey); err != nil {
 		return "", userAccount{}, err
 	}
 	userID, ok, err := db.userIDByEmail(ctx, email)
@@ -314,6 +332,11 @@ func (h *httpAdapter) totpSignIn(ctx context.Context, rawEmail, code string, ent
 	}
 	now := time.Now()
 	found, err := h.checkTOTP(ctx, user.ID, strings.TrimSpace(code), now)
+	if found && err == errTOTPCode && h.service.rates.full(totpDaily(budgetKey)) && h.service.rates.take(allowance{"totp:notice:" + user.ID, 1, 86400}) == nil {
+		// The day's last wrong code: tell the owner once, since nothing
+		// else would.
+		h.sendSecurityNotice(user, "Wrong authenticator codes tried on your Metatrash account", totpGuessesMail(a.config.Origin, now))
+	}
 	if !found || err == errTOTPCode {
 		return "", user, failed
 	}
@@ -444,7 +467,7 @@ func (h *httpAdapter) submitTOTP(ctx context.Context, path, session string, user
 		h.notifySignInChange(user, "removed", "authenticator app")
 		return "totp-removed", nil
 	case "/account/confirm/totp":
-		if err := h.service.rates.take(totpAttempts("user:" + user.ID)); err != nil {
+		if err := h.totpBudget("user:" + user.ID); err != nil {
 			return "", err
 		}
 		found, err := h.checkTOTP(ctx, user.ID, strings.TrimSpace(code), now)
