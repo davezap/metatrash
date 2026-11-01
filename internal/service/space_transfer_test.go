@@ -300,7 +300,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.s.accounts.config.DocsSpace = oldName
-	if res := oauthCall(w.h, "GET", "/docs/notes.md", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "still here") {
+	if res := oauthCall(w.h, "GET", "/docs/notes.md?format=md", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "still here") {
 		t.Fatalf("docs by the old address: %d", res.Code)
 	}
 	w.s.accounts.config.DocsSpace = ""

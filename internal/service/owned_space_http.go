@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type accountSpace struct {
@@ -90,8 +90,6 @@ func (h *httpAdapter) serveDocs(w http.ResponseWriter, r *http.Request, client s
 	path, hasPath := strings.CutPrefix(r.URL.Path, "/docs/")
 	if r.URL.Path == "/llms.txt" {
 		path, hasPath = "llms.txt", true
-	} else if h.openInApp(w, r, ref, strings.TrimPrefix(strings.TrimPrefix(r.URL.EscapedPath(), "/docs"), "/")) {
-		return true
 	}
 	h.serveSpacePage(w, r, client, owner, slug, path, hasPath, h.basePath+"/docs/", true)
 	return true
@@ -109,10 +107,6 @@ func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, 
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/spaces/"), "/", 3)
 	if len(parts) < 2 {
 		parts = append(parts, "")
-	}
-	if escaped := append(strings.SplitN(strings.TrimPrefix(r.URL.EscapedPath(), "/spaces/"), "/", 3), ""); len(escaped) >= 3 &&
-		usernamePattern.MatchString(parts[0]) && usernamePattern.MatchString(parts[1]) && h.openInApp(w, r, parts[0]+"/"+parts[1], escaped[2]) {
-		return true
 	}
 	path := ""
 	if len(parts) == 3 {
@@ -291,7 +285,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, err)
 		return
 	}
-	state, files, err := repo.snapshot(ctx, "")
+	_, files, err := repo.snapshot(ctx, "")
 	if err != nil {
 		sendError(w, err)
 		return
@@ -325,49 +319,44 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		h.serveRawImage(w, r, repo, path, file.Blob)
 		return
 	}
-	var content []byte
-	isMarkdown := isMarkdownPath(path)
-	if file.Virtual != nil {
-		content, err = h.virtualPage(ctx, repo, path, file.ID, *file.Virtual)
-		isMarkdown = true
-	} else {
-		content, err = repo.blob(ctx, file.Blob)
-	}
-	if err != nil {
-		sendError(w, err)
-		return
-	}
-	if markdown && serveSource(w, r, path, content) {
-		return
-	}
-	if asked {
-		sendError(w, problem(404, "not_found", "This file is not text, so it has no Markdown."))
-		return
-	}
-	// Docs pages are all indexable; a web-readable space only in its top folder.
-	noIndex := !docs && (space.Visibility != spaceWeb || !indexable(path))
-	page := browserPage{NoIndex: noIndex, BasePath: h.basePath, AccountsEnabled: true, Private: true, Docs: docs, Legal: h.docsSpace() != "", Web: space.Visibility == spaceWeb, Member: member, SpaceName: space.Name, SpaceRef: owner + "/" + space.Slug, Path: path, State: state, Text: string(content), Markdown: isMarkdown, RawImages: true, Tree: fileTree(files, path, root)}
-	if !docs {
-		configs, err := repo.folderConfigs(ctx, files)
+	// A virtual file's text, if any, is its ?format=md (serveVirtual).
+	hasText := file.Virtual != nil
+	if file.Virtual == nil {
+		content, err := repo.blob(ctx, file.Blob)
 		if err != nil {
 			sendError(w, err)
 			return
 		}
-		markServiceFolders(page.Tree, "", configs)
+		if markdown && serveSource(w, r, path, content) {
+			return
+		}
+		if asked {
+			sendError(w, problem(404, "not_found", "This file is not text, so it has no Markdown."))
+			return
+		}
+		hasText = isMarkdownPath(path) || utf8.Valid(content)
 	}
-	var body bytes.Buffer
-	if err := browserTemplate.Execute(&body, page); err != nil {
-		sendError(w, err)
+	// Docs pages are all indexable; a web-readable space only in its top folder.
+	noIndex := !docs && (space.Visibility != spaceWeb || !indexable(path))
+	build := appBuildOnce()
+	if build == nil {
+		sendError(w, problem(404, "not_found", "The site app is not in this build of Metatrash."))
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if !noIndex {
 		w.Header().Del("X-Robots-Tag")
 	}
-	markdownAlternate(w, root+(&url.URL{Path: path}).EscapedPath())
-	if r.Method != http.MethodHead {
-		_, _ = w.Write(body.Bytes())
+	escaped := (&url.URL{Path: path}).EscapedPath()
+	markdownAlternate(w, root+escaped)
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		return
 	}
+	page := appPage{Space: owner + "/" + space.Slug, File: path, Title: pathpkg.Base(path) + " — " + title, Address: root, NoIndex: noIndex}
+	if hasText {
+		page.Markdown = root + escaped + "?" + markdownQuery
+	}
+	h.writeAppPage(w, build, page)
 }
 
 // serveLLMS sends a folder's llms.txt (path): its own file if it has one,

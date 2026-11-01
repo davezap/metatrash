@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of Metatrash 0.83.0 and Slate Viewer 0.21.0 (2026-11-01). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.87.0 and Slate Viewer 0.21.0 (2026-11-01). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Next: Settings dialog and space picker (Dave, 2026-10-31)
 
@@ -23,7 +23,11 @@ decisions in the Claude Doc "Settings dialog and space picker: plan".
   point at Settings (*done in 0.82.0*); links to `/spaces/...` and
   `/docs/...` opened from outside the site open in `/app/...`, while the
   plain pages stay for no-script, `?raw`, `?export`, `llms.txt` and search
-  engines (*done in 0.83.0*).
+  engines (*done in 0.83.0*). *0.87.0 went further: the app now lives at
+  the spaces' own addresses (`/spaces/...`, and `/docs/...` for the docs
+  space), the plain pages are gone, and old `/app/...` links redirect. No-script
+  readers, agents and search engines get the Markdown (`?format=md`,
+  `llms.txt`, `?raw`, `?export`) from the same addresses.*
   Workplace spaces come after release 2, so their screens are built once,
   in the dialog.
 - **Before release 2 (Dave: controls against malicious code):** settings
@@ -128,7 +132,8 @@ Plan (each step its own release):
    the docs space is readable on the web; otherwise the built-in home page.
    The address bar follows the open file (`/app/…`), signed out the header
    shows Sign In instead of Change Space. `/spaces/` and `/docs/` stay
-   server-rendered.
+   server-rendered. *Since 0.87.0 the app is served at `/spaces/` and
+   `/docs/` themselves and the server-rendered pages are gone.*
 
 Decided with Dave (2026-10-30):
 

@@ -210,15 +210,15 @@ func TestAccountPagesRedirectToSettings(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
 	for path, want := range map[string]string{
-		"/account":                      "/app/#settings/spaces",
-		"/account/mine":                 "/app/#settings/spaces",
-		"/account/shared":               "/app/#settings/spaces",
-		"/account/profile":              "/app/#settings/profile",
-		"/account/sharing/" + w.ownedID: "/app/#settings/spaces/" + w.ownedID,
-		"/account/services":             "/app/#settings/services",
-		"/account/apps/" + w.ownedID:    "/app/#settings/services/apps/" + w.ownedID,
-		"/account/actions/" + w.ownedID: "/app/#settings/services/actions/" + w.ownedID,
-		"/account/security":             "/app/#settings/security",
+		"/account":                      "/spaces/#settings/spaces",
+		"/account/mine":                 "/spaces/#settings/spaces",
+		"/account/shared":               "/spaces/#settings/spaces",
+		"/account/profile":              "/spaces/#settings/profile",
+		"/account/sharing/" + w.ownedID: "/spaces/#settings/spaces/" + w.ownedID,
+		"/account/services":             "/spaces/#settings/services",
+		"/account/apps/" + w.ownedID:    "/spaces/#settings/services/apps/" + w.ownedID,
+		"/account/actions/" + w.ownedID: "/spaces/#settings/services/actions/" + w.ownedID,
+		"/account/security":             "/spaces/#settings/security",
 	} {
 		res := siteCall(w, "GET", path, "", session, "")
 		if got := res.Header().Get("Location"); got != want || want == "" && res.Code != 200 {

@@ -11,7 +11,7 @@
 <a class="btn primary block" href="{{.ContinueURL}}">Continue</a>
 {{else if .Disabled}}
 <div class="auth-head"><h1>Sign-in is not available yet</h1><p>The public space is open to explore while email sign-in is being configured.</p></div>
-<a class="btn primary block" href="{{.BasePath}}/app/public/">Explore the public space</a>
+<a class="btn primary block" href="{{.BasePath}}/spaces/public/">Explore the public space</a>
 {{else if .Verify}}
 <div class="auth-head"><h1>Check your email.</h1><p>We’ve sent a six-digit code to <strong class="account-email">{{.Email}}</strong>.</p></div>
 {{if .Message}}<p class="problem" role="alert">{{.Message}}</p>{{end}}

@@ -242,7 +242,7 @@ func TestAccountsHTTP(t *testing.T) {
 		t.Fatal("rejected resend consumed shared mail budget")
 	}
 	w = call("POST", "/login/verify", "https://metatrash.com", url.Values{"code": {*code}, "csrf": {browser.Value}}, browser)
-	if w.Code != 303 || w.Header().Get("Location") != "/app/#settings/spaces" {
+	if w.Code != 303 || w.Header().Get("Location") != "/spaces/#settings/spaces" {
 		t.Fatal("login failed")
 	}
 	var session *http.Cookie
@@ -257,10 +257,10 @@ func TestAccountsHTTP(t *testing.T) {
 	// Spaces (0.79.0) and Security (0.81.0) moved to the site app's Settings
 	// dialog. This harness has no owned-space database, so it may
 	// report the account as temporarily unavailable (503).
-	if w := call("GET", "/account", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/app/#settings/spaces" {
+	if w := call("GET", "/account", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/spaces/#settings/spaces" {
 		t.Fatal("account not sent to Settings")
 	}
-	if w := call("GET", "/account/security", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/app/#settings/security" {
+	if w := call("GET", "/account/security", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/spaces/#settings/security" {
 		t.Fatal("security not sent to Settings")
 	}
 	// Choosing a username is Settings → Profile (TestSiteAccountAgainstDatabase);

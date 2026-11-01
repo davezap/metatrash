@@ -571,7 +571,7 @@ func (h *httpAdapter) microsoftCallback(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if attempt.UserID != "" {
-		login = h.basePath + "/app/#settings/security/microsoft"
+		login = h.basePath + "/spaces/#settings/security/microsoft"
 	}
 	if query.Has("error") {
 		h.setMicrosoftCookie(w, "")
@@ -663,7 +663,7 @@ func (h *httpAdapter) microsoftCallback(w http.ResponseWriter, r *http.Request, 
 // finishMicrosoftLink ends Link a Microsoft account, started on Security.
 func (h *httpAdapter) finishMicrosoftLink(w http.ResponseWriter, r *http.Request, attempt oidcPending, id oidcIdentity, linked identity, found bool, entry *loginLog) {
 	a := h.service.accounts
-	back := h.basePath + "/app/#settings/security/microsoft"
+	back := h.basePath + "/spaces/#settings/security/microsoft"
 	entry.kind = "microsoft-link"
 	user, signedIn, err := a.currentUser(r.Context(), attempt.Session)
 	fresh, _ := a.sessionFresh(attempt.Session, time.Now())

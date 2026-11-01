@@ -1,32 +1,17 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"embed"
 	"fmt"
-	"html/template"
 	"net/http"
 	"net/url"
-	"sort"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
-
-	"metatrash.com/metatrash"
+	"unicode/utf8"
 )
-
-//go:embed web/page.html
-var browserHTML string
-
-//go:embed web/style.css
-var browserCSS []byte
-
-//go:embed web/activity.js
-var activityJS []byte
-
-//go:embed web/copy.js
-var copyJS []byte
 
 //go:embed web/login.js
 var loginJS []byte
@@ -55,9 +40,6 @@ var slateCSS []byte
 //go:embed web/mermaid
 var mermaidFiles embed.FS
 
-//go:embed web/document.js
-var documentJS []byte
-
 // Only developer-owned, embedded assets belong here. Never serve space storage.
 func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/assets/") {
@@ -66,18 +48,10 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	var data []byte
 	var kind string
 	switch r.URL.Path {
-	case "/assets/style.css":
-		data, kind = browserCSS, "text/css; charset=utf-8"
 	case "/assets/slate.js":
 		data, kind = slateJS, "text/javascript; charset=utf-8"
 	case "/assets/slate.css":
 		data, kind = slateCSS, "text/css; charset=utf-8"
-	case "/assets/document.js":
-		data, kind = documentJS, "text/javascript; charset=utf-8"
-	case "/assets/activity.js":
-		data, kind = activityJS, "text/javascript; charset=utf-8"
-	case "/assets/copy.js":
-		data, kind = copyJS, "text/javascript; charset=utf-8"
 	case "/assets/login.js":
 		data, kind = loginJS, "text/javascript; charset=utf-8"
 	case "/assets/passkey.js":
@@ -115,17 +89,6 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		_, _ = w.Write(data)
 	}
 	return true
-}
-
-var browserTemplate = template.Must(template.New("page").Funcs(template.FuncMap{"version": func() string { return metatrash.Version }}).Parse(browserHTML))
-
-type browserNode struct {
-	Name, URL string
-	Service   string // set on folders with a service attached, e.g. "GitHub owner/repo"
-	Count     int
-	Selected  bool
-	Open      bool // a folder holding the selected file
-	Children  []*browserNode
 }
 
 type recentFile struct {
@@ -168,35 +131,6 @@ func (h *httpAdapter) serveRecent(w http.ResponseWriter, r *http.Request, client
 	}{state, h.publicRecent(recent)})
 }
 
-type browserPage struct {
-	Private bool
-	// Web marks a private space its owner made readable on the web; Member
-	// is set when the viewer is its owner or a member.
-	Web, Member bool
-	// Docs marks the site's documentation space under /docs/: shown without
-	// the space's own name and header.
-	Docs bool
-	// Legal is set when a docs space is configured: the footer then links to
-	// About, Privacy and Terms under /docs/.
-	// NoIndex asks search engines to skip the page (see indexable).
-	NoIndex          bool
-	Legal            bool
-	SpaceName        string
-	SpaceRef         string // owner/slug
-	BasePath, MCPURL string
-	AccountMCPURL    string // sign-in endpoint; empty when OAuth is off
-	AccountsEnabled  bool
-	Home             bool
-	About            bool
-	Markdown         bool
-	// RawImages: path?raw serves a space's image files (owned spaces), so
-	// document.js shows a document's relative pictures.
-	RawImages         bool
-	State, Path, Text string
-	Tree              []*browserNode
-	Recent            []recentFile
-}
-
 // Search engines may index the site's pages, everything under /docs/, and in
 // spaces anyone can read under /spaces/ (the public space and spaces readable
 // on the web) only the files in the space's top folder. Nested files and
@@ -211,45 +145,6 @@ func fileURL(path string) string {
 		parts[i] = url.PathEscape(parts[i])
 	}
 	return "/spaces/public/" + strings.Join(parts, "/")
-}
-
-func fileTree(files map[string]record, selected string, spaceRoot ...string) []*browserNode {
-	root := &browserNode{}
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		parent := root
-		parts := strings.Split(path, "/")
-		for i, name := range parts {
-			var node *browserNode
-			for _, child := range parent.Children {
-				if child.Name == name {
-					node = child
-					break
-				}
-			}
-			if node == nil {
-				node = &browserNode{Name: name}
-				parent.Children = append(parent.Children, node)
-			}
-			if i == len(parts)-1 {
-				node.URL = fileURL(path)
-				if len(spaceRoot) > 0 {
-					node.URL = spaceRoot[0] + strings.TrimPrefix(node.URL, "/spaces/public/")
-				}
-				node.Selected = path == selected
-			}
-			node.Count++
-			if i < len(parts)-1 && strings.HasPrefix(selected, strings.Join(parts[:i+1], "/")+"/") {
-				node.Open = true
-			}
-			parent = node
-		}
-	}
-	return root.Children
 }
 
 // Commit order defines "touched"; stable IDs deduplicate updates and moves.
@@ -297,27 +192,28 @@ func (repo *repository) recent(ctx context.Context, state string, files map[stri
 	return result, nil
 }
 
+// serveBrowser answers the site's home page, /about and the public space's
+// addresses. Browsers get the site app (Slate Viewer's UI, app_http.go);
+// programs keep ?format=md, Accept: text/markdown, folders' Markdown and
+// llms.txt (0.87.0: the server-rendered pages are gone).
 func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
 	if path != "/" && path != "/about" && path != "/spaces/public" && !strings.HasPrefix(path, "/spaces/public/") {
 		return false
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-	if path == "/" {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-	} else {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src https: data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-	}
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
 		return true
 	}
-	if path == "/" && h.serveAppHome(w, r, client) {
-		return true
-	}
-	if file, ok := strings.CutPrefix(r.URL.EscapedPath(), "/spaces/public/"); ok && h.openInApp(w, r, "public", file) {
+	if path == "/" {
+		if h.serveAppHome(w, r, client) {
+			return true
+		}
+		// Without a docs space to show, the home page is the public space.
+		http.Redirect(w, r, h.basePath+"/spaces/public/", http.StatusFound)
 		return true
 	}
 	if path == "/about" {
@@ -325,21 +221,12 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 			sendError(w, invalid("Unknown or duplicate query parameter."))
 			return true
 		}
-		// With a docs space, the About page is its about.md. Temporary, so
-		// removing the setting brings the built-in page back.
+		// With a docs space, the About page is its about.md.
+		target := "/spaces/public/"
 		if h.docsSpace() != "" {
-			http.Redirect(w, r, h.basePath+"/docs/about.md", http.StatusFound)
-			return true
+			target = "/docs/about.md"
 		}
-		var body bytes.Buffer
-		if err := browserTemplate.Execute(&body, browserPage{BasePath: h.basePath, About: true, AccountsEnabled: h.service.accounts != nil, Legal: h.docsSpace() != ""}); err != nil {
-			sendError(w, err)
-			return true
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.Method != http.MethodHead {
-			_, _ = w.Write(body.Bytes())
-		}
+		http.Redirect(w, r, h.basePath+target, http.StatusFound)
 		return true
 	}
 	if path == "/spaces/public" {
@@ -359,103 +246,87 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		sendError(w, invalid("Invalid query."))
 		return true
 	}
-	asked := r.URL.RawQuery == markdownQuery && path != "/"
+	asked := r.URL.RawQuery == markdownQuery
 	for key, values := range q {
 		if !asked && (path != "/spaces/public/" || key != "path" || len(values) != 1) {
 			sendError(w, invalid("Unknown or duplicate query parameter."))
 			return true
 		}
 	}
-	page := browserPage{BasePath: h.basePath, MCPURL: h.publicOrigin + h.basePath + "/mcp", Home: path == "/", AccountsEnabled: h.service.accounts != nil, Legal: h.docsSpace() != ""}
-	if h.oauth != nil {
-		page.AccountMCPURL = h.oauth.mcpResource
+	filePath := strings.TrimPrefix(path, "/spaces/public/")
+	if filePath == "" {
+		filePath = q.Get("path")
 	}
-	defaulted := false
-	if !page.Home {
-		page.Path = strings.TrimPrefix(path, "/spaces/public/")
-		if page.Path == "" {
-			page.Path = q.Get("path")
-		}
-		defaulted = page.Path == ""
-		if defaulted {
-			page.Path = "README.md"
-		}
-		if !validPath(strings.TrimSuffix(page.Path, "/")) {
-			sendError(w, invalid("Invalid path."))
-			return true
-		}
-		if q.Has("path") {
-			http.Redirect(w, r, h.basePath+fileURL(page.Path), http.StatusPermanentRedirect)
-			return true
-		}
-		if !indexable(page.Path) {
-			page.NoIndex = true
-			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-		}
+	defaulted := filePath == ""
+	if defaulted {
+		filePath = "README.md"
+	}
+	if !validPath(strings.TrimSuffix(filePath, "/")) {
+		sendError(w, invalid("Invalid path."))
+		return true
+	}
+	if q.Has("path") {
+		http.Redirect(w, r, h.basePath+fileURL(filePath), http.StatusPermanentRedirect)
+		return true
+	}
+	noIndex := !indexable(filePath)
+	if noIndex {
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	repo := h.service.repos["public"]
-	state, files, err := repo.snapshot(ctx, "")
+	_, files, err := repo.snapshot(ctx, "")
 	if err != nil {
 		sendError(w, err)
 		return true
 	}
-	page.State = state
-	if page.Home {
-		page.Recent, err = repo.recent(ctx, state, files)
-		page.Recent = h.publicRecent(page.Recent)
-	} else {
-		if defaulted {
-			page.Path = defaultPage(files)
-		}
-		markdown := asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))
-		if folder, ok := strings.CutSuffix(page.Path, "/"); ok {
-			serveFolder(w, r, repo, files, folder, "Metatrash public space", h.publicOrigin, h.basePath+"/spaces/public/", markdown)
-			return true
-		}
-		if folder, name := splitFolder(page.Path); name == "llms.txt" {
-			h.serveLLMS(w, r, repo, files, page.Path, folder, "Metatrash public space", h.basePath+"/spaces/public/")
-			return true
-		}
-		file, exists := files[page.Path]
-		if !exists {
-			sendError(w, missing())
-			return true
-		}
-		var content []byte
-		content, err = repo.blob(ctx, file.Blob)
-		if err == nil && markdown {
-			if serveSource(w, r, page.Path, content) {
-				return true
-			}
-			if asked {
-				sendError(w, problem(404, "not_found", "This file is not text, so it has no Markdown."))
-				return true
-			}
-		}
-		page.Text = string(content)
-		lowerPath := strings.ToLower(page.Path)
-		page.Markdown = strings.HasSuffix(lowerPath, ".md") || strings.HasSuffix(lowerPath, ".markdown")
-		page.Tree = fileTree(files, page.Path)
-		h.publicTree(page.Tree)
+	if defaulted {
+		filePath = defaultPage(files)
 	}
+	markdown := asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))
+	if folder, ok := strings.CutSuffix(filePath, "/"); ok {
+		serveFolder(w, r, repo, files, folder, "Metatrash public space", h.publicOrigin, h.basePath+"/spaces/public/", markdown)
+		return true
+	}
+	if folder, name := splitFolder(filePath); name == "llms.txt" {
+		h.serveLLMS(w, r, repo, files, filePath, folder, "Metatrash public space", h.basePath+"/spaces/public/")
+		return true
+	}
+	file, exists := files[filePath]
+	if !exists {
+		sendError(w, missing())
+		return true
+	}
+	content, err := repo.blob(ctx, file.Blob)
 	if err != nil {
 		sendError(w, err)
 		return true
 	}
-	var body bytes.Buffer
-	if err := browserTemplate.Execute(&body, page); err != nil {
-		sendError(w, err)
+	if markdown {
+		if serveSource(w, r, filePath, content) {
+			return true
+		}
+		if asked {
+			sendError(w, problem(404, "not_found", "This file is not text, so it has no Markdown."))
+			return true
+		}
+	}
+	build := appBuildOnce()
+	if build == nil {
+		sendError(w, problem(404, "not_found", "The site app is not in this build of Metatrash."))
 		return true
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if !page.Home {
-		markdownAlternate(w, h.basePath+fileURL(page.Path))
+	markdownAlternate(w, h.basePath+fileURL(filePath))
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		return true
 	}
-	if r.Method != http.MethodHead {
-		_, _ = w.Write(body.Bytes())
+	page := appPage{Space: "public", File: filePath, Title: pathpkg.Base(filePath) + " — Metatrash public space", Address: "/spaces/public/", NoIndex: noIndex}
+	if utf8.Valid(content) {
+		page.Markdown = fileURL(filePath) + "?" + markdownQuery
 	}
+	h.writeAppPage(w, build, page)
 	return true
 }
 
@@ -464,15 +335,6 @@ func (h *httpAdapter) publicRecent(files []recentFile) []recentFile {
 		files[i].URL = h.basePath + files[i].URL
 	}
 	return files
-}
-
-func (h *httpAdapter) publicTree(nodes []*browserNode) {
-	for _, node := range nodes {
-		if node.URL != "" {
-			node.URL = h.basePath + node.URL
-		}
-		h.publicTree(node.Children)
-	}
 }
 
 // defaultPage is the file a space's address shows when it names none: its

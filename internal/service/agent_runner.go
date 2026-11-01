@@ -264,7 +264,7 @@ func (a *agentRunner) mailNotice(ctx context.Context, userID string, j agentJob,
 func actionNoticeMail(origin, space string, j agentJob, why string) string {
 	return "The folder action \"" + mailText(j.Action) + "\" in " + mailText(space) + " did not run for your file " + mailText(j.File) + ".\n\n" +
 		mailText(why) + "\n\n" +
-		"The action's page shows what it does and which model it needs: " + origin + "/app/#settings/services/actions/" + j.ID + "\n" +
+		"The action's page shows what it does and which model it needs: " + origin + "/spaces/#settings/services/actions/" + j.ID + "\n" +
 		"You get this email at most once a day for each action. Your files in that folder do not run it, and nothing is charged to you, until this is sorted out.\n"
 }
 
@@ -284,7 +284,7 @@ func (a *agentRunner) spaceAddress(ctx context.Context, spaceID string) string {
 
 // optInURL is the page where the person who brought a job's file opts in.
 func (a *agentRunner) optInURL(jobID string) string {
-	return a.origin + "/app/#settings/services/actions/" + jobID
+	return a.origin + "/spaces/#settings/services/actions/" + jobID
 }
 
 // ownerName is the name History shows for a space's owner.

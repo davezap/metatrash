@@ -144,7 +144,7 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	in := soft.get(t, dataOptions(t, body, "data-passkey-get"))
 	res = oauthCall(w.h, "POST", "/login/passkey", assertionForm(browser.Value, in), browser)
 	signedIn := responseCookie(res, sessionCookie)
-	if res.Code != 303 || res.Header().Get("Location") != "/app/#settings/spaces" || signedIn == nil {
+	if res.Code != 303 || res.Header().Get("Location") != "/spaces/#settings/spaces" || signedIn == nil {
 		t.Fatalf("passkey sign-in: %d %s", res.Code, res.Body)
 	}
 	if user, ok, _ := w.s.accounts.currentUser(ctx, signedIn.Value); !ok || user.ID != w.owner.ID {

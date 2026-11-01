@@ -207,21 +207,14 @@ func TestFolderConfigRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tree := fileTree(mustFiles(t, owned), "")
-	markServiceFolders(tree, "", configs)
 	marked := map[string]string{}
-	var walk func([]*browserNode)
-	walk = func(nodes []*browserNode) {
-		for _, n := range nodes {
-			if n.Service != "" {
-				marked[n.Name] = n.Service
-			}
-			walk(n.Children)
+	for folder, c := range configs {
+		for _, svc := range c.Services {
+			marked[folder] = svc.Repo
 		}
 	}
-	walk(tree)
-	if marked["site"] != "GitHub dave-zap/site" || marked["work"] != "GitHub dave-zap/work" || marked["docs"] != "" || len(marked) != 3 {
-		t.Fatalf("explorer marks: %v", marked)
+	if marked["site/"] != "dave-zap/site" || marked["work/"] != "dave-zap/work" || marked["other/"] != "dave-zap/other" || len(marked) != 3 {
+		t.Fatalf("service folders: %v", marked)
 	}
 
 	// Configured spaces (here public) get a root config too, but no services.

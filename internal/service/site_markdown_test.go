@@ -139,7 +139,7 @@ func TestMarkdownPagesAgainstDatabase(t *testing.T) {
 	}
 	// The page tells clients where its Markdown is.
 	res := oauthCall(w.h, "GET", space+"legal/terms.md", nil)
-	if res.Header().Get("Link") != "<"+space+`legal/terms.md?format=md>; rel="alternate"; type="text/markdown"` || res.Header().Get("Vary") != "Accept" || !strings.Contains(res.Body.String(), `<link rel="alternate" type="text/markdown" href="?format=md">`) {
+	if res.Header().Get("Link") != "<"+space+`legal/terms.md?format=md>; rel="alternate"; type="text/markdown"` || res.Header().Get("Vary") != "Accept" || !strings.Contains(res.Body.String(), `<link rel="alternate" type="text/markdown" href="`+space+`legal/terms.md?format=md">`) {
 		t.Fatalf("page alternate: %v", res.Header())
 	}
 	res = oauthCall(w.h, "GET", space+"llms.txt", nil)

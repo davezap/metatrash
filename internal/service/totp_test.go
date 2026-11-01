@@ -278,7 +278,7 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	}
 	ok2 := oauthCall(w.h, "POST", "/login/totp", url.Values{"csrf": {browser.Value}, "email": {w.owner.Email}, "code": {totpCode(secret, step+1)}}, browser)
 	signedIn := responseCookie(ok2, sessionCookie)
-	if ok2.Code != 303 || ok2.Header().Get("Location") != "/app/#settings/spaces" || signedIn == nil {
+	if ok2.Code != 303 || ok2.Header().Get("Location") != "/spaces/#settings/spaces" || signedIn == nil {
 		t.Fatalf("sign in: %d %s", ok2.Code, ok2.Body)
 	}
 	if user, ok, _ := a.currentUser(ctx, signedIn.Value); !ok || user.ID != w.owner.ID {

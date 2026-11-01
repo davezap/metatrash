@@ -13,16 +13,18 @@ import (
 )
 
 // Slate Viewer's UI on the site (0.73.0). The Viewer's website build
-// (npm run build:web) is copied into web/app and served from here:
+// (npm run build:web) is copied into web/app. Since 0.87.0 it is the page at
+// a space's own addresses (the old /app/ ones redirect there):
 //
-//	/app/public/[path]              the public space
-//	/app/{owner}/{slug}/[path]      an owned space
+//	/spaces/public/[path]           the public space
+//	/spaces/{owner}/{slug}/[path]   an owned space
+//	/docs/[path]                    the docs space
 //	/app/assets/{name}              the build's files (hashed names)
 //
 // The page opens the space at the file in the path, and the UI reads and
-// changes files through the site API with the person's own access. The
-// /spaces/ and /docs/ pages stay as they are, for browsers without
-// JavaScript and for search engines.
+// changes files through the site API with the person's own access. The same
+// addresses still answer ?raw, ?format=md, Accept: text/markdown, ?export
+// and llms.txt as before, for programs and agents.
 //
 // With a docs space readable on the web, the home page (/) is the same page
 // on the docs space's introduction.md (0.75.0).
@@ -65,9 +67,11 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{{if .Home}}<meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">{{else}}<meta name="robots" content="noindex">{{end}}
+{{if .Home}}<meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">{{end}}{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}
 <meta name="metatrash-app" content="{{.Config}}">
 <title>{{.Title}}</title>
+{{if .Markdown}}<link rel="alternate" type="text/markdown" href="{{.BasePath}}{{.Markdown}}">
+{{end}}
 <script src="{{.BasePath}}/assets/app-start.js" nonce="{{.Nonce}}"></script>
 <link rel="stylesheet" href="{{.BasePath}}/assets/slate.css">
 {{range .Build.CSS}}<link rel="stylesheet" href="{{$.BasePath}}/app/{{.}}">
@@ -75,7 +79,7 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 </head>
 <body>
 <div id="app"></div>
-<noscript><p>This page needs JavaScript. Without it, read <a href="{{.BasePath}}{{.Plain}}">the same page</a>{{if .Home}} or <a href="{{.BasePath}}/docs/">the documentation</a>{{end}}.</p></noscript>
+<noscript><p>This page needs JavaScript.{{if .Markdown}} Without it, read <a href="{{.BasePath}}{{.Markdown}}">this page's text</a>.{{end}}{{if .Home}} The documentation's pages are listed in <a href="{{.BasePath}}/llms.txt">llms.txt</a>.{{end}}</p></noscript>
 <script type="module" src="{{.BasePath}}/app/{{.Build.Entry}}"></script>
 </body>
 </html>
@@ -90,6 +94,12 @@ func appCSP(nonce string) string {
 }
 
 func (h *httpAdapter) serveApp(w http.ResponseWriter, r *http.Request, client string) bool {
+	if r.URL.Path == "/spaces" || r.URL.Path == "/spaces/" {
+		// The site's own address for Settings (/spaces/#settings/...) and for
+		// "somewhere to start": the public space. The #fragment stays.
+		http.Redirect(w, r, h.basePath+"/spaces/public/", http.StatusSeeOther)
+		return true
+	}
 	if r.URL.Path != "/app" && !strings.HasPrefix(r.URL.Path, "/app/") {
 		return false
 	}
@@ -104,125 +114,40 @@ func (h *httpAdapter) serveApp(w http.ResponseWriter, r *http.Request, client st
 		h.serveAppAsset(w, r, name)
 		return true
 	}
-	if r.URL.Path == "/app" || r.URL.Path == "/app/" {
-		http.Redirect(w, r, h.basePath+"/app/public/", http.StatusSeeOther)
-		return true
-	}
-	if h.service.accounts == nil || h.service.ownedDB == nil {
-		sendError(w, missing())
-		return true
-	}
-	if !strings.EqualFold(r.Host, h.publicHost) {
-		sendError(w, problem(403, "forbidden", "Use the configured site address."))
-		return true
+	// The app's old addresses (0.73.0 to 0.86.0), in bookmarks, emails and
+	// printed PDFs: /app/{space}/{file} is now /spaces/{space}/{file}, and
+	// the docs space's /docs/{file}. The #fragment (#settings/...) stays.
+	rest := strings.TrimPrefix(strings.TrimPrefix(r.URL.EscapedPath(), "/app"), "/")
+	target := "/spaces/" + rest
+	if docs := h.docsSpace(); docs != "" && (rest == docs || strings.HasPrefix(rest, docs+"/")) {
+		target = "/docs/" + strings.TrimPrefix(strings.TrimPrefix(rest, docs), "/")
 	}
 	if r.URL.RawQuery != "" {
-		sendError(w, missing())
-		return true
+		target += "?" + r.URL.RawQuery
 	}
-	build := appBuildOnce()
-	if build == nil {
-		sendError(w, problem(404, "not_found", "The new viewer is not in this build of Metatrash."))
-		return true
-	}
-	// /app/public/[path] or /app/{owner}/{slug}/[path]; the space's bare
-	// address goes to its top folder.
-	rest := strings.TrimPrefix(r.URL.Path, "/app/")
-	space, file := rest, ""
-	if first, after, _ := strings.Cut(rest, "/"); first == "public" {
-		space, file = first, after
-	} else if slug, after, found := strings.Cut(after, "/"); slug != "" {
-		space, file = first+"/"+slug, after
-		if !found {
-			http.Redirect(w, r, h.basePath+r.URL.Path+"/", http.StatusSeeOther)
-			return true
-		}
-	}
-	if space == "public" && !strings.HasPrefix(rest, "public/") {
-		http.Redirect(w, r, h.basePath+"/app/public/", http.StatusSeeOther)
-		return true
-	}
-	if !spaceRefPattern.MatchString(space) || strings.Contains(file, "\\") || strings.Contains("/"+file+"/", "/../") {
-		sendError(w, missing())
-		return true
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	token := cookieToken(r, h.sessionCookieName())
-	user, signedIn, err := h.service.accounts.currentUser(ctx, token)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return true
-	}
-	_, name, err := h.service.siteSpaceAccess(ctx, user, signedIn, space, client, false)
-	if p, ok := err.(*Error); ok && p.Status == 401 {
-		// As on the /spaces/ pages: a link from another site arrives without
-		// the SameSite=Strict cookie, so reload once from this site before
-		// asking the browser to sign in.
-		if token == "" && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			if r.Method == http.MethodGet {
-				_, _ = w.Write([]byte(reloadFromSitePage))
-			}
-			return true
-		}
-		h.redirectToLogin(w, r)
-		return true
-	}
-	if err != nil {
-		sendError(w, err)
-		return true
-	}
-	if name != space {
-		// The address a space had before a transfer goes to the current one.
-		http.Redirect(w, r, h.basePath+"/app/"+name+"/"+file, http.StatusSeeOther)
-		return true
-	}
-
-	title := name
-	if file != "" && !strings.HasSuffix(file, "/") {
-		title = path.Base(file)
-	}
-	h.writeAppPage(w, build, appPage{Space: name, File: file, Title: title + " — Metatrash", Plain: "/spaces/" + name + "/" + file})
-	return true
-}
-
-// openInApp sends a browser that opened a /spaces/... or /docs/... page from
-// outside the site (another site, an email or a PDF, a bookmark or the
-// address bar) to the same file in the app, /app/<space>/<file> (0.83.0);
-// file is the rest of the address, still escaped. The plain page stays for
-// everything else, so it is still the no-script and indexable view: moving
-// between plain pages and the app's own no-script "Plain" link (both
-// same-origin), a query (?raw, ?export, ?format=md), a program asking for
-// Markdown, and search engines and other programs, which send no
-// Sec-Fetch-* headers.
-func (h *httpAdapter) openInApp(w http.ResponseWriter, r *http.Request, space, file string) bool {
-	site := r.Header.Get("Sec-Fetch-Site")
-	if r.Method != http.MethodGet || r.URL.RawQuery != "" || r.Header.Get("Sec-Fetch-Mode") != "navigate" ||
-		r.Header.Get("Sec-Fetch-Dest") != "document" || (site != "none" && site != "cross-site" && site != "same-site") ||
-		prefersMarkdown(r.Header.Get("Accept")) || !strings.EqualFold(r.Host, h.publicHost) || appBuildOnce() == nil {
-		return false
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	http.Redirect(w, r, h.basePath+"/app/"+space+"/"+file, http.StatusFound)
+	http.Redirect(w, r, h.basePath+target, http.StatusMovedPermanently)
 	return true
 }
 
 // appPage is what one page of the app opens.
 type appPage struct {
 	// Space is owner/slug or public, File the path in it ("" or a folder
-	// for none). Plain is the server-rendered page of the same file.
-	Space, File, Title, Plain string
-	// Home is the home page: indexed, its address kept as /.
-	Home bool
+	// for none). Address is the page's address for the space's top folder
+	// (/spaces/{space}/ or /docs/); the app keeps the address bar under it.
+	// Markdown links the file's own text (?format=md) for browsers without
+	// JavaScript; empty when it has none.
+	Space, File, Title, Address, Markdown string
+	// Home is the home page: indexed, its address kept as /. NoIndex asks
+	// search engines to skip the page (see indexable).
+	Home, NoIndex bool
 }
 
 func (h *httpAdapter) writeAppPage(w http.ResponseWriter, build *appBuild, page appPage) {
 	root := "/spaces/" + page.Space
 	config := map[string]any{"root": root, "file": nil}
+	if page.Address != "" {
+		config["addressRoot"] = strings.TrimSuffix(page.Address, "/")
+	}
 	if page.File != "" && !strings.HasSuffix(page.File, "/") {
 		config["file"] = root + "/" + page.File
 	}
@@ -240,10 +165,10 @@ func (h *httpAdapter) writeAppPage(w http.ResponseWriter, build *appBuild, page 
 	w.Header().Set("Content-Security-Policy", appCSP(nonce))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = appTemplate.Execute(w, struct {
-		Config, Title, BasePath, Nonce, Plain string
-		Home                                  bool
-		Build                                 *appBuild
-	}{string(encoded), page.Title, h.basePath, nonce, page.Plain, page.Home, build})
+		Config, Title, BasePath, Nonce, Markdown string
+		Home, NoIndex                            bool
+		Build                                    *appBuild
+	}{string(encoded), page.Title, h.basePath, nonce, page.Markdown, page.Home, page.NoIndex, build})
 }
 
 // serveAppHome answers / with the app on the docs space's introduction.md
@@ -266,7 +191,11 @@ func (h *httpAdapter) serveAppHome(w http.ResponseWriter, r *http.Request, clien
 		file = ""
 	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	h.writeAppPage(w, build, appPage{Space: name, File: file, Title: "Metatrash — shared liminal spaces", Plain: "/docs/" + file, Home: true})
+	page := appPage{Space: name, File: file, Title: "Metatrash — shared liminal spaces", Address: "/docs/", Home: true}
+	if file != "" {
+		page.Markdown = "/docs/" + file + "?format=md"
+	}
+	h.writeAppPage(w, build, page)
 	return true
 }
 

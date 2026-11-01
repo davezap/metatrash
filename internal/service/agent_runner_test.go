@@ -803,7 +803,7 @@ func TestRunnerContributorPays(t *testing.T) {
 	w.write("hr/.metatrash.json", `{"actions":[{"name":"tidy","on":"in/*.md","do":"Tidy.","model":"minimax/MiniMax-M3","pays":"contributor"}]}`)
 	w.writeAs(aliceID, "hr/in/a.md", "a\n")
 	skipped := w.job(1, "hr/in/a.md")
-	if skipped.Status != jobSkipped || skipped.Contributor != aliceID || !strings.Contains(skipped.Error, "alice has not opted in") || !strings.Contains(skipped.Error, "/app/#settings/services/actions/"+skipped.ID) || len(w.models) != 0 {
+	if skipped.Status != jobSkipped || skipped.Contributor != aliceID || !strings.Contains(skipped.Error, "alice has not opted in") || !strings.Contains(skipped.Error, "/spaces/#settings/services/actions/"+skipped.ID) || len(w.models) != 0 {
 		t.Fatalf("not opted in: %+v", skipped)
 	}
 	if len(w.notices) != 1 || !strings.HasPrefix(w.notices[0], "alice: skipped: whoever brings a file pays") {

@@ -85,11 +85,8 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 			res = oauthCall(w.h, "GET", page, nil, ownerSession)
 		}
 		body := res.Body.String()
-		if res.Code != 200 || !strings.Contains(body, "Readable on the web") || !strings.Contains(body, "# Private space") || res.Header().Get("X-Robots-Tag") != "" || strings.Contains(body, `name="robots"`) {
+		if res.Code != 200 || !strings.Contains(body, "metatrash-app") || res.Header().Get("X-Robots-Tag") != "" || strings.Contains(body, `name="robots"`) {
 			t.Fatalf("%s, web: %d", viewer, res.Code)
-		}
-		if viewer != "owner" && !strings.Contains(body, "shared read-only by its owner") {
-			t.Fatalf("%s sees the member wording", viewer)
 		}
 	}
 	// ?raw serves a picture itself, sandboxed, for the document's images;
@@ -105,9 +102,6 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 		if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/"+path, nil); res.Code != 404 {
 			t.Fatalf("%s: %d", path, res.Code)
 		}
-	}
-	if body := oauthCall(w.h, "GET", page, nil).Body.String(); !strings.Contains(body, `data-raw-images="true"`) {
-		t.Fatal("page lacks data-raw-images")
 	}
 
 	// The other space (the member's) stays private.
@@ -129,7 +123,7 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", page, nil); res.Code != 303 {
 		t.Fatalf("signed out after private: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "GET", page, nil, ownerSession); res.Code != 200 || strings.Contains(res.Body.String(), "Readable on the web") || res.Header().Get("X-Robots-Tag") != "noindex, nofollow" || !strings.Contains(res.Body.String(), `name="robots" content="noindex, nofollow"`) {
+	if res := oauthCall(w.h, "GET", page, nil, ownerSession); res.Code != 200 || !strings.Contains(res.Body.String(), "metatrash-app") || res.Header().Get("X-Robots-Tag") != "noindex, nofollow" || !strings.Contains(res.Body.String(), `name="robots" content="noindex, nofollow"`) {
 		t.Fatalf("owner after private: %d", res.Code)
 	}
 }
@@ -200,25 +194,6 @@ func TestDownloadSpaceAgainstDatabase(t *testing.T) {
 	}
 }
 
-func TestFileTreeOpensSelectedFolders(t *testing.T) {
-	files := map[string]record{"a/b/c.md": {}, "a/d.md": {}, "e/f.md": {}, "top.md": {}}
-	tree := fileTree(files, "a/b/c.md")
-	open := map[string]bool{}
-	var walk func([]*browserNode, string)
-	walk = func(nodes []*browserNode, prefix string) {
-		for _, n := range nodes {
-			if n.Open {
-				open[prefix+n.Name] = true
-			}
-			walk(n.Children, prefix+n.Name+"/")
-		}
-	}
-	walk(tree, "")
-	if len(open) != 2 || !open["a"] || !open["a/b"] {
-		t.Fatalf("open folders %v", open)
-	}
-}
-
 // The docs space: one web-readable space shown under /docs/ as part of the
 // site. Not readable on the web means not found for everyone, with no sign-in
 // page; the footer links to the legal pages only once it is configured.
@@ -228,14 +203,16 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/docs/README.md", nil); res.Code == 200 {
 		t.Fatal("/docs/ served with no docs space configured")
 	}
-	if body := oauthCall(w.h, "GET", "/", nil).Body.String(); strings.Contains(body, "/docs/legal/privacy.md") || !strings.Contains(body, `href="/about"`) {
+	if body := oauthCall(w.h, "GET", "/login", nil).Body.String(); strings.Contains(body, "/docs/legal/privacy.md") || !strings.Contains(body, `href="/about"`) {
 		t.Fatal("legal links, or no built-in About link, without a docs space")
 	}
-	if res := oauthCall(w.h, "GET", "/about", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "A little room where agents can meet.") {
-		t.Fatalf("built-in about page: %d", res.Code)
+	for _, page := range []string{"/", "/about"} {
+		if res := oauthCall(w.h, "GET", page, nil); res.Code != 302 || res.Header().Get("Location") != "/spaces/public/" {
+			t.Fatalf("%s without a docs space: %d %s", page, res.Code, res.Header().Get("Location"))
+		}
 	}
 	w.s.accounts.config.DocsSpace = w.ownedName
-	for _, page := range []string{"/", "/login", "/spaces/public/"} {
+	for _, page := range []string{"/login"} {
 		body := oauthCall(w.h, "GET", page, nil).Body.String()
 		if !strings.Contains(body, `href="/docs/legal/privacy.md"`) || !strings.Contains(body, `href="/docs/legal/terms.md"`) || !strings.Contains(body, `href="/docs/about.md"`) || strings.Contains(body, `href="/about"`) {
 			t.Fatalf("%s lacks the docs footer links", page)
@@ -270,19 +247,16 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 	}
 	res := oauthCall(w.h, "GET", "/docs/README.md", nil)
 	body := res.Body.String()
-	if res.Code != 200 || !strings.Contains(body, "# Private space") || !strings.Contains(body, "EXPLORER / DOCS") || res.Header().Get("X-Robots-Tag") != "" || strings.Contains(body, `name="robots"`) {
+	if res.Code != 200 || !strings.Contains(body, "metatrash-app") || !strings.Contains(body, "&#34;addressRoot&#34;:&#34;/docs&#34;") || res.Header().Get("X-Robots-Tag") != "" || strings.Contains(body, `name="robots"`) {
 		t.Fatalf("docs page: %d", res.Code)
 	}
-	if strings.Contains(body, "space-bar") || strings.Contains(body, w.ownedName) || strings.Contains(body, "/spaces/"+w.owner.Username) {
-		t.Fatal("docs page shows the space's own name or links")
-	}
-	if !strings.Contains(body, `href="/docs/README.md"`) {
-		t.Fatal("tree links are not under /docs/")
+	if !strings.Contains(body, `href="/docs/README.md?format=md"`) {
+		t.Fatal("the no-script link is not under /docs/")
 	}
 	if res := oauthCall(w.h, "GET", "/docs", nil); res.Code != 307 || res.Header().Get("Location") != "/docs/" {
 		t.Fatalf("/docs: %d %s", res.Code, res.Header().Get("Location"))
 	}
-	if res := oauthCall(w.h, "GET", "/docs/", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "# Private space") {
+	if res := oauthCall(w.h, "GET", "/docs/", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "metatrash-app") {
 		t.Fatalf("/docs/: %d", res.Code)
 	}
 	for _, page := range []string{"/docs/no-such-file.md", "/docs/README.md?x=1", "/docs/../README.md"} {
@@ -294,7 +268,7 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 		t.Fatalf("POST to docs: %d", res.Code)
 	}
 	// The space's own address still works as before.
-	if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/README.md", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "Readable on the web") {
+	if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/README.md", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "&#34;addressRoot&#34;:&#34;/spaces/"+w.ownedName+"&#34;") {
 		t.Fatalf("space page: %d", res.Code)
 	}
 

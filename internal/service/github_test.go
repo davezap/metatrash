@@ -331,7 +331,7 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	// The real thing.
 	browser, state = connect(owner)
 	resp := callback(browser, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "setup_action": {"install"}, "state": {state}, "future_param": {"1"}})
-	if resp.Code != 200 || !strings.Contains(resp.Body.String(), "GitHub connected") || !strings.Contains(resp.Body.String(), `http-equiv="refresh" content="2;url=/app/#settings/services/github"`) {
+	if resp.Code != 200 || !strings.Contains(resp.Body.String(), "GitHub connected") || !strings.Contains(resp.Body.String(), `http-equiv="refresh" content="2;url=/spaces/#settings/services/github"`) {
 		t.Fatalf("callback: %d %s", resp.Code, resp.Body.String())
 	}
 	if cleared := responseCookie(resp, w.h.githubCookieName()); cleared == nil || cleared.MaxAge >= 0 {

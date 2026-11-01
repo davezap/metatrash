@@ -152,22 +152,22 @@ var accountPages = map[string]bool{
 func settingsAddress(path string) string {
 	switch path {
 	case "/account", "/account/mine", "/account/shared":
-		return "/app/#settings/spaces"
+		return "/spaces/#settings/spaces"
 	case "/account/profile":
-		return "/app/#settings/profile"
+		return "/spaces/#settings/profile"
 	case "/account/services":
-		return "/app/#settings/services"
+		return "/spaces/#settings/services"
 	case "/account/security":
-		return "/app/#settings/security"
+		return "/spaces/#settings/security"
 	}
 	if id, ok := strings.CutPrefix(path, "/account/sharing/"); ok && idPattern.MatchString(id) {
-		return "/app/#settings/spaces/" + id
+		return "/spaces/#settings/spaces/" + id
 	}
 	if id, ok := strings.CutPrefix(path, "/account/apps/"); ok && idPattern.MatchString(id) {
-		return "/app/#settings/services/apps/" + id
+		return "/spaces/#settings/services/apps/" + id
 	}
 	if id, ok := strings.CutPrefix(path, "/account/actions/"); ok && idPattern.MatchString(id) {
-		return "/app/#settings/services/actions/" + id
+		return "/spaces/#settings/services/actions/" + id
 	}
 	return ""
 }
@@ -553,7 +553,7 @@ func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 	// A Microsoft account no one has linked waits in this browser: offer to
 	// link it (Security asks first; it is never linked by itself).
 	if _, ok := h.microsoftWaiting(r); ok {
-		http.Redirect(w, r, h.basePath+"/app/#settings/security/microsoft", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/spaces/#settings/security/microsoft", http.StatusSeeOther)
 		return
 	}
 	// Go back to the page that sent this browser to sign in.
@@ -561,7 +561,7 @@ func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, h.basePath+"/app/#settings/spaces", http.StatusSeeOther)
+	http.Redirect(w, r, h.basePath+"/spaces/#settings/spaces", http.StatusSeeOther)
 }
 
 // deriveNewSpaceSlug derives the slug for a new space's name and refuses a name

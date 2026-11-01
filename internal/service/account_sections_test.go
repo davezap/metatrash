@@ -11,7 +11,7 @@ import (
 func TestAccountSectionsAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
-	if res := oauthCall(w.h, "GET", "/account/security", nil, session); res.Code != 303 || res.Header().Get("Location") != "/app/#settings/security" {
+	if res := oauthCall(w.h, "GET", "/account/security", nil, session); res.Code != 303 || res.Header().Get("Location") != "/spaces/#settings/security" {
 		t.Fatalf("security: %d %q", res.Code, res.Header().Get("Location"))
 	}
 	if res := oauthCall(w.h, "GET", "/account/security", nil); res.Code != 303 || res.Header().Get("Location") != "/login" {

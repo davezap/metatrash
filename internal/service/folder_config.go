@@ -473,25 +473,6 @@ func (r *repository) folderConfigs(ctx context.Context, files map[string]record)
 	return configs, nil
 }
 
-// markServiceFolders labels explorer folders that have services attached.
-func markServiceFolders(nodes []*browserNode, prefix string, configs map[string]folderConfig) {
-	for _, node := range nodes {
-		if len(node.Children) == 0 {
-			continue
-		}
-		folder := prefix + node.Name + "/"
-		for _, svc := range configs[folder].Services {
-			if svc.Type == "github" {
-				node.Service = "GitHub " + svc.Repo
-			}
-		}
-		if node.Service == "" && configs[folder].PublishedVersion != nil {
-			node.Service = fmt.Sprintf("Published v%d", *configs[folder].PublishedVersion)
-		}
-		markServiceFolders(node.Children, folder, configs)
-	}
-}
-
 // lockableKeys are the keys locked may name.
 var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "locked": true}
 

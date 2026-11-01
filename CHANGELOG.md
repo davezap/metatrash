@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.87.0 - The app at the spaces' own addresses (2026-11-01)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): the Viewer source changed too.
+
+- **The site app moved from `/app/...` to the spaces' own addresses**: `/spaces/{owner}/{slug}/[path]`, `/spaces/public/[path]`, and `/docs/[path]` for the docs space. The address bar, Copy Address, links between spaces and Settings (`/spaces/#settings/...`) all use them. `/spaces` on its own opens the public space.
+- **`/docs/...` links open in the app**: a link to `/docs/...` from a page in any space opens that page of the docs space in place (in the docs space itself it just opens the file); before, it went to the old plain pages. Links to another space open that space's page.
+- **The old site pages are gone**: the server-rendered file pages and their files (`web/page.html`, `style.css`, `activity.js`, `copy.js`, `document.js`) are deleted, with the code that built their file trees. `/about` goes to `/docs/about.md` (or the public space when there is no docs space).
+- **Old `/app/...` links still work**: they redirect permanently (301) to the new address, keeping the query; ones into the docs space go to `/docs/...`. `/app/assets/` still serves the app's own files.
+- **Agents, search engines and no-JavaScript readers still get the text** from the same addresses: `?format=md`, `Accept: text/markdown`, `?raw`, `?export`, folder Markdown, `llms.txt` and HEAD are unchanged. Each app page names its Markdown with `<link rel="alternate" type="text/markdown">` and a no-JavaScript link to it; private and non-indexable pages carry `noindex`.
+- Emails, sign-in returns and redirects that pointed at `/app/#settings` now point at `/spaces/#settings`.
+- Tested against MariaDB (full run). Browser-checked against a local server: the home page, relative and `/docs/` links, a link from a private space to `/docs/`, a link to the public space, old `/app/` addresses, `/spaces`, Settings and `/account`.
+
 ## 0.86.0 - A new sign-in page (2026-11-01)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No new website build is needed.

@@ -225,7 +225,7 @@ func TestVirtualFilesAgainstDatabase(t *testing.T) {
 	// The website: a page about the file, ?raw for its content, ?format=md
 	// for its text.
 	page := "/spaces/" + w.ownedName + "/pics/logo.png"
-	if res := oauthCall(w.h, "GET", page, nil, ownerSession); res.Code != 200 || !strings.Contains(res.Body.String(), "Virtual file") || !strings.Contains(res.Body.String(), "[Download](logo.png?raw)") {
+	if res := oauthCall(w.h, "GET", page, nil, ownerSession); res.Code != 200 || !strings.Contains(res.Body.String(), "metatrash-app") {
 		t.Fatalf("page: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", page+"?raw", nil, ownerSession); res.Code != 200 || res.Body.String() != string(testPNG) || !strings.HasPrefix(res.Header().Get("Content-Disposition"), "inline") || !strings.Contains(res.Header().Get("Content-Security-Policy"), "sandbox") {
@@ -311,8 +311,9 @@ func TestVirtualFilesAgainstDatabase(t *testing.T) {
 	if staleInfo, _ := stale["stale"].(map[string]any); staleInfo == nil || staleInfo["reason"] != "the site answered 503" || !strings.Contains(stale["note"].(string), "has failed since 27 October 2026") {
 		t.Errorf("stale read: %v", stale)
 	}
-	if res := oauthCall(w.h, "GET", "/spaces/"+w.ownedName+"/docs/forms-guide.md", nil, ownerSession); res.Code != 200 || !strings.Contains(res.Body.String(), "Stale:") {
-		t.Errorf("stale page: %d", res.Code)
+	// The site app reads it through the site API, which says so too.
+	if res := siteCall(w, "GET", "/api/v1/site/spaces/"+w.ownedName+"/file?path=docs/forms-guide.md", "", ownerSession, ""); res.Code != 200 || !strings.Contains(res.Body.String(), "the site answered 503") {
+		t.Errorf("stale in the site API: %d %s", res.Code, res.Body)
 	}
 	// REST changes the schedule; the row follows. An ordinary file is refused.
 	res = call("POST", "/api/v1/account/spaces/"+w.ownedName+"/configure", "application/json", []byte(`{"path":"docs/forms-guide.md","refresh":"weekday 08:00"}`))

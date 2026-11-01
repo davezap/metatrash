@@ -10,7 +10,6 @@ import (
 	"net/url"
 	pathpkg "path"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -205,44 +204,4 @@ func (h *httpAdapter) serveVirtual(w http.ResponseWriter, r *http.Request, repo 
 	}
 	w.Header().Add("Vary", "Accept")
 	sendText(w, r, kind, []byte(result.File.Text))
-}
-
-// virtualPage is the Markdown a space page shows for a virtual file: what
-// it is, a download link, the picture, and its text.
-func (h *httpAdapter) virtualPage(ctx context.Context, repo *repository, path, fileID string, v VirtualInfo) ([]byte, error) {
-	name := pathpkg.Base(path)
-	link := (&url.URL{Path: name}).EscapedPath()
-	var b strings.Builder
-	b.WriteString("> **Virtual file** · " + v.Type + " · " + humanBytes(v.Size) + " · [Download](" + link + "?raw)")
-	if v.Source != "" {
-		b.WriteString(" · [Source](<" + v.Source + ">)")
-	}
-	if v.Refresh != "" {
-		b.WriteString(" · refreshed every " + v.Refresh)
-		if since, reason := h.service.staleOf(ctx, repo, fileID); !since.IsZero() {
-			b.WriteString("\n>\n> **Stale:** " + escapeInline(staleNote(since, reason)))
-		}
-	}
-	b.WriteString("\n\n")
-	if v.image() {
-		b.WriteString("![" + strings.ReplaceAll(name, "]", `\]`) + "](" + link + ")\n")
-		return []byte(b.String()), nil
-	}
-	var result ReadResult
-	if err := h.service.readVirtual(ctx, repo, path, v, &result); err != nil {
-		return nil, err
-	}
-	switch {
-	case result.File.Text == "":
-		b.WriteString(result.Note + "\n")
-	case !v.textIsContent() || isMarkdownPath(path):
-		b.WriteString(result.File.Text)
-	default:
-		fence := "```"
-		for strings.Contains(result.File.Text, fence) {
-			fence += "`"
-		}
-		b.WriteString(fence + "\n" + strings.TrimSuffix(result.File.Text, "\n") + "\n" + fence + "\n")
-	}
-	return []byte(b.String()), nil
 }
