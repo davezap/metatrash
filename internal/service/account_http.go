@@ -227,8 +227,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		// Sign in with Microsoft posts here and is redirected to Microsoft.
 		formAction += " " + a.microsoft.authority
 	}
-	// script-src 'self' is for login.js (the login form's proof of work) and
-	// passkey.js (the browser's passkey prompt).
+	// script-src 'self' is for theme.js (the saved theme), login.js (the
+	// login form's proof of work) and passkey.js (the browser's passkey prompt).
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
 	// no-referrer makes browsers send Origin: null on HTML form POSTs.
 	w.Header().Set("Referrer-Policy", "same-origin")

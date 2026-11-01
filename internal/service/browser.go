@@ -34,6 +34,15 @@ var loginJS []byte
 //go:embed web/passkey.js
 var passkeyJS []byte
 
+// The sign-in, app connection and GitHub/Microsoft return pages' own look
+// (Slate Viewer's colours), and the script that picks the saved theme for them.
+//
+//go:embed web/signin.css
+var signinCSS []byte
+
+//go:embed web/theme.js
+var themeJS []byte
+
 //go:embed web/slate.js
 var slateJS []byte
 
@@ -73,6 +82,10 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		data, kind = loginJS, "text/javascript; charset=utf-8"
 	case "/assets/passkey.js":
 		data, kind = passkeyJS, "text/javascript; charset=utf-8"
+	case "/assets/signin.css":
+		data, kind = signinCSS, "text/css; charset=utf-8"
+	case "/assets/theme.js":
+		data, kind = themeJS, "text/javascript; charset=utf-8"
 	case "/assets/app-start.js":
 		data, kind = appStartJS, "text/javascript; charset=utf-8"
 	default:

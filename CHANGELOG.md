@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.86.0 - A new sign-in page (2026-11-01)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No new website build is needed.
+
+- **The sign-in page is a page of its own in the app's look**: a card in the middle of the page with Slate Viewer's colours, in the theme you chose in the app (light, dark or paper), or your system's light or dark setting if you haven't chosen one. The site header and the green home-page style are gone from it.
+- **The buttons have moved**: Sign in with a passkey and Sign in with Microsoft come first, as one-tap buttons with their icons, then "or use your email" and the email form with Email me a code as the main button. The authenticator app and recovery codes are under Other ways to sign in at the bottom. After a code is sent, the code box is large and centred, with Send a new code and Try another way below it.
+- **The app connection (OAuth consent) page and the GitHub and Microsoft return pages have the same look**: the app asking to connect in a highlighted box, the spaces in a list with each one's access on the right, and Cancel and Connect at the bottom right (Connect stays the button Enter presses).
+- New assets: `/assets/signin.css` (these pages' styles, with the Viewer's colour tokens) and `/assets/theme.js` (reads the app's saved theme before the page paints). These pages' CSP now allows `script-src 'self'` for it. `style.css` is unchanged and still styles the home, about and plain space pages.
+- Tested against MariaDB (every sign-in, consent and return test passes unchanged in what they check). Browser-checked against a local server: sign-in, the code page, the consent page signed in and signed out, and a Microsoft return, each in light, dark and paper, on desktop and phone width.
+
 ## 0.85.0 - Settings shows counts (2026-11-01)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No server code change: release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1` before committing).

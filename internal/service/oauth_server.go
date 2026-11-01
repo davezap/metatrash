@@ -168,7 +168,8 @@ func (h *httpAdapter) renderOAuth(w http.ResponseWriter, status int, page oauthP
 	if formTarget != "" {
 		formAction += " " + formTarget
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
+	// script-src 'self' is for theme.js (the saved theme).
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
 	var b bytes.Buffer
 	if err := oauthTemplate.Execute(&b, page); err != nil {
 		sendError(w, err)
