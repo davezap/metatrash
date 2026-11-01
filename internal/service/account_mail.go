@@ -24,7 +24,7 @@ func sendConfirmMail(ctx context.Context, cfg accountConfig, password, email, co
 }
 
 func sendEmailChangeMail(ctx context.Context, cfg accountConfig, password, email, code string) error {
-	body := "Your Metatrash code to confirm this email address is: " + code + "\n\nYou asked to make this the email address of your Metatrash account. Enter the code in Settings → Security at " + cfg.Origin + "/app/#settings/security.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not ask for this, ignore this email: nothing changes unless the code is entered.\n"
+	body := "Your Metatrash code to confirm this email address is: " + code + "\n\nYou asked to make this the email address of your Metatrash account. Enter the code in Settings → Security at " + cfg.Origin + "/app/#settings/security/email.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not ask for this, ignore this email: nothing changes unless the code is entered.\n"
 	return sendMail(ctx, cfg, password, email, "Confirm your new Metatrash email address", body)
 }
 
@@ -121,7 +121,7 @@ func emailLoginOffMail(origin string) string {
 // space. Names users chose go only in the body, stripped of controls.
 func transferOfferMail(origin, from, name, address, newAddress string, expires time.Time) string {
 	return mailText(from) + " offered you ownership of their Metatrash space \"" + mailText(name) + "\" (" + mailText(address) + "). You are a member of it.\n\n" +
-		"To accept, sign in at " + origin + "/login and choose Accept ownership at the top of Settings → Spaces (" + origin + "/app/#settings/spaces). The offer expires on " + expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n\n" +
+		"To accept, sign in at " + origin + "/login and choose Take ownership in Settings → Spaces → Invitations (" + origin + "/app/#settings/spaces/invitations). The offer expires on " + expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n\n" +
 		"If you accept:\n" +
 		"- The space's address becomes " + mailText(newAddress) + ". Old links and agents that use " + mailText(address) + " still reach it.\n" +
 		"- It counts toward your private-space allowance.\n" +
@@ -154,7 +154,7 @@ func (m invitationMail) body(origin string) string {
 	return owner + " invited you to their Metatrash space \"" + mailText(m.SpaceName) + "\" (" + mailText(m.SpaceAddress) + ").\n\n" +
 		"To accept:\n" +
 		"1. Sign in at " + origin + "/login with this email address (" + m.Email + "). If you do not have an account yet, signing in creates one.\n" +
-		"2. Open " + origin + "/app/#settings/spaces and choose Accept at the top of Spaces. You do not need to choose a username or create a space.\n\n" +
+		"2. Open Settings → Spaces → Invitations at " + origin + "/app/#settings/spaces/invitations and choose Accept. You do not need to choose a username or create a space.\n\n" +
 		"The invitation expires on " + m.Expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n" +
 		"Members browse the space read-only and can connect their own AI apps to it.\n\n" +
 		"If you were not expecting this, ignore this email. Nothing changes unless you accept.\n"

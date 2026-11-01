@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.84.0 - Settings split into pages (2026-11-01)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release the server together with a new Slate Viewer website build: run `scripts/build-frontends.ps1` before committing.
+
+- **Each Settings tab is split into pages, listed under it in the side** (`#settings/{tab}/{page}`): Spaces (Your spaces, Shared with you, Invitations, with the waiting count on Invitations), Security (Email, Passkeys, Authenticator app, Microsoft accounts, Recovery codes, Signed-in devices), Services (Connected apps, Agents, Actions you pay for, GitHub) and Profile (Username and email, Delete account). Each owned space's settings have three pages along the top: General (readable on the web, time zone), Members (invite, invitations, members) and Ownership (transfer, delete) at `#settings/spaces/{space}/{general|members|ownership}`. On a phone the list shows every page under its tab's heading.
+- **Old addresses still work**: an address without a page, such as `#settings/security` in older emails, opens the tab's first page; `#settings/services/apps/{id}` and `#settings/services/actions/{job}` are unchanged.
+- **Returns go to their own page**: GitHub's return page continues to `#settings/services/github`; linking a Microsoft account, and signing in while a Microsoft account waits in this browser, come back to `#settings/security/microsoft`; the email-change code email points to `#settings/security/email`.
+- **Invitation and ownership offer emails point to Invitations**: they link `#settings/spaces/invitations` and name its buttons (Accept, Take ownership). Your spaces shows a note linking to Invitations while something is waiting.
+- **The app connection (OAuth consent) and GitHub pages link to Settings**: their header link goes to `/app/#settings` instead of the old `/account` address.
+- The dialog's close button sits further from the right edge, clear of the scroll bar.
+- Tested against MariaDB (the GitHub and Microsoft return tests check the new addresses). Browser-checked with the website build against a local server: every page on desktop, phone width, an unknown space, a space by id and by owner/slug, and the phone's back button.
+
 ## 0.83.0 - Space links open in the app (2026-11-01)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No new website build is needed. The last part of step 5 of "Settings dialog and space picker" in the roadmap.

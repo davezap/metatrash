@@ -553,7 +553,7 @@ func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 	// A Microsoft account no one has linked waits in this browser: offer to
 	// link it (Security asks first; it is never linked by itself).
 	if _, ok := h.microsoftWaiting(r); ok {
-		http.Redirect(w, r, h.basePath+"/app/#settings/security", http.StatusSeeOther)
+		http.Redirect(w, r, h.basePath+"/app/#settings/security/microsoft", http.StatusSeeOther)
 		return
 	}
 	// Go back to the page that sent this browser to sign in.

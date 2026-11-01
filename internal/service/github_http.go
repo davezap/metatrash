@@ -130,7 +130,7 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, problem(405, "invalid_request", "Use GET."))
 		return
 	}
-	back := h.basePath + "/app/#settings/services"
+	back := h.basePath + "/app/#settings/services/github"
 	fail := func(status int, title, message string) {
 		h.renderGitHub(w, status, githubPage{Title: title, Message: message, ContinueURL: back})
 	}
@@ -275,7 +275,7 @@ func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pend
 	if len(taken) > 0 {
 		message += " Not connected, because another Metatrash account has it or you reached your limit: " + strings.Join(taken, ", ") + "."
 	}
-	h.renderGitHub(w, 200, githubPage{OK: len(taken) == 0, Title: "GitHub connected", Message: message, ContinueURL: h.basePath + "/app/#settings/services"})
+	h.renderGitHub(w, 200, githubPage{OK: len(taken) == 0, Title: "GitHub connected", Message: message, ContinueURL: h.basePath + "/app/#settings/services/github"})
 }
 
 // beginGitHubConnect remembers a connect (or link) for this browser in a
