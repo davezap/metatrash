@@ -189,6 +189,28 @@ func (h *httpAdapter) serveApp(w http.ResponseWriter, r *http.Request, client st
 	return true
 }
 
+// openInApp sends a browser that opened a /spaces/... or /docs/... page from
+// outside the site (another site, an email or a PDF, a bookmark or the
+// address bar) to the same file in the app, /app/<space>/<file> (0.83.0);
+// file is the rest of the address, still escaped. The plain page stays for
+// everything else, so it is still the no-script and indexable view: moving
+// between plain pages and the app's own no-script "Plain" link (both
+// same-origin), a query (?raw, ?export, ?format=md), a program asking for
+// Markdown, and search engines and other programs, which send no
+// Sec-Fetch-* headers.
+func (h *httpAdapter) openInApp(w http.ResponseWriter, r *http.Request, space, file string) bool {
+	site := r.Header.Get("Sec-Fetch-Site")
+	if r.Method != http.MethodGet || r.URL.RawQuery != "" || r.Header.Get("Sec-Fetch-Mode") != "navigate" ||
+		r.Header.Get("Sec-Fetch-Dest") != "document" || (site != "none" && site != "cross-site" && site != "same-site") ||
+		prefersMarkdown(r.Header.Get("Accept")) || !strings.EqualFold(r.Host, h.publicHost) || appBuildOnce() == nil {
+		return false
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	http.Redirect(w, r, h.basePath+"/app/"+space+"/"+file, http.StatusFound)
+	return true
+}
+
 // appPage is what one page of the app opens.
 type appPage struct {
 	// Space is owner/slug or public, File the path in it ("" or a folder

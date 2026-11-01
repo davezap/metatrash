@@ -90,6 +90,8 @@ func (h *httpAdapter) serveDocs(w http.ResponseWriter, r *http.Request, client s
 	path, hasPath := strings.CutPrefix(r.URL.Path, "/docs/")
 	if r.URL.Path == "/llms.txt" {
 		path, hasPath = "llms.txt", true
+	} else if h.openInApp(w, r, ref, strings.TrimPrefix(strings.TrimPrefix(r.URL.EscapedPath(), "/docs"), "/")) {
+		return true
 	}
 	h.serveSpacePage(w, r, client, owner, slug, path, hasPath, h.basePath+"/docs/", true)
 	return true
@@ -107,6 +109,10 @@ func (h *httpAdapter) serveOwnedBrowser(w http.ResponseWriter, r *http.Request, 
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/spaces/"), "/", 3)
 	if len(parts) < 2 {
 		parts = append(parts, "")
+	}
+	if escaped := append(strings.SplitN(strings.TrimPrefix(r.URL.EscapedPath(), "/spaces/"), "/", 3), ""); len(escaped) >= 3 &&
+		usernamePattern.MatchString(parts[0]) && usernamePattern.MatchString(parts[1]) && h.openInApp(w, r, parts[0]+"/"+parts[1], escaped[2]) {
+		return true
 	}
 	path := ""
 	if len(parts) == 3 {

@@ -304,6 +304,9 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	if path == "/" && h.serveAppHome(w, r, client) {
 		return true
 	}
+	if file, ok := strings.CutPrefix(r.URL.EscapedPath(), "/spaces/public/"); ok && h.openInApp(w, r, "public", file) {
+		return true
+	}
 	if path == "/about" {
 		if r.URL.RawQuery != "" {
 			sendError(w, invalid("Unknown or duplicate query parameter."))

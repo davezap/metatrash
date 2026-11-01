@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.83.0 - Space links open in the app (2026-11-01)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No new website build is needed. The last part of step 5 of "Settings dialog and space picker" in the roadmap.
+
+- **A link to a space's page opens it in the app**: opening `/spaces/{owner}/{slug}/{path}`, `/spaces/public/{path}` or `/docs/{path}` from outside the site (a link on another site, in an email or a PDF, a bookmark or the address bar) now goes to the same file at `/app/{owner}/{slug}/{path}` (`/app/public/…`, and the docs space's own address for `/docs/…`), which then asks a signed-out visitor to sign in as before.
+- **The plain pages stay** for everything else, so they are still the no-script and indexable view: moving between plain pages, the app's no-script "Plain" link, `?raw`, `?export`, `?format=md` and `Accept: text/markdown`, `/llms.txt`, `HEAD`, and search engines and other programs. The rule is the browser's own Fetch Metadata: only a top-level navigation (`Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`) from outside this site (`Sec-Fetch-Site: none`, `cross-site` or `same-site`) is redirected, with 302.
+- Tested: each kind of link and address (escaped paths, a space's bare address, the public space, `/docs` and `/docs/`), and each case that keeps the plain page.
+
 ## 0.82.0 - The old account pages are gone (2026-11-01)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No new website build is needed (the Slate Viewer build from 0.81.0 stays). Step 5 of "Settings dialog and space picker" in the roadmap, except the `/spaces/...` and `/docs/...` redirect, which comes in its own release.
