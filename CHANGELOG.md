@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.85.0 - Settings shows counts (2026-11-01)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No server code change: release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1` before committing).
+
+- **Pages that list things show how many, on the right of the side**: Your spaces, Shared with you, Invitations (highlighted while something waits), Connected apps, Agents, Actions you pay for, GitHub, Passkeys, Microsoft accounts, Recovery codes (how many are left) and Signed-in devices. A part the server doesn't offer shows no number. The counts follow each change.
+- **The tabs are in a new order**: Profile, Spaces, Services, Security. `#settings` on its own opens Profile.
+- Browser-checked against a local server on desktop and phone, as an owner and as someone with only an invitation.
+
 ## 0.84.0 - Settings split into pages (2026-11-01)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release the server together with a new Slate Viewer website build: run `scripts/build-frontends.ps1` before committing.
