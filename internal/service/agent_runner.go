@@ -264,7 +264,7 @@ func (a *agentRunner) mailNotice(ctx context.Context, userID string, j agentJob,
 func actionNoticeMail(origin, space string, j agentJob, why string) string {
 	return "The folder action \"" + mailText(j.Action) + "\" in " + mailText(space) + " did not run for your file " + mailText(j.File) + ".\n\n" +
 		mailText(why) + "\n\n" +
-		"The action's page shows what it does and which model it needs: " + origin + "/account/actions/" + j.ID + "\n" +
+		"The action's page shows what it does and which model it needs: " + origin + "/app/#settings/services/actions/" + j.ID + "\n" +
 		"You get this email at most once a day for each action. Your files in that folder do not run it, and nothing is charged to you, until this is sorted out.\n"
 }
 
@@ -284,7 +284,7 @@ func (a *agentRunner) spaceAddress(ctx context.Context, spaceID string) string {
 
 // optInURL is the page where the person who brought a job's file opts in.
 func (a *agentRunner) optInURL(jobID string) string {
-	return a.origin + "/account/actions/" + jobID
+	return a.origin + "/app/#settings/services/actions/" + jobID
 }
 
 // ownerName is the name History shows for a space's owner.
@@ -761,7 +761,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 			return out, err
 		}
 		if used >= m.dailyCap {
-			j.Status, j.Error = jobSkipped, fmt.Sprintf("skipped: the agent %s used %d tokens today, its daily cap is %d (Your account → Services → Agents)", m.name, used, m.dailyCap)
+			j.Status, j.Error = jobSkipped, fmt.Sprintf("skipped: the agent %s used %d tokens today, its daily cap is %d (Settings → Services → Agents)", m.name, used, m.dailyCap)
 			return out, nil
 		}
 	}
@@ -1050,7 +1050,7 @@ func (a *agentRunner) agentFor(ctx context.Context, payer jobPayer, action *fold
 			}
 		}
 		if !ok {
-			return m, fmt.Sprintf("skipped: the agent %s chose for this action no longer runs %s; they can choose another in Your account → Services → Agents", orSomeone(name), modelName(action.Model)), nil
+			return m, fmt.Sprintf("skipped: the agent %s chose for this action no longer runs %s; they can choose another in Settings → Services → Agents", orSomeone(name), modelName(action.Model)), nil
 		}
 	} else if u, ok = pickAgent(agents, action.Model); !ok {
 		needs := "an agent"
@@ -1061,7 +1061,7 @@ func (a *agentRunner) agentFor(ctx context.Context, payer jobPayer, action *fold
 		if payer.notify {
 			who = "They add"
 		}
-		return m, fmt.Sprintf("skipped: %s has no agent for this action: it needs %s. %s one in Your account → Services → Agents.", orSomeone(name), needs, who), nil
+		return m, fmt.Sprintf("skipped: %s has no agent for this action: it needs %s. %s one in Settings → Services → Agents.", orSomeone(name), needs, who), nil
 	}
 	key, err := openAgentKey(a.settings.seal, u.UserID, u.ID, u.Sealed)
 	if err != nil {

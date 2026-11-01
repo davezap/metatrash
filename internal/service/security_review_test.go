@@ -191,13 +191,13 @@ func TestLastingAccessNotices(t *testing.T) {
 	}
 	session := w.session(w.owner)
 	w.s.accounts.markConfirmed(session.Value, w.owner.ID, time.Now())
-	res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {a.mac("space-visibility:" + session.Value)}, "space": {w.ownedID}, "visibility": {spaceWeb}}, session)
-	if res.Code != 303 {
+	res := accountPost(w, session, "/spaces/"+w.ownedID+"/visibility", jsonOf(map[string]string{"visibility": spaceWeb}))
+	if res.Code != 200 {
 		t.Fatalf("make readable: %d %s", res.Code, res.Body)
 	}
 	expect("A Metatrash space is now readable on the web", "was made readable on the web")
-	res = oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {a.mac("space-visibility:" + session.Value)}, "space": {w.ownedID}, "visibility": {spacePrivate}}, session)
-	if res.Code != 303 {
+	res = accountPost(w, session, "/spaces/"+w.ownedID+"/visibility", jsonOf(map[string]string{"visibility": spacePrivate}))
+	if res.Code != 200 {
 		t.Fatalf("make private: %d", res.Code)
 	}
 	select {

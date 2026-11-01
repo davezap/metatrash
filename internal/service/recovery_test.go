@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"html"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
@@ -39,7 +41,7 @@ func TestRecoveryCodeFormat(t *testing.T) {
 	}
 }
 
-var recoveryCodePattern = regexp.MustCompile(`<li><code>([2-9a-z]{4}-[2-9a-z]{4}-[2-9a-z]{4})</code></li>`)
+var recoveryCodePattern = regexp.MustCompile(`^[2-9a-z]{4}-[2-9a-z]{4}-[2-9a-z]{4}$`)
 
 func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
@@ -62,50 +64,56 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 			t.Fatalf("no notice email (%s)", want)
 		}
 	}
-	csrf := func(path string, session *http.Cookie) string { return a.signInCSRF(path, session.Value) }
-	post := func(path string, form url.Values, session *http.Cookie) *http.Response {
+	post := func(path string, form url.Values, session *http.Cookie) *httptest.ResponseRecorder {
 		t.Helper()
-		form.Set("csrf", csrf(path, session))
-		return oauthCall(w.h, "POST", path, form, session).Result()
+		return securityPost(w, path, form, session)
 	}
-	page := func(session *http.Cookie) string {
-		return html.UnescapeString(legacySecurity(w.h, session).Body.String())
+	// What Settings → Security shows about email sign-in and recovery codes.
+	type view struct {
+		EmailLogin      bool     `json:"emailLogin"`
+		CanTurnOffEmail bool     `json:"canTurnOffEmail"`
+		Recovery        int      `json:"recovery"`
+		NewCodes        []string `json:"newRecoveryCodes"`
+	}
+	page := func(session *http.Cookie) view {
+		var v view
+		_ = json.Unmarshal([]byte(jsonOf(securityState(t, w, session))), &v)
+		return v
 	}
 
 	// A new account: email on, no codes, and nothing to turn it off with.
 	stale := w.session(w.owner)
-	body := page(stale)
-	if !strings.Contains(body, "Email codes <span class=\"pill\">on</span>") || !strings.Contains(body, "first add a passkey or an authenticator app, and create recovery codes") || !strings.Contains(body, "To create recovery codes, confirm it’s you above.") {
-		t.Fatal("initial security page")
+	if v := page(stale); !v.EmailLogin || v.CanTurnOffEmail || v.Recovery != 0 {
+		t.Fatalf("initial security: %+v", v)
 	}
-	if r := post("/account/recovery/create", url.Values{}, stale); r.StatusCode != 403 {
-		t.Fatalf("create without confirming: %d", r.StatusCode)
+	if r := post("/account/recovery/create", url.Values{}, stale); r.Code != 403 {
+		t.Fatalf("create without confirming: %d", r.Code)
 	}
 	session := w.session(w.owner)
 	a.markConfirmed(session.Value, w.owner.ID, time.Now())
-	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, session); r.StatusCode != 409 {
-		t.Fatalf("off with nothing else: %d", r.StatusCode)
+	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, session); r.Code != 409 {
+		t.Fatalf("off with nothing else: %d", r.Code)
 	}
-	if r := post("/account/email-login", url.Values{"email_login": {"maybe"}}, session); r.StatusCode != 400 {
-		t.Fatalf("bad value: %d", r.StatusCode)
+	if r := post("/account/email-login", url.Values{"email_login": {"maybe"}}, session); r.Code != 400 {
+		t.Fatalf("bad value: %d", r.Code)
 	}
 
 	// Create codes: shown once, stored only as digests, with a notice.
 	r := post("/account/recovery/create", url.Values{}, session)
-	if r.StatusCode != 303 || r.Header.Get("Location") != "/account/security" {
-		t.Fatalf("create: %d", r.StatusCode)
+	if r.Code != 200 || noticeOf(r) != "recovery-created" {
+		t.Fatalf("create: %d", r.Code)
 	}
 	expectNotice("a new set of 10 recovery codes")
-	body = page(session)
-	found := recoveryCodePattern.FindAllStringSubmatch(body, -1)
-	if len(found) != recoveryCodeCount || !strings.Contains(body, "shown only this once") {
-		t.Fatalf("codes shown: %d", len(found))
+	codes := page(session).NewCodes
+	if len(codes) != recoveryCodeCount {
+		t.Fatalf("codes shown: %d", len(codes))
 	}
-	codes := make([]string, len(found))
-	for i, m := range found {
-		codes[i] = m[1]
+	for _, code := range codes {
+		if !recoveryCodePattern.MatchString(code) {
+			t.Fatalf("code %q", code)
+		}
 	}
-	if again := page(session); recoveryCodePattern.MatchString(again) || !strings.Contains(again, "10 of 10 left") {
+	if again := page(session); len(again.NewCodes) != 0 || again.Recovery != 10 {
 		t.Fatal("codes shown twice, or no count")
 	}
 	rows, err := w.db.db.QueryContext(ctx, "SELECT code_hash FROM metatrash_recovery_codes WHERE user_id = ?", w.owner.ID)
@@ -130,13 +138,13 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 	// Another session never sees them.
 	other := w.session(w.owner)
 	a.markConfirmed(other.Value, w.owner.ID, time.Now())
-	if recoveryCodePattern.MatchString(page(other)) {
+	if len(page(other).NewCodes) != 0 {
 		t.Fatal("codes shown to another session")
 	}
 
 	// Codes alone are not enough to turn email off; an authenticator app too is.
-	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, session); r.StatusCode != 409 {
-		t.Fatalf("off with codes only: %d", r.StatusCode)
+	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, session); r.Code != 409 {
+		t.Fatalf("off with codes only: %d", r.Code)
 	}
 	secret := make([]byte, totpSecretBytes)
 	_, _ = rand.Read(secret)
@@ -147,19 +155,19 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 	if err := w.db.enableTOTP(ctx, w.owner.ID, time.Now().Unix()/totpPeriod-10, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(page(session), `name="email_login" value="off"`) {
+	if !page(session).CanTurnOffEmail {
 		t.Fatal("turn off not offered")
 	}
-	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, stale); r.StatusCode != 403 {
-		t.Fatalf("off without confirming: %d", r.StatusCode)
+	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, stale); r.Code != 403 {
+		t.Fatalf("off without confirming: %d", r.Code)
 	}
 	r = post("/account/email-login", url.Values{"email_login": {"off"}}, session)
-	if r.StatusCode != 303 || noticeOf(r) != "email-login-off" {
-		t.Fatalf("off: %d", r.StatusCode)
+	if r.Code != 200 || noticeOf(r) != "email-login-off" {
+		t.Fatalf("off: %d", r.Code)
 	}
 	expectNotice("A sign-in method was removed on your Metatrash account: sign-in with a code emailed to this address")
-	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, session); r.StatusCode != 303 || noticeOf(r) != "" {
-		t.Fatalf("off again: %d", r.StatusCode)
+	if r := post("/account/email-login", url.Values{"email_login": {"off"}}, session); r.Code != 200 || noticeOf(r) != "" {
+		t.Fatalf("off again: %d", r.Code)
 	}
 	// Turning email sign-in off signs out the account's other sessions.
 	if _, ok, _ := a.currentUser(ctx, stale.Value); ok {
@@ -169,18 +177,17 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 		t.Fatal("this session signed out")
 	}
 	stale = w.session(w.owner)
-	body = page(stale)
-	if !strings.Contains(body, "Email codes <span class=\"pill\">off</span>") || strings.Contains(body, "/account/confirm/send") || !strings.Contains(body, "Confirm with your authenticator app.") {
-		t.Fatal("security page with email off")
+	if ways := confirmWays(t, w, stale); page(stale).EmailLogin || ways["email"] == true || ways["totp"] != true {
+		t.Fatal("security with email off")
 	}
 
 	// With email off: no code by email, no confirming by email, and the
 	// authenticator app cannot be removed.
-	if r := post("/account/confirm/send", url.Values{}, stale); r.StatusCode != 403 {
-		t.Fatalf("confirm by email: %d", r.StatusCode)
+	if r := post("/account/confirm/send", url.Values{}, stale); r.Code != 403 {
+		t.Fatalf("confirm by email: %d", r.Code)
 	}
-	if r := post("/account/totp/remove", url.Values{}, session); r.StatusCode != 409 {
-		t.Fatalf("removed the last method: %d", r.StatusCode)
+	if r := post("/account/totp/remove", url.Values{}, session); r.Code != 409 {
+		t.Fatalf("removed the last method: %d", r.Code)
 	}
 	if _, ok, _ := w.db.totp(ctx, w.owner.ID); !ok {
 		t.Fatal("authenticator app removed")
@@ -267,7 +274,7 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 	if r := signIn(w.owner.Email, codes[3]); r.StatusCode != 400 {
 		t.Fatalf("code used twice: %d", r.StatusCode)
 	}
-	if !strings.Contains(page(signedIn), "9 of 10 left") {
+	if page(signedIn).Recovery != 9 {
 		t.Fatal("count after use")
 	}
 	// Five attempts per address per 15 minutes.
@@ -280,11 +287,11 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 	}
 
 	// New codes replace the old ones.
-	if r := post("/account/recovery/create", url.Values{}, signedIn); r.StatusCode != 303 {
-		t.Fatalf("recreate: %d", r.StatusCode)
+	if r := post("/account/recovery/create", url.Values{}, signedIn); r.Code != 200 {
+		t.Fatalf("recreate: %d", r.Code)
 	}
 	expectNotice("any older codes no longer work")
-	if newCodes := recoveryCodePattern.FindAllStringSubmatch(page(signedIn), -1); len(newCodes) != recoveryCodeCount {
+	if len(page(signedIn).NewCodes) != recoveryCodeCount {
 		t.Fatal("new codes not shown")
 	}
 	login = responseCookie(oauthCall(w.h, "GET", "/login", nil), loginCookie)
@@ -294,21 +301,12 @@ func TestRecoveryCodesAndEmailSwitchAgainstDatabase(t *testing.T) {
 
 	// Turning email back on lets the last method go again.
 	r = post("/account/email-login", url.Values{"email_login": {"on"}}, signedIn)
-	if r.StatusCode != 303 || noticeOf(r) != "email-login-on" {
-		t.Fatalf("on: %d", r.StatusCode)
+	if r.Code != 200 || noticeOf(r) != "email-login-on" {
+		t.Fatalf("on: %d", r.Code)
 	}
 	expectNotice("A sign-in method was added on your Metatrash account: sign-in with a code emailed to this address")
-	if r := post("/account/totp/remove", url.Values{}, signedIn); r.StatusCode != 303 {
-		t.Fatalf("remove with email on: %d", r.StatusCode)
+	if r := post("/account/totp/remove", url.Values{}, signedIn); r.Code != 200 {
+		t.Fatalf("remove with email on: %d", r.Code)
 	}
 	expectNotice("authenticator app")
-}
-
-func noticeOf(r *http.Response) string {
-	for _, c := range r.Cookies() {
-		if c.Name == noticeCookie {
-			return c.Value
-		}
-	}
-	return ""
 }

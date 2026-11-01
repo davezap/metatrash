@@ -19,12 +19,12 @@ func sendLoginMail(ctx context.Context, cfg accountConfig, password, email, code
 }
 
 func sendConfirmMail(ctx context.Context, cfg accountConfig, password, email, code string) error {
-	body := "Your Metatrash confirmation code is: " + code + "\n\nYou asked to confirm it’s you before changing how you sign in. Enter it on Your account at " + cfg.Origin + "/account/security.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not request it, someone may be signed in to your account: sign in yourself and review your sign-in methods.\n"
+	body := "Your Metatrash confirmation code is: " + code + "\n\nYou asked to confirm it’s you before changing how you sign in. Enter it in Settings → Security at " + cfg.Origin + "/app/#settings/security.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not request it, someone may be signed in to your account: sign in yourself and review your sign-in methods.\n"
 	return sendMail(ctx, cfg, password, email, "Your Metatrash confirmation code", body)
 }
 
 func sendEmailChangeMail(ctx context.Context, cfg accountConfig, password, email, code string) error {
-	body := "Your Metatrash code to confirm this email address is: " + code + "\n\nYou asked to make this the email address of your Metatrash account. Enter the code on Security at " + cfg.Origin + "/account/security.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not ask for this, ignore this email: nothing changes unless the code is entered.\n"
+	body := "Your Metatrash code to confirm this email address is: " + code + "\n\nYou asked to make this the email address of your Metatrash account. Enter the code in Settings → Security at " + cfg.Origin + "/app/#settings/security.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not ask for this, ignore this email: nothing changes unless the code is entered.\n"
 	return sendMail(ctx, cfg, password, email, "Confirm your new Metatrash email address", body)
 }
 
@@ -58,7 +58,7 @@ func signInMethodMail(origin, change, name string, when time.Time) string {
 	return "A sign-in method was " + change + " on your Metatrash account: " + mailText(name) + "\n" +
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
 		"If this was you, there is nothing to do.\n" +
-		"If it was not, sign in at " + origin + "/login, review Sign-in methods on Your account and remove anything you do not recognise.\n"
+		"If it was not, sign in at " + origin + "/login, review Settings → Security at " + origin + "/app/#settings/security and remove anything you do not recognise.\n"
 }
 
 // recoveryUsedMail is the notice sent when a recovery code signs in.
@@ -69,7 +69,7 @@ func recoveryUsedMail(origin string, left int, when time.Time) string {
 	}
 	return "A recovery code was used to sign in to your Metatrash account.\n" +
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n" + count + "\n\n" +
-		"If this was you, check your passkeys and authenticator app on Security at " + origin + "/account/security, and create new recovery codes there if you are running low.\n" +
+		"If this was you, check your passkeys and authenticator app in Settings → Security at " + origin + "/app/#settings/security, and create new recovery codes there if you are running low.\n" +
 		"If it was not, someone has one of your recovery codes: sign in, create new recovery codes (the old ones then stop working) and review your sign-in methods.\n"
 }
 
@@ -79,7 +79,7 @@ func totpGuessesMail(origin string, when time.Time) string {
 	return "Several wrong authenticator-app codes were entered for your Metatrash address at the sign-in page.\n" +
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
 		"Signing in with the authenticator app is paused for this address until 00:00 UTC. Passkeys, emailed codes (if you use them) and recovery codes still work.\n" +
-		"If this was you, there is nothing to do. If it was not, someone knows your address and is guessing codes: they have not signed in. You can check your sign-in methods and signed-in devices on Security at " + origin + "/account/security.\n"
+		"If this was you, there is nothing to do. If it was not, someone knows your address and is guessing codes: they have not signed in. You can check your sign-in methods and signed-in devices in Settings → Security at " + origin + "/app/#settings/security.\n"
 }
 
 // spaceWebMail tells an owner that one of their spaces was made readable by
@@ -87,7 +87,7 @@ func totpGuessesMail(origin string, when time.Time) string {
 func spaceWebMail(origin, what string, when time.Time) string {
 	return what + " was made readable on the web: anyone with its address can read it, without signing in.\n" +
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
-		"If this was you, there is nothing to do. If it was not, make it private again under Spaces at " + origin + "/account, then end the other devices on Security at " + origin + "/account/security.\n"
+		"If this was you, there is nothing to do. If it was not, make it private again in Settings → Spaces at " + origin + "/app/#settings/spaces, then end the other devices in Settings → Security at " + origin + "/app/#settings/security.\n"
 }
 
 // appConnectedMail tells an account that an app (Claude, ChatGPT, Metatrash
@@ -106,7 +106,7 @@ func appConnectedMail(origin, app, host string, write bool, spaces int, when tim
 	}
 	return mailText(app) + " (" + mailText(host) + ") was connected to your Metatrash account and can " + access + " " + count + ".\n" +
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
-		"If this was you, there is nothing to do. If it was not, revoke it under Services at " + origin + "/account/services and end the other devices on Security at " + origin + "/account/security.\n"
+		"If this was you, there is nothing to do. If it was not, revoke it in Settings → Services at " + origin + "/app/#settings/services and end the other devices in Settings → Security at " + origin + "/app/#settings/security.\n"
 }
 
 // emailLoginOffMail is sent instead of a login code when the account has
@@ -121,7 +121,7 @@ func emailLoginOffMail(origin string) string {
 // space. Names users chose go only in the body, stripped of controls.
 func transferOfferMail(origin, from, name, address, newAddress string, expires time.Time) string {
 	return mailText(from) + " offered you ownership of their Metatrash space \"" + mailText(name) + "\" (" + mailText(address) + "). You are a member of it.\n\n" +
-		"To accept, sign in at " + origin + "/login and choose Accept ownership at the top of Spaces on Your account. The offer expires on " + expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n\n" +
+		"To accept, sign in at " + origin + "/login and choose Accept ownership at the top of Settings → Spaces (" + origin + "/app/#settings/spaces). The offer expires on " + expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n\n" +
 		"If you accept:\n" +
 		"- The space's address becomes " + mailText(newAddress) + ". Old links and agents that use " + mailText(address) + " still reach it.\n" +
 		"- It counts toward your private-space allowance.\n" +
@@ -136,7 +136,7 @@ func transferAcceptedMail(origin, to, name, address, newAddress string, when tim
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
 		"Its address is now " + mailText(newAddress) + ". Links and agents that use " + mailText(address) + " still reach it, so that address stays reserved for it.\n" +
 		"You are now a member: you can still browse it, and your connected apps can still read and write it unless the new owner changes that.\n\n" +
-		"See your spaces at " + origin + "/account.\n"
+		"See your spaces in Settings → Spaces at " + origin + "/app/#settings/spaces.\n"
 }
 
 // invitationMail is the invitation email. The subject is fixed ASCII; owner
@@ -154,7 +154,7 @@ func (m invitationMail) body(origin string) string {
 	return owner + " invited you to their Metatrash space \"" + mailText(m.SpaceName) + "\" (" + mailText(m.SpaceAddress) + ").\n\n" +
 		"To accept:\n" +
 		"1. Sign in at " + origin + "/login with this email address (" + m.Email + "). If you do not have an account yet, signing in creates one.\n" +
-		"2. Open " + origin + "/account and choose Accept invitation at the top of Spaces. You do not need to choose a username or create a space.\n\n" +
+		"2. Open " + origin + "/app/#settings/spaces and choose Accept at the top of Spaces. You do not need to choose a username or create a space.\n\n" +
 		"The invitation expires on " + m.Expires.UTC().Format("2 January 2006 15:04 UTC") + ".\n" +
 		"Members browse the space read-only and can connect their own AI apps to it.\n\n" +
 		"If you were not expecting this, ignore this email. Nothing changes unless you accept.\n"
@@ -253,14 +253,14 @@ func accountDeletionRequestedMail(origin string, when, purge time.Time) string {
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
 		"You have been signed out everywhere and your connected apps were disconnected. Your account will be deleted for good on " + purge.UTC().Format("2 January 2006") + ".\n\n" +
 		"To keep it, sign in again before then at " + origin + "/login. Signing in cancels the deletion.\n" +
-		"If you did not ask for this, sign in now to cancel it, then review Sign-in methods on Your account.\n"
+		"If you did not ask for this, sign in now to cancel it, then review Settings → Security at " + origin + "/app/#settings/security.\n"
 }
 
 // accountDeletionCancelledMail tells the account that signing in kept it.
 func accountDeletionCancelledMail(origin string, when time.Time) string {
 	return "Your Metatrash account will not be deleted: you signed in after asking to delete it, which cancels the deletion.\n" +
 		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
-		"Your connected apps were disconnected when you asked, so connect them again if you want them. To delete the account after all, use Delete account on " + origin + "/account/profile.\n"
+		"Your connected apps were disconnected when you asked, so connect them again if you want them. To delete the account after all, use Delete account in Settings → Profile at " + origin + "/app/#settings/profile.\n"
 }
 
 // accountDeletedMail is the last message to a deleted account's address.

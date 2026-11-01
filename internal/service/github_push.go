@@ -415,7 +415,7 @@ func (s *Service) push(ctx context.Context, r *repository, space, folderArg, mes
 		}
 	}
 	if !usernamePattern.MatchString(author.Username) {
-		return nil, problem(403, "forbidden", "Pushes name you by your public Metatrash username; choose one on Your account, then push again.")
+		return nil, problem(403, "forbidden", "Pushes name you by your public Metatrash username; choose one in Settings → Profile, then push again.")
 	}
 	// The tree GitHub holds now, and the one it should hold after the push.
 	baseTree := p.base.githubTree()

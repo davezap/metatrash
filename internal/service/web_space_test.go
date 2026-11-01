@@ -48,34 +48,29 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/spaces/"+w.owner.Username+"/no-such-space/", nil); res.Code != 303 {
 		t.Fatalf("signed out, missing: %d", res.Code)
 	}
-	// Only the owner may change it, with the form's token.
-	ownerCSRF := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
-	strangerCSRF := w.s.accounts.mac("space-visibility:" + strangerSession.Value)
+	// Only the owner may change it, with the session's token.
 	// Opening it to everyone needs a recent sign-in or confirmation (0.79.0).
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 403 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"web"}`); res.Code != 403 {
 		t.Fatalf("make web without confirming: %d", res.Code)
 	}
 	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
 	w.s.accounts.markConfirmed(strangerSession.Value, stranger.ID, time.Now())
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {strangerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, strangerSession); res.Code != 404 {
+	if res := accountPost(w, strangerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"web"}`); res.Code != 404 {
 		t.Fatalf("stranger toggles: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {strangerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 403 {
+	if res := siteCall(w, "POST", "/api/v1/site/account/spaces/"+w.ownedID+"/visibility", `{"visibility":"web"}`, ownerSession, "wrong"); res.Code != 403 {
 		t.Fatalf("wrong token: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"public"}}, ownerSession); res.Code != 400 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"public"}`); res.Code != 400 {
 		t.Fatalf("bad value: %d", res.Code)
 	}
 	// A member of a space cannot make it public either: only its owner.
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.joinID}, "visibility": {"web"}}, ownerSession); res.Code != 404 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.joinID+"/visibility", `{"visibility":"web"}`); res.Code != 404 {
 		t.Fatalf("member toggles: %d", res.Code)
 	}
-	res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession)
-	if res.Code != 303 || res.Header().Get("Location") != "/account" {
+	res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"web"}`)
+	if res.Code != 200 || siteJSON(t, res)["notice"] != accountNotices["space-web"] {
 		t.Fatalf("make web: %d %s", res.Code, res.Body)
-	}
-	if notice := responseCookie(res, w.h.noticeCookieName()); notice == nil || notice.Value != "space-web" {
-		t.Fatal("no notice after making the space web-readable")
 	}
 	if body := siteCall(w, "GET", "/api/v1/site/account", "", ownerSession, "").Body.String(); !strings.Contains(body, `"web":true`) {
 		t.Fatalf("Settings after making the space web-readable: %s", body)
@@ -128,7 +123,7 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 	}
 
 	// Private again.
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"private"}}, ownerSession); res.Code != 303 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"private"}`); res.Code != 200 {
 		t.Fatalf("make private: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", page, nil); res.Code != 303 {
@@ -147,7 +142,7 @@ func writePrivateReadme(w *oauthWorld) {
 	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "README.md", "text": "# Private space\n", "ifInState": state}, "")
 }
 
-// Your account offers each space as a zip (0.65.0): the space's top folder
+// Settings offers each space as a zip (0.65.0): the space's top folder
 // with ?export, for its owner and members only, even when it is readable on
 // the web.
 func TestDownloadSpaceAgainstDatabase(t *testing.T) {
@@ -190,9 +185,8 @@ func TestDownloadSpaceAgainstDatabase(t *testing.T) {
 	}
 
 	// Readable on the web: visitors still cannot download it.
-	csrf := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
 	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {csrf}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 303 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"web"}`); res.Code != 200 {
 		t.Fatalf("make web: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", download, nil, strangerSession); res.Code != 404 {
@@ -262,9 +256,8 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
 	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
 	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "legal/terms.md", "text": "# Terms\n", "ifInState": state}, "")
-	ownerCSRF := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
 	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 303 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"web"}`); res.Code != 200 {
 		t.Fatalf("make web: %d", res.Code)
 	}
 	// Search engines: all of /docs/; under /spaces/ only the top folder.
@@ -305,7 +298,7 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 		t.Fatalf("space page: %d", res.Code)
 	}
 
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"private"}}, ownerSession); res.Code != 303 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"private"}`); res.Code != 200 {
 		t.Fatalf("make private: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", "/docs/README.md", nil); res.Code != 404 {

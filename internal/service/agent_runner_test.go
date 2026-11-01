@@ -662,7 +662,7 @@ func TestRunnerChoosesAgent(t *testing.T) {
 	if jobs[0].AgentID != w.agents[0].ID || jobs[1].AgentID != claude.ID || jobs[2].Status != jobSkipped || !strings.Contains(jobs[2].Error, "needs a MiniMax MiniMax-M3.1-Flash agent") {
 		t.Errorf("jobs %+v", jobs)
 	}
-	if log := w.read("hr/runner.md"); !strings.Contains(log, "· claude-sonnet-5-5") || !strings.Contains(log, "Your account → Services → Agents") {
+	if log := w.read("hr/runner.md"); !strings.Contains(log, "· claude-sonnet-5-5") || !strings.Contains(log, "Settings → Services → Agents") {
 		t.Errorf("runner.md:\n%s", log)
 	}
 	// Over the agent's daily cap: skipped before any call.
@@ -803,7 +803,7 @@ func TestRunnerContributorPays(t *testing.T) {
 	w.write("hr/.metatrash.json", `{"actions":[{"name":"tidy","on":"in/*.md","do":"Tidy.","model":"minimax/MiniMax-M3","pays":"contributor"}]}`)
 	w.writeAs(aliceID, "hr/in/a.md", "a\n")
 	skipped := w.job(1, "hr/in/a.md")
-	if skipped.Status != jobSkipped || skipped.Contributor != aliceID || !strings.Contains(skipped.Error, "alice has not opted in") || !strings.Contains(skipped.Error, "/account/actions/"+skipped.ID) || len(w.models) != 0 {
+	if skipped.Status != jobSkipped || skipped.Contributor != aliceID || !strings.Contains(skipped.Error, "alice has not opted in") || !strings.Contains(skipped.Error, "/app/#settings/services/actions/"+skipped.ID) || len(w.models) != 0 {
 		t.Fatalf("not opted in: %+v", skipped)
 	}
 	if len(w.notices) != 1 || !strings.HasPrefix(w.notices[0], "alice: skipped: whoever brings a file pays") {

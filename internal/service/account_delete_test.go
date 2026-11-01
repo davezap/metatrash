@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -63,7 +62,7 @@ func TestDeleteAccountAgainstDatabase(t *testing.T) {
 	session := w.session(carol)
 	remove := func(typed string, session *http.Cookie) *http.Response {
 		t.Helper()
-		return oauthCall(w.h, "POST", "/account/delete", url.Values{"csrf": {w.s.accounts.mac("account-delete:" + session.Value)}, "email": {typed}}, session).Result()
+		return accountPost(w, session, "/delete", jsonOf(map[string]string{"email": typed})).Result()
 	}
 	if res := remove(carol.Email, session); res.StatusCode != 403 {
 		t.Fatalf("delete without confirmation: %d", res.StatusCode)
@@ -78,13 +77,13 @@ func TestDeleteAccountAgainstDatabase(t *testing.T) {
 	if res := remove("someone@example.com", session); res.StatusCode != 400 {
 		t.Fatalf("wrong email: %d", res.StatusCode)
 	}
-	if res := oauthCall(w.h, "POST", "/account/delete", url.Values{"csrf": {w.s.accounts.mac("space-delete:" + session.Value)}, "email": {carol.Email}}, session); res.Code != 403 {
-		t.Fatalf("another form's token: %d", res.Code)
+	if res := siteCall(w, "POST", "/api/v1/site/account/delete", jsonOf(map[string]string{"email": carol.Email}), session, "wrong"); res.Code != 403 {
+		t.Fatalf("a wrong token: %d", res.Code)
 	}
 	other := w.session(carol)
 	res := remove("  "+strings.ToUpper(carol.Email)+" ", session)
-	if res.StatusCode != 303 || res.Header.Get("Location") != "/login" {
-		t.Fatalf("delete: %d %s", res.StatusCode, res.Header.Get("Location"))
+	if res.StatusCode != 200 {
+		t.Fatalf("delete: %d", res.StatusCode)
 	}
 	cleared := false
 	for _, c := range res.Cookies() {
@@ -133,7 +132,7 @@ func TestDeleteAccountAgainstDatabase(t *testing.T) {
 	// Asked again, then purged after 30 days.
 	session = w.session(carol)
 	w.s.accounts.markConfirmed(session.Value, carol.ID, time.Now())
-	if res := remove(carol.Email, session); res.StatusCode != 303 {
+	if res := remove(carol.Email, session); res.StatusCode != 200 {
 		t.Fatalf("delete again: %d", res.StatusCode)
 	}
 	w.s.purgeDeletedAccounts(ctx, time.Now().Add(AccountDeletionGrace-time.Hour))

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.82.0 - The old account pages are gone (2026-11-01)
+
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. No new website build is needed (the Slate Viewer build from 0.81.0 stays). Step 5 of "Settings dialog and space picker" in the roadmap, except the `/spaces/...` and `/docs/...` redirect, which comes in its own release.
+
+- **The old account page and its forms are deleted**: `web/account.html`, `web/account.js` (`/assets/account.js` is gone) and every `/account/...` form route (username, spaces, sharing, invitations, ownership offers, deleting a space or the account, connected apps, agents, opt-ins, GitHub and Security). Everything is in the Settings dialog and its `/api/v1/site/account/...` routes. The old addresses (`/account`, `/account/security`, `/account/services`, `/account/apps/{id}`, `/account/actions/{job}` and the rest) still redirect into the dialog, and to sign-in first when signed out; a post to an old form route now gets 404.
+- **The sign-in page has its own template**, `web/login.html`, made from the signed-out half of the old account page, with only `login.js` and `passkey.js`. Its CSP's `form-action` allows only this site and Microsoft's sign-in. `/logout` stays a form. After signing in you go to `/app/#settings/spaces` unless you were on your way to a page.
+- **Emails, notices and messages say Settings**: the links in sign-in change, account deletion, web-readable space, connected app, ownership offer and invitation emails go to `/app/#settings/{spaces|security|services|profile}`; a skipped action links `/app/#settings/services/actions/{job}`; GitHub's return page says "Back to Settings"; and the messages that said "Your account" (choosing a username, GitHub connections, passkeys, agents) name the Settings tab.
+- **Confirm it's you has one route**, `/api/v1/site/account/confirm/{send|verify|totp|passkey}`: the copies in the Security change function are removed, and `security/confirm/...` no longer exists.
+- `passkey.js` keeps only sign-in (with conditional UI and forgetting a passkey the site does not know); adding a passkey is the Settings dialog's.
+- Tested against MariaDB: the tests for the old forms now post the JSON the dialog sends and read `GET /api/v1/site/account/security` and `/confirm` instead of the old page (passkeys, the authenticator app, recovery codes, email sign-in, email change, devices, Microsoft, ownership transfer, GitHub, connected apps, account and space deletion), and a test checks that the old page, `account.js` and the old form routes are gone. Browser-checked against a local server: the sign-in page and Settings → Security on desktop and phone, and the old links' redirects signed in and out.
+
 ## 0.81.0 - Security in the Settings dialog (2026-10-31)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release the server together with a new Slate Viewer website build: run `scripts/build-frontends.ps1` before committing. Step 4 of "Settings dialog and space picker" in the roadmap.

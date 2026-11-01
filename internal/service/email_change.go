@@ -10,7 +10,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-// Change email address (0.26.0), on Your account → Security.
+// Change email address (0.26.0), in Settings → Security.
 //
 // Starting a change needs a session that signed in or confirmed within
 // stepUpWindow. A six-digit code goes to the new address and waits under the
@@ -45,7 +45,7 @@ func (a *accounts) pendingEmailChange(session string, now time.Time) string {
 	return c.Email
 }
 
-// startEmailChange emails a code to the new address (POST /account/email/change).
+// startEmailChange emails a code to the new address (Security route email/change).
 func (h *httpAdapter) startEmailChange(ctx context.Context, session, client string, user userAccount, raw string, now time.Time) error {
 	a := h.service.accounts
 	if fresh, _ := a.sessionFresh(session, now); !fresh {
@@ -83,7 +83,7 @@ func (h *httpAdapter) startEmailChange(ctx context.Context, session, client stri
 }
 
 // finishEmailChange checks the code and moves the account to the new address
-// (POST /account/email/verify). It returns the address it moved to.
+// (Security route email/verify). It returns the address it moved to.
 func (h *httpAdapter) finishEmailChange(ctx context.Context, session string, user userAccount, code string, now time.Time) (string, error) {
 	a, db := h.service.accounts, h.service.ownedDB
 	if db == nil {

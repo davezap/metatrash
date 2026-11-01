@@ -704,7 +704,7 @@ func (h *httpAdapter) finishMicrosoftLink(w http.ResponseWriter, r *http.Request
 // browser arrived from Microsoft, so it did not send the Strict cookies.
 func (h *httpAdapter) continueTo(w http.ResponseWriter, r *http.Request, target string) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
-	h.renderAccount(w, r, 200, accountPage{ContinueURL: target})
+	h.renderLogin(w, r, 200, loginView{ContinueURL: target})
 }
 
 // confirmMicrosoftLink links the account waiting in this browser to the

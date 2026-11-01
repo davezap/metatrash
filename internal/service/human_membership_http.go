@@ -3,9 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -135,80 +133,6 @@ func (h *httpAdapter) humanSharing(ctx context.Context, user userAccount, spaceI
 		return nil, err
 	}
 	return page, nil
-}
-
-// Called only after the account handler's Host, Origin, method, form and
-// action-specific session CSRF checks. Actor IDs never come from submitted data.
-func (h *httpAdapter) submitHumanMembership(w http.ResponseWriter, r *http.Request, session, action string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	spaceID := r.PostForm.Get("space")
-	if !idPattern.MatchString(spaceID) {
-		sendError(w, missing())
-		return
-	}
-	db := h.service.ownedDB
-	if db == nil {
-		sendError(w, problem(503, "unavailable", "Sharing is temporarily unavailable."))
-		return
-	}
-	notice := ""
-	err = h.service.rates.take(allowance{"membership:user:" + user.ID, 30, 600})
-	if err == nil {
-		switch action {
-		case "invite":
-			var invitationID string
-			invitationID, err = db.inviteHuman(r.Context(), user.ID, spaceID, r.PostForm.Get("email"))
-			if err == nil {
-				notice = h.emailInvitation(r.Context(), user, spaceID, invitationID)
-			}
-		case "cancel":
-			err = db.cancelHumanInvitation(r.Context(), user.ID, spaceID, r.PostForm.Get("invitation"))
-		case "accept":
-			err = db.acceptHumanInvitation(r.Context(), user.ID, spaceID, r.PostForm.Get("invitation"))
-		case "agent":
-			err = db.setMemberAgentPermission(r.Context(), user.ID, spaceID, r.PostForm.Get("member"), r.PostForm.Get("permission"))
-		default:
-			err = db.manageHumanMember(r.Context(), user.ID, spaceID, r.PostForm.Get("member"), action)
-		}
-	}
-	if err != nil {
-		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "Sharing could not be updated. Reload before retrying."}
-		status := http.StatusServiceUnavailable
-		var p *Error
-		if errors.As(err, &p) {
-			status, page.Message = p.Status, p.Message
-			if p.RetryAfterSeconds > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-			}
-		}
-		if action != "accept" {
-			sharing, loadErr := h.humanSharing(r.Context(), user, spaceID)
-			if loadErr != nil {
-				sendError(w, loadErr)
-				return
-			}
-			page.Sharing = sharing
-		}
-		h.renderAccount(w, r, status, page)
-		return
-	}
-	if notice != "" {
-		accountCookie(w, h.noticeCookieName(), notice, 60)
-	}
-	target := h.basePath + "/account/shared"
-	if action != "accept" {
-		target = h.basePath + "/account/sharing/" + spaceID
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // Notices are fixed keys carried across the post-redirect in a short-lived cookie;

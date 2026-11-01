@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"html/template"
-	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -22,56 +21,26 @@ const sessionCookie = "__Host-metatrash-session"
 const noticeCookie = "__Host-metatrash-notice"
 const returnCookie = "__Host-metatrash-return"
 
-//go:embed web/account.html
-var accountHTML string
-var accountTemplate = template.Must(template.New("account").Parse(accountHTML))
+// The sign-in page (/login). Everything else about an account is in the site
+// app's Settings dialog (0.79.0-0.81.0); the old /account pages only redirect
+// there (0.82.0).
+//
+//go:embed web/login.html
+var loginHTML string
+var loginTemplate = template.Must(template.New("login").Parse(loginHTML))
 
-type accountPage struct {
-	// Section is the account page shown: spaces, security, services or
-	// profile (accountSection). Filter is which spaces Spaces lists: all,
-	// mine or shared (accountSpaceFilters).
-	Section                 string
-	Filter                  string
-	InvitationCount         int
-	OAuthEnabled            bool
-	AppConnectURL, AppsCSRF string
-	AppSpacesCSRF           string
-	Apps                    []connectedApp
-	AppSpaces               *appSpacesPage
-	AppsUnavailable         bool
-	GitHubEnabled           bool
-	GitHubConnectCSRF       string
-	GitHubLinkCSRF          string
-	GitHubDisconnectCSRF    string
-	GitHub                  []githubInstallationView
-	GitHubUnavailable       bool
-	Sharing                 *humanSharingPage
-	Invitations             []humanInvitation
-	TransferOffers          []spaceTransferOffer
-	TransferCSRF            map[string]string
-	Joined                  []joinedHumanSpace
-	MembershipUnavailable   bool
-	MembershipCSRF          map[string]string
-	SpaceCSRF, SpaceName    string
-	VisibilityCSRF          string
-	DeleteCSRF              string
-	// AccountDeleteCSRF guards Delete account on Profile; AccountDeleteFresh
-	// says the session signed in or confirmed recently enough to use it.
-	AccountDeleteCSRF  string
-	AccountDeleteFresh bool
-	// TimezoneCSRF guards each space's time zone form; DefaultTimezone is
-	// the zone of spaces without their own.
-	TimezoneCSRF, DefaultTimezone string
-	SpaceNameError                string
-	Spaces                        []accountSpace
-	SpacesUnavailable             bool
-	CanCreate                     bool
-	BasePath                      string
-	Legal                         bool
-	Disabled, Verify, SignedIn    bool
-	CSRF, Email, Message          string
-	Pow                           string // login proof-of-work challenge
-	LoginPasskey                  string // WebAuthn request options for passkey sign-in
+type loginView struct {
+	BasePath string
+	Legal    bool
+	Disabled bool
+	Verify   bool
+	CSRF     string
+	Email    string
+	Message  string
+	Pow      string // login proof-of-work challenge
+	PowBits  int
+	// LoginPasskey is WebAuthn request options for passkey sign-in.
+	LoginPasskey string
 	// ForgetPasskey is a passkey (credential ID, base64url) the site has no
 	// record of, which the page asks the browser to stop offering
 	// (signalUnknownCredential) on the relying party PasskeyRPID.
@@ -88,37 +57,13 @@ type accountPage struct {
 	// after it failed.
 	RecoveryOpen  bool
 	RecoveryEmail string
-	SignIn        *signInPage
-	PowBits       int
 	// ContinueURL makes the page reload itself from this site: a link from
 	// another site arrives without the SameSite=Strict session cookie.
 	ContinueURL string
 	// SignedInAs is the account this browser is signed in to while a code
 	// for another address waits: entering it switches accounts.
-	SignedInAs             string
-	Notice                 string
-	UsernameCSRF, Username string
-	User                   userAccount
-	// Agents is the Agents part of Services, while folder actions are on;
-	// AgentForm refills the Add agent form after it failed.
-	Agents    *agentsSection
-	AgentForm *agentForm
-	// ActionOffer is the page of an action that skipped the user's file.
-	ActionOffer *actionOffer
-}
-
-// SpaceTotal counts the spaces Spaces lists under All: owned and joined.
-func (p accountPage) SpaceTotal() int { return len(p.Spaces) + len(p.Joined) }
-
-// AnyWeb reports whether any of the user's spaces is readable on the web, so
-// Spaces explains public spaces once instead of on every row.
-func (p accountPage) AnyWeb() bool {
-	for _, space := range p.Spaces {
-		if space.Web && space.URL != "" {
-			return true
-		}
-	}
-	return false
+	SignedInAs string
+	Notice     string
 }
 
 func accountCookie(w http.ResponseWriter, name, value string, age int) {
@@ -147,7 +92,7 @@ func returnTarget(target string) bool {
 
 // redirectToLogin sends a signed-out browser to sign in and remembers the
 // page it asked for, so signing in comes back to it (a link from a printed
-// PDF or an email) instead of going to Your account.
+// PDF or an email) instead of going to Settings.
 func (h *httpAdapter) redirectToLogin(w http.ResponseWriter, r *http.Request) {
 	if target := r.URL.RequestURI(); r.Method == http.MethodGet && returnTarget(target) {
 		accountCookie(w, h.returnCookieName(), base64.RawURLEncoding.EncodeToString([]byte(target)), 1200)
@@ -190,19 +135,20 @@ func (a *accounts) signOut(w http.ResponseWriter, browser, session string) {
 	accountCookie(w, loginCookie, "", -1)
 }
 
-// accountSectionPaths are the account pages. Each is one section of Your
-// account, with the sections listed down the left like a space's explorer.
-var accountSectionPaths = map[string]string{
-	"/account":          "spaces",
-	"/account/mine":     "spaces",
-	"/account/shared":   "spaces",
-	"/account/security": "security",
-	"/account/services": "services",
-	"/account/profile":  "profile",
+// accountPages are the old account pages, which moved to the site app's
+// Settings dialog. Their addresses still work (links in older emails and
+// bookmarks): settingsAddress is where each one went.
+var accountPages = map[string]bool{
+	"/account":          true,
+	"/account/mine":     true,
+	"/account/shared":   true,
+	"/account/security": true,
+	"/account/services": true,
+	"/account/profile":  true,
 }
 
-// settingsAddress is where an account page moved to in the site app's
-// Settings dialog, or "" for the pages still served here.
+// settingsAddress is where an old account page moved to in the site app's
+// Settings dialog, or "" for none.
 func settingsAddress(path string) string {
 	switch path {
 	case "/account", "/account/mine", "/account/shared":
@@ -226,139 +172,22 @@ func settingsAddress(path string) string {
 	return ""
 }
 
-// accountSpaceFilters are the filters of Spaces, one table of the spaces the
-// user owns and the spaces they joined. Each filter is its own address, so
-// it works without JavaScript and an old link to Shared with me still works.
-var accountSpaceFilters = map[string]string{
-	"/account":        "all",
-	"/account/mine":   "mine",
-	"/account/shared": "shared",
+// loginPosts are the sign-in page's forms.
+var loginPosts = map[string]bool{
+	"/login/send":      true,
+	"/login/verify":    true,
+	"/login/passkey":   true,
+	"/login/totp":      true,
+	"/login/recovery":  true,
+	"/login/microsoft": true,
+	"/login/restart":   true,
 }
 
-// accountSection is the section a request belongs to, so a form that fails
-// is shown again on its own page.
-func accountSection(path string) string {
-	if section, ok := accountSectionPaths[path]; ok {
-		return section
-	}
-	switch {
-	case path == "/account/membership/accept", strings.HasPrefix(path, "/account/transfer/"):
-		return "spaces"
-	case signInRoutes[path]:
-		return "security"
-	case strings.HasPrefix(path, "/account/apps/"), strings.HasPrefix(path, "/account/github/"), strings.HasPrefix(path, "/account/actions/"), agentRoutes[path]:
-		return "services"
-	case path == "/account/username":
-		return "profile"
-	}
-	return "spaces"
-}
-
-func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, status int, page accountPage) {
+func (h *httpAdapter) renderLogin(w http.ResponseWriter, r *http.Request, status int, page loginView) {
 	page.BasePath = h.basePath
 	page.Legal = h.docsSpace() != ""
-	if page.SignedIn {
-		if page.Section == "" {
-			page.Section = accountSection(r.URL.Path)
-		}
-		if page.Filter = accountSpaceFilters[r.URL.Path]; page.Filter == "" {
-			page.Filter = "all"
-		}
-		if page.AppSpaces != nil || page.ActionOffer != nil {
-			page.Section = "services"
-		}
-		if page.Sharing != nil {
-			page.Section = "spaces"
-		}
-		overview := page.Sharing == nil && page.AppSpaces == nil && page.ActionOffer == nil
-		page.MembershipCSRF = make(map[string]string)
-		for _, action := range []string{"invite", "cancel", "accept", "suspend", "restore", "remove", "agent"} {
-			page.MembershipCSRF[action] = h.service.accounts.mac("membership:" + action + ":" + cookieToken(r, h.sessionCookieName()))
-		}
-		// Memberships load on every page: the navigation counts invitations.
-		var membershipErr error
-		page.Invitations, page.Joined, membershipErr = h.accountMemberships(r.Context(), page.User)
-		if membershipErr == nil {
-			page.TransferOffers, membershipErr = h.service.ownedDB.transferOffers(r.Context(), page.User.ID, time.Now())
-		}
-		page.InvitationCount = len(page.Invitations) + len(page.TransferOffers)
-		page.TransferCSRF = make(map[string]string)
-		for action := range transferActions {
-			page.TransferCSRF[action] = h.transferCSRF(action, cookieToken(r, h.sessionCookieName()))
-		}
-		if page.Sharing != nil {
-			page.Sharing.TransferFresh, _ = h.service.accounts.sessionFresh(cookieToken(r, h.sessionCookieName()), time.Now())
-		}
-		if membershipErr != nil {
-			page.MembershipUnavailable = true
-			if overview && page.Section == "spaces" && page.Filter != "mine" {
-				status = http.StatusServiceUnavailable
-			}
-		}
-		if h.oauth != nil {
-			page.OAuthEnabled = true
-			page.AppConnectURL = h.oauth.mcpResource
-			page.AppsCSRF = h.service.accounts.mac("apps-revoke:" + cookieToken(r, h.sessionCookieName()))
-			page.AppSpacesCSRF = h.service.accounts.mac("apps-spaces:" + cookieToken(r, h.sessionCookieName()))
-			if overview && page.Section == "services" {
-				var appsErr error
-				if page.Apps, appsErr = h.connectedApps(r.Context(), page.User); appsErr != nil {
-					page.AppsUnavailable = true
-					status = http.StatusServiceUnavailable
-				}
-			}
-		}
-		if h.github != nil {
-			page.GitHubEnabled = true
-			page.GitHubConnectCSRF = h.service.accounts.mac("github-connect:" + cookieToken(r, h.sessionCookieName()))
-			page.GitHubLinkCSRF = h.service.accounts.mac("github-link:" + cookieToken(r, h.sessionCookieName()))
-			page.GitHubDisconnectCSRF = h.service.accounts.mac("github-disconnect:" + cookieToken(r, h.sessionCookieName()))
-			if overview && page.Section == "services" {
-				var githubErr error
-				if page.GitHub, githubErr = h.githubConnections(r, page.User); githubErr != nil {
-					page.GitHubUnavailable = true
-					status = http.StatusServiceUnavailable
-				}
-			}
-		}
-		if overview && page.Section == "services" && h.agentsEnabled() {
-			var ok bool
-			if page.Agents, ok = h.agentsPage(r, page.User); !ok {
-				status = http.StatusServiceUnavailable
-			}
-			if page.AgentForm != nil {
-				page.Agents.Form = *page.AgentForm
-			}
-		}
-		if overview && page.Section == "security" && h.service.ownedDB != nil {
-			var ok bool
-			if page.SignIn, ok = h.signInSection(r, page.User); !ok {
-				status = http.StatusServiceUnavailable
-			}
-		}
-		page.SpaceCSRF = h.service.accounts.mac("space-create:" + cookieToken(r, h.sessionCookieName()))
-		page.VisibilityCSRF = h.service.accounts.mac("space-visibility:" + cookieToken(r, h.sessionCookieName()))
-		page.DeleteCSRF = h.service.accounts.mac("space-delete:" + cookieToken(r, h.sessionCookieName()))
-		page.AccountDeleteCSRF = h.service.accounts.mac("account-delete:" + cookieToken(r, h.sessionCookieName()))
-		page.AccountDeleteFresh, _ = h.service.accounts.sessionFresh(cookieToken(r, h.sessionCookieName()), time.Now())
-		page.TimezoneCSRF = h.service.accounts.mac("space-timezone:" + cookieToken(r, h.sessionCookieName()))
-		page.DefaultTimezone = defaultAgentTimezone
-		if a := h.service.agents.Load(); a != nil {
-			page.DefaultTimezone = a.settings.zone.String()
-		}
-		var err error
-		page.Spaces, err = h.accountSpaces(r.Context(), page.User)
-		if err != nil {
-			page.SpacesUnavailable = true
-			if overview && page.Section == "spaces" && page.Filter != "shared" {
-				status = http.StatusServiceUnavailable
-			}
-		} else {
-			page.CanCreate = page.User.Username != "" && len(page.Spaces) < page.User.MaxPrivateSpaces
-		}
-	}
 	var b bytes.Buffer
-	if err := accountTemplate.Execute(&b, page); err != nil {
+	if err := loginTemplate.Execute(&b, page); err != nil {
 		sendError(w, err)
 		return
 	}
@@ -369,8 +198,8 @@ func (h *httpAdapter) renderAccount(w http.ResponseWriter, r *http.Request, stat
 	}
 }
 
-func (a *accounts) loginPage(browser string) accountPage {
-	page := accountPage{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now()), TOTPLogin: a.totpKey != nil, MicrosoftLogin: a.microsoft != nil}
+func (a *accounts) loginPage(browser string) loginView {
+	page := loginView{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now()), TOTPLogin: a.totpKey != nil, MicrosoftLogin: a.microsoft != nil}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cleanup(time.Now())
@@ -383,46 +212,30 @@ func (a *accounts) loginPage(browser string) accountPage {
 
 func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
-	sharingID := strings.TrimPrefix(path, "/account/sharing/")
-	sharingRoute := strings.HasPrefix(path, "/account/sharing/") && idPattern.MatchString(sharingID)
-	membershipAction := strings.TrimPrefix(path, "/account/membership/")
-	membershipRoute := strings.HasPrefix(path, "/account/membership/") && (membershipAction == "invite" || membershipAction == "cancel" || membershipAction == "accept" || membershipAction == "suspend" || membershipAction == "restore" || membershipAction == "remove" || membershipAction == "agent")
-	appID := strings.TrimPrefix(path, "/account/apps/")
-	appRoute := strings.HasPrefix(path, "/account/apps/") && idPattern.MatchString(appID)
-	jobID := strings.TrimPrefix(path, "/account/actions/")
-	actionRoute := strings.HasPrefix(path, "/account/actions/") && idPattern.MatchString(jobID)
-	githubRoute := path == "/account/github/connect" || path == "/account/github/link" || path == "/account/github/disconnect"
-	agentRoute := agentRoutes[path]
-	transferAction, transferRoute := parseTransferRoute(path)
+	oldPage := accountPages[path] || settingsAddress(path) != ""
+	if !oldPage && path != "/login" && !loginPosts[path] && path != "/logout" {
+		return false
+	}
 	loginCookie, sessionCookie := loginCookie, sessionCookie
 	if h.basePath != "" {
 		suffix := "-" + secretDigest(h.basePath)[:16]
 		loginCookie += suffix
 		sessionCookie += suffix
 	}
-	if !sharingRoute && !membershipRoute && !transferRoute && !appRoute && !actionRoute && !githubRoute && !agentRoute && !signInRoutes[path] && path != "/login" && path != "/login/send" && path != "/login/verify" && path != "/login/passkey" && path != "/login/totp" && path != "/login/recovery" && path != "/login/microsoft" && path != "/login/restart" && path != "/logout" && accountSectionPaths[path] == "" && path != "/account/username" && path != "/account/spaces" && path != "/account/spaces/visibility" && path != "/account/spaces/delete" && path != "/account/delete" && path != "/account/spaces/timezone" && path != "/account/apps/revoke" && path != "/account/apps/spaces" {
-		return false
-	}
 	formAction := "'self'"
-	if h.github != nil {
-		// Connect GitHub posts here and is redirected to GitHub; browsers check
-		// form-action against the redirect target too.
-		formAction += " " + h.github.settings.webBase
-	}
 	if a := h.service.accounts; a != nil && a.microsoft != nil {
-		// Sign in with Microsoft and Link a Microsoft account post here and
-		// are redirected to Microsoft.
+		// Sign in with Microsoft posts here and is redirected to Microsoft.
 		formAction += " " + a.microsoft.authority
 	}
 	// script-src 'self' is for login.js (the login form's proof of work) and
-	// passkey.js (the browser's passkey prompts).
+	// passkey.js (the browser's passkey prompt).
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
 	// no-referrer makes browsers send Origin: null on HTML form POSTs.
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
 	a := h.service.accounts
 	if a == nil {
-		h.renderAccount(w, r, 503, accountPage{Disabled: true})
+		h.renderLogin(w, r, 503, loginView{Disabled: true})
 		return true
 	}
 	origin, _ := url.Parse(a.config.Origin)
@@ -434,7 +247,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, invalid("Account routes do not accept query parameters."))
 		return true
 	}
-	if path == "/login" || accountSectionPaths[path] != "" || sharingRoute || appRoute || actionRoute {
+	if path == "/login" || oldPage {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			sendError(w, problem(405, "invalid_request", "Use GET or HEAD."))
@@ -447,52 +260,21 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		// it, before treating the browser as signed out. The reload is
 		// same-origin, so it cannot loop.
 		if session == "" && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-			h.renderAccount(w, r, 200, accountPage{ContinueURL: h.basePath + path})
+			h.renderLogin(w, r, 200, loginView{ContinueURL: h.basePath + path})
 			return true
 		}
 		user, signedIn, err := a.currentUser(r.Context(), session)
 		if err != nil {
-			h.renderAccount(w, r, 503, accountPage{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
+			h.renderLogin(w, r, 503, loginView{Message: "Sign-in is temporarily unavailable. Please reload this page shortly."})
 			return true
 		}
-		if accountSectionPaths[path] != "" || sharingRoute || appRoute || actionRoute {
+		if oldPage {
+			// The old account pages live in the site app's Settings dialog.
 			if !signedIn {
 				h.redirectToLogin(w, r)
 				return true
 			}
-			// Spaces, sharing and Profile live in the site app's Settings
-			// dialog (0.79.0); Security and Services follow.
-			if target := settingsAddress(path); target != "" {
-				http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
-				return true
-			}
-			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session)}
-			if accountSectionPaths[path] != "" {
-				page.Notice = h.takeNotice(w, r)
-			}
-			if sharingRoute {
-				page.Sharing, err = h.humanSharing(r.Context(), user, sharingID)
-				if err != nil {
-					sendError(w, err)
-					return true
-				}
-				page.Notice = h.takeNotice(w, r)
-			}
-			if appRoute {
-				page.AppSpaces, err = h.appSpaces(r.Context(), user, appID)
-				if err != nil {
-					sendError(w, err)
-					return true
-				}
-			}
-			if actionRoute {
-				page.ActionOffer, err = h.actionOfferPage(r, user, jobID)
-				if err != nil {
-					sendError(w, err)
-					return true
-				}
-			}
-			h.renderAccount(w, r, 200, page)
+			http.Redirect(w, r, h.basePath+settingsAddress(path), http.StatusSeeOther)
 			return true
 		}
 		browser := cookieToken(r, loginCookie)
@@ -504,7 +286,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 				if page := a.loginPage(browser); page.Verify && !strings.EqualFold(page.Email, user.Email) {
 					page.SignedInAs = user.Email
 					accountCookie(w, loginCookie, browser, 1200)
-					h.renderAccount(w, r, 200, page)
+					h.renderLogin(w, r, 200, page)
 					return true
 				}
 			}
@@ -528,7 +310,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 				page.Email = id.Email
 			}
 		}
-		h.renderAccount(w, r, 200, page)
+		h.renderLogin(w, r, 200, page)
 		return true
 	}
 	if r.Method != http.MethodPost {
@@ -557,10 +339,7 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return true
 	}
 	formLimit := int64(2048)
-	if path == "/account/apps/spaces" {
-		formLimit = 16384 // one field per space
-	}
-	if path == "/login/passkey" || path == "/account/confirm/passkey" || path == "/account/passkeys/add" {
+	if path == "/login/passkey" {
 		formLimit = 16384 // WebAuthn responses in base64url
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
@@ -569,63 +348,20 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		return true
 	}
 	allowed := map[string]bool{"csrf": true}
-	if membershipRoute {
-		allowed["space"] = true
-		switch membershipAction {
-		case "invite":
-			allowed["email"] = true
-		case "cancel", "accept":
-			allowed["invitation"] = true
-		case "agent":
-			allowed["member"], allowed["permission"] = true, true
-		default:
-			allowed["member"] = true
-		}
-	}
-	if path == "/account/spaces" {
-		allowed["name"], allowed["slug"], allowed["timezone"] = true, true, true
-	}
-	if path == "/account/spaces/visibility" {
-		allowed["space"], allowed["visibility"] = true, true
-	}
-	if path == "/account/spaces/delete" {
-		allowed["space"], allowed["name"] = true, true
-	}
-	if path == "/account/delete" {
-		allowed["email"] = true
-	}
-	if path == "/account/spaces/timezone" {
-		allowed["space"], allowed["timezone"] = true, true
-	}
-	if transferRoute {
-		allowed["space"] = true
-		if transferAction == "offer" {
-			allowed["member"] = true
-		}
-	}
-	if path == "/account/username" {
-		allowed["username"] = true
-	}
-	if path == "/account/apps/revoke" || path == "/account/apps/spaces" {
-		allowed["grant"] = true
-	}
-	if path == "/account/github/disconnect" {
-		allowed["installation"] = true
-	}
-	if path == "/login/send" {
+	switch path {
+	case "/login/send":
 		allowed["email"], allowed["pow"], allowed["nonce"], allowed[loginHoneypotField] = true, true, true, true
-	}
-	if path == "/login/verify" {
+	case "/login/verify":
 		allowed["code"] = true
-	}
-	for _, field := range signInFormFields[path] {
-		allowed[field] = true
-	}
-	for _, field := range agentFormFields[path] {
-		allowed[field] = true
+	case "/login/passkey":
+		for _, field := range passkeyAssertionFields {
+			allowed[field] = true
+		}
+	case "/login/totp", "/login/recovery":
+		allowed["email"], allowed["code"] = true, true
 	}
 	for key, values := range r.PostForm {
-		if !(allowed[key] || (path == "/account/apps/spaces" && spaceFieldPattern.MatchString(key))) || len(values) != 1 {
+		if !allowed[key] || len(values) != 1 {
 			sendError(w, invalid("Unknown or duplicate form field."))
 			return true
 		}
@@ -641,209 +377,15 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	note("bad_csrf")
 	csrf := browser
 	session := cookieToken(r, sessionCookie)
-	if membershipRoute || transferRoute || githubRoute || agentRoute || signInRoutes[path] || path == "/logout" || path == "/account/username" || path == "/account/spaces" || path == "/account/spaces/visibility" || path == "/account/spaces/delete" || path == "/account/delete" || path == "/account/spaces/timezone" || path == "/account/apps/revoke" || path == "/account/apps/spaces" {
+	if path == "/logout" {
 		if session == "" {
 			sendError(w, problem(403, "forbidden", "Please sign in again."))
 			return true
 		}
 		csrf = a.mac("logout:" + session)
-		if membershipRoute {
-			csrf = a.mac("membership:" + membershipAction + ":" + session)
-		}
-		if transferRoute {
-			csrf = h.transferCSRF(transferAction, session)
-		}
-		if path == "/account/username" {
-			csrf = a.mac("username:" + session)
-		}
-		if path == "/account/spaces" {
-			csrf = a.mac("space-create:" + session)
-		}
-		if path == "/account/spaces/visibility" {
-			csrf = a.mac("space-visibility:" + session)
-		}
-		if path == "/account/spaces/delete" {
-			csrf = a.mac("space-delete:" + session)
-		}
-		if path == "/account/delete" {
-			csrf = a.mac("account-delete:" + session)
-		}
-		if path == "/account/spaces/timezone" {
-			csrf = a.mac("space-timezone:" + session)
-		}
-		if path == "/account/apps/revoke" {
-			csrf = a.mac("apps-revoke:" + session)
-		}
-		if path == "/account/apps/spaces" {
-			csrf = a.mac("apps-spaces:" + session)
-		}
-		if githubRoute {
-			csrf = a.mac("github-" + strings.TrimPrefix(path, "/account/github/") + ":" + session)
-		}
-		if signInRoutes[path] {
-			csrf = a.signInCSRF(path, session)
-		}
-		if agentRoute {
-			csrf = a.agentCSRF(path, session)
-		}
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
-		return true
-	}
-	if membershipRoute {
-		h.submitHumanMembership(w, r, session, membershipAction)
-		return true
-	}
-	if transferRoute {
-		h.submitSpaceTransfer(w, r, session, transferAction)
-		return true
-	}
-	if signInRoutes[path] {
-		h.submitSignIn(w, r, session, path, client)
-		return true
-	}
-	if path == "/account/apps/spaces" {
-		h.submitAppSpaces(w, r, session)
-		return true
-	}
-	if agentRoute {
-		h.submitAgent(w, r, session, path)
-		return true
-	}
-	if githubRoute {
-		h.submitGitHub(w, r, session, path)
-		return true
-	}
-	if path == "/account/spaces/visibility" {
-		h.submitSpaceVisibility(w, r, session)
-		return true
-	}
-	if path == "/account/spaces/delete" {
-		h.submitSpaceDelete(w, r, session)
-		return true
-	}
-	if path == "/account/delete" {
-		h.submitAccountDelete(w, r, session)
-		return true
-	}
-	if path == "/account/spaces/timezone" {
-		h.submitSpaceTimezone(w, r, session)
-		return true
-	}
-	if path == "/account/apps/revoke" {
-		user, signedIn, err := a.currentUser(r.Context(), session)
-		if err != nil {
-			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-			return true
-		}
-		if !signedIn {
-			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-			return true
-		}
-		if h.oauth == nil || h.service.ownedDB == nil {
-			sendError(w, missing())
-			return true
-		}
-		if err = h.revokeApp(r.Context(), user, r.PostForm.Get("grant")); err != nil {
-			page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The connection could not be revoked. Reload before retrying."}
-			status := http.StatusServiceUnavailable
-			var p *Error
-			if errors.As(err, &p) {
-				status, page.Message = p.Status, p.Message
-				if p.RetryAfterSeconds > 0 {
-					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-				}
-			}
-			h.renderAccount(w, r, status, page)
-			return true
-		}
-		http.Redirect(w, r, h.basePath+"/account/services", http.StatusSeeOther)
-		return true
-	}
-	if path == "/account/spaces" {
-		user, signedIn, err := a.currentUser(r.Context(), session)
-		if err != nil {
-			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-			return true
-		}
-		if !signedIn {
-			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-			return true
-		}
-		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), SpaceName: r.PostForm.Get("name")}
-		// The create form sends only a name and the slug is derived from it.
-		// Retry preparation sends the stored slug so an interrupted space
-		// always finishes at the address it reserved.
-		slug, derived := r.PostForm.Get("slug"), !r.PostForm.Has("slug")
-		err = h.service.rates.take(allowance{"space-create:user:" + user.ID, 10, 600})
-		if err == nil && derived {
-			slug, err = h.deriveNewSpaceSlug(r.Context(), user, page.SpaceName)
-		}
-		var space ownedSpace
-		if err == nil {
-			space, err = h.service.createOwnedSpace(r.Context(), user.ID, page.SpaceName, slug)
-		}
-		if err != nil {
-			status := http.StatusServiceUnavailable
-			message := "Your space is not ready yet. Reload your account page and retry."
-			var p *Error
-			if errors.As(err, &p) {
-				status, message = p.Status, p.Message
-				if p.RetryAfterSeconds > 0 {
-					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-				}
-			}
-			if derived && p != nil && p.Code == "conflict" {
-				message = "You already have a space at " + h.basePath + "/spaces/" + user.Username + "/" + slug + ". Choose a different name."
-			}
-			if derived && p != nil && (p.Code == "invalid_request" || p.Code == "conflict" || p.Code == "reserved") {
-				page.SpaceNameError = message
-			} else {
-				page.Message = message
-			}
-			h.renderAccount(w, r, status, page)
-			return true
-		}
-		// A new space takes the creator's browser time zone (sent by
-		// account.js); without one it uses the server's.
-		if zone := r.PostForm.Get("timezone"); zone != "" && validTimezone(zone) {
-			if err := h.service.ownedDB.setSpaceTimezone(r.Context(), user.ID, space.ID, zone); err != nil {
-				log.Printf("space %s: time zone not saved: %v", space.ID, err)
-			}
-		}
-		http.Redirect(w, r, h.ownedSpaceURL(user.Username, space.Slug), http.StatusSeeOther)
-		return true
-	}
-	if path == "/account/username" {
-		user, signedIn, err := a.currentUser(r.Context(), session)
-		if err != nil {
-			sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable. Please try again later."))
-			return true
-		}
-		if !signedIn {
-			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-			return true
-		}
-		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: csrf, Username: r.PostForm.Get("username")}
-		err = h.service.rates.take(allowance{"username:user:" + user.ID, 20, 600})
-		if err == nil {
-			err = a.store.ChooseUsername(r.Context(), user.ID, page.Username)
-		}
-		if err != nil {
-			status := http.StatusServiceUnavailable
-			page.Message = "Your username could not be saved. Reload your account page before trying again."
-			var p *Error
-			if errors.As(err, &p) {
-				status, page.Message = p.Status, p.Message
-				if p.RetryAfterSeconds > 0 {
-					w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-				}
-			}
-			h.renderAccount(w, r, status, page)
-			return true
-		}
-		http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 		return true
 	}
 	if path == "/login/microsoft" {
@@ -884,11 +426,11 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 			if p.RetryAfterSeconds > 0 {
 				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
 			}
-			h.renderAccount(w, r, p.Status, page)
+			h.renderLogin(w, r, p.Status, page)
 		} else {
 			note("error")
 			page.Message = "Sign-in is temporarily unavailable. Please try again later."
-			h.renderAccount(w, r, 503, page)
+			h.renderLogin(w, r, 503, page)
 		}
 	}
 	if path == "/login/send" {
@@ -1019,62 +561,10 @@ func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
+	http.Redirect(w, r, h.basePath+"/app/#settings/spaces", http.StatusSeeOther)
 }
 
-// submitAppSpaces saves Change spaces for one connection after the form,
-// Origin and CSRF checks. Each s-{space} field is none, read_only or
-// read_write; errors re-render the page with the user's current state.
-func (h *httpAdapter) submitAppSpaces(w http.ResponseWriter, r *http.Request, session string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	if h.oauth == nil || h.service.ownedDB == nil {
-		sendError(w, missing())
-		return
-	}
-	grantID := r.PostForm.Get("grant")
-	choices := []oauthSpaceChoice{}
-	for key, values := range r.PostForm {
-		if !spaceFieldPattern.MatchString(key) {
-			continue
-		}
-		switch values[0] {
-		case "none", "read_only", "read_write":
-			choices = append(choices, oauthSpaceChoice{SpaceID: key[2:], Permission: values[0]})
-		default:
-			sendError(w, invalid("Invalid access choice."))
-			return
-		}
-	}
-	if err = h.changeAppSpaces(r.Context(), user, session, grantID, choices); err == nil {
-		http.Redirect(w, r, h.basePath+"/account/services", http.StatusSeeOther)
-		return
-	}
-	status, message := http.StatusServiceUnavailable, "Your changes could not be saved. Reload before retrying."
-	var p *Error
-	if errors.As(err, &p) {
-		status, message = p.Status, p.Message
-		if p.RetryAfterSeconds > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-		}
-	}
-	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: message}
-	if page.AppSpaces, err = h.appSpaces(r.Context(), user, grantID); err != nil {
-		// The connection itself is gone: show Your account with the message.
-		page.AppSpaces = nil
-	}
-	h.renderAccount(w, r, status, page)
-}
-
-// deriveNewSpaceSlug derives the slug for the create form and refuses a name
+// deriveNewSpaceSlug derives the slug for a new space's name and refuses a name
 // whose address the user already has. Retrying an interrupted space goes
 // through the stored slug instead, so a ready space here is always a clash.
 func (h *httpAdapter) deriveNewSpaceSlug(ctx context.Context, user userAccount, name string) (string, error) {
@@ -1092,89 +582,6 @@ func (h *httpAdapter) deriveNewSpaceSlug(ctx context.Context, user userAccount, 
 		}
 	}
 	return slug, nil
-}
-
-// submitSpaceTimezone handles POST /account/spaces/timezone: the owner sets
-// the time zone of a space's schedules and runner.md times, or clears it to
-// use the server's.
-func (h *httpAdapter) submitSpaceTimezone(w http.ResponseWriter, r *http.Request, session string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	if h.service.ownedDB == nil {
-		sendError(w, problem(503, "unavailable", "Your spaces are temporarily unavailable."))
-		return
-	}
-	zone, spaceID := strings.TrimSpace(r.PostForm.Get("timezone")), r.PostForm.Get("space")
-	err = h.service.rates.take(allowance{"space-timezone:user:" + user.ID, 30, 600})
-	if err == nil && zone != "" && !validTimezone(zone) {
-		err = invalid(zone + " is not a time zone. Use a name such as Pacific/Auckland or Australia/Sydney, or leave it empty for the server's (" + defaultAgentTimezone + ").")
-	}
-	if err == nil {
-		err = h.service.ownedDB.setSpaceTimezone(r.Context(), user.ID, spaceID, zone)
-	}
-	if err != nil {
-		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The space setting could not be saved. Reload before retrying."}
-		status := http.StatusServiceUnavailable
-		var p *Error
-		if errors.As(err, &p) {
-			status, page.Message = p.Status, p.Message
-			if p.RetryAfterSeconds > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-			}
-		}
-		h.renderAccount(w, r, status, page)
-		return
-	}
-	h.service.spaceZoneChanged(spaceID)
-	accountCookie(w, h.noticeCookieName(), "space-timezone", 60)
-	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
-}
-
-// submitSpaceVisibility handles POST /account/spaces/visibility: the owner
-// makes a space readable by anyone in the website explorer ("web") or private
-// again. Agent access is not affected.
-func (h *httpAdapter) submitSpaceVisibility(w http.ResponseWriter, r *http.Request, session string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	if h.service.ownedDB == nil {
-		sendError(w, problem(503, "unavailable", "Your spaces are temporarily unavailable."))
-		return
-	}
-	notice, err := h.changeSpaceVisibility(r.Context(), user, session, r.PostForm.Get("space"), r.PostForm.Get("visibility"))
-	if err != nil {
-		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The space setting could not be saved. Reload before retrying."}
-		status := http.StatusServiceUnavailable
-		var p *Error
-		if errors.As(err, &p) {
-			status, page.Message = p.Status, p.Message
-			if p.RetryAfterSeconds > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-			}
-		}
-		if err == errConfirmFirst {
-			page.Message = "Making a space readable on the web needs a sign-in within the last 10 minutes. Confirm it’s you in Security, then try again."
-		}
-		h.renderAccount(w, r, status, page)
-		return
-	}
-	accountCookie(w, h.noticeCookieName(), notice, 60)
-	http.Redirect(w, r, h.basePath+"/account", http.StatusSeeOther)
 }
 
 // changeSpaceVisibility makes an owner's space readable on the web or private

@@ -87,7 +87,7 @@ func (h *httpAdapter) renderGitHub(w http.ResponseWriter, status int, page githu
 	page.BasePath = h.basePath
 	page.Legal = h.docsSpace() != ""
 	if page.Eyebrow == "" {
-		page.Eyebrow, page.Button = "GitHub", "Back to Your account →"
+		page.Eyebrow, page.Button = "GitHub", "Back to Settings →"
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -135,19 +135,19 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 		h.renderGitHub(w, status, githubPage{Title: title, Message: message, ContinueURL: back})
 	}
 	if err := h.service.rates.take(allowance{"github:callback:" + client, 30, 600}); err != nil {
-		fail(429, "Too many attempts", "Please wait a few minutes, then connect GitHub again from Your account.")
+		fail(429, "Too many attempts", "Please wait a few minutes, then connect GitHub again from Settings → Services.")
 		return
 	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		fail(400, "GitHub sent an unexpected reply", "Start again from Your account.")
+		fail(400, "GitHub sent an unexpected reply", "Start again from Settings → Services.")
 		return
 	}
 	// Parameters we do not use are ignored, so GitHub adding one later does
 	// not break connecting. The ones we use must appear at most once.
 	for _, key := range []string{"code", "installation_id", "setup_action", "state", "error", "iss"} {
 		if len(query[key]) > 1 {
-			fail(400, "GitHub sent an unexpected reply", "Start again from Your account.")
+			fail(400, "GitHub sent an unexpected reply", "Start again from Settings → Services.")
 			return
 		}
 	}
@@ -155,7 +155,7 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 	// When present it must be GitHub's, so a reply from another authorization
 	// server is not taken for GitHub's.
 	if query.Has("iss") && query.Get("iss") != g.settings.webBase+"/login/oauth" {
-		fail(400, "GitHub sent an unexpected reply", "Start again from Your account.")
+		fail(400, "GitHub sent an unexpected reply", "Start again from Settings → Services.")
 		return
 	}
 	// The attempt is single-use whatever happens next.
@@ -164,11 +164,11 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 	pending, ok := g.take(browser)
 	state := query.Get("state")
 	if !ok || state == "" || subtle.ConstantTimeCompare([]byte(pending.State), []byte(state)) != 1 {
-		fail(400, "Connect GitHub from Your account", "This GitHub reply did not match a connection started in this browser in the last ten minutes. If you installed the Metatrash app on GitHub directly, finish by choosing Link an existing installation on Your account.")
+		fail(400, "Connect GitHub from Settings → Services", "This GitHub reply did not match a connection started in this browser in the last ten minutes. If you installed the Metatrash app on GitHub directly, finish by choosing Link an existing installation in Settings → Services.")
 		return
 	}
 	if query.Has("error") {
-		fail(200, "GitHub was not connected", "The GitHub authorization was cancelled. You can try again from Your account.")
+		fail(200, "GitHub was not connected", "The GitHub authorization was cancelled. You can try again from Settings → Services.")
 		return
 	}
 	if pending.Link {
@@ -176,17 +176,17 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 		return
 	}
 	if query.Get("setup_action") == "request" {
-		fail(200, "Installation requested", "GitHub sent your request to install the Metatrash app to the organization's owners. Once they approve it, choose Connect GitHub on Your account again.")
+		fail(200, "Installation requested", "GitHub sent your request to install the Metatrash app to the organization's owners. Once they approve it, choose Connect GitHub in Settings → Services again.")
 		return
 	}
 	code := query.Get("code")
 	installationID, err := strconv.ParseInt(query.Get("installation_id"), 10, 64)
 	if code == "" || len(code) > 256 || err != nil || installationID <= 0 {
-		fail(400, "GitHub did not finish the connection", "GitHub returned without an installation. Start again from Your account and make sure you install the app.")
+		fail(400, "GitHub did not finish the connection", "GitHub returned without an installation. Start again from Settings → Services and make sure you install the app.")
 		return
 	}
 	if err := h.service.rates.take(allowance{"github:link:user:" + pending.UserID, 20, 600}); err != nil {
-		fail(429, "Too many attempts", "Please wait a few minutes, then connect GitHub again from Your account.")
+		fail(429, "Too many attempts", "Please wait a few minutes, then connect GitHub again from Settings → Services.")
 		return
 	}
 	db := h.service.ownedDB
@@ -204,7 +204,7 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 		err = db.linkGitHubInstallation(r.Context(), inst, g.now())
 	}
 	if err != nil {
-		status, message := 503, "GitHub could not be connected. Please try again from Your account."
+		status, message := 503, "GitHub could not be connected. Please try again from Settings → Services."
 		var p *Error
 		if errors.As(err, &p) {
 			status, message = p.Status, p.Message
@@ -221,11 +221,11 @@ func (h *httpAdapter) githubCallback(w http.ResponseWriter, r *http.Request, cli
 func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pending githubPending, code string, fail func(int, string, string)) {
 	g := h.github
 	if code == "" || len(code) > 256 {
-		fail(400, "GitHub did not finish the connection", "GitHub returned without authorizing. Start again from Your account.")
+		fail(400, "GitHub did not finish the connection", "GitHub returned without authorizing. Start again from Settings → Services.")
 		return
 	}
 	if err := h.service.rates.take(allowance{"github:link:user:" + pending.UserID, 20, 600}); err != nil {
-		fail(429, "Too many attempts", "Please wait a few minutes, then connect GitHub again from Your account.")
+		fail(429, "Too many attempts", "Please wait a few minutes, then connect GitHub again from Settings → Services.")
 		return
 	}
 	db := h.service.ownedDB
@@ -240,7 +240,7 @@ func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pend
 		user, list, err = g.client.userInstallations(r.Context(), token)
 	}
 	if err != nil {
-		status, message := 503, "GitHub could not be connected. Please try again from Your account."
+		status, message := 503, "GitHub could not be connected. Please try again from Settings → Services."
 		var p *Error
 		if errors.As(err, &p) {
 			status, message = p.Status, p.Message
@@ -249,7 +249,7 @@ func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pend
 		return
 	}
 	if len(list) == 0 {
-		fail(404, "No installation found", "GitHub user "+user.Login+" has no installation of the Metatrash app it can access. Choose Connect GitHub on Your account to install it.")
+		fail(404, "No installation found", "GitHub user "+user.Login+" has no installation of the Metatrash app it can access. Choose Connect GitHub in Settings → Services to install it.")
 		return
 	}
 	var linked, taken []string
@@ -263,7 +263,7 @@ func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pend
 		case errors.As(err, &p) && p.Status == 409:
 			taken = append(taken, inst.AccountLogin)
 		default:
-			fail(503, "GitHub was not connected", "GitHub could not be connected. Please try again from Your account.")
+			fail(503, "GitHub was not connected", "GitHub could not be connected. Please try again from Settings → Services.")
 			return
 		}
 	}
@@ -276,18 +276,6 @@ func (h *httpAdapter) githubLinkAll(w http.ResponseWriter, r *http.Request, pend
 		message += " Not connected, because another Metatrash account has it or you reached your limit: " + strings.Join(taken, ", ") + "."
 	}
 	h.renderGitHub(w, 200, githubPage{OK: len(taken) == 0, Title: "GitHub connected", Message: message, ContinueURL: h.basePath + "/app/#settings/services"})
-}
-
-// startGitHubConnect handles the Connect GitHub and Link an existing
-// installation forms (POST, after the account form checks): record the attempt
-// and send the browser to GitHub to install, or only to authorize.
-func (h *httpAdapter) startGitHubConnect(w http.ResponseWriter, r *http.Request, user userAccount, link bool) {
-	target, err := h.beginGitHubConnect(w, user, link)
-	if err != nil {
-		sendError(w, err)
-		return
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // beginGitHubConnect remembers a connect (or link) for this browser in a
@@ -327,26 +315,11 @@ func (h *httpAdapter) beginGitHubConnect(w http.ResponseWriter, user userAccount
 	return g.settings.installURL(state), nil
 }
 
-// githubInstallationView is one connection on Your account.
+// githubInstallationView is one connection in Settings → Services.
 type githubInstallationView struct {
 	ID                                     string
 	AccountLogin, AccountType, GitHubLogin string
 	Status, Connected, SettingsURL         string
-}
-
-func (h *httpAdapter) githubConnections(r *http.Request, user userAccount) ([]githubInstallationView, error) {
-	if h.service.ownedDB == nil {
-		return nil, errors.New("accounts unavailable")
-	}
-	list, err := h.service.ownedDB.githubInstallations(r.Context(), user.ID)
-	if err != nil {
-		return nil, err
-	}
-	views := make([]githubInstallationView, 0, len(list))
-	for _, inst := range list {
-		views = append(views, githubInstallationViewOf(h.github, inst))
-	}
-	return views, nil
 }
 
 func githubInstallationViewOf(g *githubServer, inst githubInstallation) githubInstallationView {
@@ -436,43 +409,6 @@ func (s *githubSettings) validSignature(body []byte, header string) bool {
 	want := hmac.New(sha256.New, s.webhookSecret)
 	_, _ = want.Write(body)
 	return subtle.ConstantTimeCompare([]byte(strings.ToLower(given)), []byte(hex.EncodeToString(want.Sum(nil)))) == 1
-}
-
-// submitGitHub handles the Connect GitHub and Disconnect forms after the
-// account form, Origin and CSRF checks.
-func (h *httpAdapter) submitGitHub(w http.ResponseWriter, r *http.Request, session, path string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	if h.github == nil || h.service.ownedDB == nil {
-		sendError(w, missing())
-		return
-	}
-	if path == "/account/github/connect" || path == "/account/github/link" {
-		h.startGitHubConnect(w, r, user, path == "/account/github/link")
-		return
-	}
-	if err = h.disconnectGitHub(r.Context(), user, r.PostForm.Get("installation")); err != nil {
-		page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "The GitHub connection could not be removed. Reload before retrying."}
-		status := http.StatusServiceUnavailable
-		var p *Error
-		if errors.As(err, &p) {
-			status, page.Message = p.Status, p.Message
-			if p.RetryAfterSeconds > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-			}
-		}
-		h.renderAccount(w, r, status, page)
-		return
-	}
-	http.Redirect(w, r, h.basePath+"/account/services", http.StatusSeeOther)
 }
 
 // disconnectGitHub stops Metatrash using one of user's GitHub installations.

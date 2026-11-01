@@ -17,7 +17,7 @@ func TestInvitationMailMessage(t *testing.T) {
 	if strings.ContainsAny(body[:strings.Index(body, "\n")], "\r") || strings.Contains(body, "\nBcc:") {
 		t.Fatalf("control characters survived: %q", body)
 	}
-	for _, want := range []string{`dave-zap invited you to their Metatrash space "ŌtautahiBcc: victim@example.com" (dave-zap/otautahi).`, "https://metatrash.com/login", "(guest@example.com)", "10 October 2026 01:02 UTC", "https://metatrash.com/account and choose Accept invitation"} {
+	for _, want := range []string{`dave-zap invited you to their Metatrash space "ŌtautahiBcc: victim@example.com" (dave-zap/otautahi).`, "https://metatrash.com/login", "(guest@example.com)", "10 October 2026 01:02 UTC", "https://metatrash.com/app/#settings/spaces and choose Accept"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}

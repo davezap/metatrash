@@ -73,7 +73,7 @@ type accountSession struct {
 	// Device and IP describe the browser that signed in (device.go).
 	Device, IP string
 	// AuthAt is when this session last proved who the user is: signing in,
-	// or confirming on Your account. Changing sign-in methods needs it recent.
+	// or confirming it’s you in Settings. Changing sign-in methods needs it recent.
 	AuthAt time.Time
 }
 

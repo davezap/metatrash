@@ -78,7 +78,7 @@ func (c *githubClient) exchangeCode(ctx context.Context, code string) (string, e
 		return "", err
 	}
 	if out.Error != "" || out.AccessToken == "" || !strings.EqualFold(out.TokenType, "bearer") || len(out.AccessToken) > 1024 {
-		return "", problem(400, "github_denied", "GitHub did not confirm the connection. The link may have expired; start again from Your account.")
+		return "", problem(400, "github_denied", "GitHub did not confirm the connection. The link may have expired; start again from Settings → Services.")
 	}
 	return out.AccessToken, nil
 }

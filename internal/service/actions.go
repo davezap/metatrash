@@ -355,7 +355,7 @@ func (s *Service) checkActionsWriter(ctx context.Context, r *repository, files m
 	}
 	username := s.usernameOf(ctx, identity.oauth.UserID)
 	if username == "" {
-		return problem(403, "forbidden", path+": choose a username first (Your account → Profile); your own actions are marked with it.")
+		return problem(403, "forbidden", path+": choose a username first (Settings → Profile); your own actions are marked with it.")
 	}
 	names := map[string]bool{}
 	for name := range before {

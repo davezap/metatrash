@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +53,7 @@ func TestDeleteSpaceAgainstDatabase(t *testing.T) {
 	aliceSession, bobSession := w.session(alice), w.session(bob)
 	remove := func(typed string, session *http.Cookie) int {
 		t.Helper()
-		res := oauthCall(w.h, "POST", "/account/spaces/delete", url.Values{"csrf": {w.s.accounts.mac("space-delete:" + session.Value)}, "space": {space.ID}, "name": {typed}}, session)
+		res := accountPost(w, session, "/spaces/"+space.ID+"/delete", jsonOf(map[string]string{"name": typed}))
 		return res.Code
 	}
 	sharing := func() string {
@@ -77,10 +76,10 @@ func TestDeleteSpaceAgainstDatabase(t *testing.T) {
 	if code := remove("Old notes", bobSession); code != 404 {
 		t.Fatalf("member deleting: %d", code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/spaces/delete", url.Values{"csrf": {w.s.accounts.mac("space-visibility:" + aliceSession.Value)}, "space": {space.ID}, "name": {"Old notes"}}, aliceSession); res.Code != 403 {
-		t.Fatalf("another form's token: %d", res.Code)
+	if res := siteCall(w, "POST", "/api/v1/site/account/spaces/"+space.ID+"/delete", `{"name":"Old notes"}`, aliceSession, "wrong"); res.Code != 403 {
+		t.Fatalf("a wrong token: %d", res.Code)
 	}
-	if code := remove("  old NOTES ", aliceSession); code != 303 {
+	if code := remove("  old NOTES ", aliceSession); code != 200 {
 		t.Fatalf("delete: %d", code)
 	}
 
@@ -139,7 +138,7 @@ func TestDeleteSpaceAgainstDatabase(t *testing.T) {
 	w.tool(bobToken, "read", map[string]any{"space": name, "path": "AGENTS.md"}, "")
 
 	// Deleted again and purged after 30 days, with its own virtual files only.
-	if code := remove("Old notes", aliceSession); code != 303 {
+	if code := remove("Old notes", aliceSession); code != 200 {
 		t.Fatalf("delete again: %d", code)
 	}
 	mine, other := "files/"+space.ID+"/"+strings.Repeat("a", 64), "files/"+w.ownedID+"/"+strings.Repeat("b", 64)

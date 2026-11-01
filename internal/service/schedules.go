@@ -19,7 +19,7 @@ import (
 //	monday 08:00             one day of the week
 //	month 1 09:00            one day of the month (1 to 28)
 //
-// in the space's own time zone (Your account → Spaces), or the server's
+// in the space's own time zone (Settings → Spaces), or the server's
 // agents.timezone for a space without one. metatrash_action_schedules holds
 // each action's next run; the runner keeps it in step with the folders'
 // settings and queues a job when the time comes round.

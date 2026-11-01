@@ -1,6 +1,6 @@
 # Roadmap
 
-Open work as of Metatrash 0.78.0 and Slate Viewer 0.21.0 (2026-10-31). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.82.0 and Slate Viewer 0.21.0 (2026-11-01). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Next: Settings dialog and space picker (Dave, 2026-10-31)
 
@@ -19,8 +19,11 @@ decisions in the Claude Doc "Settings dialog and space picker: plan".
   and the JSON route call, until the form route is retired.
 - **Releases:** 1 space picker and account menu (*done in 0.78.0*); 2 the
   dialog, Profile, Spaces and space sharing (*done in 0.79.0*); 3 Services (*done in 0.80.0*); 4 Security (*done in 0.81.0*);
-  5 clean-up (delete `account.html` and the form routes, emails point at the
-  new addresses, `/spaces/...` and `/docs/...` redirect into `/app/...`).
+  5 clean-up: `account.html` and the form routes deleted, emails and messages
+  point at Settings (*done in 0.82.0*); still to do, as its own release
+  because `?raw`, `?export`, `llms.txt` and the app's no-script "Plain" link
+  use them: browser visits to `/spaces/...` and `/docs/...` redirect into
+  `/app/...`.
   Workplace spaces come after release 2, so their screens are built once,
   in the dialog.
 - **Before release 2 (Dave: controls against malicious code):** settings

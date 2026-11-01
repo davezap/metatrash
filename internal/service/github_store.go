@@ -149,7 +149,7 @@ func (db *accountDatabase) unlinkGitHubInstallation(ctx context.Context, userID 
 		return fmt.Errorf("account database unavailable")
 	}
 	if n, err := result.RowsAffected(); err != nil || n != 1 {
-		return problem(404, "not_found", "That GitHub connection no longer exists. Reload Your account.")
+		return problem(404, "not_found", "That GitHub connection no longer exists. Reload Settings → Services.")
 	}
 	return nil
 }

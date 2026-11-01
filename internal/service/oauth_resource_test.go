@@ -302,19 +302,18 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	if sharing.Code != 200 || !strings.Contains(sharing.Body.String(), `"apps":true`) || !strings.Contains(sharing.Body.String(), `"agentPermission":"read_write"`) {
 		t.Fatalf("sharing: %d %s", sharing.Code, sharing.Body)
 	}
-	agentCSRF := w.s.accounts.mac("membership:agent:" + memberSession.Value)
-	form := url.Values{"csrf": {agentCSRF}, "space": {w.joinID}, "member": {w.owner.ID}, "permission": {"read_only"}}
-	if res := oauthCall(w.h, "POST", "/account/membership/agent", form, session); res.Code != 403 {
+	agentPath := "/spaces/" + w.joinID + "/agent"
+	lower := jsonOf(map[string]string{"member": w.owner.ID, "permission": "read_only"})
+	if res := siteCall(w, "POST", "/api/v1/site/account"+agentPath, lower, session, siteCSRF(w, memberSession)); res.Code != 403 {
 		t.Fatalf("app permission change with another session's CSRF: %d", res.Code)
 	}
-	ownForm := url.Values{"csrf": {w.s.accounts.mac("membership:agent:" + session.Value)}, "space": {w.joinID}, "member": {w.owner.ID}, "permission": {"read_only"}}
-	if res := oauthCall(w.h, "POST", "/account/membership/agent", ownForm, session); res.Code != 404 {
+	if res := accountPost(w, session, agentPath, lower); res.Code != 404 {
 		t.Fatalf("non-owner changed app permission: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/membership/agent", url.Values{"csrf": {agentCSRF}, "space": {w.joinID}, "member": {w.owner.ID}, "permission": {"admin"}}, memberSession); res.Code != 400 {
+	if res := accountPost(w, memberSession, agentPath, jsonOf(map[string]string{"member": w.owner.ID, "permission": "admin"})); res.Code != 400 {
 		t.Fatalf("invalid permission accepted: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/membership/agent", form, memberSession); res.Code != 303 {
+	if res := accountPost(w, memberSession, agentPath, lower); res.Code != 200 {
 		t.Fatalf("owner app permission change: %d %s", res.Code, res.Body)
 	}
 	state := w.tool(token, "list", map[string]any{"space": w.joinID}, "")["state"]
@@ -322,20 +321,19 @@ func TestOAuthAccountManagementAgainstDatabase(t *testing.T) {
 	if body := services(); !strings.Contains(body, `{"name":"Shared plans","access":"read only"}`) {
 		t.Fatal("lowered permission not shown on connected apps")
 	}
-	// Revoke from Your account ends the connection at once.
+	// Revoke from Settings → Services ends the connection at once.
 	apps, err := w.h.connectedApps(context.Background(), w.owner)
 	if err != nil || len(apps) != 1 {
 		t.Fatalf("apps: %v %v", apps, err)
 	}
-	revokeCSRF := w.s.accounts.mac("apps-revoke:" + session.Value)
-	if res := oauthCall(w.h, "POST", "/account/apps/revoke", url.Values{"csrf": {revokeCSRF}, "grant": {apps[0].ID}}, memberSession); res.Code != 403 {
+	revokePath := "/services/apps/" + apps[0].ID + "/revoke"
+	if res := siteCall(w, "POST", "/api/v1/site/account"+revokePath, "{}", memberSession, siteCSRF(w, session)); res.Code != 403 {
 		t.Fatalf("revoke with another session's CSRF: %d", res.Code)
 	}
-	otherCSRF := w.s.accounts.mac("apps-revoke:" + memberSession.Value)
-	if res := oauthCall(w.h, "POST", "/account/apps/revoke", url.Values{"csrf": {otherCSRF}, "grant": {apps[0].ID}}, memberSession); res.Code != 303 || !w.valid(token) {
-		t.Fatal("another account revoked the connection")
+	if res := accountPost(w, memberSession, revokePath, "{}"); res.Code != 200 || !w.valid(token) {
+		t.Fatalf("another account revoked the connection: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/apps/revoke", url.Values{"csrf": {revokeCSRF}, "grant": {apps[0].ID}}, session); res.Code != 303 || w.valid(token) {
+	if res := accountPost(w, session, revokePath, "{}"); res.Code != 200 || w.valid(token) {
 		t.Fatalf("revoke: %d", res.Code)
 	}
 	if res := w.mcp(token, "tools/list", map[string]any{}, ""); res.status != 401 {
@@ -410,15 +408,6 @@ func TestOAuthChangeSpacesAgainstDatabase(t *testing.T) {
 		t.Fatalf("raise to read and write: %d %s", res.Code, res.Body)
 	}
 	w.tool(token, "write", map[string]any{"space": w.joinName, "path": "a.md", "text": "x", "ifInState": state}, "")
-	// The form route asks for the same confirmation (until the clean-up release).
-	form := url.Values{"csrf": {w.s.accounts.mac("apps-spaces:" + stale.Value)}, "grant": {grant}, "s-" + w.ownedID: {"none"}, "s-" + w.joinID: {"read_write"}}
-	if res := oauthCall(w.h, "POST", "/account/apps/spaces", form, stale); res.Code != 303 {
-		t.Fatalf("form narrow: %d", res.Code)
-	}
-	form.Set("s-"+w.ownedID, "read_write")
-	if res := oauthCall(w.h, "POST", "/account/apps/spaces", form, stale); res.Code != 403 || !strings.Contains(res.Body.String(), "Confirm it’s you") {
-		t.Fatalf("form widen without a recent sign-in: %d", res.Code)
-	}
 	if res := change(session, ownerCSRF, grant, map[string]string{w.ownedID: "read_write"}); res.Code != 200 {
 		t.Fatalf("restore owned space: %d", res.Code)
 	}

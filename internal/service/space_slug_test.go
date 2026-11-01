@@ -1,7 +1,7 @@
 package service
 
 import (
-	"net/url"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -40,46 +40,47 @@ func TestDeriveSpaceSlug(t *testing.T) {
 	}
 }
 
-func TestCreateSpaceFormAgainstDatabase(t *testing.T) {
+// Creating a space from Settings → Spaces: the slug comes from the name.
+func TestCreateSpaceAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	maker := w.user("maker")
 	session := w.session(maker)
-	csrf := w.s.accounts.mac("space-create:" + session.Value)
-	create := func(fields url.Values) (int, string, string) {
-		fields.Set("csrf", csrf)
-		res := oauthCall(w.h, "POST", "/account/spaces", fields, session)
-		return res.Code, res.Header().Get("Location"), res.Body.String()
+	create := func(fields map[string]string) (int, map[string]any, string) {
+		res := accountPost(w, session, "/spaces", jsonOf(fields))
+		var out map[string]any
+		_ = json.Unmarshal(res.Body.Bytes(), &out)
+		return res.Code, out, res.Body.String()
 	}
-	// Name problems are reported on the name field.
+	// Name problems are reported.
 	for name, message := range map[string]string{
 		"🙂🚀":                     "Use at least one letter or number in the name",
 		strings.Repeat("n", 121): "Use a space name of 1–120 characters",
 	} {
-		code, _, body := create(url.Values{"name": {name}})
-		if code != 400 || !strings.Contains(body, `aria-invalid="true"`) || !strings.Contains(body, `id="space-name-error"`) || !strings.Contains(body, message) {
+		code, _, body := create(map[string]string{"name": name})
+		if code != 400 || !strings.Contains(body, message) {
 			t.Fatalf("name %q: %d %s", name, code, body)
 		}
 	}
-	// One field: the slug is derived and the browser lands on the new space.
-	code, location, _ := create(url.Values{"name": {"Bartco Notes!"}})
-	if code != 303 || location != "/spaces/"+maker.Username+"/bartco-notes/" {
-		t.Fatalf("create: %d %q", code, location)
+	// One field: the slug is derived, and the answer names the new space.
+	code, out, body := create(map[string]string{"name": "Bartco Notes!"})
+	if code != 200 || out["space"] != maker.Username+"/bartco-notes" {
+		t.Fatalf("create: %d %s", code, body)
 	}
 	spaces, err := w.h.accountSpaces(t.Context(), maker)
 	if err != nil || len(spaces) != 1 || spaces[0].Name != "Bartco Notes!" || spaces[0].Slug != "bartco-notes" {
 		t.Fatalf("stored space: %v %v", spaces, err)
 	}
 	// A name that gives an address already in use is refused, even an identical
-	// name (which a retry would otherwise reuse) and even at the allowance limit.
+	// name (which a retry would otherwise reuse).
 	for _, name := range []string{"Bartco Notes!", "bartco notes"} {
-		code, _, body := create(url.Values{"name": {name}})
-		if code != 409 || !strings.Contains(body, "You already have a space at /spaces/"+maker.Username+"/bartco-notes. Choose a different name.") {
+		code, _, body := create(map[string]string{"name": name})
+		if code != 409 || !strings.Contains(body, "You already have a space at "+maker.Username+"/bartco-notes. Choose a different name.") {
 			t.Fatalf("duplicate %q: %d %s", name, code, body)
 		}
 	}
-	// Retry preparation still sends the stored slug and finishes idempotently.
-	if code, location, _ := create(url.Values{"name": {"Bartco Notes!"}, "slug": {"bartco-notes"}}); code != 303 || location != "/spaces/"+maker.Username+"/bartco-notes/" {
-		t.Fatalf("retry: %d %q", code, location)
+	// Retry sends the stored slug and finishes idempotently.
+	if code, out, body := create(map[string]string{"name": "Bartco Notes!", "slug": "bartco-notes"}); code != 200 || out["space"] != maker.Username+"/bartco-notes" {
+		t.Fatalf("retry: %d %s", code, body)
 	}
 	if spaces, _ := w.h.accountSpaces(t.Context(), maker); len(spaces) != 1 {
 		t.Fatalf("retry created another space: %v", spaces)

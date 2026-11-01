@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"net/url"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -105,14 +105,16 @@ func TestDatabaseSchedulesAndTimezone(t *testing.T) {
 
 	// The time zone: the owner's form, then the runner reads it.
 	session := w.session(w.owner)
-	csrf := w.s.accounts.mac("space-timezone:" + session.Value)
-	if res := oauthCall(w.h, "POST", "/account/spaces/timezone", url.Values{"csrf": {csrf}, "space": {w.ownedID}, "timezone": {"Mars/Olympus"}}, session); res.Code != 400 {
+	zone := func(spaceID, timezone string) *httptest.ResponseRecorder {
+		return accountPost(w, session, "/spaces/"+spaceID+"/timezone", jsonOf(map[string]string{"timezone": timezone}))
+	}
+	if res := zone(w.ownedID, "Mars/Olympus"); res.Code != 400 {
 		t.Fatalf("bad zone: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/spaces/timezone", url.Values{"csrf": {csrf}, "space": {w.joinID}, "timezone": {"Australia/Perth"}}, session); res.Code != 404 {
+	if res := zone(w.joinID, "Australia/Perth"); res.Code != 404 {
 		t.Fatalf("a space of someone else's: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/spaces/timezone", url.Values{"csrf": {csrf}, "space": {w.ownedID}, "timezone": {"Australia/Perth"}}, session); res.Code != 303 {
+	if res := zone(w.ownedID, "Australia/Perth"); res.Code != 200 {
 		t.Fatalf("set zone: %d %s", res.Code, res.Body.String())
 	}
 	if got := w.s.dbSpaceZone(ctx, w.ownedID); got != "Australia/Perth" {
@@ -121,7 +123,7 @@ func TestDatabaseSchedulesAndTimezone(t *testing.T) {
 	if body := siteCall(w, "GET", "/api/v1/site/account", "", session, "").Body.String(); !strings.Contains(body, `"timezone":"Australia/Perth"`) {
 		t.Error("Settings lacks the zone")
 	}
-	if res := oauthCall(w.h, "POST", "/account/spaces/timezone", url.Values{"csrf": {csrf}, "space": {w.ownedID}, "timezone": {""}}, session); res.Code != 303 {
+	if res := zone(w.ownedID, ""); res.Code != 200 {
 		t.Fatalf("clear zone: %d", res.Code)
 	}
 	if got := w.s.dbSpaceZone(ctx, w.ownedID); got != "" {
@@ -132,8 +134,7 @@ func TestDatabaseSchedulesAndTimezone(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := randomName(t, "Zone ")
-	spaceCSRF := w.s.accounts.mac("space-create:" + session.Value)
-	if res := oauthCall(w.h, "POST", "/account/spaces", url.Values{"csrf": {spaceCSRF}, "name": {name}, "timezone": {"Europe/London"}}, session); res.Code != 303 {
+	if res := accountPost(w, session, "/spaces", jsonOf(map[string]string{"name": name, "timezone": "Europe/London"})); res.Code != 200 {
 		t.Fatalf("create: %d %s", res.Code, res.Body.String())
 	}
 	zones, err := w.db.spaceTimezones(ctx, w.owner.ID)

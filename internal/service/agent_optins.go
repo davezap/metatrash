@@ -11,7 +11,7 @@ import (
 // Opting in (0.56.0, metatrash_action_optins in schema v17). An action whose
 // owner set "pays": "contributor" runs on the agent of whoever brought the
 // file, but only once they have agreed: they pick one of their agents for
-// the action's model on the action's page (/account/actions/<job>, linked
+// the action's model on the action's page (Settings → Services, /app/#settings/services/actions/<job>, linked
 // from the notice they get when a file of theirs is skipped). Nothing falls
 // back to another key or model; a file from someone not opted in runs
 // nothing.

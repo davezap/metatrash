@@ -2,17 +2,16 @@ package service
 
 import (
 	"context"
-	"errors"
 	"log"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
 
-// Sign-in methods on Your account (0.22.0): confirming it's you (step-up)
-// and managing passkeys; and signing in with a passkey. The authenticator
+// Sign-in methods (0.22.0; Settings → Security since 0.81.0, site_security.go):
+// confirming it's you (step-up) and managing passkeys; and signing in with a
+// passkey. The authenticator
 // app (0.24.0) is in totp.go; recovery codes and the email sign-in switch
 // (0.25.0) are in recovery.go.
 //
@@ -21,16 +20,14 @@ import (
 // authenticator app or a code emailed to the account's address (unless the
 // account turned email sign-in off).
 
-// signInRoutes are the POST routes of the Sign-in methods section. Each has
-// its own session-bound CSRF token.
+// signInRoutes name the Security changes. They were the old account page's
+// form routes; Settings posts each one to /api/v1/site/account/security/...
+// (with /account/ dropped). Confirming it's you is site_account.go's
+// /api/v1/site/account/confirm/....
 var signInRoutes = map[string]bool{
-	"/account/confirm/send":      true,
-	"/account/confirm/verify":    true,
-	"/account/confirm/passkey":   true,
 	"/account/passkeys/add":      true,
 	"/account/passkeys/rename":   true,
 	"/account/passkeys/remove":   true,
-	"/account/confirm/totp":      true,
 	"/account/totp/start":        true,
 	"/account/totp/enable":       true,
 	"/account/totp/remove":       true,
@@ -47,34 +44,6 @@ var signInRoutes = map[string]bool{
 	"/account/microsoft/remove":  true,
 }
 
-// signInFormFields are the fields each route accepts besides csrf.
-var signInFormFields = map[string][]string{
-	"/account/confirm/send":      nil,
-	"/account/confirm/verify":    {"code"},
-	"/account/confirm/passkey":   passkeyAssertionFields,
-	"/account/passkeys/add":      {"name", "client_data", "attestation", "transports"},
-	"/account/passkeys/rename":   {"passkey", "name"},
-	"/account/passkeys/remove":   {"passkey"},
-	"/login/passkey":             passkeyAssertionFields,
-	"/account/confirm/totp":      {"code"},
-	"/account/totp/start":        nil,
-	"/account/totp/enable":       {"code"},
-	"/account/totp/remove":       nil,
-	"/login/totp":                {"email", "code"},
-	"/account/recovery/create":   nil,
-	"/account/email-login":       {"email_login"},
-	"/login/recovery":            {"email", "code"},
-	"/account/email/change":      {"email"},
-	"/account/email/verify":      {"code"},
-	"/account/email/cancel":      nil,
-	"/account/sessions/end":      nil,
-	"/account/sessions/remove":   {"session"},
-	"/account/microsoft/link":    nil,
-	"/account/microsoft/confirm": nil,
-	"/account/microsoft/forget":  nil,
-	"/account/microsoft/remove":  {"identity"},
-}
-
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
 
 type passkeyView struct {
@@ -84,7 +53,6 @@ type passkeyView struct {
 }
 
 type signInPage struct {
-	CSRF map[string]string
 	// Fresh: the session signed in or confirmed within stepUpWindow.
 	Fresh        bool
 	FreshMinutes int
@@ -128,19 +96,12 @@ type identityView struct {
 	ID, Label, Created, LastUsed string
 }
 
-func (a *accounts) signInCSRF(path, session string) string {
-	return a.mac("signin:" + path + ":" + session)
-}
-
-// signInSection builds the Sign-in methods section of Your account.
+// signInSection is the state Settings → Security shows (siteSecurityOf).
 func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInPage, bool) {
 	a := h.service.accounts
 	session := cookieToken(r, h.sessionCookieName())
 	now := time.Now()
-	page := &signInPage{CSRF: map[string]string{}}
-	for path := range signInRoutes {
-		page.CSRF[strings.TrimPrefix(path, "/account/")] = a.signInCSRF(path, session)
-	}
+	page := &signInPage{}
 	var until time.Time
 	page.Fresh, until = a.sessionFresh(session, now)
 	if page.Fresh {
@@ -275,47 +236,6 @@ var signsOutOthers = map[string]bool{
 
 var errConfirmFirst = problem(403, "confirm_required", "Confirm it’s you first. Adding or removing a sign-in method needs a sign-in or confirmation within the last 10 minutes.")
 
-// submitSignIn handles the Sign-in methods forms after the form, Origin and
-// CSRF checks.
-func (h *httpAdapter) submitSignIn(w http.ResponseWriter, r *http.Request, session, path, client string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	if h.service.ownedDB == nil {
-		sendError(w, problem(503, "unavailable", "Sign-in methods are temporarily unavailable."))
-		return
-	}
-	notice, redirect, err := h.signInChange(w, r, session, client, path, user, r.PostForm.Get)
-	if err == nil && redirect != "" {
-		http.Redirect(w, r, redirect, http.StatusSeeOther)
-		return
-	}
-	if err == nil {
-		if notice != "" {
-			accountCookie(w, h.noticeCookieName(), notice, 60)
-		}
-		http.Redirect(w, r, h.basePath+"/account/security", http.StatusSeeOther)
-		return
-	}
-	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "That change could not be saved. Reload the page and try again."}
-	status := http.StatusServiceUnavailable
-	var p *Error
-	if errors.As(err, &p) {
-		status, page.Message = p.Status, p.Message
-		if p.RetryAfterSeconds > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-		}
-	}
-	h.renderAccount(w, r, status, page)
-}
-
 // signInChange makes one Security change (path is its form route,
 // /account/...) for the session's user, reading its fields with get: for the
 // Security forms and the Settings dialog's Security tab (0.81.0). It answers
@@ -339,43 +259,9 @@ func (h *httpAdapter) signInChange(w http.ResponseWriter, r *http.Request, sessi
 		}
 		err = errConfirmFirst
 	}
-	if err == nil && (path == "/account/confirm/send" || path == "/account/confirm/verify") {
-		var state signInState
-		if state, err = db.signInState(ctx, user.ID); err == nil && !state.EmailLogin {
-			err = problem(403, "email_login_off", "Email sign-in is turned off for this account, so emailed codes cannot confirm it’s you. Confirm with a passkey or your authenticator app.")
-		}
-	}
 	if err == nil {
 		switch path {
-		case "/account/confirm/send":
-			emailKey := a.mac("email:" + user.Email)
-			err = h.service.rates.reserve(codeMailBudget, allowance{"mail:ip:" + client, 10, 3600}, allowance{"mail:email:minute:" + emailKey, 1, 60}, allowance{"mail:email:hour:" + emailKey, 3, 3600})
-			h.logMailBudget()
-			if err == nil {
-				err = a.issueCode(ctx, confirmKey(session), user.Email, a.sendConfirm)
-			}
-		case "/account/confirm/verify":
-			a.mu.Lock()
-			a.cleanup(now)
-			var email string
-			email, err = a.checkCodeLocked(confirmKey(session), strings.TrimSpace(get("code")))
-			a.mu.Unlock()
-			if err == nil && email != user.Email {
-				err = problem(400, "invalid_code", "That code is invalid or expired. Try again, or request a new code.")
-			}
-			if err == nil {
-				a.markConfirmed(session, user.ID, now)
-				notice = "signin-confirmed"
-			}
-		case "/account/confirm/passkey":
-			var in passkeyAssertion
-			if in, err = passkeyAssertionFrom(get); err == nil {
-				err = h.confirmWithPasskey(ctx, session, user, in, now)
-			}
-			if err == nil {
-				notice = "signin-confirmed"
-			}
-		case "/account/confirm/totp", "/account/totp/start", "/account/totp/enable", "/account/totp/remove":
+		case "/account/totp/start", "/account/totp/enable", "/account/totp/remove":
 			notice, err = h.submitTOTP(ctx, path, session, user, get("code"), now)
 		case "/account/recovery/create":
 			err = h.createRecoveryCodes(ctx, session, user, now)

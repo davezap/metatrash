@@ -242,7 +242,7 @@ func TestAccountsHTTP(t *testing.T) {
 		t.Fatal("rejected resend consumed shared mail budget")
 	}
 	w = call("POST", "/login/verify", "https://metatrash.com", url.Values{"code": {*code}, "csrf": {browser.Value}}, browser)
-	if w.Code != 303 || w.Header().Get("Location") != "/account" {
+	if w.Code != 303 || w.Header().Get("Location") != "/app/#settings/spaces" {
 		t.Fatal("login failed")
 	}
 	var session *http.Cookie
@@ -263,34 +263,16 @@ func TestAccountsHTTP(t *testing.T) {
 	if w := call("GET", "/account/security", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/app/#settings/security" {
 		t.Fatal("security not sent to Settings")
 	}
-	usernameForm := url.Values{"username": {"Dave-C"}, "csrf": {s.accounts.mac("username:" + session.Value)}}
-	if w := call("POST", "/account/username", "https://other.example", usernameForm, session); w.Code != 403 {
-		t.Fatal("cross-origin username selection accepted")
-	}
-	usernameForm.Set("csrf", s.accounts.mac("logout:"+session.Value))
-	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 403 {
-		t.Fatal("logout token accepted for username selection")
-	}
-	usernameForm.Set("csrf", s.accounts.mac("username:"+session.Value))
-	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
-		t.Fatal("username selection failed")
-	}
-	if user, ok, err := s.accounts.currentUser(context.Background(), session.Value); err != nil || !ok || user.Username != "dave-c" {
-		t.Fatal("selected username not shown as fixed")
-	}
-	usernameForm.Set("username", "another-name")
-	// 409 in production; this harness reports 503 because spaces are unavailable.
-	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); (w.Code != 409 && w.Code != 503) || !strings.Contains(w.Body.String(), "Username already selected.") {
-		t.Fatal("permanent username replaced")
+	// Choosing a username is Settings → Profile (TestSiteAccountAgainstDatabase);
+	// the old form route is gone (TestAccountSectionsAgainstDatabase).
+	if h.serveAccounts(httptest.NewRecorder(), httptest.NewRequest("POST", "https://metatrash.com/account/username", nil), "test-client") {
+		t.Fatal("old username form still handled")
 	}
 	if w := call("POST", "/logout", "https://metatrash.com", url.Values{"csrf": {s.accounts.mac("logout:" + session.Value)}}, session); w.Code != 303 {
 		t.Fatal("logout failed")
 	}
 	if w := call("GET", "/account", "", nil, session); w.Code != 303 || w.Header().Get("Location") != "/login" {
 		t.Fatal("logged-out session accepted")
-	}
-	if w := call("POST", "/account/username", "https://metatrash.com", usernameForm, session); w.Code != 303 {
-		t.Fatal("logged-out username request not redirected")
 	}
 }
 

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -78,8 +77,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	aliceSession := w.session(alice)
 	offer := func(member string, session *http.Cookie) int {
 		t.Helper()
-		res := oauthCall(w.h, "POST", "/account/transfer/offer", url.Values{"csrf": {w.h.transferCSRF("offer", session.Value)}, "space": {space.ID}, "member": {member}}, session)
-		return res.Code
+		return accountPost(w, session, "/spaces/"+space.ID+"/transfer-offer", jsonOf(map[string]string{"member": member})).Code
 	}
 	// Sharing in the Settings dialog (0.79.0) says whether the session is fresh
 	// enough to offer, and lists who it can go to.
@@ -105,16 +103,16 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 			t.Fatalf("offer to %s: %d", name, code)
 		}
 	}
-	// Only the owner can offer, with their own CSRF token.
+	// Only the owner can offer, with their session's CSRF token.
 	bobSession := w.session(bob)
 	w.s.accounts.markConfirmed(bobSession.Value, bob.ID, time.Now())
 	if code := offer(bob.ID, bobSession); code != 404 {
 		t.Fatalf("member offering: %d", code)
 	}
-	if res := oauthCall(w.h, "POST", "/account/transfer/offer", url.Values{"csrf": {w.h.transferCSRF("cancel", aliceSession.Value)}, "space": {space.ID}, "member": {bob.ID}}, aliceSession); res.Code != 403 {
-		t.Fatalf("offer with another action's token: %d", res.Code)
+	if res := siteCall(w, "POST", "/api/v1/site/account/spaces/"+space.ID+"/transfer-offer", jsonOf(map[string]string{"member": bob.ID}), aliceSession, siteCSRF(w, bobSession)); res.Code != 403 {
+		t.Fatalf("offer with another session's token: %d", res.Code)
 	}
-	if code := offer(bob.ID, aliceSession); code != 303 {
+	if code := offer(bob.ID, aliceSession); code != 200 {
 		t.Fatalf("offer: %d", code)
 	}
 	if m := mailTo(bob.Email, "A Metatrash space has been offered to you"); !strings.Contains(m, oldName) || !strings.Contains(m, newName) || !strings.Contains(m, "Moving house") {
@@ -137,7 +135,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	accept := func(u userAccount) int {
 		t.Helper()
 		s := w.session(u)
-		return oauthCall(w.h, "POST", "/account/transfer/accept", url.Values{"csrf": {w.h.transferCSRF("accept", s.Value)}, "space": {space.ID}}, s).Code
+		return accountPost(w, s, "/offers/accept", jsonOf(map[string]string{"space": space.ID})).Code
 	}
 	if code := accept(carol); code != 409 {
 		t.Fatalf("someone else accepting: %d", code)
@@ -148,7 +146,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	if _, err := w.s.createOwnedSpace(ctx, erin.ID, "Erin's own", slug); err != nil {
 		t.Fatal(err)
 	}
-	if code := offer(erin.ID, aliceSession); code != 303 {
+	if code := offer(erin.ID, aliceSession); code != 200 {
 		t.Fatalf("offer to erin: %d", code)
 	}
 	if code := accept(erin); code != 409 {
@@ -158,7 +156,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 		t.Fatalf("accepting an offer made to someone else: %d", code)
 	}
 	// Nor over their allowance (Bob owns one space; the limit is one).
-	if code := offer(bob.ID, aliceSession); code != 303 {
+	if code := offer(bob.ID, aliceSession); code != 200 {
 		t.Fatalf("offer: %d", code)
 	}
 	if _, err := w.s.createOwnedSpace(ctx, bob.ID, "Bob's own", randomName(t, "own-")); err != nil {
@@ -172,22 +170,22 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	}
 	// Declining and cancelling are harmless to repeat; an offer can be made again.
 	decline := func() int {
-		return oauthCall(w.h, "POST", "/account/transfer/decline", url.Values{"csrf": {w.h.transferCSRF("decline", bobSession.Value)}, "space": {space.ID}}, bobSession).Code
+		return accountPost(w, bobSession, "/offers/decline", jsonOf(map[string]string{"space": space.ID})).Code
 	}
-	if decline() != 303 || decline() != 303 || accept(bob) != 409 {
+	if decline() != 200 || decline() != 200 || accept(bob) != 409 {
 		t.Fatal("decline")
 	}
-	if code := offer(bob.ID, aliceSession); code != 303 {
+	if code := offer(bob.ID, aliceSession); code != 200 {
 		t.Fatalf("offer again: %d", code)
 	}
 	cancel := func() int {
-		return oauthCall(w.h, "POST", "/account/transfer/cancel", url.Values{"csrf": {w.h.transferCSRF("cancel", aliceSession.Value)}, "space": {space.ID}}, aliceSession).Code
+		return accountPost(w, aliceSession, "/spaces/"+space.ID+"/transfer-cancel", "{}").Code
 	}
-	if cancel() != 303 || cancel() != 303 || accept(bob) != 409 {
+	if cancel() != 200 || cancel() != 200 || accept(bob) != 409 {
 		t.Fatal("cancel")
 	}
 	// Suspending the member withdraws the offer.
-	if code := offer(bob.ID, aliceSession); code != 303 {
+	if code := offer(bob.ID, aliceSession); code != 200 {
 		t.Fatalf("offer: %d", code)
 	}
 	if err := w.db.manageHumanMember(ctx, alice.ID, space.ID, bob.ID, "suspend"); err != nil {
@@ -200,7 +198,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 		t.Fatalf("offer survived suspension: %d", code)
 	}
 	// An expired offer cannot be accepted.
-	if code := offer(bob.ID, aliceSession); code != 303 {
+	if code := offer(bob.ID, aliceSession); code != 200 {
 		t.Fatalf("offer: %d", code)
 	}
 	if _, err := w.db.db.ExecContext(ctx, "DELETE FROM metatrash_space_transfers WHERE space_id = ?", space.ID); err != nil {
@@ -217,13 +215,13 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 		t.Fatal("expired offer not shown as expired")
 	}
 
-	if code := offer(bob.ID, aliceSession); code != 303 {
+	if code := offer(bob.ID, aliceSession); code != 200 {
 		t.Fatalf("offer: %d", code)
 	}
-	if code := accept(bob); code != 303 {
+	if code := accept(bob); code != 200 {
 		t.Fatalf("accept: %d", code)
 	}
-	if code := accept(bob); code != 303 {
+	if code := accept(bob); code != 200 {
 		t.Fatalf("repeated accept: %d", code)
 	}
 	if m := mailTo(alice.Email, "Your Metatrash space has a new owner"); !strings.Contains(m, newName) || !strings.Contains(m, oldName) {
@@ -318,7 +316,7 @@ func TestSpaceTransferAgainstDatabase(t *testing.T) {
 	if _, err := w.s.createOwnedSpace(ctx, alice.ID, "Moving house again", slug); err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("reusing the old address: %v", err)
 	}
-	if res := oauthCall(w.h, "POST", "/account/spaces", url.Values{"csrf": {w.s.accounts.mac("space-create:" + aliceSession.Value)}, "name": {slug}}, aliceSession); res.Code != 409 || !strings.Contains(res.Body.String(), "is reserved") || !strings.Contains(res.Body.String(), `id="space-name-error"`) {
+	if res := accountPost(w, aliceSession, "/spaces", jsonOf(map[string]string{"name": slug})); res.Code != 409 || !strings.Contains(res.Body.String(), "is reserved") {
 		t.Fatalf("create form on the old address: %d", res.Code)
 	}
 	// Alice cannot accept another space onto it either.

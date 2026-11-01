@@ -3,7 +3,6 @@ package service
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -116,9 +115,8 @@ func TestMarkdownPagesAgainstDatabase(t *testing.T) {
 		t.Fatalf("stranger, private llms.txt: %d", res.Code)
 	}
 
-	ownerCSRF := w.s.accounts.mac("space-visibility:" + ownerSession.Value)
 	w.s.accounts.markConfirmed(ownerSession.Value, w.owner.ID, time.Now())
-	if res := oauthCall(w.h, "POST", "/account/spaces/visibility", url.Values{"csrf": {ownerCSRF}, "space": {w.ownedID}, "visibility": {"web"}}, ownerSession); res.Code != 303 {
+	if res := accountPost(w, ownerSession, "/spaces/"+w.ownedID+"/visibility", `{"visibility":"web"}`); res.Code != 200 {
 		t.Fatalf("make web: %d", res.Code)
 	}
 	if res := oauthCall(w.h, "GET", space+"README.md?format=md", nil); !isMarkdown(res, "# Private space\n") {

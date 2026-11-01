@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// connectedApp is one OAuth connection shown on Your account.
+// connectedApp is one OAuth connection shown in Settings → Services.
 type connectedApp struct {
 	ID, Name, Host, Kind, Created, LastUsed string
 	Spaces                                  []connectedAppSpace

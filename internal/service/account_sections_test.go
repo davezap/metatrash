@@ -1,38 +1,33 @@
 package service
 
 import (
-	"strings"
+	"net/url"
 	"testing"
 )
 
-// Your account is one page per section, with the sections down the left like
-// a space's explorer. Each section loads only what it shows.
+// The old account pages and their forms are gone (0.82.0): every section is
+// in the site app's Settings dialog, and the old addresses only redirect
+// there (TestAccountPagesRedirectToSettings).
 func TestAccountSectionsAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
-	// Every section moved to the site app's Settings dialog: Spaces, sharing
-	// and Profile in 0.79.0, Services in 0.80.0, Security in 0.81.0
-	// (TestAccountPagesRedirectToSettings). The old Security page still
-	// renders until the clean-up release; its form routes post there.
-	res := legacySecurity(w.h, session)
-	body := res.Body.String()
-	if res.Code != 200 || !strings.Contains(body, "Confirm it’s you") || strings.Contains(body, `id="connected-apps"`) {
-		t.Fatalf("security: %d\n%s", res.Code, body)
-	}
-	if !strings.Contains(body, `href="/account/security" aria-current="page"`) || strings.Count(body, `aria-current="page"`) != 1 {
-		t.Fatal("navigation does not mark exactly Security")
-	}
-	if !strings.Contains(body, `src="/assets/account.js"`) {
-		t.Fatal("account.js not loaded")
+	if res := oauthCall(w.h, "GET", "/account/security", nil, session); res.Code != 303 || res.Header().Get("Location") != "/app/#settings/security" {
+		t.Fatalf("security: %d %q", res.Code, res.Header().Get("Location"))
 	}
 	if res := oauthCall(w.h, "GET", "/account/security", nil); res.Code != 303 || res.Header().Get("Location") != "/login" {
 		t.Fatalf("security without a session: %d", res.Code)
 	}
-	if res := oauthCall(w.h, "GET", "/assets/account.js", nil); res.Code != 200 || !strings.Contains(res.Body.String(), "details.pop") {
+	if res := oauthCall(w.h, "GET", "/assets/account.js", nil); res.Code != 404 {
 		t.Fatalf("account.js: %d", res.Code)
 	}
-	// Only the listed sections exist.
-	if res := oauthCall(w.h, "GET", "/account/nope", nil, session); res.Code == 200 {
-		t.Fatal("unknown account section served")
+	// The old form routes no longer take posts, with or without a token.
+	for _, path := range []string{"/account/passkeys/rename", "/account/username", "/account/spaces", "/account/delete", "/account/transfer/offer", "/account/agents", "/account/github/connect"} {
+		res := oauthCall(w.h, "POST", path, url.Values{"csrf": {w.s.accounts.mac("logout:" + session.Value)}, "name": {"x"}}, session)
+		if res.Code < 400 {
+			t.Fatalf("%s: %d", path, res.Code)
+		}
+	}
+	if res := oauthCall(w.h, "GET", "/account/nope", nil, session); res.Code != 404 {
+		t.Fatalf("unknown account section: %d", res.Code)
 	}
 }

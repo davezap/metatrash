@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"html"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
@@ -11,15 +10,6 @@ import (
 	"testing"
 	"time"
 )
-
-func formCSRF(t *testing.T, body, action string) string {
-	t.Helper()
-	m := regexp.MustCompile(`action="` + regexp.QuoteMeta(action) + `"[^>]*><input type="hidden" name="csrf" value="([0-9a-f]{64})"`).FindStringSubmatch(body)
-	if m == nil {
-		t.Fatalf("no form for %s in page", action)
-	}
-	return m[1]
-}
 
 func dataOptions(t *testing.T, body, attribute string) string {
 	t.Helper()
@@ -62,65 +52,66 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 
 	// A session that signed in long ago must confirm before adding a passkey.
 	session := w.session(w.owner)
-	page := legacySecurity(w.h, session)
-	body := page.Body.String()
-	if page.Code != 200 || !strings.Contains(body, `id="sign-in"`) || !strings.Contains(body, "Confirm it’s you") || strings.Contains(body, "data-passkey-create") || strings.Contains(body, "/account/confirm/passkey") {
-		t.Fatalf("account page before confirming: %d %v %v %v %v", page.Code, strings.Contains(body, `id="sign-in"`), strings.Contains(body, "Confirm it’s you"), strings.Contains(body, "data-passkey-create"), strings.Contains(body, "/account/confirm/passkey"))
+	state := securityState(t, w, session)
+	if state["fresh"] == true || state["createOptions"] != nil {
+		t.Fatalf("security before confirming: %v", state)
 	}
-	if !strings.Contains(body, "/assets/passkey.js") {
-		t.Fatal("passkey.js not loaded")
+	if ways := confirmWays(t, w, session); ways["email"] != true || ways["passkey"] != nil {
+		t.Fatalf("ways to confirm: %v", ways)
 	}
-	sendCSRF := formCSRF(t, body, "/account/confirm/send")
-	res := oauthCall(w.h, "POST", "/account/passkeys/add", url.Values{"csrf": {w.s.accounts.signInCSRF("/account/passkeys/add", session.Value)}, "name": {"x"}, "client_data": {"e30"}, "attestation": {"oA"}}, session)
-	if res.Code != 403 || !strings.Contains(res.Body.String(), "Confirm it’s you first") {
+	res := securityPost(w, "/account/passkeys/add", url.Values{"name": {"x"}, "client_data": {"e30"}, "attestation": {"oA"}}, session)
+	if res.Code != 403 || !strings.Contains(res.Body.String(), "step_up_needed") {
 		t.Fatalf("add without confirming: %d %s", res.Code, res.Body)
 	}
 	// Change the token's first character (one that starts with 0 gets a 1).
-	tampered := "0" + sendCSRF[1:]
-	if tampered == sendCSRF {
-		tampered = "1" + sendCSRF[1:]
+	csrf := siteCSRF(w, session)
+	tampered := "0" + csrf[1:]
+	if tampered == csrf {
+		tampered = "1" + csrf[1:]
 	}
-	res = oauthCall(w.h, "POST", "/account/confirm/send", url.Values{"csrf": {tampered}}, session)
-	if res.Code != 403 {
+	res = siteCall(w, "POST", "/api/v1/site/account/confirm/send", "{}", session, tampered)
+	if res.Code != 403 || confirmEmail != "" {
 		t.Fatalf("bad CSRF: %d", res.Code)
 	}
 
 	// Confirm with an emailed code.
-	res = oauthCall(w.h, "POST", "/account/confirm/send", url.Values{"csrf": {sendCSRF}}, session)
-	if res.Code != 303 || confirmEmail != w.owner.Email || len(confirmCode) != 6 {
+	res = securityPost(w, "/account/confirm/send", url.Values{}, session)
+	if res.Code != 200 || confirmEmail != w.owner.Email || len(confirmCode) != 6 {
 		t.Fatalf("send confirmation: %d %s", res.Code, res.Body)
 	}
-	body = legacySecurity(w.h, session).Body.String()
-	verifyCSRF := formCSRF(t, body, "/account/confirm/verify")
+	if ways := confirmWays(t, w, session); ways["sent"] != true {
+		t.Fatalf("code not shown as sent: %v", ways)
+	}
 	wrong := "000000"
 	if confirmCode == wrong {
 		wrong = "111111"
 	}
-	res = oauthCall(w.h, "POST", "/account/confirm/verify", url.Values{"csrf": {verifyCSRF}, "code": {wrong}}, session)
+	res = securityPost(w, "/account/confirm/verify", url.Values{"code": {wrong}}, session)
 	if res.Code != 400 {
 		t.Fatalf("wrong confirmation code: %d", res.Code)
 	}
 	// Another session cannot use this session's code.
 	other := w.session(w.owner)
-	res = oauthCall(w.h, "POST", "/account/confirm/verify", url.Values{"csrf": {w.s.accounts.signInCSRF("/account/confirm/verify", other.Value)}, "code": {confirmCode}}, other)
+	res = securityPost(w, "/account/confirm/verify", url.Values{"code": {confirmCode}}, other)
 	if res.Code != 400 {
 		t.Fatalf("code used from another session: %d", res.Code)
 	}
-	res = oauthCall(w.h, "POST", "/account/confirm/verify", url.Values{"csrf": {verifyCSRF}, "code": {confirmCode}}, session)
-	if res.Code != 303 || res.Header().Get("Location") != "/account/security" {
+	res = securityPost(w, "/account/confirm/verify", url.Values{"code": {confirmCode}}, session)
+	if res.Code != 200 || !strings.HasPrefix(jsonNotice(t, res), "Confirmed. For the next 10 minutes") {
 		t.Fatalf("confirm: %d %s", res.Code, res.Body)
 	}
 
-	// Now the page offers to add a passkey.
-	body = legacySecurity(w.h, session, &http.Cookie{Name: noticeCookie, Value: "signin-confirmed"}).Body.String()
-	if !strings.Contains(body, "Confirmed. For the next 10 minutes") || !strings.Contains(body, "for the next 10 minutes") {
-		t.Fatal("confirmation not shown")
+	// Now Security offers to add a passkey.
+	state = securityState(t, w, session)
+	options, _ := state["createOptions"].(string)
+	if state["fresh"] != true || options == "" {
+		t.Fatalf("security after confirming: %v", state)
 	}
 	soft := newSoftAuthenticator(t, coseES256)
-	cd, att := soft.create(t, dataOptions(t, body, "data-passkey-create"))
-	addForm := url.Values{"csrf": {formCSRF(t, body, "/account/passkeys/add")}, "name": {"  Pixel phone  "}, "client_data": {b64.EncodeToString(cd)}, "attestation": {b64.EncodeToString(att)}, "transports": {"hybrid,internal"}}
-	res = oauthCall(w.h, "POST", "/account/passkeys/add", addForm, session)
-	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "passkey-added" {
+	cd, att := soft.create(t, options)
+	addForm := url.Values{"name": {"  Pixel phone  "}, "client_data": {b64.EncodeToString(cd)}, "attestation": {b64.EncodeToString(att)}, "transports": {"hybrid,internal"}}
+	res = securityPost(w, "/account/passkeys/add", addForm, session)
+	if res.Code != 200 || noticeOf(res) != "passkey-added" {
 		t.Fatalf("add passkey: %d %s", res.Code, res.Body)
 	}
 	expectNotice(`added on your Metatrash account|A sign-in method was added on your Metatrash account: passkey "Pixel phone"`)
@@ -130,16 +121,15 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	}
 	// Replaying the same registration fails (challenge spent); a fresh
 	// challenge with the same credential is a duplicate.
-	if res = oauthCall(w.h, "POST", "/account/passkeys/add", addForm, session); res.Code != 400 {
+	if res = securityPost(w, "/account/passkeys/add", addForm, session); res.Code != 400 {
 		t.Fatalf("replayed registration: %d", res.Code)
 	}
-	body = legacySecurity(w.h, session).Body.String()
-	options := dataOptions(t, body, "data-passkey-create")
+	options, _ = securityState(t, w, session)["createOptions"].(string)
 	if !strings.Contains(options, b64.EncodeToString(soft.id)) {
 		t.Fatal("existing passkey not excluded")
 	}
 	cd, att = soft.create(t, options)
-	res = oauthCall(w.h, "POST", "/account/passkeys/add", url.Values{"csrf": {addForm.Get("csrf")}, "client_data": {b64.EncodeToString(cd)}, "attestation": {b64.EncodeToString(att)}}, session)
+	res = securityPost(w, "/account/passkeys/add", url.Values{"client_data": {b64.EncodeToString(cd)}, "attestation": {b64.EncodeToString(att)}}, session)
 	if res.Code != 409 {
 		t.Fatalf("duplicate passkey: %d %s", res.Code, res.Body)
 	}
@@ -147,14 +137,14 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	// Sign in with the passkey, without an email address.
 	login := oauthCall(w.h, "GET", "/login", nil)
 	browser := responseCookie(login, loginCookie)
-	body = login.Body.String()
+	body := login.Body.String()
 	if browser == nil || !strings.Contains(body, "Sign in with a passkey") || !strings.Contains(body, `autocomplete="email webauthn"`) {
 		t.Fatalf("login page: %d", login.Code)
 	}
 	in := soft.get(t, dataOptions(t, body, "data-passkey-get"))
 	res = oauthCall(w.h, "POST", "/login/passkey", assertionForm(browser.Value, in), browser)
 	signedIn := responseCookie(res, sessionCookie)
-	if res.Code != 303 || res.Header().Get("Location") != "/account" || signedIn == nil {
+	if res.Code != 303 || res.Header().Get("Location") != "/app/#settings/spaces" || signedIn == nil {
 		t.Fatalf("passkey sign-in: %d %s", res.Code, res.Body)
 	}
 	if user, ok, _ := w.s.accounts.currentUser(ctx, signedIn.Value); !ok || user.ID != w.owner.ID {
@@ -193,10 +183,10 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 
 	// Confirm with the passkey on a session that is not fresh.
 	stale := w.session(w.owner)
-	body = legacySecurity(w.h, stale).Body.String()
-	in = soft.get(t, dataOptions(t, body, "data-passkey-get"))
-	res = oauthCall(w.h, "POST", "/account/confirm/passkey", assertionForm(formCSRF(t, body, "/account/confirm/passkey"), in), stale)
-	if res.Code != 303 {
+	ways, _ := confirmWays(t, w, stale)["passkey"].(string)
+	in = soft.get(t, ways)
+	res = securityPost(w, "/account/confirm/passkey", assertionForm("", in), stale)
+	if res.Code != 200 {
 		t.Fatalf("confirm with passkey: %d %s", res.Code, res.Body)
 	}
 	if fresh, _ := w.s.accounts.sessionFresh(stale.Value, time.Now()); !fresh {
@@ -204,43 +194,35 @@ func TestPasskeysAgainstDatabase(t *testing.T) {
 	}
 	// Another account cannot confirm with the owner's passkey.
 	memberSession := w.session(w.member)
-	body = legacySecurity(w.h, memberSession).Body.String()
-	if strings.Contains(body, "/account/confirm/passkey") {
+	if confirmWays(t, w, memberSession)["passkey"] != nil {
 		t.Fatal("confirm with passkey offered without passkeys")
 	}
 	in = soft.get(t, w.s.accounts.requestOptions("confirm", memberSession.Value, nil, time.Now()))
-	res = oauthCall(w.h, "POST", "/account/confirm/passkey", assertionForm(w.s.accounts.signInCSRF("/account/confirm/passkey", memberSession.Value), in), memberSession)
+	res = securityPost(w, "/account/confirm/passkey", assertionForm("", in), memberSession)
 	if res.Code != 400 {
 		t.Fatalf("confirm with another account's passkey: %d", res.Code)
 	}
 
 	// Rename (no confirmation needed) and remove (confirmation needed).
-	renameCSRF := w.s.accounts.signInCSRF("/account/passkeys/rename", memberSession.Value)
-	if res = oauthCall(w.h, "POST", "/account/passkeys/rename", url.Values{"csrf": {renameCSRF}, "passkey": {list[0].ID}, "name": {"mine now"}}, memberSession); res.Code != 404 {
+	if res = securityPost(w, "/account/passkeys/rename", url.Values{"passkey": {list[0].ID}, "name": {"mine now"}}, memberSession); res.Code != 404 {
 		t.Fatalf("rename another account's passkey: %d", res.Code)
 	}
 	unconfirmed := w.session(w.owner)
-	body = legacySecurity(w.h, unconfirmed).Body.String()
-	if strings.Contains(body, "/account/passkeys/remove") {
-		t.Fatal("remove offered without confirming")
-	}
-	res = oauthCall(w.h, "POST", "/account/passkeys/rename", url.Values{"csrf": {formCSRF(t, body, "/account/passkeys/rename")}, "passkey": {list[0].ID}, "name": {"Work laptop"}}, unconfirmed)
-	if res.Code != 303 {
+	res = securityPost(w, "/account/passkeys/rename", url.Values{"passkey": {list[0].ID}, "name": {"Work laptop"}}, unconfirmed)
+	if res.Code != 200 {
 		t.Fatalf("rename: %d %s", res.Code, res.Body)
 	}
-	if res = oauthCall(w.h, "POST", "/account/passkeys/rename", url.Values{"csrf": {formCSRF(t, body, "/account/passkeys/rename")}, "passkey": {list[0].ID}, "name": {"bad\nname"}}, unconfirmed); res.Code != 400 {
+	if res = securityPost(w, "/account/passkeys/rename", url.Values{"passkey": {list[0].ID}, "name": {"bad\nname"}}, unconfirmed); res.Code != 400 {
 		t.Fatalf("rename with a control character: %d", res.Code)
 	}
-	removeCSRF := w.s.accounts.signInCSRF("/account/passkeys/remove", unconfirmed.Value)
-	if res = oauthCall(w.h, "POST", "/account/passkeys/remove", url.Values{"csrf": {removeCSRF}, "passkey": {list[0].ID}}, unconfirmed); res.Code != 403 {
+	if res = securityPost(w, "/account/passkeys/remove", url.Values{"passkey": {list[0].ID}}, unconfirmed); res.Code != 403 {
 		t.Fatalf("remove without confirming: %d", res.Code)
 	}
-	body = legacySecurity(w.h, signedIn).Body.String()
-	if !strings.Contains(body, "Work laptop") {
+	if !strings.Contains(jsonOf(securityState(t, w, signedIn)["passkeys"]), `"name":"Work laptop"`) {
 		t.Fatal("renamed passkey not listed")
 	}
-	res = oauthCall(w.h, "POST", "/account/passkeys/remove", url.Values{"csrf": {formCSRF(t, body, "/account/passkeys/remove")}, "passkey": {list[0].ID}}, signedIn)
-	if res.Code != 303 {
+	res = securityPost(w, "/account/passkeys/remove", url.Values{"passkey": {list[0].ID}}, signedIn)
+	if res.Code != 200 {
 		t.Fatalf("remove: %d %s", res.Code, res.Body)
 	}
 	expectNotice(`removed on your Metatrash account|A sign-in method was removed on your Metatrash account: passkey "Work laptop"`)

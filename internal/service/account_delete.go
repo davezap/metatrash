@@ -3,12 +3,8 @@ package service
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
-	"net/http"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -269,61 +265,4 @@ func (s *Service) purgeDeletedAccounts(ctx context.Context, now time.Time) {
 			}
 		}
 	}
-}
-
-// submitAccountDelete handles POST /account/delete from Profile: after a
-// recent sign-in, the account types its email address and is marked for
-// deletion, signed out everywhere and emailed.
-func (h *httpAdapter) submitAccountDelete(w http.ResponseWriter, r *http.Request, session string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	db := a.sessionDB()
-	err = h.service.rates.take(allowance{"account-delete:user:" + user.ID, 10, 600})
-	if err == nil && db == nil {
-		err = problem(503, "unavailable", "Deleting an account is not available on this server.")
-	}
-	if err == nil {
-		if fresh, _ := a.sessionFresh(session, time.Now()); !fresh {
-			err = errConfirmFirst
-		}
-	}
-	if err == nil && !strings.EqualFold(strings.TrimSpace(r.PostForm.Get("email")), user.Email) {
-		err = problem(400, "invalid_request", "That is not your email address. Type it exactly as shown under Email.")
-	}
-	now := time.Now()
-	if err == nil {
-		err = db.requestAccountDeletion(r.Context(), user.ID, now)
-	}
-	if err == nil {
-		log.Printf("account deletion requested user=%s", user.ID)
-		if endErr := a.endUserSessions(user.ID); endErr != nil {
-			log.Printf("account deletion: sessions of %s not all ended in the database", user.ID)
-		}
-		h.sendSecurityNotice(user, "Your Metatrash account will be deleted", accountDeletionRequestedMail(a.config.Origin, now, now.Add(AccountDeletionGrace)))
-		accountCookie(w, h.sessionCookieName(), "", -1)
-		accountCookie(w, h.noticeCookieName(), "account-deletion-requested", 60)
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	page := accountPage{SignedIn: true, User: user, Section: "profile", CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Message: "Your account could not be deleted. Reload before retrying."}
-	status := http.StatusServiceUnavailable
-	var p *Error
-	if errors.As(err, &p) {
-		status, page.Message = p.Status, p.Message
-		if p.RetryAfterSeconds > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-		}
-	}
-	if err == errConfirmFirst {
-		page.Message = "Deleting your account needs a sign-in within the last 10 minutes. Confirm it’s you in Security, then delete it again."
-	}
-	h.renderAccount(w, r, status, page)
 }

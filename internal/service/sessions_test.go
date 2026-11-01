@@ -2,10 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -43,13 +44,12 @@ func TestSignOutEverywhereAgainstDatabase(t *testing.T) {
 	here, phone, laptop := w.session(w.owner), w.session(w.owner), w.session(w.owner)
 	member := w.session(w.member)
 
-	body := html.UnescapeString(legacySecurity(w.h, here).Body.String())
-	if strings.Count(body, `action="/account/sessions/remove"`) != 2 || !strings.Contains(body, `action="/account/sessions/end"`) {
-		t.Fatal("other sessions not listed")
+	if state := securityState(t, w, here); state["otherSessions"] != 2.0 || len(state["sessions"].([]any)) != 3 {
+		t.Fatalf("other sessions not listed: %v", state)
 	}
 	// No confirmation needed: signing others out cannot lock anyone out.
-	res := oauthCall(w.h, "POST", "/account/sessions/end", url.Values{"csrf": {formCSRF(t, body, "/account/sessions/end")}}, here)
-	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "sessions-ended" {
+	res := securityPost(w, "/account/sessions/end", url.Values{}, here)
+	if res.Code != 200 || noticeOf(res) != "sessions-ended" {
 		t.Fatalf("sign out everywhere: %d %s", res.Code, res.Body)
 	}
 	for _, c := range []struct {
@@ -64,14 +64,13 @@ func TestSignOutEverywhereAgainstDatabase(t *testing.T) {
 	if _, ok, _ := a.currentUser(ctx, member.Value); !ok {
 		t.Fatal("another account's session signed out")
 	}
-	body = html.UnescapeString(legacySecurity(w.h, here).Body.String())
-	if !strings.Contains(body, "Only this device is signed in.") || strings.Contains(body, `action="/account/sessions/end"`) || strings.Contains(body, `action="/account/sessions/remove"`) {
-		t.Fatal("security page after signing out everywhere else")
+	if state := securityState(t, w, here); state["otherSessions"] != 0.0 || len(state["sessions"].([]any)) != 1 {
+		t.Fatalf("security after signing out everywhere else: %v", state)
 	}
-	// A signed-out browser cannot use the form.
-	res = oauthCall(w.h, "POST", "/account/sessions/end", url.Values{"csrf": {a.signInCSRF("/account/sessions/end", phone.Value)}}, phone)
-	if res.Code != 303 || !strings.HasSuffix(res.Header().Get("Location"), "/login") {
-		t.Fatalf("signed-out session: %d %s", res.Code, res.Header().Get("Location"))
+	// A signed-out browser cannot use it.
+	res = securityPost(w, "/account/sessions/end", url.Values{}, phone)
+	if res.Code != 401 {
+		t.Fatalf("signed-out session: %d %s", res.Code, res.Body)
 	}
 	if _, ok, _ := a.currentUser(ctx, here.Value); !ok {
 		t.Fatal("signed-out browser ended this session")
@@ -221,12 +220,7 @@ func TestSignOutSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie := &http.Cookie{Name: sessionCookie, Value: token}
-	body := legacySecurity(w.h, cookie).Body.String()
-	m := regexp.MustCompile(`action="/logout">\s*<input type="hidden" name="csrf" value="([0-9a-f]{64})"`).FindStringSubmatch(body)
-	if m == nil {
-		t.Fatal("no sign-out form")
-	}
-	if res := oauthCall(w.h, "POST", "/logout", url.Values{"csrf": {m[1]}}, cookie); res.Code != 303 {
+	if res := oauthCall(w.h, "POST", "/logout", url.Values{"csrf": {a.mac("logout:" + token)}}, cookie); res.Code != 303 {
 		t.Fatalf("sign out: %d", res.Code)
 	}
 	b := &accounts{store: w.db, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}}
@@ -290,54 +284,43 @@ func TestSignedInDevices(t *testing.T) {
 	old := start(w.owner, "", "", 20*time.Hour)
 	member := start(w.member, "Firefox on Linux", "192.0.2.99", time.Hour)
 
-	page := func() string {
-		res := legacySecurity(w.h, here)
-		if res.Code != 200 {
-			t.Fatalf("security page: %d", res.Code)
+	devices := func() []siteDevice {
+		var out struct {
+			Sessions []siteDevice `json:"sessions"`
 		}
-		return html.UnescapeString(res.Body.String())
+		_ = json.Unmarshal([]byte(jsonOf(securityState(t, w, here))), &out)
+		return out.Sessions
 	}
-	body := page()
-	table := body[strings.Index(body, `id="sessions"`):]
-	for _, want := range []string{"Signed-in devices", "Chrome on Windows</strong> <span class=\"pill\">this device</span>", "Safari on iPhone", "198.51.100.7", "3 hours ago", "Unknown browser", "20 hours ago", "Sign out everywhere else"} {
-		if !strings.Contains(table, want) {
-			t.Fatalf("devices table lacks %q", want)
-		}
+	list := devices()
+	got := []string{}
+	for _, d := range list {
+		got = append(got, fmt.Sprintf("%s|%s|%s|%v", d.Device, d.IP, d.SignedIn, d.Current))
 	}
-	if strings.Contains(table, "Firefox on Linux") || strings.Contains(table, "192.0.2.99") {
-		t.Fatal("another account's session listed")
+	// This device first, then the most recently used; never another account's.
+	if len(list) != 3 || !strings.HasPrefix(got[0], "Chrome on Windows|203.0.113.5|") || !strings.HasSuffix(got[0], "|true") ||
+		got[1] != "Safari on iPhone|198.51.100.7|3 hours ago|false" || !strings.HasPrefix(got[2], "Unknown browser||20 hours ago|") {
+		t.Fatalf("devices: %q", got)
 	}
-	if strings.Index(table, "Chrome on Windows") > strings.Index(table, "Safari on iPhone") || strings.Index(table, "Safari on iPhone") > strings.Index(table, "Unknown browser") {
-		t.Fatal("this device first, then the most recently used")
-	}
-	if strings.Count(table, `action="/account/sessions/remove"`) != 2 {
-		t.Fatal("the current device must not have a sign-out button; the others must")
-	}
-	if !strings.Contains(table, `title="Sign out" aria-label="Sign out Safari on iPhone, signed in 3 hours ago"`) {
-		t.Fatal("sign-out button label")
-	}
-
-	csrf := formCSRF(t, body, "/account/sessions/remove")
 	a.mu.Lock()
 	phoneID, memberID := a.sessionRowID(secretDigest(phone.Value)), a.sessionRowID(secretDigest(member.Value))
 	hereID := a.sessionRowID(secretDigest(here.Value))
 	a.mu.Unlock()
-	if !strings.Contains(table, `name="session" value="`+phoneID+`"`) || strings.Contains(body, secretDigest(phone.Value)) {
+	if list[1].ID != phoneID || strings.Contains(jsonOf(list), secretDigest(phone.Value)) {
 		t.Fatal("rows must name sessions by row ID, never by digest")
 	}
 	// Another account's session, this browser's own and unknown IDs: not found.
 	for name, id := range map[string]string{"member": memberID, "here": hereID, "unknown": strings.Repeat("0", 32), "bad": "x"} {
-		res := oauthCall(w.h, "POST", "/account/sessions/remove", url.Values{"csrf": {csrf}, "session": {id}}, here)
+		res := securityPost(w, "/account/sessions/remove", url.Values{"session": {id}}, here)
 		if res.Code != 404 || !strings.Contains(html.UnescapeString(res.Body.String()), "That device is already signed out.") {
 			t.Fatalf("%s: %d", name, res.Code)
 		}
 	}
-	// Another action's token does not work.
-	if res := oauthCall(w.h, "POST", "/account/sessions/remove", url.Values{"csrf": {formCSRF(t, body, "/account/sessions/end")}, "session": {phoneID}}, here); res.Code == 303 {
-		t.Fatal("accepted another form's CSRF token")
+	// A wrong token does not work.
+	if res := siteCall(w, "POST", "/api/v1/site/account/security/sessions/remove", jsonOf(map[string]string{"session": phoneID}), here, "wrong"); res.Code != 403 {
+		t.Fatalf("accepted a wrong CSRF token: %d", res.Code)
 	}
-	res := oauthCall(w.h, "POST", "/account/sessions/remove", url.Values{"csrf": {csrf}, "session": {phoneID}}, here)
-	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "session-ended" {
+	res := securityPost(w, "/account/sessions/remove", url.Values{"session": {phoneID}}, here)
+	if res.Code != 200 || noticeOf(res) != "session-ended" {
 		t.Fatalf("sign out one device: %d %s", res.Code, res.Body)
 	}
 	b := &accounts{store: w.db, challenges: map[string]loginChallenge{}, sessions: map[string]accountSession{}, secret: []byte("restarted")}
@@ -359,8 +342,7 @@ func TestSignedInDevices(t *testing.T) {
 	if s.Device != "Chrome on Windows" || s.IP != "203.0.113.5" {
 		t.Fatalf("restored session: %+v", s)
 	}
-	body = page()
-	if strings.Contains(body, "Safari on iPhone") || strings.Count(body, `action="/account/sessions/remove"`) != 1 {
+	if list := devices(); len(list) != 2 || strings.Contains(jsonOf(list), "Safari on iPhone") {
 		t.Fatal("signed-out device still listed")
 	}
 }

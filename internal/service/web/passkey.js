@@ -5,10 +5,8 @@
 // puts the answer into the form's hidden fields (base64url) and submits the
 // form normally. The server verifies everything; nothing here is trusted.
 //
-//   form[data-passkey-get]    sign in, or confirm on Your account
-//                             (data-conditional: also offer passkeys in the
-//                             email field's autofill)
-//   form[data-passkey-create] add a passkey on Your account
+//   form[data-passkey-get]    sign in (data-conditional: also offer
+//                             passkeys in the email field's autofill)
 //   [data-passkey-forget]     a passkey the site has no record of: ask the
 //                             browser to stop offering it, where it can
 (() => {
@@ -35,8 +33,6 @@
     switch (err && err.name) {
       case "NotAllowedError":
         return "Cancelled or timed out. Try again when you're ready.";
-      case "InvalidStateError":
-        return "This device or password manager already holds a passkey for your account.";
       case "SecurityError":
         return "Passkeys are not available on this address.";
       default:
@@ -109,33 +105,4 @@
     }
   }
 
-  for (const form of document.querySelectorAll("form[data-passkey-create]")) {
-    let busy = false;
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (!supported) {
-        status(form, "This browser does not support passkeys.");
-        return;
-      }
-      if (busy) return;
-      busy = true;
-      status(form, "Follow your browser's prompts…");
-      try {
-        const options = JSON.parse(form.dataset.passkeyCreate);
-        options.challenge = decode(options.challenge);
-        options.user.id = decode(options.user.id);
-        options.excludeCredentials = (options.excludeCredentials || []).map((c) => ({ ...c, id: decode(c.id) }));
-        const credential = await navigator.credentials.create({ publicKey: options });
-        const r = credential.response;
-        form.elements.client_data.value = encode(r.clientDataJSON);
-        form.elements.attestation.value = encode(r.attestationObject);
-        form.elements.transports.value = typeof r.getTransports === "function" ? r.getTransports().join(",") : "";
-        status(form, "Saving…");
-        form.submit();
-      } catch (err) {
-        status(form, explain(err));
-        busy = false;
-      }
-    });
-  }
 })();

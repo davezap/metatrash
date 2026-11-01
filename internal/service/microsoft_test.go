@@ -185,20 +185,25 @@ func microsoftStart(t *testing.T, w *oauthWorld, f *fakeMicrosoft, session *http
 		}
 		res = oauthCall(w.h, "POST", "/login/microsoft", url.Values{"csrf": {browser.Value}}, browser)
 	} else {
-		res = oauthCall(w.h, "POST", "/account/microsoft/link", url.Values{"csrf": {w.s.accounts.signInCSRF("/account/microsoft/link", session.Value)}}, session)
+		res = securityPost(w, "/account/microsoft/link", url.Values{}, session)
 	}
-	if res.Code != 303 {
+	location := res.Header().Get("Location")
+	if session != nil && res.Code == 200 {
+		location, _ = siteJSON(t, res)["redirect"].(string)
+	} else if res.Code != 303 {
 		t.Fatalf("start: %d %s", res.Code, res.Body)
 	}
-	target, err := url.Parse(res.Header().Get("Location"))
+	target, err := url.Parse(location)
 	if err != nil || !strings.HasPrefix(target.String(), f.server.URL+"/common/oauth2/v2.0/authorize?") {
-		t.Fatalf("redirect %q", res.Header().Get("Location"))
+		t.Fatalf("redirect %q", location)
 	}
 	q := target.Query()
 	if q.Get("client_id") != testMicrosoftClient || q.Get("redirect_uri") != "https://metatrash.com/login/microsoft/callback" || q.Get("code_challenge_method") != "S256" || q.Get("response_type") != "code" || q.Get("nonce") == "" || q.Get("state") == "" {
 		t.Fatalf("authorize query %v", q)
 	}
-	if csp := res.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self' "+f.server.URL) {
+	// The sign-in form posts and is redirected to Microsoft, so the page's
+	// form-action allows it; Settings goes there by setting the address.
+	if csp := res.Header().Get("Content-Security-Policy"); session == nil && !strings.Contains(csp, "form-action 'self' "+f.server.URL) {
 		t.Fatalf("form-action does not allow Microsoft: %q", csp)
 	}
 	cookie := responseCookie(res, "__Host-metatrash-microsoft")
@@ -272,12 +277,12 @@ func TestMicrosoftSignIn(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/login", nil, session, waiting); res.Code != 303 || res.Header().Get("Location") != "/app/#settings/security" {
 		t.Fatalf("signed in with a waiting account: %d %q", res.Code, res.Header().Get("Location"))
 	}
-	page := legacySecurity(w.h, session, waiting)
-	if !strings.Contains(page.Body.String(), "Link this Microsoft account") {
+	page := siteCall(w, "GET", "/api/v1/site/account/security", "", nil, "", "Cookie", session.Name+"="+session.Value+"; "+waiting.Name+"="+waiting.Value)
+	if ms, _ := siteJSON(t, page)["microsoft"].(map[string]any); ms == nil || ms["waiting"] != w.owner.Email {
 		t.Fatalf("no link offer: %s", page.Body)
 	}
-	res = oauthCall(w.h, "POST", "/account/microsoft/confirm", url.Values{"csrf": {a.signInCSRF("/account/microsoft/confirm", session.Value)}}, session, waiting)
-	if res.Code != 303 {
+	res = securityPost(w, "/account/microsoft/confirm", url.Values{}, session, waiting)
+	if res.Code != 200 || noticeOf(res) != "microsoft-linked" {
 		t.Fatalf("confirm: %d %s", res.Code, res.Body)
 	}
 	expect("Sign-in method added on your Metatrash account", "Microsoft account "+w.owner.Email)
@@ -317,7 +322,7 @@ func TestMicrosoftSignIn(t *testing.T) {
 
 	// Link from Security: straight to the signed-in account, once fresh.
 	stale := w.session(w.member)
-	if res := oauthCall(w.h, "POST", "/account/microsoft/link", url.Values{"csrf": {a.signInCSRF("/account/microsoft/link", stale.Value)}}, stale); res.Code != 403 {
+	if res := securityPost(w, "/account/microsoft/link", url.Values{}, stale); res.Code != 403 {
 		t.Fatalf("link without confirming: %d", res.Code)
 	}
 	memberSession := fresh(w.member)
@@ -339,8 +344,8 @@ func TestMicrosoftSignIn(t *testing.T) {
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("member identities %v %v", ids, err)
 	}
-	res = oauthCall(w.h, "POST", "/account/microsoft/remove", url.Values{"csrf": {a.signInCSRF("/account/microsoft/remove", memberSession.Value)}, "identity": {ids[0].ID}}, memberSession)
-	if res.Code != 303 {
+	res = securityPost(w, "/account/microsoft/remove", url.Values{"identity": {ids[0].ID}}, memberSession)
+	if res.Code != 200 {
 		t.Fatalf("remove: %d %s", res.Code, res.Body)
 	}
 	expect("Sign-in method removed on your Metatrash account", "Microsoft account Test Person")

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+
 	// Schedules and runner.md times use IANA zones; carry the zone data so a
 	// server without it still works.
 	_ "time/tzdata"
@@ -17,7 +18,7 @@ import (
 // agentsConfig is the optional "agents" object in the account configuration.
 // It turns folder actions on and holds what the server needs to run them;
 // the agents themselves (provider, model, API key) are each user's, set up
-// in Your account → Services (agent_store.go). Actions are checked and
+// in Settings → Services (agent_store.go). Actions are checked and
 // stored either way; they run only while enabled is true.
 //
 // keyFile holds 64 hex digits (openssl rand -hex 32) that seal the users' API
@@ -122,7 +123,7 @@ const (
 func (c *agentsConfig) settings() (*agentSettings, error) {
 	for name, raw := range map[string]json.RawMessage{"owners": c.Owners, "provider": c.Provider, "baseURL": c.BaseURL, "model": c.Model, "apiKeyFile": c.APIKeyFile, "maxTokens": c.MaxTokens, "dailyTokenCap": c.DailyTokenCap} {
 		if raw != nil {
-			return nil, fmt.Errorf("agents %s is no longer a server setting (0.55.0): each user adds their own agent and API key in Your account → Services; remove %s and add keyFile (docs/deployment.md)", name, name)
+			return nil, fmt.Errorf("agents %s is no longer a server setting (0.55.0): each user adds their own agent and API key in Settings → Services; remove %s and add keyFile (docs/deployment.md)", name, name)
 		}
 	}
 	if c.KeyFile == "" {

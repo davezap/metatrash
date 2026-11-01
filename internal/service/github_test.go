@@ -244,9 +244,6 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 		{"id": orgID, "app_id": 4242, "account": map[string]any{"login": "zaptronics", "type": "Organization"}, "suspended_at": "2026-10-01T00:00:00Z"},
 	}
 	owner := w.session(w.owner)
-	csrf := func(cookie *http.Cookie, action string) string {
-		return w.s.accounts.mac("github-" + action + ":" + cookie.Value)
-	}
 
 	// Services is in the Settings dialog since 0.80.0.
 	services := func() string {
@@ -264,11 +261,11 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	// connect starts an attempt and sends the browser to GitHub with a state.
 	connect := func(cookie *http.Cookie) (*http.Cookie, string) {
 		t.Helper()
-		resp := oauthCall(w.h, "POST", "/account/github/connect", url.Values{"csrf": {csrf(cookie, "connect")}}, cookie)
-		if resp.Code != 303 {
+		resp := accountPost(w, cookie, "/services/github/connect", "{}")
+		if resp.Code != 200 {
 			t.Fatalf("connect: %d %s", resp.Code, resp.Body.String())
 		}
-		location, _ := url.Parse(resp.Header().Get("Location"))
+		location, _ := url.Parse(fmt.Sprint(siteJSON(t, resp)["redirect"]))
 		if location.Path != "/web/apps/metatrash-test/installations/new" || len(location.Query().Get("state")) != 64 {
 			t.Fatalf("install URL %s", location)
 		}
@@ -290,11 +287,11 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 	}
 
 	// Wrong CSRF, missing session.
-	if resp := oauthCall(w.h, "POST", "/account/github/connect", url.Values{"csrf": {"0"}}, owner); resp.Code != 403 {
+	if resp := siteCall(w, "POST", "/api/v1/site/account/services/github/connect", "{}", owner, "0"); resp.Code != 403 {
 		t.Fatalf("bad csrf: %d", resp.Code)
 	}
 	// No attempt in this browser, then a wrong state (which also spends the attempt).
-	if resp := callback(nil, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "setup_action": {"install"}, "state": {strings.Repeat("a", 64)}}); resp.Code != 400 || !strings.Contains(resp.Body.String(), "Connect GitHub from Your account") {
+	if resp := callback(nil, url.Values{"code": {"good-me"}, "installation_id": {fmt.Sprint(mine)}, "setup_action": {"install"}, "state": {strings.Repeat("a", 64)}}); resp.Code != 400 || !strings.Contains(resp.Body.String(), "Connect GitHub from Settings → Services") {
 		t.Fatalf("no attempt: %d", resp.Code)
 	}
 	browser, state := connect(owner)
@@ -416,20 +413,23 @@ func TestGitHubConnectAgainstDatabase(t *testing.T) {
 		t.Fatalf("repeat delete: %d", code)
 	}
 
-	// Disconnect from Your account; only the account's own connections.
-	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(member, "disconnect")}, "installation": {fmt.Sprint(orgID)}}, member); resp.Code != 404 || statusOf(orgID) != "suspended" {
+	// Disconnect from Settings → Services; only the account's own connections.
+	disconnect := func(cookie *http.Cookie, installation string) *httptest.ResponseRecorder {
+		return accountPost(w, cookie, "/services/github/"+installation+"/disconnect", "{}")
+	}
+	if resp := disconnect(member, fmt.Sprint(orgID)); resp.Code != 404 || statusOf(orgID) != "suspended" {
 		t.Fatalf("other account's disconnect: %d", resp.Code)
 	}
-	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "connect")}, "installation": {fmt.Sprint(orgID)}}, owner); resp.Code != 403 {
-		t.Fatalf("disconnect with connect csrf: %d", resp.Code)
+	if resp := siteCall(w, "POST", "/api/v1/site/account/services/github/"+fmt.Sprint(orgID)+"/disconnect", "{}", owner, siteCSRF(w, member)); resp.Code != 403 {
+		t.Fatalf("disconnect with another session's csrf: %d", resp.Code)
 	}
-	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "disconnect")}, "installation": {"x"}}, owner); resp.Code != 400 {
-		t.Fatalf("bad installation field: %d", resp.Code)
+	if resp := disconnect(owner, "x"); resp.Code != 400 && resp.Code != 404 {
+		t.Fatalf("bad installation: %d", resp.Code)
 	}
-	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "disconnect")}, "installation": {fmt.Sprint(orgID)}}, owner); resp.Code != 303 || resp.Header().Get("Location") != "/account/services" || statusOf(orgID) != "gone" {
+	if resp := disconnect(owner, fmt.Sprint(orgID)); resp.Code != 200 || statusOf(orgID) != "gone" {
 		t.Fatalf("disconnect: %d", resp.Code)
 	}
-	if resp := oauthCall(w.h, "POST", "/account/github/disconnect", url.Values{"csrf": {csrf(owner, "disconnect")}, "installation": {fmt.Sprint(orgID)}}, owner); resp.Code != 404 {
+	if resp := disconnect(owner, fmt.Sprint(orgID)); resp.Code != 404 {
 		t.Fatalf("disconnect again: %d", resp.Code)
 	}
 	// Once the owner is gone, the other account may link the installation.
@@ -465,11 +465,11 @@ func TestGitHubLinkExistingAgainstDatabase(t *testing.T) {
 	owner, member := w.session(w.owner), w.session(w.member)
 	link := func(cookie *http.Cookie) (*http.Cookie, string) {
 		t.Helper()
-		resp := oauthCall(w.h, "POST", "/account/github/link", url.Values{"csrf": {w.s.accounts.mac("github-link:" + cookie.Value)}}, cookie)
-		if resp.Code != 303 {
+		resp := accountPost(w, cookie, "/services/github/link", "{}")
+		if resp.Code != 200 {
 			t.Fatalf("link: %d %s", resp.Code, resp.Body.String())
 		}
-		location, _ := url.Parse(resp.Header().Get("Location"))
+		location, _ := url.Parse(fmt.Sprint(siteJSON(t, resp)["redirect"]))
 		q := location.Query()
 		if location.Path != "/web/login/oauth/authorize" || q.Get("client_id") != "Iv23liTestClient" || q.Get("redirect_uri") != "https://metatrash.com/github/callback" || len(q.Get("state")) != 64 {
 			t.Fatalf("authorize URL %s", location)

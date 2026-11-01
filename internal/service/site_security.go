@@ -17,7 +17,7 @@ import (
 //	     sessions/end, sessions/remove {"session"}, microsoft/link (answers {"redirect"}), microsoft/confirm,
 //	     microsoft/forget, microsoft/remove {"identity"}
 //
-// Confirming it's you stays at /account/confirm/... (site_account.go). Every
+// Confirming it’s you is /api/v1/site/account/confirm/... (site_account.go). Every
 // change runs signInChange, the same code as the form, with its rate limits,
 // emails and step-ups: adding or removing a sign-in method, recovery codes,
 // email sign-in and the email address need a sign-in within the last 10
@@ -108,7 +108,7 @@ func (h *httpAdapter) serveSiteSecurity(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	path := "/account/" + route
-	if !signInRoutes[path] || strings.HasPrefix(route, "confirm/") {
+	if !signInRoutes[path] {
 		sendError(w, missing())
 		return
 	}

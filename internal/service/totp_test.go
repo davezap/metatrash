@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -152,8 +151,6 @@ func TestQRCodeStructure(t *testing.T) {
 	}
 }
 
-var setupKeyPattern = regexp.MustCompile(`<code class="totp-secret">([A-Z2-7 ]+)</code>`)
-
 func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	ctx := context.Background()
@@ -175,35 +172,37 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 			t.Fatal("no notice email")
 		}
 	}
-	csrf := func(path string, session *http.Cookie) string { return a.signInCSRF(path, session.Value) }
-
-	// Without a recent confirmation, setup is not offered or accepted.
-	stale := w.session(w.owner)
-	body := legacySecurity(w.h, stale).Body.String()
-	if !strings.Contains(body, "To set up an authenticator app, confirm it’s you above.") || strings.Contains(body, "/account/totp/start") || strings.Contains(body, "/account/confirm/totp") {
-		t.Fatal("setup offered without confirming")
+	// The setup Security shows: its key, and whether it shows a QR code.
+	setup := func(session *http.Cookie) (key string, qr bool) {
+		totp, _ := securityState(t, w, session)["totp"].(map[string]any)
+		key, _ = totp["secret"].(string)
+		image, _ := totp["qr"].(string)
+		return key, strings.HasPrefix(image, "data:image/svg+xml;base64,")
 	}
-	if res := oauthCall(w.h, "POST", "/account/totp/start", url.Values{"csrf": {csrf("/account/totp/start", stale)}}, stale); res.Code != 403 {
+
+	// Without a recent confirmation, setup is not accepted, and Confirm it's
+	// you does not offer the app before it is set up.
+	stale := w.session(w.owner)
+	if confirmWays(t, w, stale)["totp"] == true {
+		t.Fatal("confirm with an app that is not set up")
+	}
+	if res := securityPost(w, "/account/totp/start", url.Values{}, stale); res.Code != 403 {
 		t.Fatalf("start without confirming: %d", res.Code)
 	}
 
 	// Start setup on a fresh session: the page shows a QR code and the key.
 	session := w.session(w.owner)
 	a.markConfirmed(session.Value, w.owner.ID, time.Now())
-	body = legacySecurity(w.h, session).Body.String()
-	res := oauthCall(w.h, "POST", "/account/totp/start", url.Values{"csrf": {formCSRF(t, body, "/account/totp/start")}}, session)
-	if res.Code != 303 || res.Header().Get("Location") != "/account/security" {
+	res := securityPost(w, "/account/totp/start", url.Values{}, session)
+	if res.Code != 200 {
 		t.Fatalf("start: %d %s", res.Code, res.Body)
 	}
-	page := legacySecurity(w.h, session)
-	body = page.Body.String()
-	m := setupKeyPattern.FindStringSubmatch(body)
-	// (The Settings dialog's GET security is checked for no-store in
-	// TestSiteSecurityAgainstDatabase.)
-	if m == nil || !strings.Contains(body, `<svg class="qr"`) {
-		t.Fatal("setup page without QR code or key")
+	// (GET security is checked for no-store in TestSiteSecurityAgainstDatabase.)
+	key, qr := setup(session)
+	if key == "" || !qr {
+		t.Fatal("setup without QR code or key")
 	}
-	secret, err := totpEncoding.DecodeString(strings.ReplaceAll(m[1], " ", ""))
+	secret, err := totpEncoding.DecodeString(strings.ReplaceAll(key, " ", ""))
 	if err != nil || len(secret) != totpSecretBytes {
 		t.Fatal("setup key", err)
 	}
@@ -212,16 +211,15 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 		t.Fatal("stored setup", err)
 	}
 	// Starting again replaces the unfinished setup with a new key.
-	res = oauthCall(w.h, "POST", "/account/totp/start", url.Values{"csrf": {csrf("/account/totp/start", session)}}, session)
-	if res.Code != 303 {
+	res = securityPost(w, "/account/totp/start", url.Values{}, session)
+	if res.Code != 200 {
 		t.Fatalf("restart: %d", res.Code)
 	}
-	body = legacySecurity(w.h, session).Body.String()
-	m = setupKeyPattern.FindStringSubmatch(body)
-	if m == nil {
+	key, _ = setup(session)
+	if key == "" {
 		t.Fatal("no setup key after restart")
 	}
-	newSecret, _ := totpEncoding.DecodeString(strings.ReplaceAll(m[1], " ", ""))
+	newSecret, _ := totpEncoding.DecodeString(strings.ReplaceAll(key, " ", ""))
 	if string(newSecret) == string(secret) {
 		t.Fatal("restart kept the key")
 	}
@@ -231,24 +229,23 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	now := time.Now()
 	step := now.Unix() / totpPeriod
 	wrong := totpCode(secret, step+5)
-	enable := url.Values{"csrf": {formCSRF(t, body, "/account/totp/enable")}, "code": {wrong}}
-	if res = oauthCall(w.h, "POST", "/account/totp/enable", enable, session); res.Code != 400 || !strings.Contains(res.Body.String(), "That code is not right") {
+	enable := url.Values{"code": {wrong}}
+	if res = securityPost(w, "/account/totp/enable", enable, session); res.Code != 400 || !strings.Contains(res.Body.String(), "That code is not right") {
 		t.Fatalf("wrong code: %d", res.Code)
 	}
 	enable.Set("code", totpCode(secret, step))
-	if res = oauthCall(w.h, "POST", "/account/totp/enable", enable, stale); res.Code != 403 {
+	if res = securityPost(w, "/account/totp/enable", enable, stale); res.Code != 403 {
 		t.Fatalf("enable from a stale session: %d", res.Code)
 	}
-	res = oauthCall(w.h, "POST", "/account/totp/enable", enable, session)
-	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "totp-added" {
+	res = securityPost(w, "/account/totp/enable", enable, session)
+	if res.Code != 200 || noticeOf(res) != "totp-added" {
 		t.Fatalf("enable: %d %s", res.Code, res.Body)
 	}
 	expectNotice("A sign-in method was added on your Metatrash account: authenticator app")
-	body = legacySecurity(w.h, session).Body.String()
-	if setupKeyPattern.MatchString(body) || strings.Contains(body, `<svg class="qr"`) || !strings.Contains(body, "/account/totp/remove") {
-		t.Fatal("key still shown after setup, or no remove")
+	if key, qr := setup(session); key != "" || qr {
+		t.Fatal("key still shown after setup")
 	}
-	if res = oauthCall(w.h, "POST", "/account/totp/start", url.Values{"csrf": {csrf("/account/totp/start", session)}}, session); res.Code != 409 {
+	if res = securityPost(w, "/account/totp/start", url.Values{}, session); res.Code != 409 {
 		t.Fatalf("second setup: %d", res.Code)
 	}
 
@@ -281,7 +278,7 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	}
 	ok2 := oauthCall(w.h, "POST", "/login/totp", url.Values{"csrf": {browser.Value}, "email": {w.owner.Email}, "code": {totpCode(secret, step+1)}}, browser)
 	signedIn := responseCookie(ok2, sessionCookie)
-	if ok2.Code != 303 || ok2.Header().Get("Location") != "/account" || signedIn == nil {
+	if ok2.Code != 303 || ok2.Header().Get("Location") != "/app/#settings/spaces" || signedIn == nil {
 		t.Fatalf("sign in: %d %s", ok2.Code, ok2.Body)
 	}
 	if user, ok, _ := a.currentUser(ctx, signedIn.Value); !ok || user.ID != w.owner.ID {
@@ -319,31 +316,30 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 	if _, err := w.db.db.ExecContext(ctx, "UPDATE metatrash_totp SET last_used_step = ? WHERE user_id = ?", step-5, w.owner.ID); err != nil {
 		t.Fatal(err)
 	}
-	body = legacySecurity(w.h, stale).Body.String()
-	if !strings.Contains(body, "your authenticator app or a code we email") {
+	if confirmWays(t, w, stale)["totp"] != true {
 		t.Fatal("confirm with the app not offered")
 	}
-	if res = oauthCall(w.h, "POST", "/account/totp/remove", url.Values{"csrf": {csrf("/account/totp/remove", stale)}}, stale); res.Code != 403 {
+	if res = securityPost(w, "/account/totp/remove", url.Values{}, stale); res.Code != 403 {
 		t.Fatalf("remove without confirming: %d", res.Code)
 	}
-	if res = oauthCall(w.h, "POST", "/account/confirm/totp", url.Values{"csrf": {formCSRF(t, body, "/account/confirm/totp")}, "code": {wrong}}, stale); res.Code != 400 {
+	if res = securityPost(w, "/account/confirm/totp", url.Values{"code": {wrong}}, stale); res.Code != 400 {
 		t.Fatalf("confirm with a wrong code: %d", res.Code)
 	}
-	res = oauthCall(w.h, "POST", "/account/confirm/totp", url.Values{"csrf": {formCSRF(t, body, "/account/confirm/totp")}, "code": {totpCode(secret, time.Now().Unix()/totpPeriod)}}, stale)
-	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "signin-confirmed" {
+	res = securityPost(w, "/account/confirm/totp", url.Values{"code": {totpCode(secret, time.Now().Unix()/totpPeriod)}}, stale)
+	if res.Code != 200 || !strings.HasPrefix(jsonNotice(t, res), "Confirmed.") {
 		t.Fatalf("confirm with the app: %d %s", res.Code, res.Body)
 	}
 	// The member cannot confirm with an app they do not have.
 	member := w.session(w.member)
-	if res = oauthCall(w.h, "POST", "/account/confirm/totp", url.Values{"csrf": {csrf("/account/confirm/totp", member)}, "code": {"123456"}}, member); res.Code != 400 {
+	if res = securityPost(w, "/account/confirm/totp", url.Values{"code": {"123456"}}, member); res.Code != 400 {
 		t.Fatalf("member confirm: %d", res.Code)
 	}
 
 	// Remove it: a notice, its codes no longer sign in, and the account's
 	// other sessions are signed out.
 	elsewhere := w.session(w.owner)
-	res = oauthCall(w.h, "POST", "/account/totp/remove", url.Values{"csrf": {csrf("/account/totp/remove", stale)}}, stale)
-	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "totp-removed" {
+	res = securityPost(w, "/account/totp/remove", url.Values{}, stale)
+	if res.Code != 200 || noticeOf(res) != "totp-removed" {
 		t.Fatalf("remove: %d %s", res.Code, res.Body)
 	}
 	expectNotice("A sign-in method was removed on your Metatrash account: authenticator app")
@@ -364,12 +360,12 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 
 	// An unfinished setup can be cancelled without confirming, quietly.
 	a.markConfirmed(member.Value, w.member.ID, time.Now())
-	if res = oauthCall(w.h, "POST", "/account/totp/start", url.Values{"csrf": {csrf("/account/totp/start", member)}}, member); res.Code != 303 {
+	if res = securityPost(w, "/account/totp/start", url.Values{}, member); res.Code != 200 {
 		t.Fatalf("member start: %d", res.Code)
 	}
 	staleMember := w.session(w.member)
-	res = oauthCall(w.h, "POST", "/account/totp/remove", url.Values{"csrf": {csrf("/account/totp/remove", staleMember)}}, staleMember)
-	if res.Code != 303 || responseCookie(res, noticeCookie).Value != "totp-cancelled" {
+	res = securityPost(w, "/account/totp/remove", url.Values{}, staleMember)
+	if res.Code != 200 || noticeOf(res) != "totp-cancelled" {
 		t.Fatalf("cancel: %d %s", res.Code, res.Body)
 	}
 	select {
@@ -377,7 +373,7 @@ func TestAuthenticatorAppAgainstDatabase(t *testing.T) {
 		t.Fatalf("notice for a cancelled setup: %q", n)
 	case <-time.After(200 * time.Millisecond):
 	}
-	if res = oauthCall(w.h, "POST", "/account/totp/remove", url.Values{"csrf": {csrf("/account/totp/remove", member)}}, member); res.Code != 404 {
+	if res = securityPost(w, "/account/totp/remove", url.Values{}, member); res.Code != 404 {
 		t.Fatalf("remove when there is none: %d", res.Code)
 	}
 }
@@ -387,11 +383,10 @@ func TestAuthenticatorAppOffWithoutKey(t *testing.T) {
 	w := newOAuthWorld(t)
 	session := w.session(w.owner)
 	w.s.accounts.markConfirmed(session.Value, w.owner.ID, time.Now())
-	body := legacySecurity(w.h, session).Body.String()
-	if strings.Contains(body, "Authenticator app") || strings.Contains(body, "/account/totp/") {
+	if _, ok := securityState(t, w, session)["totp"]; ok {
 		t.Fatal("authenticator app offered without a key")
 	}
-	if res := oauthCall(w.h, "POST", "/account/totp/start", url.Values{"csrf": {w.s.accounts.signInCSRF("/account/totp/start", session.Value)}}, session); res.Code != 404 {
+	if res := securityPost(w, "/account/totp/start", url.Values{}, session); res.Code != 404 {
 		t.Fatalf("start without a key: %d", res.Code)
 	}
 	login := oauthCall(w.h, "GET", "/login", nil)

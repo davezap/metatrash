@@ -3,107 +3,25 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
 
-// Agents in Services (0.55.0; in the Settings dialog since 0.80.0, site_services.go): add an agent (provider, model,
-// API key, daily cap), test it with one tiny call, make it the default,
-// change its name, daily cap or key (0.58.0), or remove it. Since 0.56.0 it also lists the actions the user pays for, and
-// /account/actions/<job> shows an action that skipped one of the user's
-// files, where they opt in to pay for it. Shown only while folder actions
-// are enabled on the server.
-
-var agentRoutes = map[string]bool{
-	"/account/agents/add":     true,
-	"/account/agents/test":    true,
-	"/account/agents/default": true,
-	"/account/agents/change":  true,
-	"/account/agents/remove":  true,
-	"/account/agents/optin":   true,
-	"/account/agents/optout":  true,
-}
-
-var agentFormFields = map[string][]string{
-	"/account/agents/add":     {"name", "provider", "model", "key", "endpoint", "cap"},
-	"/account/agents/test":    {"agent"},
-	"/account/agents/default": {"agent"},
-	"/account/agents/change":  {"agent", "name", "cap", "key"},
-	"/account/agents/remove":  {"agent"},
-	"/account/agents/optin":   {"job", "agent"},
-	"/account/agents/optout":  {"optin"},
-}
-
-func (a *accounts) agentCSRF(path, session string) string {
-	return a.mac("agents:" + path + ":" + session)
-}
-
-// agentView is one row of the Agents list.
-type agentView struct {
-	userAgent
-	UsedToday int64
-}
-
-// agentProviderView is one provider choice on the Add agent form.
-type agentProviderView struct{ Value, Name, Model, KeysURL string }
-
-// agentsSection is the Agents part of Services.
-type agentsSection struct {
-	CSRF      map[string]string
-	Agents    []agentView
-	Providers []agentProviderView
-	// OptIns are the actions the user pays for in other people's spaces.
-	OptIns      []optInView
-	Unavailable bool
-	Full        bool
-	// Form holds what the Add agent form sent after it failed, without the key.
-	Form agentForm
-}
+// Agents in Settings → Services (0.55.0; in the Settings dialog since 0.80.0,
+// site_services.go): add an agent (provider, model, API key, daily cap),
+// test it with one tiny call, make it the default, change its name, daily
+// cap or key (0.58.0), or remove it. Since 0.56.0 it also lists the actions
+// the user pays for, and #settings/services/actions/<job> shows an action
+// that skipped one of the user's files, where they opt in to pay for it.
+// Shown only while folder actions are enabled on the server.
 
 func (h *httpAdapter) agentsEnabled() bool {
 	return h.service.agents.Load() != nil && h.service.ownedDB != nil
 }
 
-// agentsPage builds the Agents section for user; ok is false when the list
-// could not be read.
-func (h *httpAdapter) agentsPage(r *http.Request, user userAccount) (*agentsSection, bool) {
-	a := h.service.accounts
-	session := cookieToken(r, h.sessionCookieName())
-	page := &agentsSection{CSRF: map[string]string{}}
-	for path := range agentRoutes {
-		page.CSRF[strings.TrimPrefix(path, "/account/agents/")] = a.agentCSRF(path, session)
-	}
-	for _, name := range agentProviderNames() {
-		p := agentProviders[name]
-		page.Providers = append(page.Providers, agentProviderView{name, p.name, p.model, p.keysURL})
-	}
-	runner := h.service.agents.Load()
-	agents, err := h.service.ownedDB.userAgents(r.Context(), user.ID)
-	if err != nil || runner == nil {
-		page.Unavailable = true
-		return page, false
-	}
-	now := time.Now().In(runner.settings.zone)
-	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, runner.settings.zone)
-	for _, u := range agents {
-		v := agentView{userAgent: u}
-		v.UsedToday, _ = runner.store.tokensSince(r.Context(), u.ID, midnight)
-		page.Agents = append(page.Agents, v)
-	}
-	page.Full = len(agents) >= maxAgentsPerUser
-	if page.OptIns, err = h.service.ownedDB.userOptIns(r.Context(), user.ID); err != nil {
-		page.Unavailable = true
-		return page, false
-	}
-	return page, true
-}
-
 // actionOffer is the page of an action that skipped one of the user's files
-// (/account/actions/<job>): what the action does, who pays, and, when
+// (#settings/services/actions/<job>): what the action does, who pays, and, when
 // whoever brings a file pays, the form to opt in with one of their agents.
 type actionOffer struct {
 	JobID, Space, Folder, Action, File, Status, Reason string
@@ -120,16 +38,6 @@ type actionOffer struct {
 	// they opted in with.
 	Agents  []userAgent
 	Current string
-	CSRF    string
-}
-
-// actionOfferPage builds the page for a job whose file the user brought.
-func (h *httpAdapter) actionOfferPage(r *http.Request, user userAccount, jobID string) (*actionOffer, error) {
-	offer, err := h.actionOfferFor(r.Context(), user, jobID)
-	if err == nil {
-		offer.CSRF = h.service.accounts.agentCSRF("/account/agents/optin", cookieToken(r, h.sessionCookieName()))
-	}
-	return offer, err
 }
 
 // actionOfferFor is what an action that skipped one of user's files does and
@@ -205,81 +113,6 @@ func (h *httpAdapter) actionOfferFor(ctx context.Context, user userAccount, jobI
 		offer.Current = o.AgentID
 	}
 	return offer, nil
-}
-
-// submitAgent handles the Agents forms after the form, Origin and CSRF checks.
-func (h *httpAdapter) submitAgent(w http.ResponseWriter, r *http.Request, session, path string) {
-	a := h.service.accounts
-	user, signedIn, err := a.currentUser(r.Context(), session)
-	if err != nil {
-		sendError(w, problem(503, "unavailable", "Your account is temporarily unavailable."))
-		return
-	}
-	if !signedIn {
-		http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
-		return
-	}
-	if h.service.agents.Load() == nil || h.service.ownedDB == nil {
-		sendError(w, missing())
-		return
-	}
-	page := accountPage{SignedIn: true, User: user, CSRF: a.mac("logout:" + session), UsernameCSRF: a.mac("username:" + session), Section: "services"}
-	fail := func(err error, form *agentForm) {
-		status, message := http.StatusServiceUnavailable, "The agent could not be saved. Reload before retrying."
-		var p *Error
-		if errors.As(err, &p) {
-			status, message = p.Status, p.Message
-			if p.RetryAfterSeconds > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfterSeconds))
-			}
-		}
-		page.Message = message
-		page.AgentForm = form
-		h.renderAccount(w, r, status, page)
-	}
-	agentID := r.PostForm.Get("agent")
-	switch path {
-	case "/account/agents/optin", "/account/agents/optout":
-		var notice string
-		if path == "/account/agents/optin" {
-			notice, err = h.optInToAction(r.Context(), user, r.PostForm.Get("job"), agentID)
-		} else {
-			notice, err = h.optOutOfAction(r.Context(), user, r.PostForm.Get("optin"))
-		}
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		accountCookie(w, h.noticeCookieName(), notice, 60)
-		http.Redirect(w, r, h.basePath+"/account/services#paying", http.StatusSeeOther)
-		return
-	case "/account/agents/test":
-		result, ok, err := h.testUserAgent(r.Context(), user, agentID)
-		if err != nil {
-			fail(err, nil)
-			return
-		}
-		if ok {
-			page.Notice = result
-		} else {
-			page.Message = result
-		}
-		h.renderAccount(w, r, http.StatusOK, page)
-		return
-	}
-	form := agentForm{Name: r.PostForm.Get("name"), Provider: r.PostForm.Get("provider"), Model: r.PostForm.Get("model"), Key: r.PostForm.Get("key"), Endpoint: r.PostForm.Get("endpoint"), Cap: r.PostForm.Get("cap")}
-	notice, err := h.saveAgent(r.Context(), user, session, strings.TrimPrefix(path, "/account/agents/"), agentID, form)
-	if err != nil {
-		if path == "/account/agents/add" {
-			form.Key = ""
-			fail(err, &form)
-		} else {
-			fail(err, nil)
-		}
-		return
-	}
-	accountCookie(w, h.noticeCookieName(), notice, 60)
-	http.Redirect(w, r, h.basePath+"/account/services#agents", http.StatusSeeOther)
 }
 
 // errAgentsUnavailable: folder actions are off on this server.

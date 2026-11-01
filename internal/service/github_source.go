@@ -88,7 +88,7 @@ func (s *Service) githubRepoClient(ctx context.Context, r *repository, repo, acc
 		}
 		return &githubRepoReader{client: client, token: token, repo: repo}, nil
 	}
-	return nil, problem(403, "forbidden", fmt.Sprintf("The space owner has no GitHub connection for %s. On Your account, use Connect GitHub to install the Metatrash app on %s (or Link an existing installation), then try again.", owner, owner))
+	return nil, problem(403, "forbidden", fmt.Sprintf("The space owner has no GitHub connection for %s. In Settings → Services, use Connect GitHub to install the Metatrash app on %s (or Link an existing installation), then try again.", owner, owner))
 }
 
 // installationToken asks for a token limited to one repository with read or

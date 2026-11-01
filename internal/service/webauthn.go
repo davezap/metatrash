@@ -515,7 +515,7 @@ func (a *accounts) verifyPasskeyAssertion(purpose, binding string, p passkey, cl
 	// A counter that does not move forward suggests a cloned authenticator.
 	// Synced passkeys usually keep it at zero, which is allowed.
 	if (d.signCount != 0 || p.SignCount != 0) && d.signCount <= p.SignCount {
-		return 0, false, problem(400, "invalid_passkey", "This passkey could not be verified. If this keeps happening, remove it from Your account and add it again.")
+		return 0, false, problem(400, "invalid_passkey", "This passkey could not be verified. If this keeps happening, remove it in Settings → Security and add it again.")
 	}
 	return d.signCount, d.flags&flagBS != 0, nil
 }
@@ -570,7 +570,7 @@ func (a *accounts) creationOptions(session string, user userAccount, existing []
 }
 
 // requestOptions is PublicKeyCredentialRequestOptions as JSON. allowed limits
-// the choice to those passkeys (confirming on Your account); sign-in passes
+// the choice to those passkeys (confirming it’s you in Settings); sign-in passes
 // none, so the browser offers every passkey it has for this site.
 func (a *accounts) requestOptions(purpose, binding string, allowed []passkey, now time.Time) string {
 	options := map[string]any{
