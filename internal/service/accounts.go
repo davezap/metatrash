@@ -42,6 +42,8 @@ type accountConfig struct {
 	DocsSpace string `json:"docsSpace"`
 	// Microsoft turns on Sign in with Microsoft (microsoft.go).
 	Microsoft *microsoftConfig `json:"microsoft"`
+	// Paddle turns on the pricing and checkout pages (paddle.go).
+	Paddle *paddleConfig `json:"paddle"`
 }
 
 type userAccount struct {
@@ -115,6 +117,8 @@ type accounts struct {
 	agents *agentSettings
 	// microsoft is nil unless Sign in with Microsoft is on (microsoft.go).
 	microsoft *oidcProvider
+	// paddle is nil unless the pricing and checkout pages are on (paddle.go).
+	paddle *paddleConfig
 	// totpKey seals authenticator-app secrets; nil without totpKeyFile.
 	totpKey cipher.AEAD
 	// recoveryReveals holds new recovery codes until their page shows them
@@ -265,6 +269,11 @@ func loadAccountSettings(configPath string) (*accounts, string, error) {
 	}
 	if cfg.Microsoft != nil && cfg.Microsoft.Enabled {
 		if a.microsoft, err = cfg.Microsoft.settings(); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.Paddle != nil && cfg.Paddle.Enabled {
+		if a.paddle, err = cfg.Paddle.settings(); err != nil {
 			return nil, "", err
 		}
 	}

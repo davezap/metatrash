@@ -8,6 +8,13 @@
   "totpKeyFile": "/etc/metatrash/totp-key",
   "databaseConfigFile": "/etc/metatrash/account-database.json",
   "docsSpace": "",
+  "paddle": {
+    "enabled": false,
+    "environment": "sandbox",
+    "clientToken": "test_...",
+    "planPriceId": "pri_...",
+    "storagePriceId": "pri_..."
+  },
   "microsoft": {
     "enabled": false,
     "clientId": "",

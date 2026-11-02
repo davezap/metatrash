@@ -41,25 +41,66 @@ type appBuild struct {
 	CSS   []string
 }
 
-var appBuildOnce = sync.OnceValue(func() *appBuild {
+// appManifest is the build's .vite/manifest.json, by source file.
+type appManifest map[string]struct {
+	File    string   `json:"file"`
+	CSS     []string `json:"css"`
+	Imports []string `json:"imports"`
+	IsEntry bool     `json:"isEntry"`
+}
+
+var appManifestOnce = sync.OnceValue(func() appManifest {
 	data, err := appFiles.ReadFile("web/app/.vite/manifest.json")
 	if err != nil {
 		return nil
 	}
-	var manifest map[string]struct {
-		File    string   `json:"file"`
-		CSS     []string `json:"css"`
-		IsEntry bool     `json:"isEntry"`
-	}
+	var manifest appManifest
 	if json.Unmarshal(data, &manifest) != nil {
 		return nil
 	}
-	for _, chunk := range manifest {
-		if chunk.IsEntry && chunk.File != "" {
-			return &appBuild{Entry: chunk.File, CSS: chunk.CSS}
+	return manifest
+})
+
+// entry is the build of one entry script: its file and every stylesheet it
+// needs, its own and those of the chunks it shares with the other entry
+// (since 0.90.0 the build has two: the app and the pricing page).
+func (m appManifest) entry(src string) *appBuild {
+	chunk, ok := m[src]
+	if !ok || !chunk.IsEntry || chunk.File == "" {
+		return nil
+	}
+	build := &appBuild{Entry: chunk.File}
+	seen := map[string]bool{}
+	var walk func(string)
+	walk = func(key string) {
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		c := m[key]
+		for _, imported := range c.Imports {
+			walk(imported)
+		}
+		for _, css := range c.CSS {
+			if !seen["css:"+css] {
+				seen["css:"+css] = true
+				build.CSS = append(build.CSS, css)
+			}
 		}
 	}
-	return nil
+	walk(src)
+	return build
+}
+
+// appBuildOnce is the app (src/main.ts in the Viewer's website build).
+var appBuildOnce = sync.OnceValue(func() *appBuild {
+	return appManifestOnce().entry("src/main.ts")
+})
+
+// pricingBuildOnce is the pricing page (src/pricing.ts, 0.90.0); nil in a
+// build from before it.
+var pricingBuildOnce = sync.OnceValue(func() *appBuild {
+	return appManifestOnce().entry("src/pricing.ts")
 })
 
 var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>

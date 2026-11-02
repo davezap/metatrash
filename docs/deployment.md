@@ -435,6 +435,38 @@ the journal (`result=waiting` for an account nobody linked yet,
 outbound HTTPS requests to `login.microsoftonline.com`. Absent or
 `"enabled": false`: nothing is shown and linked accounts sign in another way.
 
+### Pricing and checkout (Paddle)
+
+From 0.90.0, optional. `/pricing` shows the plan and the storage add-on
+with prices from Paddle, and Start free trial opens Paddle's checkout in an
+overlay; `/checkout` is the same page (Paddle's default payment link) and
+`/welcome` is where a completed checkout lands. Paddle is the merchant of
+record: card details never reach the server, and the server makes no calls
+to Paddle. There is no billing state yet (phase 3 of the payment rollout).
+
+1. In Paddle (sandbox: sandbox-vendors.paddle.com), **Developer tools →
+   Authentication → Client-side tokens**: make one. Sandbox tokens start
+   `test_`, live ones `live_`. It is public, made for browser code. Never use
+   an API key here.
+2. **Catalog**: the plan's monthly price and the storage add-on's monthly
+   price, each `pri_...`. The plan's price has the 30-day trial; a checkout
+   can't mix a price with a trial and one without.
+3. **Checkout → Checkout settings**: the default payment link
+   `https://metatrash.com/checkout`. Live, the domain must also be approved.
+4. Add to `accounts.json` and restart:
+
+   ```json
+   "paddle": {"enabled": true, "environment": "sandbox", "clientToken": "test_...", "planPriceId": "pri_...", "storagePriceId": "pri_..."}
+   ```
+
+Nothing has a default: `environment` must be `sandbox` or `production`, the
+token must belong to it, and both prices must be price IDs, or the service
+stops at startup with the setting's name. Absent or `"enabled": false`: the
+three pages answer 404. The visitor's country comes from Cloudflare's
+`CF-IPCountry` header when it has one (otherwise Paddle uses their IP
+address). The pages need a Slate Viewer website build from 0.24.0 on
+(`scripts/build-frontends.ps1`); with an older one they answer 404 too.
+
 ### GitHub
 
 Optional `"github"` section for the Metatrash GitHub App; off until
@@ -944,6 +976,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.77.1 | nothing; optional `people` in `spaces.json` (Public space) | 22, after removing `people` from `spaces.json` (0.77.0 refuses keys it doesn't know) |
 | 0.77.0 | schema v22 (`metatrash_identities`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (email_hint, display_name, last_used_at)` on it); optional `microsoft` in `accounts.json` (Sign in with Microsoft) | 21; linked Microsoft accounts stay in the table, unused, and those people sign in another way |
 | 0.89.0 | schema v23 (`metatrash_space_usage`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)` on it) | 22; the rows stay in the table, unused |
+| 0.90.0 | nothing; optional `paddle` in `accounts.json` (Pricing and checkout) | 0.89.0 (no schema change), after removing `paddle` from `accounts.json` (0.89 refuses keys it doesn't know) |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

@@ -1,0 +1,135 @@
+package service
+
+import (
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+const testPlanPrice, testStoragePrice = "pri_01m6d01aaxs5w1g9myee7m5cdp", "pri_01m6d01afz75y4er9q4mb5r4sn"
+
+// The paddle settings have no defaults: a missing environment, or a token for
+// the other environment, stops the server rather than reach the wrong account.
+func TestPaddleSettings(t *testing.T) {
+	good := paddleConfig{Enabled: true, Environment: "sandbox", ClientToken: "test_ebbff7d957dece400c2e9677157", PlanPriceID: testPlanPrice, StoragePriceID: testStoragePrice}
+	if _, err := good.settings(); err != nil {
+		t.Fatal(err)
+	}
+	live := good
+	live.Environment, live.ClientToken = "production", "live_0123456789abcdef0123456789"
+	if _, err := live.settings(); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*paddleConfig){
+		"no environment":     func(c *paddleConfig) { c.Environment = "" },
+		"other environment":  func(c *paddleConfig) { c.Environment = "live" },
+		"no token":           func(c *paddleConfig) { c.ClientToken = "" },
+		"live token sandbox": func(c *paddleConfig) { c.ClientToken = "live_0123456789abcdef0123456789" },
+		"test token live":    func(c *paddleConfig) { c.Environment = "production" },
+		"api key":            func(c *paddleConfig) { c.ClientToken = "pdl_sdbx_apikey_01abc" },
+		"no plan":            func(c *paddleConfig) { c.PlanPriceID = "" },
+		"bad storage":        func(c *paddleConfig) { c.StoragePriceID = "pro_01m6d01aerc1b5j46rgn1e7awx" },
+		"same prices":        func(c *paddleConfig) { c.StoragePriceID = c.PlanPriceID },
+	} {
+		c := good
+		change(&c)
+		if _, err := c.settings(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestVisitorCountry(t *testing.T) {
+	for header, want := range map[string]string{"NZ": "NZ", " DE ": "DE", "": "", "XX": "", "T1": "", "nz": "", "NZL": "", "N1": ""} {
+		r := httptest.NewRequest("GET", "https://metatrash.com/pricing", nil)
+		if header != "" {
+			r.Header.Set("CF-IPCountry", header)
+		}
+		if got := visitorCountry(r); got != want {
+			t.Errorf("%q: %q, want %q", header, got, want)
+		}
+	}
+}
+
+// Each entry gets its own script and every stylesheet it needs, through the
+// chunks the two entries share.
+func TestAppManifestEntries(t *testing.T) {
+	m := appManifest{
+		"_shared.js":     {File: "assets/shared.js", CSS: []string{"assets/shared.css"}},
+		"src/main.ts":    {File: "assets/main.js", IsEntry: true, Imports: []string{"_shared.js"}, CSS: []string{"assets/main.css"}},
+		"src/pricing.ts": {File: "assets/pricing.js", IsEntry: true, Imports: []string{"_shared.js"}, CSS: []string{"assets/pricing.css"}},
+	}
+	main, pricing := m.entry("src/main.ts"), m.entry("src/pricing.ts")
+	if main == nil || main.Entry != "assets/main.js" || strings.Join(main.CSS, ",") != "assets/shared.css,assets/main.css" {
+		t.Fatalf("main: %+v", main)
+	}
+	if pricing == nil || pricing.Entry != "assets/pricing.js" || strings.Join(pricing.CSS, ",") != "assets/shared.css,assets/pricing.css" {
+		t.Fatalf("pricing: %+v", pricing)
+	}
+	if m.entry("_shared.js") != nil || m.entry("src/missing.ts") != nil {
+		t.Fatal("not an entry")
+	}
+}
+
+func TestPricingPagesAgainstDatabase(t *testing.T) {
+	w := newOAuthWorld(t)
+	get := func(path string, headers ...string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "https://metatrash.com"+path, nil)
+		r.RemoteAddr = "192.0.2.14:1"
+		for i := 0; i+1 < len(headers); i += 2 {
+			r.Header.Set(headers[i], headers[i+1])
+		}
+		res := httptest.NewRecorder()
+		w.h.ServeHTTP(res, r)
+		return res
+	}
+	// Off until accounts.json has a "paddle" part.
+	if res := get("/pricing"); res.Code != 404 {
+		t.Fatalf("without paddle: %d", res.Code)
+	}
+	build := pricingBuildOnce()
+	if build == nil {
+		t.Skip("no pricing page in the website build in web/app")
+	}
+	settings, err := (&paddleConfig{Enabled: true, Environment: "sandbox", ClientToken: "test_ebbff7d957dece400c2e9677157", PlanPriceID: testPlanPrice, StoragePriceID: testStoragePrice}).settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.s.accounts.paddle = settings
+	t.Cleanup(func() { w.s.accounts.paddle = nil })
+
+	res := get("/pricing", "CF-IPCountry", "NZ")
+	body := res.Body.String()
+	csp := res.Header().Get("Content-Security-Policy")
+	if res.Code != 200 || !strings.Contains(body, `src="/app/`+build.Entry+`"`) || !strings.Contains(body, `&#34;environment&#34;:&#34;sandbox&#34;`) || !strings.Contains(body, `&#34;country&#34;:&#34;NZ&#34;`) || !strings.Contains(body, testPlanPrice) || !strings.Contains(body, `&#34;welcome&#34;:&#34;https://metatrash.com/welcome&#34;`) {
+		t.Fatalf("pricing page: %d %s", res.Code, body)
+	}
+	if !strings.Contains(csp, "https://cdn.paddle.com") || !strings.Contains(csp, "frame-src https://*.paddle.com") || strings.Contains(csp, "unsafe-eval") || strings.Contains(body, "<script>") {
+		t.Fatalf("csp: %s", csp)
+	}
+	if strings.Contains(body, "email") || strings.Contains(body, "noindex") || res.Header().Get("X-Robots-Tag") != "" {
+		t.Fatalf("signed out, indexable: %s", body)
+	}
+	// No country from Cloudflare (or its unknown/Tor codes): none is passed to Paddle.
+	if body := get("/pricing", "CF-IPCountry", "XX").Body.String(); strings.Contains(body, "country") {
+		t.Fatalf("unknown country passed: %s", body)
+	}
+	// Signed in: the email to fill in, and the account for the checkout's custom data.
+	user := w.user("payer")
+	session := w.session(user)
+	res = get("/checkout?_ptxn=txn_01abc", "Cookie", w.h.sessionCookieName()+"="+session.Value)
+	body = res.Body.String()
+	if res.Code != 200 || !strings.Contains(body, user.Email) || !strings.Contains(body, user.ID) || !strings.Contains(body, `&#34;page&#34;:&#34;pricing&#34;`) || res.Header().Get("X-Robots-Tag") != "noindex, nofollow" {
+		t.Fatalf("checkout page: %d %v %s", res.Code, res.Header(), body)
+	}
+	if body := get("/welcome").Body.String(); !strings.Contains(body, `&#34;page&#34;:&#34;welcome&#34;`) {
+		t.Fatalf("welcome page: %s", body)
+	}
+	r := httptest.NewRequest("POST", "https://metatrash.com/pricing", nil)
+	r.RemoteAddr = "192.0.2.14:1"
+	post := httptest.NewRecorder()
+	w.h.ServeHTTP(post, r)
+	if post.Code != 405 {
+		t.Fatalf("POST: %d", post.Code)
+	}
+}

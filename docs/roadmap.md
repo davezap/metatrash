@@ -1,6 +1,14 @@
 # Roadmap
 
-Open work as of Metatrash 0.89.0 and Slate Viewer 0.23.0 (2026-11-02). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.90.0 and Slate Viewer 0.24.0 (2026-11-02). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+
+## Next: Scalability (Dave, 2026-11-02)
+
+Top of the short-term list. Found while costing the payment model (`business/financials.md` in the dave-zap/metatrash space): these limits will bite at a few hundred active subscribers, well before money does.
+
+1. **mtsync long-poll cap.** At most 256 REST lists with `after=` wait at once service-wide; past that they answer at once, so clients fall back to polling. That's about 256 folders syncing at the same moment. Raise the cap (it is a counter, not a pool; each waiting request is a goroutine and a connection), check memory and Apache's worker and timeout limits for that many open requests, and make it a setting in `spaces.json` with a sensible default.
+2. **Folder actions run two jobs at a time** for the whole server (one per space). Make the global limit a setting, keep one per space, and add a fair queue so one busy account can't hold the others back; the 20-jobs-per-folder-an-hour limit stays.
+3. **Gmail SMTP sending limit.** Sign-in codes, invitations, notices and the daily config backup all go through one Gmail account (about 500 messages a day on a personal account, 2,000 on Workspace). Move to a transactional email service (Amazon SES, about US$0.10 per 1,000) with SPF, DKIM and DMARC for metatrash.com, keep the same `accounts.json` SMTP settings shape, and keep Gmail only for the backup email if wanted.
 
 ## Payment rollout (Dave, 2026-11-02)
 
@@ -13,6 +21,13 @@ space dave-zap/metatrash.
   Settings → Spaces and by `mt users usage` and `mt spaces usage`. No limits.
   Live checks after deploy: the first full measurement at start, the numbers
   against `du` on a few repositories, and Settings.
+- **Phase 3, billing in test mode:** *started in 0.90.0 (Viewer 0.24.0)*:
+  `/pricing`, `/checkout` and `/welcome` with Paddle's sandbox (prices from
+  `Paddle.PricePreview`, one-page overlay checkout, plan only at signup,
+  email filled in, account ID in custom data). Live check after deploy:
+  Dave's end-to-end sandbox checkout (opens, completes with a test card,
+  lands on `/welcome`). Still to do in phase 3: webhooks, the entitlement
+  module, buying extra storage from Settings, and Paddle's customer portal.
 - **Next:** phase 2, enforce the allowance (still free).
 
 ## Next: Settings dialog and space picker (Dave, 2026-10-31)
