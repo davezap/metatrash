@@ -31,9 +31,17 @@ space dave-zap/metatrash.
   state from Paddle's webhooks (schema v24), the entitlement module
   (`entitlement(user)`, not yet enforced), a daily check against Paddle,
   Settings → Billing with Paddle's customer portal, `mt users comp` /
-  `uncomp` and `mt billing show`. Still to do in phase 3: buying extra
-  storage from Settings (subscription update with proration) and checking
-  Paddle's reminder email before the first charge.
+  `uncomp` and `mt billing show`. *0.92.0 (Viewer 0.26.0)*: extra storage
+  from Settings → Billing in 1 GB steps (Paddle's price preview first,
+  prorated at once, free until a trial ends, never below what the spaces
+  use). Live checks after deploy: Dave's sandbox webhook, trial, portal
+  and storage tests (release-0.91.0.md, release-0.92.0.md). Reminder before the
+  first charge: Paddle sends its Trial End Reminder by itself to every
+  customer at least 7 days before a trial longer than 7 days ends (Paddle
+  help, "Which emails will customers receive on Paddle Billing?"), so
+  nothing to build; read the one Dave's sandbox trial gets (about 23 days
+  in) to check it shows the price, date and how to cancel. That finishes
+  phase 3 apart from the live checks.
 - **Next:** phase 2, enforce the allowance (still free).
 
 ## Next: Settings dialog and space picker (Dave, 2026-10-31)

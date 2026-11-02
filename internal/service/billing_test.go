@@ -157,6 +157,10 @@ type fakePaddle struct {
 	subscriptions map[string]map[string]any
 	portals       []string
 	auth          []string
+	// changes are the PATCHes: "path mode price=quantity,...".
+	changes []string
+	// refuse makes the next PATCH fail with this Paddle error code.
+	refuse string
 }
 
 func (f *fakePaddle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -181,8 +185,106 @@ func (f *fakePaddle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.portals = append(f.portals, customer+" "+strings.Join(body.SubscriptionIDs, ","))
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"id": "cpls_1", "urls": map[string]any{
 			"general": map[string]any{"overview": "https://sandbox-customer-portal.paddle.com/cpl_1?token=pga_x"}, "subscriptions": []any{}}}})
+	case r.Method == "PATCH" && strings.HasPrefix(r.URL.Path, "/subscriptions/"):
+		var body struct {
+			Items []paddleItem `json:"items"`
+			Mode  string       `json:"proration_billing_mode"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		id, preview := strings.TrimPrefix(r.URL.Path, "/subscriptions/"), false
+		if strings.HasSuffix(id, "/preview") {
+			id, preview = strings.TrimSuffix(id, "/preview"), true
+		}
+		list := []string{}
+		storage := 0
+		for _, item := range body.Items {
+			list = append(list, fmt.Sprintf("%s=%d", item.PriceID, item.Quantity))
+			if item.PriceID == testStoragePrice {
+				storage = item.Quantity
+			}
+		}
+		f.changes = append(f.changes, r.URL.Path+" "+body.Mode+" "+strings.Join(list, ","))
+		sub, ok := f.subscriptions[id]
+		if !ok || f.refuse != "" {
+			code := f.refuse
+			if !ok {
+				code = "entity_not_found"
+			}
+			f.refuse = ""
+			w.WriteHeader(400)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": code}})
+			return
+		}
+		user := ""
+		if c, ok := sub["custom_data"].(map[string]any); ok {
+			user, _ = c["metatrash_user_id"].(string)
+		}
+		changed := testSubscription(id, sub["customer_id"].(string), sub["status"].(string), user, storage, time.Now())
+		total := fmt.Sprint(1000 + 100*storage)
+		if preview {
+			delete(changed, "id")
+			changed["immediate_transaction"] = map[string]any{"details": map[string]any{"totals": map[string]any{"grand_total": "123", "currency_code": "NZD"}}}
+			changed["next_transaction"] = map[string]any{"billing_period": map[string]any{"starts_at": "2026-12-02T03:32:23.525Z"}, "details": map[string]any{"totals": map[string]any{"grand_total": total, "currency_code": "NZD"}}}
+			changed["recurring_transaction_details"] = map[string]any{"totals": map[string]any{"grand_total": total, "currency_code": "NZD"}}
+		} else {
+			f.subscriptions[id] = changed
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": changed})
 	default:
 		w.WriteHeader(404)
+	}
+}
+
+func TestMinimumExtraGB(t *testing.T) {
+	for used, want := range map[int64]int{0: 0, includedStorage: 0, includedStorage + 1: 1, 2 * includedStorage: 1, 2*includedStorage + 1: 2, 101 * includedStorage: 100} {
+		if got := minimumExtraGB(used); got != want {
+			t.Errorf("minimumExtraGB(%d) = %d, want %d", used, got, want)
+		}
+	}
+}
+
+func TestStorageRefusal(t *testing.T) {
+	for code, want := range map[string]string{
+		"subscription_trialing_items_update_invalid_options": "free trial",
+		"subscription_payment_declined":                      "payment",
+		"subscription_locked_renewal":                        "busy",
+		"forbidden":                                          "key",
+		"something_else":                                     "refused",
+	} {
+		err := storageRefusal(&paddleError{Status: 400, Code: code}, false)
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", code, err)
+		}
+	}
+	if err := storageRefusal(fmt.Errorf("Paddle could not be reached"), false); !strings.Contains(err.Error(), "reached") {
+		t.Errorf("unreachable: %v", err)
+	}
+}
+
+func TestChangeItemsMode(t *testing.T) {
+	fake := &fakePaddle{subscriptions: map[string]map[string]any{}}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	id := paddleID("sub", 9)
+	fake.subscriptions[id] = testSubscription(id, paddleID("ctm", 9), "trialing", "", 0, time.Now())
+	api := &paddleAPI{base: server.URL, key: "k", client: server.Client()}
+	items := []paddleItem{{testPlanPrice, 1}, {testStoragePrice, 3}}
+	p, err := api.changeItems(context.Background(), id, true, items, true)
+	if err != nil || p.NextTransaction == nil || p.NextTransaction.Details.Totals.GrandTotal != "1300" {
+		t.Fatalf("preview: %+v %v", p, err)
+	}
+	if _, err := api.changeItems(context.Background(), id, false, items, false); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{
+		"/subscriptions/" + id + "/preview do_not_bill " + testPlanPrice + "=1," + testStoragePrice + "=3",
+		"/subscriptions/" + id + " prorated_immediately " + testPlanPrice + "=1," + testStoragePrice + "=3",
+	}; strings.Join(fake.changes, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("changes:\n%s", strings.Join(fake.changes, "\n"))
+	}
+	fake.refuse = "subscription_trialing_items_update_invalid_options"
+	if _, err := api.changeItems(context.Background(), id, true, items, false); paddleErrorCode(err) != fake.refuse && paddleErrorCode(err) != "subscription_trialing_items_update_invalid_options" {
+		t.Fatalf("refusal: %v", err)
 	}
 }
 
@@ -385,6 +487,57 @@ func TestBillingAgainstDatabase(t *testing.T) {
 	nobody := w.user("nobody")
 	if res := accountPost(w, w.freshSession(nobody), "/billing/portal", `{}`); res.Code != 404 {
 		t.Fatalf("portal without subscription: %d %s", res.Code, res.Body)
+	}
+
+	// Extra storage: a preview needs no recent sign-in, a change does.
+	if res := accountPost(w, secondSession, "/billing/storage", `{"storageGb": 2, "preview": true}`); res.Code != 200 ||
+		!strings.Contains(res.Body.String(), `"now":{"amount":"123","currency":"NZD"}`) || !strings.Contains(res.Body.String(), `"monthly":{"amount":"1200","currency":"NZD"}`) {
+		t.Fatalf("storage preview: %d %s", res.Code, res.Body)
+	}
+	if last := fake.changes[len(fake.changes)-1]; last != "/subscriptions/"+sub3+"/preview prorated_immediately "+testPlanPrice+"=1,"+testStoragePrice+"=2" {
+		t.Fatalf("preview sent: %s", last)
+	}
+	if res := accountPost(w, secondSession, "/billing/storage", `{"storageGb": 2}`); res.Code != 403 || !strings.Contains(res.Body.String(), "step_up_needed") {
+		t.Fatalf("storage, not fresh: %d %s", res.Code, res.Body)
+	}
+	for _, bad := range []string{`{"storageGb": 101}`, `{"storageGb": -1}`, `{}`, `{"storageGb": "2"}`} {
+		if res := accountPost(w, fresh, "/billing/storage", bad); res.Code != 400 {
+			t.Fatalf("storage %s: %d %s", bad, res.Code, res.Body)
+		}
+	}
+	if res := accountPost(w, fresh, "/billing/storage", `{"storageGb": 2}`); res.Code != 200 || !strings.Contains(res.Body.String(), "2 GB of extra storage") {
+		t.Fatalf("storage: %d %s", res.Code, res.Body)
+	}
+	if e, _ := w.s.accounts.entitlement(ctx, second.ID); e.Subscription.StorageGB != 2 || e.StorageBytes != 3*includedStorage {
+		t.Fatalf("after storage: %+v", e)
+	}
+	if res := accountPost(w, fresh, "/billing/storage", `{"storageGb": 2}`); res.Code != 200 || !strings.Contains(res.Body.String(), "already") {
+		t.Fatalf("storage again: %d %s", res.Code, res.Body)
+	}
+	fake.mu.Lock()
+	fake.refuse = "subscription_payment_declined"
+	fake.mu.Unlock()
+	if res := accountPost(w, fresh, "/billing/storage", `{"storageGb": 5}`); res.Code != 409 || !strings.Contains(res.Body.String(), "payment") {
+		t.Fatalf("declined: %d %s", res.Code, res.Body)
+	}
+	if e, _ := w.s.accounts.entitlement(ctx, second.ID); e.Subscription.StorageGB != 2 {
+		t.Fatalf("after declined: %+v", e.Subscription)
+	}
+	var secondAcct struct {
+		Billing siteBilling `json:"billing"`
+	}
+	_ = json.Unmarshal(siteCall(w, "GET", "/api/v1/site/account", "", secondSession, "").Body.Bytes(), &secondAcct)
+	if b := secondAcct.Billing; !b.StorageChange || b.StorageMaxGB != storageMaxGB || b.StorageMinGB != 0 || b.StorageGB != 2 {
+		t.Fatalf("settings storage: %+v", b)
+	}
+	if res := accountPost(w, fresh, "/billing/storage", `{"storageGb": 0}`); res.Code != 200 || !strings.Contains(res.Body.String(), "removed") {
+		t.Fatalf("storage off: %d %s", res.Code, res.Body)
+	}
+	if last := fake.changes[len(fake.changes)-1]; last != "/subscriptions/"+sub3+" prorated_immediately "+testPlanPrice+"=1" {
+		t.Fatalf("removal sent: %s", last)
+	}
+	if res := accountPost(w, w.freshSession(nobody), "/billing/storage", `{"storageGb": 1}`); res.Code != 404 {
+		t.Fatalf("storage without subscription: %d %s", res.Code, res.Body)
 	}
 
 	// Comping, from the console.

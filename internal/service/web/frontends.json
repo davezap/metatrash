@@ -1,14 +1,14 @@
 {
     "note":  "Written by scripts/build-frontends.ps1: the front-end sources this Metatrash build carries.",
-    "built":  "2026-11-02T06:42:29Z",
+    "built":  "2026-11-02T07:33:17Z",
     "slate":  {
                   "version":  "0.20.1",
                   "commit":  "45ea280",
                   "uncommitted":  true
               },
     "viewer":  {
-                   "version":  "0.25.0",
-                   "commit":  "091ca39",
+                   "version":  "0.26.0",
+                   "commit":  "ae2679b",
                    "uncommitted":  false
                }
 }

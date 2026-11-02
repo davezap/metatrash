@@ -84,7 +84,9 @@ func TestLoopUploadsLocalSaves(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "mine.txt"), []byte("saved here\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, 5*time.Second, "local save uploaded", func() bool {
+	// 15s, not 5: the shared Windows and macOS runners can stall a scan for
+	// seconds (failed there once, 0.91.0 CI).
+	eventually(t, 15*time.Second, "local save uploaded", func() bool {
 		text, err := h.agent.read(context.Background(), "mine.txt", "")
 		return err == nil && text == "saved here\n"
 	})

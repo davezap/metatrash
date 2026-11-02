@@ -483,8 +483,9 @@ and owned by the service user; neither belongs in `accounts.json` or Git:
   `/paddle/webhook` answers 404 and no billing state arrives.
 - `apiKeyFile`: a server-side API key (**Developer tools → Authentication →
   API keys**), `pdl_sdbx_apikey_...` for sandbox or `pdl_live_apikey_...`
-  for production, with **Subscriptions: read** and **Customer portal
-  sessions: write**. It opens the customer portal and runs the daily check,
+  for production, with **Subscriptions: write** (0.92.0; read was enough
+  in 0.91.0) and **Customer portal sessions: write**. It opens the
+  customer portal, changes extra storage from Settings and runs the daily check,
   which reads every subscription not long cancelled from Paddle again (10
   minutes after start, then every 24 hours) in case an event was missed.
   Without it Settings says to use the link in Paddle's emails.
@@ -1016,6 +1017,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.90.0 | nothing; optional `paddle` in `accounts.json` (Pricing and checkout) | 0.89.0 (no schema change), after removing `paddle` from `accounts.json` (0.89 refuses keys it doesn't know) |
 | 0.90.1 | nothing | 0.90.0 (no schema change) |
 | 0.91.0 | schema v24 (`metatrash_subscriptions`, `metatrash_paddle_events`, `metatrash_users.comped_at`) and grants (`SELECT, INSERT, DELETE` and column `UPDATE` on `metatrash_subscriptions`, `SELECT, INSERT, DELETE` on `metatrash_paddle_events`, `UPDATE (comped_at)` on `metatrash_users`); optional `webhookSecretFile` and `apiKeyFile` in `paddle` | 23, after removing `webhookSecretFile` and `apiKeyFile` from `accounts.json` (0.90 refuses keys it doesn't know); the rows stay in the tables, unused |
+| 0.92.0 | nothing; the Paddle API key needs **Subscriptions: write** for extra storage from Settings | 0.91.0 (no schema change) |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

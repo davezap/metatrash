@@ -673,7 +673,7 @@ func (p *paddleAPI) call(ctx context.Context, method, path string, body any, out
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(b, &problem)
-		return fmt.Errorf("Paddle answered %d %s", res.StatusCode, problem.Error.Code)
+		return &paddleError{Status: res.StatusCode, Code: problem.Error.Code}
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
@@ -691,6 +691,80 @@ func (p *paddleAPI) subscription(ctx context.Context, id string) (paddleSubscrip
 	}
 	err := p.call(ctx, http.MethodGet, "/subscriptions/"+url.PathEscape(id), nil, &sub)
 	return sub, err
+}
+
+// paddleError is a refusal from Paddle's API; Code is Paddle's error code
+// (such as subscription_trialing_items_update_invalid_options).
+type paddleError struct {
+	Status int
+	Code   string
+}
+
+func (e *paddleError) Error() string { return fmt.Sprintf("Paddle answered %d %s", e.Status, e.Code) }
+
+// paddleErrorCode is err's Paddle error code, or "".
+func paddleErrorCode(err error) string {
+	var p *paddleError
+	if errors.As(err, &p) {
+		return p.Code
+	}
+	return ""
+}
+
+// paddleItem is an item to keep on a subscription.
+type paddleItem struct {
+	PriceID  string `json:"price_id"`
+	Quantity int    `json:"quantity"`
+}
+
+// paddleTotal is an amount in the currency's smallest unit, as Paddle gives it.
+type paddleTotal struct {
+	GrandTotal   string `json:"grand_total"`
+	CurrencyCode string `json:"currency_code"`
+}
+
+// paddleUpdate is a subscription after a change, or a preview of one.
+type paddleUpdate struct {
+	paddleSubscription
+	ImmediateTransaction *struct {
+		Details struct {
+			Totals paddleTotal `json:"totals"`
+		} `json:"details"`
+	} `json:"immediate_transaction"`
+	NextTransaction *struct {
+		BillingPeriod struct {
+			StartsAt time.Time `json:"starts_at"`
+		} `json:"billing_period"`
+		Details struct {
+			Totals paddleTotal `json:"totals"`
+		} `json:"details"`
+	} `json:"next_transaction"`
+	RecurringTransactionDetails *struct {
+		Totals paddleTotal `json:"totals"`
+	} `json:"recurring_transaction_details"`
+}
+
+// changeItems sets a subscription's items (the complete list), or with
+// preview only asks Paddle what it would charge. Paddle refuses billing for
+// item changes during a trial, so a trialing subscription is changed with
+// do_not_bill: the new items start when the trial ends. Otherwise the change
+// is prorated and charged (or credited) at once; a failed payment leaves the
+// subscription as it was (prevent_change, Paddle's default).
+func (p *paddleAPI) changeItems(ctx context.Context, id string, trialing bool, items []paddleItem, preview bool) (paddleUpdate, error) {
+	var out paddleUpdate
+	if !paddleSubscriptionPattern.MatchString(id) {
+		return out, fmt.Errorf("not a subscription ID")
+	}
+	mode := "prorated_immediately"
+	if trialing {
+		mode = "do_not_bill"
+	}
+	path := "/subscriptions/" + url.PathEscape(id)
+	if preview {
+		path += "/preview"
+	}
+	err := p.call(ctx, http.MethodPatch, path, map[string]any{"items": items, "proration_billing_mode": mode, "on_payment_failure": "prevent_change"}, &out)
+	return out, err
 }
 
 // portal makes an authenticated customer portal session and answers its
