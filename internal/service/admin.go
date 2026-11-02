@@ -56,6 +56,8 @@ type AdminUserDetail struct {
 	// Sessions are the signed-in browsers stored in the database; last use
 	// there lags by up to five minutes.
 	Sessions []AdminSession `json:"sessions"`
+	// Billing is the account's plan (0.91.0, admin_billing.go).
+	Billing *AdminBilling `json:"billing,omitempty"`
 }
 
 type AdminSession struct {
@@ -125,7 +127,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v23.
+// a notice is sent, its SMTP settings) and checks the schema is v24.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -147,9 +149,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 23 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 24 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v23 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v24 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -350,6 +352,11 @@ WHERE i.email = ? AND i.status = 'pending' AND i.expires_at > ? ORDER BY i.creat
 	}, "SELECT device, ip, created_at, last_used_at, expires_at FROM metatrash_sessions WHERE user_id = ? AND expires_at > ? ORDER BY last_used_at DESC, created_at DESC", u.ID, time.Now().Unix()); err != nil {
 		return detail, fail
 	}
+	billing, err := d.Billing(ctx, u)
+	if err != nil {
+		return detail, fail
+	}
+	detail.Billing = &billing
 	return detail, nil
 }
 
@@ -617,7 +624,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v23 ready") {
+	if !add("schema", store.ready(ctx), "v24 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -738,6 +745,13 @@ var accountGrants = []string{
 	"metatrash_space_usage SELECT", "metatrash_space_usage INSERT", "metatrash_space_usage DELETE",
 	"metatrash_space_usage UPDATE (git_bytes)", "metatrash_space_usage UPDATE (file_bytes)", "metatrash_space_usage UPDATE (file_objects)",
 	"metatrash_space_usage UPDATE (git_measured_at)", "metatrash_space_usage UPDATE (files_measured_at)",
+	"metatrash_subscriptions SELECT", "metatrash_subscriptions INSERT", "metatrash_subscriptions DELETE",
+	"metatrash_subscriptions UPDATE (customer_id)", "metatrash_subscriptions UPDATE (subscription_id)", "metatrash_subscriptions UPDATE (status)",
+	"metatrash_subscriptions UPDATE (storage_gb)", "metatrash_subscriptions UPDATE (trial_ends_at)", "metatrash_subscriptions UPDATE (period_ends_at)",
+	"metatrash_subscriptions UPDATE (next_billed_at)", "metatrash_subscriptions UPDATE (scheduled_change)", "metatrash_subscriptions UPDATE (scheduled_at)",
+	"metatrash_subscriptions UPDATE (canceled_at)", "metatrash_subscriptions UPDATE (paddle_updated_at)", "metatrash_subscriptions UPDATE (updated_at)",
+	"metatrash_paddle_events SELECT", "metatrash_paddle_events INSERT", "metatrash_paddle_events DELETE",
+	"metatrash_users UPDATE (comped_at)",
 }
 
 // checkPrivileges compares the login's privileges in this database with

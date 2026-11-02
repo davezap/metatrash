@@ -1,7 +1,10 @@
 package service
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -32,6 +35,39 @@ func TestPaddleSettings(t *testing.T) {
 		"same prices":        func(c *paddleConfig) { c.StoragePriceID = c.PlanPriceID },
 	} {
 		c := good
+		change(&c)
+		if _, err := c.settings(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// The webhook secret and API key (0.91.0) come from files, each checked.
+	dir := t.TempDir()
+	file := func(name, value string) string {
+		path := filepath.Join(dir, name)
+		_ = os.WriteFile(path, []byte(value), 0600)
+		return path
+	}
+	withFiles := good
+	withFiles.WebhookSecretFile = file("secret", "pdl_ntfset_01m6dd7pjhh0y7yymvjmse3xcw_8OCfAd02lErzJIdVkDAiC8ZuJLQaDrIw\n")
+	withFiles.APIKeyFile = file("key", "pdl_sdbx_apikey_01abcdefghijklmnopqrstuvwxyz_TestOnlyKey")
+	if c, err := withFiles.settings(); err != nil || c.webhookSecret == "" || c.api() == nil || c.api().base != "https://sandbox-api.paddle.com" {
+		t.Fatalf("files: %v", err)
+	}
+	if good.api() != nil {
+		t.Fatal("API without a key")
+	}
+	for name, change := range map[string]func(*paddleConfig){
+		"missing secret file": func(c *paddleConfig) { c.WebhookSecretFile = filepath.Join(dir, "nope") },
+		"not a secret":        func(c *paddleConfig) { c.WebhookSecretFile = file("bad-secret", "hunter2") },
+		"live key in sandbox": func(c *paddleConfig) {
+			c.APIKeyFile = file("live", "pdl_live_apikey_01abcdefghijklmnopqrstuvwxyz_TestOnlyKey")
+		},
+		"client token as key": func(c *paddleConfig) { c.APIKeyFile = file("token", "test_ebbff7d957dece400c2e9677157") },
+		"two values": func(c *paddleConfig) {
+			c.APIKeyFile = file("two", "pdl_sdbx_apikey_01abcdefghijklmnopqrstuvwxyz_A pdl_sdbx_apikey_01abcdefghijklmnopqrstuvwxyz_B")
+		},
+	} {
+		c := withFiles
 		change(&c)
 		if _, err := c.settings(); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -124,6 +160,49 @@ func TestPricingPagesAgainstDatabase(t *testing.T) {
 	}
 	if body := get("/welcome").Body.String(); !strings.Contains(body, `&#34;page&#34;:&#34;welcome&#34;`) {
 		t.Fatalf("welcome page: %s", body)
+	}
+	// Start free trial signed out: sign in first, remembering to come back.
+	res = get("/pricing/start")
+	if res.Code != 303 || res.Header().Get("Location") != "/login" {
+		t.Fatalf("start signed out: %d %v", res.Code, res.Header())
+	}
+	returned := ""
+	for _, c := range res.Result().Cookies() {
+		if c.Name == w.h.returnCookieName() {
+			returned = c.Value
+		}
+	}
+	back := httptest.NewRequest("GET", "https://metatrash.com/login", nil)
+	back.AddCookie(&http.Cookie{Name: w.h.returnCookieName(), Value: returned})
+	if target := w.h.takeReturn(httptest.NewRecorder(), back); target != pricingStart {
+		t.Fatalf("return after sign-in: %q", target)
+	}
+	// Signed in, it goes on to the checkout, which opens by itself.
+	cookie := w.h.sessionCookieName() + "=" + session.Value
+	res = get("/pricing/start", "Cookie", cookie)
+	if res.Code != 303 || res.Header().Get("Location") != "/pricing?start=trial" {
+		t.Fatalf("start signed in: %d %v", res.Code, res.Header())
+	}
+	if body := get("/pricing?start=trial", "Cookie", cookie).Body.String(); !strings.Contains(body, `&#34;start&#34;:true`) {
+		t.Fatalf("start not set: %s", body)
+	}
+	if body := get("/pricing?start=trial").Body.String(); strings.Contains(body, `start&#34;:`) {
+		t.Fatalf("start set signed out: %s", body)
+	}
+	if body := get("/pricing", "Cookie", cookie).Body.String(); strings.Contains(body, `start&#34;:`) {
+		t.Fatalf("start set without asking: %s", body)
+	}
+	// From another site the session cookie stays behind: reload once from here.
+	res = get("/checkout?_ptxn=txn_01abc", "Sec-Fetch-Site", "cross-site")
+	body = res.Body.String()
+	if res.Code != 200 || !strings.Contains(body, `http-equiv="refresh"`) || !strings.Contains(body, "/checkout?_ptxn=txn_01abc") || strings.Contains(body, "metatrash-pricing") {
+		t.Fatalf("cross-site reload: %d %s", res.Code, body)
+	}
+	if body := get("/pricing", "Sec-Fetch-Site", "cross-site", "Cookie", cookie).Body.String(); !strings.Contains(body, user.Email) {
+		t.Fatalf("cross-site with cookie: %s", body)
+	}
+	if body := get("/pricing", "Sec-Fetch-Site", "same-origin").Body.String(); !strings.Contains(body, "metatrash-pricing") {
+		t.Fatalf("same-origin reloaded: %s", body)
 	}
 	r := httptest.NewRequest("POST", "https://metatrash.com/pricing", nil)
 	r.RemoteAddr = "192.0.2.14:1"

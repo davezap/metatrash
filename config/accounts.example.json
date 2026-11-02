@@ -13,7 +13,9 @@
     "environment": "sandbox",
     "clientToken": "test_...",
     "planPriceId": "pri_...",
-    "storagePriceId": "pri_..."
+    "storagePriceId": "pri_...",
+    "webhookSecretFile": "/etc/metatrash/paddle-webhook-secret",
+    "apiKeyFile": "/etc/metatrash/paddle-api-key"
   },
   "microsoft": {
     "enabled": false,

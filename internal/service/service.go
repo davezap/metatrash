@@ -74,6 +74,8 @@ type Service struct {
 	virtualTexts textCache
 	// storage writes spaces' usage to the database (storage.go).
 	storage storageMeter
+	// billing is the daily check against Paddle (billing.go).
+	billing billingChecker
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -150,6 +152,7 @@ func (s *Service) Close() {
 	<-s.done
 	// The storage meter writes what changed before the database closes.
 	s.stopStorageMeter()
+	s.billing.wg.Wait()
 	if s.accounts != nil {
 		_ = s.accounts.store.Close()
 	}

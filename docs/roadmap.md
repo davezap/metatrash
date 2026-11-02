@@ -26,8 +26,14 @@ space dave-zap/metatrash.
   `Paddle.PricePreview`, one-page overlay checkout, plan only at signup,
   email filled in, account ID in custom data). Live check after deploy:
   Dave's end-to-end sandbox checkout (opens, completes with a test card,
-  lands on `/welcome`). Still to do in phase 3: webhooks, the entitlement
-  module, buying extra storage from Settings, and Paddle's customer portal.
+  lands on `/welcome`). 0.90.1: Start free trial signs in first, so every
+  subscription belongs to an account. *0.91.0 (Viewer 0.25.0)*: billing
+  state from Paddle's webhooks (schema v24), the entitlement module
+  (`entitlement(user)`, not yet enforced), a daily check against Paddle,
+  Settings → Billing with Paddle's customer portal, `mt users comp` /
+  `uncomp` and `mt billing show`. Still to do in phase 3: buying extra
+  storage from Settings (subscription update with proration) and checking
+  Paddle's reminder email before the first charge.
 - **Next:** phase 2, enforce the allowance (still free).
 
 ## Next: Settings dialog and space picker (Dave, 2026-10-31)

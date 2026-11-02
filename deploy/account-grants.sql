@@ -1,4 +1,4 @@
--- Runtime permissions for the service's database login, schema v1-v23
+-- Runtime permissions for the service's database login, schema v1-v24
 -- (0.60.2 and later; v11 needs no new grants).
 -- Run as database administrator after the schema scripts. Safe to repeat.
 -- For loopback TCP use 'metatrash_accounts'@'127.0.0.1' throughout instead.
@@ -91,5 +91,11 @@ GRANT UPDATE (email_hint, display_name, last_used_at) ON metatrash.metatrash_ide
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)
     ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
+-- v24 billing state from Paddle
+GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_subscriptions TO 'metatrash_accounts'@'localhost';
+GRANT UPDATE (customer_id, subscription_id, status, storage_gb, trial_ends_at, period_ends_at, next_billed_at, scheduled_change, scheduled_at, canceled_at, paddle_updated_at, updated_at)
+    ON metatrash.metatrash_subscriptions TO 'metatrash_accounts'@'localhost';
+GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_paddle_events TO 'metatrash_accounts'@'localhost';
+GRANT UPDATE (comped_at) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

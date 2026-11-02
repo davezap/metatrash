@@ -203,7 +203,7 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 	if res := oauthCall(w.h, "GET", "/docs/README.md", nil); res.Code == 200 {
 		t.Fatal("/docs/ served with no docs space configured")
 	}
-	if body := oauthCall(w.h, "GET", "/login", nil).Body.String(); strings.Contains(body, "/docs/legal/privacy.md") || !strings.Contains(body, `href="/about"`) {
+	if body := oauthCall(w.h, "GET", "/login", nil).Body.String(); strings.Contains(body, "/docs/legal/privacy.md") || strings.Contains(body, "/docs/legal/refunds.md") || !strings.Contains(body, `href="/about"`) {
 		t.Fatal("legal links, or no built-in About link, without a docs space")
 	}
 	for _, page := range []string{"/", "/about"} {
@@ -214,7 +214,7 @@ func TestDocsSpaceAgainstDatabase(t *testing.T) {
 	w.s.accounts.config.DocsSpace = w.ownedName
 	for _, page := range []string{"/login"} {
 		body := oauthCall(w.h, "GET", page, nil).Body.String()
-		if !strings.Contains(body, `href="/docs/legal/privacy.md"`) || !strings.Contains(body, `href="/docs/legal/terms.md"`) || !strings.Contains(body, `href="/docs/about.md"`) || strings.Contains(body, `href="/about"`) {
+		if !strings.Contains(body, `href="/docs/legal/privacy.md"`) || !strings.Contains(body, `href="/docs/legal/terms.md"`) || !strings.Contains(body, `href="/docs/legal/refunds.md"`) || !strings.Contains(body, `href="/docs/about.md"`) || strings.Contains(body, `href="/about"`) {
 			t.Fatalf("%s lacks the docs footer links", page)
 		}
 	}

@@ -24,6 +24,7 @@ import (
 //	POST /api/v1/site/account/invitations/accept       {"space", "invitation"}
 //	POST /api/v1/site/account/offers/{accept|decline}  {"space"}
 //	POST /api/v1/site/account/delete                   {"email"}
+//	POST /api/v1/site/account/billing/portal           {} (0.91.0, site_billing.go)
 //	GET  /api/v1/site/account/confirm                  how this session can confirm it's you
 //	POST /api/v1/site/account/confirm/{send|verify|totp|passkey}
 //	     /api/v1/site/account/services/...             connected apps, agents and GitHub (0.80.0, site_services.go)
@@ -117,6 +118,9 @@ type siteAccount struct {
 	// Storage is the account's storage (0.89.0); absent when it could not
 	// be read.
 	Storage *siteStorage `json:"storage,omitempty"`
+	// Billing is the account's plan (0.91.0, site_billing.go); absent when
+	// the server sells no plans.
+	Billing *siteBilling `json:"billing,omitempty"`
 	// Unavailable names the parts that could not be read just now.
 	Unavailable []string `json:"unavailable,omitempty"`
 }
@@ -222,6 +226,7 @@ var stepUpMessages = map[string]string{
 	"visibility":     "Making a space readable on the web needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"transfer-offer": "Offering a space to someone needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"delete":         "Deleting a space needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"billing-portal": "Managing your subscription needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"account-delete": "Deleting your account needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"app-spaces":     "Giving an app more of your spaces needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"security":       "Changing how you sign in needs a sign-in within the last 10 minutes. Confirm it’s you first.",
@@ -320,7 +325,7 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 	}
 	known := route == "username" || route == "spaces" || route == "invitations/accept" || route == "offers/accept" ||
 		route == "offers/decline" || route == "delete" || route == "confirm/send" || route == "confirm/verify" ||
-		route == "confirm/totp" || route == "confirm/passkey" ||
+		route == "confirm/totp" || route == "confirm/passkey" || route == "billing/portal" && h.service.accounts.paddle != nil ||
 		len(parts) == 3 && parts[0] == "spaces" && idPattern.MatchString(parts[1]) && siteSpaceActions[parts[2]]
 	if !known {
 		sendError(w, missing())
@@ -351,6 +356,9 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 	case route == "delete":
 		value, err = h.siteDeleteAccount(w, ctx, user, session, body.Email)
 		route = "account-delete"
+	case route == "billing/portal":
+		value, err = h.siteBillingPortal(ctx, user, session)
+		route = "billing-portal"
 	case strings.HasPrefix(route, "confirm/"):
 		value, err = h.siteConfirm(ctx, user, session, client, strings.TrimPrefix(route, "confirm/"), body)
 	default:
@@ -407,6 +415,12 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 		out.Unavailable = append(out.Unavailable, "storage")
 	} else {
 		out.Storage = &siteStorage{siteUsage: siteUsage{Bytes: storage.Total, Git: storage.Git, Files: storage.Files, Measured: siteTime(storage.Oldest)}, Deleted: storage.Deleted}
+	}
+	if billing, err := h.siteBillingState(ctx, user); err != nil {
+		log.Printf("site account: billing for %s: %v", user.ID, err)
+		out.Unavailable = append(out.Unavailable, "billing")
+	} else {
+		out.Billing = billing
 	}
 	if spaces, err := h.accountSpaces(ctx, user); err != nil {
 		out.Unavailable = append(out.Unavailable, "spaces")

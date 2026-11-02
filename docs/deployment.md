@@ -47,6 +47,9 @@ mt users show dave               # one account in full (email, username or user 
 mt users usage                   # storage per account, largest first (-json for JSON)
 mt users email-login on name@example.com
 mt users set-limit dave 3        # private spaces the account may own
+mt users comp dave               # a full subscriber with no charge (uncomp ends it)
+mt billing show                  # accounts with a plan or Paddle subscription (one with <who>)
+mt billing events -outcome unlinked  # Paddle subscriptions no account claims
 mt users rename dave david       # change the username (old addresses break)
 mt spaces list                   # every owned space (-json for JSON)
 mt spaces usage dave             # storage per owned space, largest first (-json for JSON)
@@ -466,6 +469,40 @@ three pages answer 404. The visitor's country comes from Cloudflare's
 `CF-IPCountry` header when it has one (otherwise Paddle uses their IP
 address). The pages need a Slate Viewer website build from 0.24.0 on
 (`scripts/build-frontends.ps1`); with an older one they answer 404 too.
+**Billing state (0.91.0, schema v24).** Paddle tells the server about each
+subscription through a webhook, and the server keeps one row per account
+(`metatrash_subscriptions`). Settings → Billing shows the plan, and its
+Manage subscription button opens Paddle's customer portal (card, invoices,
+cancel). Both settings are optional files, each holding one value, mode 600
+and owned by the service user; neither belongs in `accounts.json` or Git:
+
+- `webhookSecretFile`: the secret key of the Paddle notification destination
+  (**Developer tools → Notifications**) that sends to
+  `https://metatrash.com/paddle/webhook`, `pdl_ntfset_...`. Subscribe it to
+  every `subscription.*` event and `transaction.completed`. Without it
+  `/paddle/webhook` answers 404 and no billing state arrives.
+- `apiKeyFile`: a server-side API key (**Developer tools → Authentication →
+  API keys**), `pdl_sdbx_apikey_...` for sandbox or `pdl_live_apikey_...`
+  for production, with **Subscriptions: read** and **Customer portal
+  sessions: write**. It opens the customer portal and runs the daily check,
+  which reads every subscription not long cancelled from Paddle again (10
+  minutes after start, then every 24 hours) in case an event was missed.
+  Without it Settings says to use the link in Paddle's emails.
+
+Each event is checked against `Paddle-Signature` (HMAC-SHA256, at most 5
+minutes old) and applied once (`metatrash_paddle_events`, kept 90 days). A
+subscription belongs to the account named in the checkout's custom data
+(`metatrash_user_id`), else to the account already holding that subscription
+or Paddle customer. One that none of these name is recorded as `unlinked`
+and changes nothing: `mt billing events -outcome unlinked` lists them.
+Nothing is limited by the plan yet (phase 4 of the payment plan); a
+comped account (`mt users comp <who>`) counts as a full subscriber with no
+charge.
+
+From 0.90.1 the prices stay public, but Start free trial asks a signed-out
+visitor to sign in or register first (`/pricing/start`), so every
+subscription belongs to an account; signing in comes back with the checkout
+open. Release 0.90.1 with Slate Viewer 0.24.1, which has the new button.
 
 ### GitHub
 
@@ -977,6 +1014,8 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.77.0 | schema v22 (`metatrash_identities`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (email_hint, display_name, last_used_at)` on it); optional `microsoft` in `accounts.json` (Sign in with Microsoft) | 21; linked Microsoft accounts stay in the table, unused, and those people sign in another way |
 | 0.89.0 | schema v23 (`metatrash_space_usage`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)` on it) | 22; the rows stay in the table, unused |
 | 0.90.0 | nothing; optional `paddle` in `accounts.json` (Pricing and checkout) | 0.89.0 (no schema change), after removing `paddle` from `accounts.json` (0.89 refuses keys it doesn't know) |
+| 0.90.1 | nothing | 0.90.0 (no schema change) |
+| 0.91.0 | schema v24 (`metatrash_subscriptions`, `metatrash_paddle_events`, `metatrash_users.comped_at`) and grants (`SELECT, INSERT, DELETE` and column `UPDATE` on `metatrash_subscriptions`, `SELECT, INSERT, DELETE` on `metatrash_paddle_events`, `UPDATE (comped_at)` on `metatrash_users`); optional `webhookSecretFile` and `apiKeyFile` in `paddle` | 23, after removing `webhookSecretFile` and `apiKeyFile` from `accounts.json` (0.90 refuses keys it doesn't know); the rows stay in the tables, unused |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

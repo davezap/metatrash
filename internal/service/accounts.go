@@ -201,6 +201,7 @@ func (s *Service) EnableAccounts(configPath string) error {
 		return sendMail(ctx, cfg, passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
 	}
 	s.accounts = a
+	s.startBillingCheck()
 	if a.agents != nil {
 		runner, err := newAgentRunner(s, a.agents, dbJobStore{store.db})
 		if err != nil {

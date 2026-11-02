@@ -36,6 +36,10 @@ var commandUsage = map[string]string{
 	"users set-limit":   "users set-limit <email|username|id> <spaces>",
 	"users rename":      "users rename <email|username|id> <new-username> [-no-notice]",
 	"users usage":       "users usage [<email|username|id>] [-json]",
+	"users comp":        "users comp <email|username|id>",
+	"users uncomp":      "users uncomp <email|username|id>",
+	"billing show":      "billing show [<email|username|id>] [-json]",
+	"billing events":    "billing events [-outcome applied|older|kept|unlinked|conflict|invalid|ignored] [-n 50] [-json]",
 	"spaces list":       "spaces list [-json]",
 	"spaces usage":      "spaces usage [<email|username|id>] [-json]",
 	"spaces export":     "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
@@ -65,6 +69,12 @@ Commands:
                                 name stop working (emails a notice; -no-notice skips it)
   users usage [<who>]           storage per account, largest first: the spaces it owns
                                 (Git with history, plus virtual files), as last measured
+  users comp <who>              make the account a full subscriber with no charge
+                                (users uncomp ends it)
+  billing show [<who>]          every account with a plan or a Paddle subscription, or
+                                one account's plan and subscription in full
+  billing events                the Paddle events the webhook took, newest first
+                                (-outcome unlinked: subscriptions no account claims)
   spaces list                   list owned spaces with owner, visibility and members
   spaces usage [<who>]          storage per owned space, largest first (one account's
                                 spaces with <who>)
@@ -74,7 +84,8 @@ Commands:
   spaces restore <space>        bring back a space its owner deleted in the last 30
                                 days (restart the service afterwards)
 
-<who> is an email address, username or user ID. list, show and usage take -json.
+<who> is an email address, username or user ID. list, show, usage, billing show
+and billing events take -json.
 <space> is owner/slug or a space ID, or a spaces.json name such as public.
 
 Account commands read the same accounts.json and account database as the
@@ -115,6 +126,8 @@ func runCommand(name string, args []string) error {
 		return usersCommand(args)
 	case "spaces":
 		return spacesCommand(args)
+	case "billing":
+		return billingCommand(args)
 	case "check":
 		return checkCommand(args)
 	}
@@ -162,7 +175,7 @@ func parseArgs(flags *flag.FlagSet, args []string) ([]string, error) {
 func usersCommand(args []string) error {
 	if len(args) == 0 {
 		printUsage(os.Stderr)
-		return fmt.Errorf("users needs a subcommand: list, show, usage, email-login, set-limit or rename")
+		return fmt.Errorf("users needs a subcommand: list, show, usage, email-login, set-limit, rename, comp or uncomp")
 	}
 	name := "users " + args[0]
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -184,6 +197,8 @@ func usersCommand(args []string) error {
 		want = 2
 	case "set-limit":
 		want = 2
+	case "comp", "uncomp":
+		want = 1
 	case "rename":
 		noNotice = flags.Bool("no-notice", false, "Do not email the account a notice")
 		want = 2
@@ -276,6 +291,8 @@ func usersCommand(args []string) error {
 			fmt.Println("Spaces it already owns stay; it cannot create more until it is under the limit.")
 		}
 		return nil
+	case "comp", "uncomp":
+		return usersComp(ctx, db, rest[0], args[0] == "comp")
 	case "rename":
 		u, err := db.FindUser(ctx, rest[0])
 		if err != nil {
@@ -629,6 +646,9 @@ func printUser(w io.Writer, u service.AdminUserDetail) {
 		codes = fmt.Sprintf("%d left, created %s", u.RecoveryCodes, day(u.RecoveryCodesCreated))
 	}
 	fmt.Fprintf(t, "Recovery codes\t%s\n", codes)
+	if u.Billing != nil {
+		fmt.Fprintf(t, "Plan\t%s\n", planLine(*u.Billing))
+	}
 	switch {
 	case u.DeletedAt != nil:
 		fmt.Fprintf(t, "Deleted\t%s\n", minute(*u.DeletedAt))

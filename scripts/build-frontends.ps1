@@ -30,7 +30,7 @@
   Run npm ci in both repositories first (after pulling new dependencies).
 
 .PARAMETER Test
-  Run go vet and go test in Metatrash afterwards.
+  Run go vet and go test in Metatrash afterwards (go test -v, so each test shows as it runs).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\build-frontends.ps1
@@ -156,7 +156,10 @@ $json = ($stamp | ConvertTo-Json -Depth 4) -replace "`r`n", "`n"
 if ($Test) {
   Step 'Metatrash: go vet and go test'
   Run $Metatrash 'go' @('vet', './...')
-  Run $Metatrash 'go' @('test', './...')
+  # -v names each test as it runs (go test is otherwise silent until a whole
+  # package ends, which looks like a hang on Windows); -timeout stops a test
+  # that really sticks and prints where it was.
+  Run $Metatrash 'go' @('test', '-v', '-timeout', '15m', './...')
 }
 
 Step 'Done'

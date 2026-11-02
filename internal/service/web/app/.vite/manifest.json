@@ -4,7 +4,7 @@
     "name": "disclose-version"
   },
   "src/main.ts": {
-    "file": "assets/main-BjnDE7nG.js",
+    "file": "assets/main-C5ONCVwU.js",
     "name": "main",
     "src": "src/main.ts",
     "isEntry": true,
@@ -12,11 +12,11 @@
       "_disclose-version-DKiW3PUh.js"
     ],
     "css": [
-      "assets/main-naQdXBhW.css"
+      "assets/main-DsJnoyPj.css"
     ]
   },
   "src/pricing.ts": {
-    "file": "assets/pricing-DXfTFmFP.js",
+    "file": "assets/pricing-DIjPnqfw.js",
     "name": "pricing",
     "src": "src/pricing.ts",
     "isEntry": true,
@@ -24,7 +24,7 @@
       "_disclose-version-DKiW3PUh.js"
     ],
     "css": [
-      "assets/pricing-B39Xvm3Q.css"
+      "assets/pricing-jngUVw4Z.css"
     ]
   }
 }
