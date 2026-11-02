@@ -10,6 +10,7 @@ import (
 )
 
 const testPlanPrice, testStoragePrice = "pri_01m6d01aaxs5w1g9myee7m5cdp", "pri_01m6d01afz75y4er9q4mb5r4sn"
+const testPlanYearlyPrice, testStorageYearlyPrice = "pri_01m6f0kf0v20v39czmf3x3h9ms", "pri_01m6f0kf28p4pdvgkjnpbt4e71"
 
 // The paddle settings have no defaults: a missing environment, or a token for
 // the other environment, stops the server rather than reach the wrong account.
@@ -22,6 +23,29 @@ func TestPaddleSettings(t *testing.T) {
 	live.Environment, live.ClientToken = "production", "live_0123456789abcdef0123456789"
 	if _, err := live.settings(); err != nil {
 		t.Fatal(err)
+	}
+	yearly := good
+	yearly.PlanYearlyPriceID, yearly.StorageYearlyPriceID = testPlanYearlyPrice, testStorageYearlyPrice
+	if c, err := yearly.settings(); err != nil {
+		t.Fatal(err)
+	} else if p := c.pagePrices(); len(p) != 4 || p["planYearly"] != testPlanYearlyPrice || p["storageYearly"] != testStorageYearlyPrice {
+		t.Fatalf("yearly page prices: %v", p)
+	}
+	if p := good.pagePrices(); len(p) != 2 {
+		t.Fatalf("monthly page prices: %v", p)
+	}
+	for name, change := range map[string]func(*paddleConfig){
+		"yearly plan only":      func(c *paddleConfig) { c.StorageYearlyPriceID = "" },
+		"yearly storage only":   func(c *paddleConfig) { c.PlanYearlyPriceID = "" },
+		"yearly same as month":  func(c *paddleConfig) { c.PlanYearlyPriceID = c.PlanPriceID },
+		"yearly storage twice":  func(c *paddleConfig) { c.StorageYearlyPriceID = c.PlanYearlyPriceID },
+		"yearly not a price id": func(c *paddleConfig) { c.StorageYearlyPriceID = "pro_01m6d01aerc1b5j46rgn1e7awx" },
+	} {
+		c := yearly
+		change(&c)
+		if _, err := c.settings(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 	for name, change := range map[string]func(*paddleConfig){
 		"no environment":     func(c *paddleConfig) { c.Environment = "" },

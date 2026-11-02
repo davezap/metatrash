@@ -160,6 +160,7 @@ func printBilling(b service.AdminBilling) {
 	if s := b.Subscription; s != nil {
 		fmt.Fprintf(t, "Subscription\t%s (%s)\n", s.SubscriptionID, s.Status)
 		fmt.Fprintf(t, "Customer\t%s\n", s.CustomerID)
+		fmt.Fprintf(t, "Billed\t%sly\n", s.Interval)
 		fmt.Fprintf(t, "Extra storage\t%d GB\n", s.StorageGB)
 		for _, row := range []struct {
 			label string

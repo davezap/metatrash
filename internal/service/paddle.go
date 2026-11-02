@@ -48,6 +48,11 @@ type paddleConfig struct {
 	// extra storage (1 GB) add-on's: pri_... from the Paddle catalog.
 	PlanPriceID    string `json:"planPriceId"`
 	StoragePriceID string `json:"storagePriceId"`
+	// PlanYearlyPriceID and StorageYearlyPriceID are the same two billed
+	// yearly (0.93.0). Optional, but both or neither: Paddle bills every item
+	// of a subscription on one cycle, so a yearly plan needs yearly storage.
+	PlanYearlyPriceID    string `json:"planYearlyPriceId,omitempty"`
+	StorageYearlyPriceID string `json:"storageYearlyPriceId,omitempty"`
 	// WebhookSecretFile holds the secret key of the Paddle notification
 	// destination that sends to /paddle/webhook (0.91.0, billing.go):
 	// pdl_ntfset_... Optional; without it the webhook answers 404 and no
@@ -67,6 +72,38 @@ type paddleConfig struct {
 }
 
 var paddlePricePattern = regexp.MustCompile(`^pri_[a-z0-9]{26}$`)
+
+// planInterval says whether id is one of the plan's prices, and its billing
+// interval: "month" or "year".
+func (c *paddleConfig) planInterval(id string) (string, bool) {
+	switch {
+	case id == "":
+		return "", false
+	case id == c.PlanPriceID:
+		return "month", true
+	case id == c.PlanYearlyPriceID:
+		return "year", true
+	}
+	return "", false
+}
+
+// isStoragePrice says whether id is an extra storage price, either cycle.
+func (c *paddleConfig) isStoragePrice(id string) bool {
+	return id != "" && (id == c.StoragePriceID || id == c.StorageYearlyPriceID)
+}
+
+// storagePriceFor is the extra storage price billed on interval, or "" when
+// none is configured for it.
+func (c *paddleConfig) storagePriceFor(interval string) string {
+	switch interval {
+	case "month":
+		return c.StoragePriceID
+	case "year":
+		return c.StorageYearlyPriceID
+	}
+	return ""
+}
+
 var paddleTokenPattern = regexp.MustCompile(`^(test|live)_[A-Za-z0-9]{10,100}$`)
 
 // paddleSettings checks the configuration. Errors name the setting.
@@ -89,6 +126,18 @@ func (c *paddleConfig) settings() (*paddleConfig, error) {
 	}
 	if !paddlePricePattern.MatchString(out.StoragePriceID) || out.StoragePriceID == out.PlanPriceID {
 		return nil, fmt.Errorf("paddle.storagePriceId must be another Paddle price ID (pri_...)")
+	}
+	if (out.PlanYearlyPriceID == "") != (out.StorageYearlyPriceID == "") {
+		return nil, fmt.Errorf("paddle.planYearlyPriceId and paddle.storageYearlyPriceId go together: set both or neither")
+	}
+	if out.PlanYearlyPriceID != "" {
+		seen := map[string]bool{out.PlanPriceID: true, out.StoragePriceID: true}
+		for _, p := range []struct{ name, id string }{{"planYearlyPriceId", out.PlanYearlyPriceID}, {"storageYearlyPriceId", out.StorageYearlyPriceID}} {
+			if !paddlePricePattern.MatchString(p.id) || seen[p.id] {
+				return nil, fmt.Errorf("paddle.%s must be another Paddle price ID (pri_...)", p.name)
+			}
+			seen[p.id] = true
+		}
 	}
 	if out.WebhookSecretFile != "" {
 		secret, err := readPaddleSecret(out.WebhookSecretFile, "paddle.webhookSecretFile")
@@ -264,7 +313,7 @@ func (h *httpAdapter) servePricing(w http.ResponseWriter, r *http.Request) bool 
 	paddle := accounts.paddle
 	config := pricingPage{
 		Page: page, Environment: paddle.Environment, Token: paddle.ClientToken,
-		Prices:  map[string]string{"plan": paddle.PlanPriceID, "storage": paddle.StoragePriceID},
+		Prices:  paddle.pagePrices(),
 		Country: visitorCountry(r),
 		Welcome: h.publicOrigin + h.basePath + "/welcome",
 		Home:    h.basePath + "/",
@@ -301,4 +350,14 @@ func (h *httpAdapter) servePricing(w http.ResponseWriter, r *http.Request) bool 
 		Build                   *appBuild
 	}{string(encoded), title, h.basePath, noIndex, build})
 	return true
+}
+
+// pagePrices are the price IDs the pricing page shows: plan and storage, and
+// planYearly and storageYearly when yearly billing is configured.
+func (c *paddleConfig) pagePrices() map[string]string {
+	out := map[string]string{"plan": c.PlanPriceID, "storage": c.StoragePriceID}
+	if c.PlanYearlyPriceID != "" {
+		out["planYearly"], out["storageYearly"] = c.PlanYearlyPriceID, c.StorageYearlyPriceID
+	}
+	return out
 }

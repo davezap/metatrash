@@ -462,6 +462,12 @@ to Paddle. There is no billing state yet (phase 3 of the payment rollout).
    "paddle": {"enabled": true, "environment": "sandbox", "clientToken": "test_...", "planPriceId": "pri_...", "storagePriceId": "pri_..."}
    ```
 
+   For yearly billing (0.93.0), add the plan's yearly price and the storage
+   add-on's yearly price, `"planYearlyPriceId": "pri_..."` and
+   `"storageYearlyPriceId": "pri_..."`. Both or neither: Paddle bills every
+   item of a subscription on one cycle, so a yearly plan needs yearly storage.
+   With them, the pricing page offers Monthly and Yearly.
+
 Nothing has a default: `environment` must be `sandbox` or `production`, the
 token must belong to it, and both prices must be price IDs, or the service
 stops at startup with the setting's name. Absent or `"enabled": false`: the
@@ -1018,6 +1024,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.90.1 | nothing | 0.90.0 (no schema change) |
 | 0.91.0 | schema v24 (`metatrash_subscriptions`, `metatrash_paddle_events`, `metatrash_users.comped_at`) and grants (`SELECT, INSERT, DELETE` and column `UPDATE` on `metatrash_subscriptions`, `SELECT, INSERT, DELETE` on `metatrash_paddle_events`, `UPDATE (comped_at)` on `metatrash_users`); optional `webhookSecretFile` and `apiKeyFile` in `paddle` | 23, after removing `webhookSecretFile` and `apiKeyFile` from `accounts.json` (0.90 refuses keys it doesn't know); the rows stay in the tables, unused |
 | 0.92.0 | nothing; the Paddle API key needs **Subscriptions: write** for extra storage from Settings | 0.91.0 (no schema change) |
+| 0.93.0 | schema v25 (`billing_interval` on `metatrash_subscriptions`) and grant (`UPDATE (billing_interval)` on it); optional `planYearlyPriceId` and `storageYearlyPriceId` in `paddle` | 0.92.x, after removing the two yearly keys from `accounts.json` and setting `schema_version` back to 24 (`UPDATE metatrash_account_meta SET schema_version = 24`); the column stays, unused. Yearly subscribers then show as monthly |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

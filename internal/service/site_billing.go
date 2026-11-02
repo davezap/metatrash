@@ -27,8 +27,10 @@ type siteBilling struct {
 	Plan   string `json:"plan"`
 	Status string `json:"status"`
 	// Storage is the allowance in bytes; StorageGB the extra storage bought.
-	Storage   int64  `json:"storage"`
-	StorageGB int    `json:"storageGb,omitempty"`
+	Storage   int64 `json:"storage"`
+	StorageGB int   `json:"storageGb,omitempty"`
+	// Interval is how often Paddle bills a subscription: month or year (0.93.0).
+	Interval  string `json:"interval,omitempty"`
 	TrialEnds string `json:"trialEnds,omitempty"`
 	// Renews is when Paddle next bills; Ends when a scheduled cancellation
 	// takes effect; Paused when a scheduled pause does.
@@ -86,11 +88,13 @@ type siteStoragePreview struct {
 	// Now is charged at once (prorated; nothing during a trial or for a
 	// reduction, which Paddle credits to the next bill instead).
 	Now *siteMoney `json:"now,omitempty"`
-	// Next is the next bill and when it is; Monthly the bill from then on.
-	Next    *siteMoney `json:"next,omitempty"`
-	NextAt  string     `json:"nextAt,omitempty"`
-	Monthly *siteMoney `json:"monthly,omitempty"`
-	Trial   bool       `json:"trial,omitempty"`
+	// Next is the next bill and when it is; Monthly the bill from then on,
+	// each month or each year as Interval says (the name is from 0.92.0).
+	Next     *siteMoney `json:"next,omitempty"`
+	NextAt   string     `json:"nextAt,omitempty"`
+	Monthly  *siteMoney `json:"monthly,omitempty"`
+	Interval string     `json:"interval,omitempty"`
+	Trial    bool       `json:"trial,omitempty"`
 }
 
 // siteBillingState is the billing part of GET /account; nil when Paddle is
@@ -107,6 +111,7 @@ func (h *httpAdapter) siteBillingState(ctx context.Context, user userAccount, us
 	}
 	out := &siteBilling{Plan: e.Plan, Status: e.Status, Storage: e.StorageBytes, TrialEnds: siteTime(e.TrialEnds), Test: a.paddle.Environment == "sandbox"}
 	if sub := e.Subscription; sub != nil {
+		out.Interval = billingInterval(sub.Interval)
 		if sub.Status != "canceled" {
 			out.StorageGB = sub.StorageGB
 			if sub.ScheduledChange == "cancel" {
@@ -218,12 +223,19 @@ func (h *httpAdapter) siteBillingStorage(ctx context.Context, user userAccount, 
 	if sub.Status != "active" && sub.Status != "trialing" {
 		return siteNotice{}, problem(409, "conflict", "Your subscription can't be changed just now. Open Manage subscription to see why.")
 	}
+	// Storage is billed on the subscription's own cycle: Paddle refuses items
+	// on different cycles.
+	interval := sub.interval(a.paddle)
+	storagePrice := a.paddle.storagePriceFor(interval)
+	if storagePrice == "" {
+		return siteNotice{}, problem(409, "conflict", "Extra storage for yearly plans isn't set up on this server yet. Ask us if you need more.")
+	}
 	items, had := []paddleItem{}, 0
 	for _, item := range sub.Items {
 		if item.Status == "inactive" || item.Price.ID == "" {
 			continue
 		}
-		if item.Price.ID == a.paddle.StoragePriceID {
+		if a.paddle.isStoragePrice(item.Price.ID) {
 			had += item.Quantity
 			continue
 		}
@@ -233,7 +245,7 @@ func (h *httpAdapter) siteBillingStorage(ctx context.Context, user userAccount, 
 		return siteNotice{Notice: fmt.Sprintf("You already have %d GB of extra storage.", want)}, nil
 	}
 	if want > 0 {
-		items = append(items, paddleItem{PriceID: a.paddle.StoragePriceID, Quantity: want})
+		items = append(items, paddleItem{PriceID: storagePrice, Quantity: want})
 	}
 	trialing := sub.Status == "trialing"
 	result, err := api.changeItems(ctx, sub.ID, trialing, items, body.Preview)
@@ -242,7 +254,7 @@ func (h *httpAdapter) siteBillingStorage(ctx context.Context, user userAccount, 
 		return siteNotice{}, storageRefusal(err, trialing)
 	}
 	if body.Preview {
-		p := &siteStoragePreview{StorageGB: want, Trial: trialing}
+		p := &siteStoragePreview{StorageGB: want, Trial: trialing, Interval: interval}
 		if t := result.ImmediateTransaction; t != nil {
 			p.Now = moneyOf(t.Details.Totals)
 		}

@@ -1,30 +1,30 @@
 {
-  "_disclose-version-DKiW3PUh.js": {
-    "file": "assets/disclose-version-DKiW3PUh.js",
+  "_disclose-version-CJbYtpbC.js": {
+    "file": "assets/disclose-version-CJbYtpbC.js",
     "name": "disclose-version"
   },
   "src/main.ts": {
-    "file": "assets/main-2daqfn__.js",
+    "file": "assets/main-CAu0uBGh.js",
     "name": "main",
     "src": "src/main.ts",
     "isEntry": true,
     "imports": [
-      "_disclose-version-DKiW3PUh.js"
+      "_disclose-version-CJbYtpbC.js"
     ],
     "css": [
       "assets/main-Coy6ENQE.css"
     ]
   },
   "src/pricing.ts": {
-    "file": "assets/pricing-DIjPnqfw.js",
+    "file": "assets/pricing-BmG1nrmI.js",
     "name": "pricing",
     "src": "src/pricing.ts",
     "isEntry": true,
     "imports": [
-      "_disclose-version-DKiW3PUh.js"
+      "_disclose-version-CJbYtpbC.js"
     ],
     "css": [
-      "assets/pricing-jngUVw4Z.css"
+      "assets/pricing-flDF0KJY.css"
     ]
   }
 }

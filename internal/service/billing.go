@@ -70,11 +70,13 @@ var paddleStatuses = map[string]bool{"trialing": true, "active": true, "past_due
 
 // subscriptionRow is one row of metatrash_subscriptions. A zero time is NULL.
 type subscriptionRow struct {
-	UserID          string
-	CustomerID      string
-	SubscriptionID  string
-	Status          string
-	StorageGB       int
+	UserID         string
+	CustomerID     string
+	SubscriptionID string
+	Status         string
+	StorageGB      int
+	// Interval is how often Paddle bills: "month" or "year" (0.93.0).
+	Interval        string
 	TrialEnds       time.Time
 	PeriodEnds      time.Time
 	NextBilled      time.Time
@@ -154,7 +156,7 @@ func (a *accounts) billingDB() *accountDatabase {
 
 // --- Database ---------------------------------------------------------------
 
-const subscriptionColumns = "user_id, customer_id, subscription_id, status, storage_gb, trial_ends_at, period_ends_at, next_billed_at, scheduled_change, scheduled_at, canceled_at, paddle_updated_at, updated_at"
+const subscriptionColumns = "user_id, customer_id, subscription_id, status, storage_gb, trial_ends_at, period_ends_at, next_billed_at, scheduled_change, scheduled_at, canceled_at, paddle_updated_at, updated_at, billing_interval"
 
 func (db *accountDatabase) checkBillingSchema(ctx context.Context) error {
 	for _, query := range []string{
@@ -164,7 +166,7 @@ func (db *accountDatabase) checkBillingSchema(ctx context.Context) error {
 	} {
 		rows, err := db.db.QueryContext(ctx, query)
 		if err != nil {
-			return fmt.Errorf("account schema v24 required (billing state); follow docs/deployment.md")
+			return fmt.Errorf("account schema v25 required (billing state); follow docs/deployment.md")
 		}
 		rows.Close()
 	}
@@ -190,7 +192,7 @@ func scanSubscription(scan func(...any) error) (*subscriptionRow, error) {
 	var trial, period, next, scheduledAt, canceled sql.NullInt64
 	var change sql.NullString
 	var updated int64
-	if err := scan(&row.UserID, &row.CustomerID, &row.SubscriptionID, &row.Status, &row.StorageGB, &trial, &period, &next, &change, &scheduledAt, &canceled, &row.PaddleUpdated, &updated); err != nil {
+	if err := scan(&row.UserID, &row.CustomerID, &row.SubscriptionID, &row.Status, &row.StorageGB, &trial, &period, &next, &change, &scheduledAt, &canceled, &row.PaddleUpdated, &updated, &row.Interval); err != nil {
 		return nil, err
 	}
 	row.TrialEnds, row.PeriodEnds, row.NextBilled = fromNullUnix(trial), fromNullUnix(period), fromNullUnix(next)
@@ -260,9 +262,9 @@ func saveSubscription(ctx context.Context, tx *sql.Tx, row subscriptionRow, now 
 		return "", err
 	}
 	args := []any{row.CustomerID, row.SubscriptionID, row.Status, row.StorageGB, nullUnix(row.TrialEnds), nullUnix(row.PeriodEnds), nullUnix(row.NextBilled),
-		sql.NullString{String: row.ScheduledChange, Valid: row.ScheduledChange != ""}, nullUnix(row.ScheduledAt), nullUnix(row.CanceledAt), row.PaddleUpdated, now.Unix()}
+		sql.NullString{String: row.ScheduledChange, Valid: row.ScheduledChange != ""}, nullUnix(row.ScheduledAt), nullUnix(row.CanceledAt), row.PaddleUpdated, now.Unix(), billingInterval(row.Interval)}
 	if existing == nil {
-		_, err := tx.ExecContext(ctx, "INSERT INTO metatrash_subscriptions ("+subscriptionColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", append([]any{row.UserID}, args...)...)
+		_, err := tx.ExecContext(ctx, "INSERT INTO metatrash_subscriptions ("+subscriptionColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", append([]any{row.UserID}, args...)...)
 		if err != nil {
 			return "", err
 		}
@@ -283,11 +285,19 @@ func saveSubscription(ctx context.Context, tx *sql.Tx, row subscriptionRow, now 
 		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE metatrash_subscriptions SET customer_id = ?, subscription_id = ?, status = ?, storage_gb = ?, trial_ends_at = ?, period_ends_at = ?,
-next_billed_at = ?, scheduled_change = ?, scheduled_at = ?, canceled_at = ?, paddle_updated_at = ?, updated_at = ? WHERE user_id = ?`, append(args, row.UserID)...)
+next_billed_at = ?, scheduled_change = ?, scheduled_at = ?, canceled_at = ?, paddle_updated_at = ?, updated_at = ?, billing_interval = ? WHERE user_id = ?`, append(args, row.UserID)...)
 	if err != nil {
 		return "", err
 	}
 	return "applied", nil
+}
+
+// billingInterval is interval as stored: "year", or "month" for anything else.
+func billingInterval(interval string) string {
+	if interval == "year" {
+		return "year"
+	}
+	return "month"
 }
 
 func recordPaddleEvent(ctx context.Context, tx *sql.Tx, ev paddleEvent, subscriptionID, userID, outcome string, now time.Time) error {
@@ -341,8 +351,26 @@ type paddleSubscription struct {
 		Action      string    `json:"action"`
 		EffectiveAt time.Time `json:"effective_at"`
 	} `json:"scheduled_change"`
-	CanceledAt *time.Time `json:"canceled_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	CanceledAt   *time.Time `json:"canceled_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	BillingCycle *struct {
+		Interval  string `json:"interval"`
+		Frequency int    `json:"frequency"`
+	} `json:"billing_cycle"`
+}
+
+// interval is how often Paddle bills the subscription, "month" or "year":
+// from its billing cycle, else from which plan price it has.
+func (sub paddleSubscription) interval(settings *paddleConfig) string {
+	if c := sub.BillingCycle; c != nil && c.Frequency == 1 && (c.Interval == "month" || c.Interval == "year") {
+		return c.Interval
+	}
+	for _, item := range sub.Items {
+		if interval, ok := settings.planInterval(item.Price.ID); ok && item.Status != "inactive" {
+			return interval
+		}
+	}
+	return "month"
 }
 
 type paddleTransaction struct {
@@ -358,17 +386,18 @@ func (sub paddleSubscription) row(userID string, settings *paddleConfig) (subscr
 	if !paddleSubscriptionPattern.MatchString(sub.ID) || !paddleCustomerPattern.MatchString(sub.CustomerID) || !paddleStatuses[sub.Status] || sub.UpdatedAt.IsZero() {
 		return subscriptionRow{}, fmt.Errorf("not a subscription this server understands")
 	}
-	row := subscriptionRow{UserID: userID, CustomerID: sub.CustomerID, SubscriptionID: sub.ID, Status: sub.Status, PaddleUpdated: sub.UpdatedAt.UnixMilli()}
+	row := subscriptionRow{UserID: userID, CustomerID: sub.CustomerID, SubscriptionID: sub.ID, Status: sub.Status, PaddleUpdated: sub.UpdatedAt.UnixMilli(), Interval: sub.interval(settings)}
 	for _, item := range sub.Items {
 		if item.Status == "inactive" {
 			continue
 		}
-		switch item.Price.ID {
-		case settings.StoragePriceID:
+		_, plan := settings.planInterval(item.Price.ID)
+		switch {
+		case settings.isStoragePrice(item.Price.ID):
 			if item.Quantity > 0 && item.Quantity <= 10000 {
 				row.StorageGB += item.Quantity
 			}
-		case settings.PlanPriceID:
+		case plan:
 			if item.TrialDates != nil && item.TrialDates.EndsAt != nil {
 				row.TrialEnds = item.TrialDates.EndsAt.UTC()
 			}
@@ -875,7 +904,7 @@ func (s *Service) checkBilling(ctx context.Context, now time.Time) (checked, cha
 			continue
 		}
 		after, err := subscriptionWhere(ctx, db.db, "user_id = ?", row.UserID)
-		if err == nil && after != nil && (after.Status != before.Status || after.StorageGB != before.StorageGB || after.PaddleUpdated != before.PaddleUpdated) {
+		if err == nil && after != nil && (after.Status != before.Status || after.StorageGB != before.StorageGB || after.Interval != before.Interval || after.PaddleUpdated != before.PaddleUpdated) {
 			changed++
 		}
 	}

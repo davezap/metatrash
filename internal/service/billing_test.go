@@ -110,6 +110,21 @@ func testSubscription(id, customer, status, userID string, storage int, updated 
 	return sub
 }
 
+// yearlySubscription turns a testSubscription into one billed yearly.
+func yearlySubscription(sub map[string]any) map[string]any {
+	sub["billing_cycle"] = map[string]any{"interval": "year", "frequency": 1}
+	for _, item := range sub["items"].([]any) {
+		price := item.(map[string]any)["price"].(map[string]any)
+		switch price["id"] {
+		case testPlanPrice:
+			price["id"] = testPlanYearlyPrice
+		case testStoragePrice:
+			price["id"] = testStorageYearlyPrice
+		}
+	}
+	return sub
+}
+
 func paddleID(prefix string, n int) string {
 	return fmt.Sprintf("%s_%026d", prefix, n)
 }
@@ -136,6 +151,28 @@ func TestPaddleSubscriptionRow(t *testing.T) {
 	}{"cancel", updated.Add(time.Hour)}
 	if row, _ := sub.row("u1", settings); !row.TrialEnds.IsZero() || row.ScheduledChange != "cancel" {
 		t.Fatalf("active row: %+v", row)
+	}
+	if row.Interval != "month" {
+		t.Fatalf("monthly interval: %q", row.Interval)
+	}
+	// Yearly (0.93.0): the yearly storage price counts, and the interval comes
+	// from the billing cycle, or from the plan price when that is missing.
+	yearlySettings := &paddleConfig{PlanPriceID: testPlanPrice, StoragePriceID: testStoragePrice, PlanYearlyPriceID: testPlanYearlyPrice, StorageYearlyPriceID: testStorageYearlyPrice}
+	b, _ = json.Marshal(yearlySubscription(testSubscription(paddleID("sub", 2), paddleID("ctm", 2), "trialing", "", 3, updated)))
+	var year paddleSubscription
+	_ = json.Unmarshal(b, &year)
+	if row, err := year.row("u2", yearlySettings); err != nil || row.Interval != "year" || row.StorageGB != 3 || row.TrialEnds.IsZero() {
+		t.Fatalf("yearly row: %+v %v", row, err)
+	}
+	year.BillingCycle = nil
+	if got := year.interval(yearlySettings); got != "year" {
+		t.Fatalf("yearly from the plan price: %q", got)
+	}
+	if got := yearlySettings.storagePriceFor("year"); got != testStorageYearlyPrice {
+		t.Fatalf("yearly storage price: %q", got)
+	}
+	if got := settings.storagePriceFor("year"); got != "" {
+		t.Fatalf("yearly storage price without yearly prices: %q", got)
 	}
 	for _, bad := range []func(*paddleSubscription){
 		func(s *paddleSubscription) { s.ID = "sub_short" },
@@ -199,7 +236,7 @@ func (f *fakePaddle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		storage := 0
 		for _, item := range body.Items {
 			list = append(list, fmt.Sprintf("%s=%d", item.PriceID, item.Quantity))
-			if item.PriceID == testStoragePrice {
+			if item.PriceID == testStoragePrice || item.PriceID == testStorageYearlyPrice {
 				storage = item.Quantity
 			}
 		}
@@ -220,6 +257,9 @@ func (f *fakePaddle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			user, _ = c["metatrash_user_id"].(string)
 		}
 		changed := testSubscription(id, sub["customer_id"].(string), sub["status"].(string), user, storage, time.Now())
+		if c, ok := sub["billing_cycle"].(map[string]any); ok && c["interval"] == "year" {
+			changed = yearlySubscription(changed)
+		}
 		total := fmt.Sprint(1000 + 100*storage)
 		if preview {
 			delete(changed, "id")
@@ -299,7 +339,7 @@ func TestBillingAgainstDatabase(t *testing.T) {
 	_ = os.WriteFile(secretFile, []byte(testWebhookSecret+"\n"), 0600)
 	_ = os.WriteFile(keyFile, []byte("pdl_sdbx_apikey_01abcdefghijklmnopqrstuvwxyz_TestOnlyKey\n"), 0600)
 	settings, err := (&paddleConfig{Enabled: true, Environment: "sandbox", ClientToken: "test_ebbff7d957dece400c2e9677157", PlanPriceID: testPlanPrice, StoragePriceID: testStoragePrice,
-		WebhookSecretFile: secretFile, APIKeyFile: keyFile}).settings()
+		PlanYearlyPriceID: testPlanYearlyPrice, StorageYearlyPriceID: testStorageYearlyPrice, WebhookSecretFile: secretFile, APIKeyFile: keyFile}).settings()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,6 +578,47 @@ func TestBillingAgainstDatabase(t *testing.T) {
 	}
 	if res := accountPost(w, w.freshSession(nobody), "/billing/storage", `{"storageGb": 1}`); res.Code != 404 {
 		t.Fatalf("storage without subscription: %d %s", res.Code, res.Body)
+	}
+
+	// Yearly (0.93.0): stored as yearly, shown as yearly, and storage is added
+	// at the yearly storage price.
+	yearly := w.user("yearly")
+	subY, custY := paddleID("sub", n+7), paddleID("ctm", n+7)
+	fake.subscriptions[subY] = yearlySubscription(testSubscription(subY, custY, "active", yearly.ID, 0, t0))
+	if out := send("subscription.created", yearlySubscription(testSubscription(subY, custY, "active", yearly.ID, 0, t0))); out != "applied" {
+		t.Fatalf("yearly created: %s", out)
+	}
+	if e, _ := w.s.accounts.entitlement(ctx, yearly.ID); e.Plan != "individual" || e.Subscription.Interval != "year" {
+		t.Fatalf("yearly: %+v", e.Subscription)
+	}
+	yearlyFresh := w.freshSession(yearly)
+	var yearlyAcct struct {
+		Billing siteBilling `json:"billing"`
+	}
+	_ = json.Unmarshal(siteCall(w, "GET", "/api/v1/site/account", "", yearlyFresh, "").Body.Bytes(), &yearlyAcct)
+	if yearlyAcct.Billing.Interval != "year" {
+		t.Fatalf("yearly billing: %+v", yearlyAcct.Billing)
+	}
+	if res := accountPost(w, yearlyFresh, "/billing/storage", `{"storageGb": 3, "preview": true}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"interval":"year"`) {
+		t.Fatalf("yearly preview: %d %s", res.Code, res.Body)
+	}
+	if res := accountPost(w, yearlyFresh, "/billing/storage", `{"storageGb": 3}`); res.Code != 200 {
+		t.Fatalf("yearly storage: %d %s", res.Code, res.Body)
+	}
+	if last := fake.changes[len(fake.changes)-1]; last != "/subscriptions/"+subY+" prorated_immediately "+testPlanYearlyPrice+"=1,"+testStorageYearlyPrice+"=3" {
+		t.Fatalf("yearly storage sent: %s", last)
+	}
+	if e, _ := w.s.accounts.entitlement(ctx, yearly.ID); e.Subscription.StorageGB != 3 || e.Subscription.Interval != "year" {
+		t.Fatalf("after yearly storage: %+v", e.Subscription)
+	}
+	if b, _ := (&AdminDB{store: w.db}).BillingAccounts(ctx); len(b) == 0 {
+		t.Fatal("no billing accounts")
+	} else {
+		for _, a := range b {
+			if a.UserID == yearly.ID && (a.Subscription == nil || a.Subscription.Interval != "year") {
+				t.Fatalf("admin yearly: %+v", a.Subscription)
+			}
+		}
 	}
 
 	// Comping, from the console.

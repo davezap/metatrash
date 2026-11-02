@@ -97,5 +97,7 @@ GRANT UPDATE (customer_id, subscription_id, status, storage_gb, trial_ends_at, p
     ON metatrash.metatrash_subscriptions TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_paddle_events TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (comped_at) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
+-- v25 yearly billing
+GRANT UPDATE (billing_interval) ON metatrash.metatrash_subscriptions TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

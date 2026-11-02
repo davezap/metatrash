@@ -127,7 +127,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v24.
+// a notice is sent, its SMTP settings) and checks the schema is v25.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -149,9 +149,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 24 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 25 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v24 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v25 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -624,7 +624,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v24 ready") {
+	if !add("schema", store.ready(ctx), "v25 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -750,6 +750,7 @@ var accountGrants = []string{
 	"metatrash_subscriptions UPDATE (storage_gb)", "metatrash_subscriptions UPDATE (trial_ends_at)", "metatrash_subscriptions UPDATE (period_ends_at)",
 	"metatrash_subscriptions UPDATE (next_billed_at)", "metatrash_subscriptions UPDATE (scheduled_change)", "metatrash_subscriptions UPDATE (scheduled_at)",
 	"metatrash_subscriptions UPDATE (canceled_at)", "metatrash_subscriptions UPDATE (paddle_updated_at)", "metatrash_subscriptions UPDATE (updated_at)",
+	"metatrash_subscriptions UPDATE (billing_interval)",
 	"metatrash_paddle_events SELECT", "metatrash_paddle_events INSERT", "metatrash_paddle_events DELETE",
 	"metatrash_users UPDATE (comped_at)",
 }

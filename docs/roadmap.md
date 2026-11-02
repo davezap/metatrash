@@ -41,7 +41,11 @@ space dave-zap/metatrash.
   help, "Which emails will customers receive on Paddle Billing?"), so
   nothing to build; read the one Dave's sandbox trial gets (about 23 days
   in) to check it shows the price, date and how to cancel. That finishes
-  phase 3 apart from the live checks.
+  phase 3 apart from the live checks. *0.93.0 (Viewer 0.27.0)*: yearly
+  billing, US$100 a year (Dave, 2026-11-02): a Monthly / Yearly switch on
+  the pricing page, yearly storage at US$10 per GB a year, the billing cycle
+  stored (schema v25) and shown in Settings. Live check after deploy: a
+  yearly sandbox trial, then adding storage to it.
 - **Next:** phase 2, enforce the allowance (still free).
 
 ## Next: Settings dialog and space picker (Dave, 2026-10-31)

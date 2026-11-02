@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.93.0 - Yearly billing (2026-11-02)
+
+Schema v25 and a new grant (apply `deploy/account-schema-v25.sql` and `deploy/account-grants.sql` before the new binary starts). New optional `planYearlyPriceId` and `storageYearlyPriceId` in `accounts.json`'s `paddle` part, both or neither (see Pricing and checkout in docs/deployment.md). Tool-schema unchanged; mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.27.0. CI applies schema v25 (copy `.github/workflows/ci.yml` by hand).
+
+- **Yearly plan**: US$100 a year (NZ$100, A$150, £100, €100, C$140: ten times each monthly price, "2 months free"), with the same 30-day card trial. Extra storage on a yearly plan is US$10 per GB a year. The prices are in the Paddle catalog, sandbox and live (IDs in docs/release-0.93.0.md).
+- **Pricing page**: a Monthly / Yearly switch when the server has yearly prices. Paddle previews both cycles at once, so switching shows the other price straight away; Start free trial opens the checkout with the chosen plan price. Without yearly prices the page is as before.
+- **The server follows either plan price**: a subscription is a Personal plan whichever plan price it has, and its billing cycle is stored (`billing_interval`, from Paddle's `billing_cycle`, else from the plan price). Extra storage is counted at either storage price.
+- **Extra storage follows the cycle**: Settings adds storage at the storage price matching the subscription's cycle, because Paddle bills every item of a subscription on one cycle. A yearly subscription on a server without yearly prices is told storage can't be changed yet. The storage preview says `interval`, so Settings shows "a year" and "the rest of this year".
+- `GET /api/v1/site/account`'s `billing` has `interval` (`month` or `year`); Settings → Billing says "billed yearly" and "Paddle charges the first year". `mt billing show` has a Billed line, and the console's billing list carries the interval.
+- Tested against MariaDB (full run): yearly subscriptions stored and shown as yearly, storage added to one at the yearly storage price with the yearly plan kept, the interval in Settings, the preview and the console, and the configuration checks (both yearly prices or neither, all four different). Browser-checked with the Viewer website build against a stand-in Paddle: the switch, both cycles' prices and wording, the checkout opening with the yearly price, desktop and phone width.
+
 ## 0.92.1 - Storage hints, CI schema, Viewer change notes (2026-11-02)
 
 No schema, grant or `accounts.json` change; tool-schema unchanged; mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.26.1.

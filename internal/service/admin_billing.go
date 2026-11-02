@@ -30,10 +30,12 @@ type AdminBilling struct {
 
 // AdminSubscription is a row of metatrash_subscriptions.
 type AdminSubscription struct {
-	SubscriptionID  string    `json:"subscriptionId"`
-	CustomerID      string    `json:"customerId"`
-	Status          string    `json:"status"`
-	StorageGB       int       `json:"storageGb"`
+	SubscriptionID string `json:"subscriptionId"`
+	CustomerID     string `json:"customerId"`
+	Status         string `json:"status"`
+	StorageGB      int    `json:"storageGb"`
+	// Interval is how often Paddle bills: month or year.
+	Interval        string    `json:"interval"`
 	TrialEndsAt     time.Time `json:"trialEndsAt,omitzero"`
 	PeriodEndsAt    time.Time `json:"periodEndsAt,omitzero"`
 	NextBilledAt    time.Time `json:"nextBilledAt,omitzero"`
@@ -61,7 +63,7 @@ func adminSubscription(row *subscriptionRow) *AdminSubscription {
 	if row == nil {
 		return nil
 	}
-	return &AdminSubscription{SubscriptionID: row.SubscriptionID, CustomerID: row.CustomerID, Status: row.Status, StorageGB: row.StorageGB,
+	return &AdminSubscription{SubscriptionID: row.SubscriptionID, CustomerID: row.CustomerID, Status: row.Status, StorageGB: row.StorageGB, Interval: billingInterval(row.Interval),
 		TrialEndsAt: row.TrialEnds, PeriodEndsAt: row.PeriodEnds, NextBilledAt: row.NextBilled, ScheduledChange: row.ScheduledChange,
 		ScheduledAt: row.ScheduledAt, CanceledAt: row.CanceledAt, PaddleUpdatedAt: time.UnixMilli(row.PaddleUpdated).UTC(), UpdatedAt: row.Updated}
 }
@@ -99,21 +101,21 @@ func (d *AdminDB) BillingAccounts(ctx context.Context) ([]AdminBilling, error) {
 	out := []AdminBilling{}
 	err := eachRow(ctx, d.store.db, func(scan func(...any) error) error {
 		var id, email string
-		var username, customer, subscription, status, change sql.NullString
+		var username, customer, subscription, status, change, interval sql.NullString
 		var compedAt, storage, trial, period, next, scheduledAt, canceled, paddleUpdated, updated sql.NullInt64
-		if err := scan(&id, &email, &username, &compedAt, &customer, &subscription, &status, &storage, &trial, &period, &next, &change, &scheduledAt, &canceled, &paddleUpdated, &updated); err != nil {
+		if err := scan(&id, &email, &username, &compedAt, &customer, &subscription, &status, &storage, &trial, &period, &next, &change, &scheduledAt, &canceled, &paddleUpdated, &updated, &interval); err != nil {
 			return err
 		}
 		var sub *subscriptionRow
 		if subscription.Valid {
 			sub = &subscriptionRow{UserID: id, CustomerID: customer.String, SubscriptionID: subscription.String, Status: status.String, StorageGB: int(storage.Int64),
 				TrialEnds: fromNullUnix(trial), PeriodEnds: fromNullUnix(period), NextBilled: fromNullUnix(next), ScheduledChange: change.String,
-				ScheduledAt: fromNullUnix(scheduledAt), CanceledAt: fromNullUnix(canceled), PaddleUpdated: paddleUpdated.Int64, Updated: fromNullUnix(updated)}
+				ScheduledAt: fromNullUnix(scheduledAt), CanceledAt: fromNullUnix(canceled), PaddleUpdated: paddleUpdated.Int64, Updated: fromNullUnix(updated), Interval: interval.String}
 		}
 		out = append(out, adminBilling(id, email, username.String, compedAt, sub))
 		return nil
 	}, `SELECT u.user_id, u.email, u.username, u.comped_at, s.customer_id, s.subscription_id, s.status, s.storage_gb, s.trial_ends_at, s.period_ends_at,
-s.next_billed_at, s.scheduled_change, s.scheduled_at, s.canceled_at, s.paddle_updated_at, s.updated_at
+s.next_billed_at, s.scheduled_change, s.scheduled_at, s.canceled_at, s.paddle_updated_at, s.updated_at, s.billing_interval
 FROM metatrash_users u LEFT JOIN metatrash_subscriptions s ON s.user_id = u.user_id
 WHERE u.comped_at IS NOT NULL OR s.user_id IS NOT NULL
 ORDER BY COALESCE(s.updated_at, u.comped_at) DESC, u.user_id LIMIT 10001`)
