@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.89.0 - Measuring storage (2026-11-02)
+
+Schema v23 and new grants (apply `deploy/account-schema-v23.sql` and `deploy/account-grants.sql` before the new binary starts). No `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.23.0 shows the numbers in Settings. Phase 1 of the payment rollout (`business/payment-rollout-plan.md`): nothing is limited yet.
+
+- **Each owned space is measured**: its Git repository on disk (every version of every text file, so history counts) plus the unique objects under `files/<space ID>/` in the space-files bucket (every kept version of its virtual files). An account's total is the sum of the ready spaces it owns; spaces shared with you count for their owners. Deleted spaces waiting to be purged are counted apart and not in the total.
+- **Kept up to date cheaply**: a commit already knows the repository's size, so it adds what it moved in; storing a virtual file adds its object once (the same content twice counts once), and the daily sweep takes off what it removes. Numbers are written to the new table `metatrash_space_usage` a few seconds after a change, and everything is measured in full when the service starts and every 24 hours after.
+- **Settings → Spaces shows them**: each space's size next to it (with Git and files in its tooltip), and a Storage section with the account's total, how much is text with its history and how much is files, deleted spaces still counted, when it was measured, and a note that history counts and deleting a file may not free any space. The site API's `GET /api/v1/site/account` has `storage` and a `usage` on each owned space.
+- **New console commands**: `mt users usage [<who>] [-json]` (accounts by storage, largest first) and `mt spaces usage [<who>] [-json]` (owned spaces, or one account's, with Git, files, objects and when each was measured).
+- A purged space's usage row is deleted with it.
+- Tested against MariaDB (full run, and `-race` on the storage, delete and owned-space tests): a write's size matches a walk of the repository, objects count once and only after the first listing, the sweep takes off what it removes, a full measurement agrees with the running count, and the database row, Settings JSON and console views match; a deleted space counts apart and its row goes at purge. Browser-checked with the Viewer website build against a local server: Settings → Spaces in light and dark and at phone width.
+
 ## 0.88.0 - A page footer for folders (2026-11-02)
 
 No schema, grant or `accounts.json` change; tool-schema 0.17.4 (the write tool's description names `footer`); mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.22.0 draws the footer and edits it in Properties.

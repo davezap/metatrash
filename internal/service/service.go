@@ -72,6 +72,8 @@ type Service struct {
 	userIDHook   func(username string) string
 	// virtualTexts caches virtual files' text for search and read.
 	virtualTexts textCache
+	// storage writes spaces' usage to the database (storage.go).
+	storage storageMeter
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -146,6 +148,8 @@ func (s *Service) Close() {
 	// Automatic pulls see the stop and give up.
 	s.autoPull.wg.Wait()
 	<-s.done
+	// The storage meter writes what changed before the database closes.
+	s.stopStorageMeter()
 	if s.accounts != nil {
 		_ = s.accounts.store.Close()
 	}

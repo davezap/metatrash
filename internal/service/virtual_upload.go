@@ -144,6 +144,7 @@ func (s *Service) putVirtualUpload(ctx context.Context, r *repository, space, pa
 		log.Printf("virtual file: %v", err)
 		return WriteResult{}, unavailable
 	}
+	s.noteStoredObject(r, info.SHA256, info.Size)
 	if !convertedTypes[info.Type] && u.text {
 		info.TextSHA256 = info.SHA256
 	} else if text := s.uploadText(ctx, u, info.Type, pdfText); text != "" {
@@ -155,6 +156,7 @@ func (s *Service) putVirtualUpload(ctx context.Context, r *repository, space, pa
 			log.Printf("virtual file: %v", err)
 			return WriteResult{}, unavailable
 		}
+		s.noteStoredObject(r, info.TextSHA256, int64(len(text)))
 	}
 	pointer := info.pointer()
 	value, err := s.dispatchRepository(ctx, r, space, "write", Input{Path: path, Text: &pointer, IfInState: ifInState, Virtual: &info})

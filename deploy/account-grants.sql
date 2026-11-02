@@ -1,4 +1,4 @@
--- Runtime permissions for the service's database login, schema v1-v19
+-- Runtime permissions for the service's database login, schema v1-v23
 -- (0.60.2 and later; v11 needs no new grants).
 -- Run as database administrator after the schema scripts. Safe to repeat.
 -- For loopback TCP use 'metatrash_accounts'@'127.0.0.1' throughout instead.
@@ -87,5 +87,9 @@ GRANT UPDATE (deletion_requested_at, deleted_at) ON metatrash.metatrash_users TO
 -- v22 sign in with Microsoft
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_identities TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (email_hint, display_name, last_used_at) ON metatrash.metatrash_identities TO 'metatrash_accounts'@'localhost';
+-- v23 measuring storage
+GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
+GRANT UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)
+    ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
 
 SHOW GRANTS FOR 'metatrash_accounts'@'localhost';

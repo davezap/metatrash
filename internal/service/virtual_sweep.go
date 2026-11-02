@@ -59,6 +59,7 @@ func (s *Service) sweepVirtual(ctx context.Context, now time.Time) {
 			continue
 		}
 		if result.Removed > 0 {
+			s.storageChanged(r)
 			log.Printf("virtual files sweep: space %s: removed %d of %d objects (%s)", r.id, result.Removed, result.Objects, humanBytes(result.RemovedBytes))
 		}
 	}
@@ -90,6 +91,7 @@ func sweepSpace(ctx context.Context, r *repository, sweeper objectSweeper, now t
 		if err := sweeper.remove(ctx, o.Key); err != nil {
 			return result, err
 		}
+		r.usage.removeObject(hash)
 		result.Removed++
 		result.RemovedBytes += o.Size
 	}

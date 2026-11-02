@@ -50,6 +50,29 @@ type siteAccountSpace struct {
 	Ready    bool   `json:"ready"`
 	Web      bool   `json:"web,omitempty"`
 	Timezone string `json:"timezone,omitempty"`
+	// Usage is what the space takes up, once it was measured (0.89.0).
+	Usage *siteUsage `json:"usage,omitempty"`
+}
+
+// siteUsage is storage in bytes: Git is the space's repository (every
+// version of every text file), Files its virtual files' content and text in
+// the bucket (every version kept), Bytes both. Measured is when the oldest
+// number in it was measured (RFC 3339).
+type siteUsage struct {
+	Bytes    int64  `json:"bytes"`
+	Git      int64  `json:"git"`
+	Files    int64  `json:"files"`
+	Measured string `json:"measured,omitempty"`
+}
+
+// siteStorage is the account's storage: the sum over the spaces it owns.
+// Deleted is what its deleted spaces take up until they are removed for
+// good, 30 days after deletion; it is not in Bytes. Allowance is 0 while
+// no limit applies (phase 2 of the payment plan sets it).
+type siteStorage struct {
+	siteUsage
+	Deleted   int64 `json:"deleted,omitempty"`
+	Allowance int64 `json:"allowance,omitempty"`
 }
 
 type siteJoinedSpace struct {
@@ -91,6 +114,9 @@ type siteAccount struct {
 	Joined          []siteJoinedSpace  `json:"joined"`
 	Invitations     []siteInvitation   `json:"invitations"`
 	Offers          []siteOffer        `json:"offers"`
+	// Storage is the account's storage (0.89.0); absent when it could not
+	// be read.
+	Storage *siteStorage `json:"storage,omitempty"`
 	// Unavailable names the parts that could not be read just now.
 	Unavailable []string `json:"unavailable,omitempty"`
 }
@@ -376,6 +402,12 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 		Apps: h.oauth != nil, Spaces: []siteAccountSpace{}, Joined: []siteJoinedSpace{}, Invitations: []siteInvitation{}, Offers: []siteOffer{},
 	}
 	out.Fresh, _ = h.service.accounts.sessionFresh(session, time.Now())
+	storage, storageErr := h.service.accountStorage(ctx, user.ID)
+	if storageErr != nil {
+		out.Unavailable = append(out.Unavailable, "storage")
+	} else {
+		out.Storage = &siteStorage{siteUsage: siteUsage{Bytes: storage.Total, Git: storage.Git, Files: storage.Files, Measured: siteTime(storage.Oldest)}, Deleted: storage.Deleted}
+	}
 	if spaces, err := h.accountSpaces(ctx, user); err != nil {
 		out.Unavailable = append(out.Unavailable, "spaces")
 	} else {
@@ -383,6 +415,9 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 			item := siteAccountSpace{ID: s.ID, Name: s.Name, Slug: s.Slug, Ready: s.Ready, Web: s.Web, Timezone: s.Timezone}
 			if s.Ready && user.Username != "" {
 				item.Space = user.Username + "/" + s.Slug
+			}
+			if u, ok := storage.Spaces[s.ID]; ok && storageErr == nil {
+				item.Usage = &siteUsage{Bytes: u.Total(), Git: u.GitBytes, Files: u.FileBytes, Measured: siteTime(u.oldest())}
 			}
 			out.Spaces = append(out.Spaces, item)
 		}

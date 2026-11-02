@@ -125,7 +125,7 @@ type AdminDB struct {
 var ErrNoAccount = errors.New("no account with that email, username or ID")
 
 // OpenAdminDB reads accounts.json for its databaseConfigFile (and, only when
-// a notice is sent, its SMTP settings) and checks the schema is v22.
+// a notice is sent, its SMTP settings) and checks the schema is v23.
 func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, error) {
 	if accountsConfigPath == "" {
 		return nil, fmt.Errorf("no account configuration: pass -accounts-config or set METATRASH_ACCOUNTS_CONFIG")
@@ -147,9 +147,9 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 		return nil, err
 	}
 	var version int
-	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 22 {
+	if err := store.db.QueryRowContext(ctx, "SELECT schema_version FROM metatrash_account_meta WHERE singleton_id = 1").Scan(&version); err != nil || version != 23 {
 		store.Close()
-		return nil, fmt.Errorf("account schema v22 is required; follow docs/deployment.md")
+		return nil, fmt.Errorf("account schema v23 is required; follow docs/deployment.md")
 	}
 	return &AdminDB{store: store, config: cfg}, nil
 }
@@ -617,7 +617,7 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 		return results
 	}
 	defer store.Close()
-	if !add("schema", store.ready(ctx), "v22 ready") {
+	if !add("schema", store.ready(ctx), "v23 ready") {
 		return results
 	}
 	missing, extra, err := store.checkPrivileges(ctx)
@@ -735,6 +735,9 @@ var accountGrants = []string{
 	"metatrash_users UPDATE (deletion_requested_at)", "metatrash_users UPDATE (deleted_at)",
 	"metatrash_identities SELECT", "metatrash_identities INSERT", "metatrash_identities DELETE",
 	"metatrash_identities UPDATE (email_hint)", "metatrash_identities UPDATE (display_name)", "metatrash_identities UPDATE (last_used_at)",
+	"metatrash_space_usage SELECT", "metatrash_space_usage INSERT", "metatrash_space_usage DELETE",
+	"metatrash_space_usage UPDATE (git_bytes)", "metatrash_space_usage UPDATE (file_bytes)", "metatrash_space_usage UPDATE (file_objects)",
+	"metatrash_space_usage UPDATE (git_measured_at)", "metatrash_space_usage UPDATE (files_measured_at)",
 }
 
 // checkPrivileges compares the login's privileges in this database with

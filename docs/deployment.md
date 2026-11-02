@@ -10,7 +10,7 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
   `davezap/metatrash` with a read-only deploy key (`~/.ssh/metatrash_deploy`).
 - Accounts and OAuth enabled: a systemd override sets
   `METATRASH_ACCOUNTS_CONFIG=/etc/metatrash/accounts.json`, which contains
-  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); 0.67.0 needs v20, 0.71.0 v21 and 0.77.0 v22.
+  `"oauth": {"enabled": true}`. Database `metatrash` at schema v19 (from 0.60.2); 0.67.0 needs v20, 0.71.0 v21 and 0.77.0 v22, 0.89.0 v23.
 - Whole-domain Apache proxy from `deploy/apache-metatrash.conf.example`.
 
 ## Layout
@@ -30,8 +30,9 @@ service needs Git at runtime and MariaDB only when accounts are enabled.
 Command line: `metatrash [-listen 127.0.0.1:8080] [-data DIR] [-config spaces.json]
 [-keys keys.json] [-accounts-config accounts.json] [-trusted-proxies CIDRs]
 [-public-url URL]`, plus the subcommands `help`, `version`, `keygen`,
-`accounts-migrate`, `check`, `users …` (list, show, email-login, set-limit,
-rename), `spaces list`, `spaces export` and `spaces restore`. `metatrash help`
+`accounts-migrate`, `check`, `users …` (list, show, usage, email-login,
+set-limit, rename), `spaces list`, `spaces usage`, `spaces export` and
+`spaces restore`. `metatrash help`
 lists them.
 
 ### Console commands
@@ -43,10 +44,12 @@ the binary as `metatrash` through sudo, so it can read the service's files:
 mt check                         # startup checks without starting the service
 mt users list                    # every account, oldest first (-json for JSON)
 mt users show dave               # one account in full (email, username or user ID)
+mt users usage                   # storage per account, largest first (-json for JSON)
 mt users email-login on name@example.com
 mt users set-limit dave 3        # private spaces the account may own
 mt users rename dave david       # change the username (old addresses break)
 mt spaces list                   # every owned space (-json for JSON)
+mt spaces usage dave             # storage per owned space, largest first (-json for JSON)
 mt spaces export dave/notes      # one space as a zip in the current folder
 mt spaces export -all /srv/backup/metatrash   # every space, for backups
 mt spaces restore dave/notes     # bring back a space deleted in the last 30 days
@@ -91,6 +94,16 @@ limits from the database on each request).
   to choose. If `docsSpace` in `accounts.json` names the old username, change
   it and restart; the command warns. The account is emailed a notice
   (`-no-notice` skips it); if the email fails the rename still stands.
+- **`users usage [<who>]`** (0.89.0) lists accounts by the storage of the
+  ready spaces they own, largest first: total, Git, files, deleted spaces
+  still counted apart, how many spaces are not measured yet and the oldest
+  measurement. With `<who>`, only that account.
+- **`spaces usage [<who>]`** (0.89.0) lists owned spaces, largest first
+  (ready and deleted; with `<who>`, only that account's) with Git, files,
+  objects and when each was measured.
+  Git counts every version of every text file; files count every kept version
+  of virtual files. The service measures every space at start and every 24
+  hours, and updates the numbers after each write.
 - **`spaces list`** shows owned spaces with owner, name, visibility, state,
   active members and invitations waiting. A space its owner deleted shows
   `deleted (purged <date>)`, and a purged one `purged` with the slug
@@ -160,7 +173,7 @@ no Go toolchain is needed locally:
 
 - **CI** (`ci.yml`) runs on every push and pull request: `gofmt`, `go vet`,
   `go test ./...` on Linux with the MariaDB integration tests against a
-  disposable MariaDB 11.4 container (schema v1–v22 and `account-grants.sql`,
+  disposable MariaDB 11.4 container (schema v1–v23 and `account-grants.sql`,
   as below), a cross-compile check of both programs for every release
   platform, and `go test ./cmd/mtsync` on Windows and macOS.
 - **Release** (`release.yml`) runs when a tag `vX.Y.Z` is pushed. The tag must
@@ -896,7 +909,7 @@ roadmap.
 2. Apply any new schema script and `deploy/account-grants.sql`.
 3. Install the new binary and start.
 
-Schema scripts v1 and v5–v22 can be repeated safely. v2–v4 cannot (DDL commits
+Schema scripts v1 and v5–v23 can be repeated safely. v2–v4 cannot (DDL commits
 implicitly): if one is interrupted, keep the service stopped, compare
 `SHOW CREATE TABLE` with the script, run only the missing statements and then
 its guarded `UPDATE metatrash_account_meta`.
@@ -930,6 +943,7 @@ Releases that changed the schema or grants (the live server has all of them):
 | 0.76.0 | none. Recommended: the Cloudflare lines in Apache if the site is proxied by Cloudflare (Apache) | 0.75.0 (no schema change) |
 | 0.77.1 | nothing; optional `people` in `spaces.json` (Public space) | 22, after removing `people` from `spaces.json` (0.77.0 refuses keys it doesn't know) |
 | 0.77.0 | schema v22 (`metatrash_identities`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (email_hint, display_name, last_used_at)` on it); optional `microsoft` in `accounts.json` (Sign in with Microsoft) | 21; linked Microsoft accounts stay in the table, unused, and those people sign in another way |
+| 0.89.0 | schema v23 (`metatrash_space_usage`) and grants (`SELECT, INSERT, DELETE` and `UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)` on it) | 22; the rows stay in the table, unused |
 
 Apply a schema script and `account-grants.sql` before running `upgrade.sh`,
 which restarts the service; the running binary keeps working on the newer

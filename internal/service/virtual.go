@@ -224,6 +224,7 @@ func (s *Service) storeVirtual(ctx context.Context, r *repository, path string, 
 		log.Printf("virtual file: %v", err)
 		return VirtualInfo{}, problem(503, "unavailable", "The file could not be stored; try again later.")
 	}
+	s.noteStoredObject(r, info.SHA256, info.Size)
 	if text := virtualText(ctx, body, info.Type, source, pdfText); text == string(body) {
 		info.TextSHA256 = info.SHA256
 	} else if text != "" {
@@ -235,6 +236,7 @@ func (s *Service) storeVirtual(ctx context.Context, r *repository, path string, 
 			log.Printf("virtual file: %v", err)
 			return VirtualInfo{}, problem(503, "unavailable", "The file could not be stored; try again later.")
 		}
+		s.noteStoredObject(r, info.TextSHA256, int64(len(text)))
 	}
 	return info, nil
 }

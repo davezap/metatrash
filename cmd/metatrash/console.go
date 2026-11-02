@@ -35,7 +35,9 @@ var commandUsage = map[string]string{
 	"users email-login": "users email-login <on|off> <email|username|id> [-no-notice]",
 	"users set-limit":   "users set-limit <email|username|id> <spaces>",
 	"users rename":      "users rename <email|username|id> <new-username> [-no-notice]",
+	"users usage":       "users usage [<email|username|id>] [-json]",
 	"spaces list":       "spaces list [-json]",
+	"spaces usage":      "spaces usage [<email|username|id>] [-json]",
 	"spaces export":     "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
 	"spaces restore":    "spaces restore <owner/slug|id>",
 }
@@ -61,14 +63,18 @@ Commands:
   users set-limit <who> <n>     set how many private spaces the account may own
   users rename <who> <name>     change the account's username; addresses with the old
                                 name stop working (emails a notice; -no-notice skips it)
+  users usage [<who>]           storage per account, largest first: the spaces it owns
+                                (Git with history, plus virtual files), as last measured
   spaces list                   list owned spaces with owner, visibility and members
+  spaces usage [<who>]          storage per owned space, largest first (one account's
+                                spaces with <who>)
   spaces export <space> [FILE]  write the space as it is now to a zip (- for stdout;
                                 default <owner>-<slug>-<date>-<state>.zip here)
   spaces export -all DIR        export every space into DIR, for backups
   spaces restore <space>        bring back a space its owner deleted in the last 30
                                 days (restart the service afterwards)
 
-<who> is an email address, username or user ID. list and show take -json.
+<who> is an email address, username or user ID. list, show and usage take -json.
 <space> is owner/slug or a space ID, or a spaces.json name such as public.
 
 Account commands read the same accounts.json and account database as the
@@ -156,16 +162,20 @@ func parseArgs(flags *flag.FlagSet, args []string) ([]string, error) {
 func usersCommand(args []string) error {
 	if len(args) == 0 {
 		printUsage(os.Stderr)
-		return fmt.Errorf("users needs a subcommand: list, show, email-login, set-limit or rename")
+		return fmt.Errorf("users needs a subcommand: list, show, usage, email-login, set-limit or rename")
 	}
 	name := "users " + args[0]
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	accountsConfig := accountsConfigFlag(flags)
 	var asJSON, noNotice *bool
 	var want int
+	optional := false
 	switch args[0] {
 	case "list":
 		asJSON = flags.Bool("json", false, "Print JSON instead of a table")
+	case "usage":
+		asJSON = flags.Bool("json", false, "Print JSON instead of a table")
+		want, optional = 1, true
 	case "show":
 		asJSON = flags.Bool("json", false, "Print JSON instead of text")
 		want = 1
@@ -185,7 +195,7 @@ func usersCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(rest) != want {
+	if len(rest) != want && !(optional && len(rest) == 0) {
 		return fmt.Errorf("usage: metatrash %s", commandUsage[name])
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -196,6 +206,8 @@ func usersCommand(args []string) error {
 	}
 	defer db.Close()
 	switch args[0] {
+	case "usage":
+		return usersUsage(ctx, db, rest, *asJSON)
 	case "list":
 		users, err := db.Users(ctx)
 		if err != nil {
@@ -303,9 +315,12 @@ func spacesCommand(args []string) error {
 	if len(args) > 0 && args[0] == "restore" {
 		return spacesRestore(args[1:])
 	}
+	if len(args) > 0 && args[0] == "usage" {
+		return spacesUsage(args[1:])
+	}
 	if len(args) == 0 || args[0] != "list" {
 		printUsage(os.Stderr)
-		return fmt.Errorf("spaces needs a subcommand: spaces list, spaces export or spaces restore")
+		return fmt.Errorf("spaces needs a subcommand: spaces list, spaces usage, spaces export or spaces restore")
 	}
 	flags := flag.NewFlagSet("spaces list", flag.ContinueOnError)
 	accountsConfig := accountsConfigFlag(flags)

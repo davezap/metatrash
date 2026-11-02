@@ -44,6 +44,8 @@ type repository struct {
 	// committed, when set, hears of every commit (old and new state), so
 	// folder actions can queue jobs (Service.agentCommitted).
 	committed func(ctx context.Context, old, state string)
+	// usage is what the space takes up (owned spaces, storage.go).
+	usage spaceUsage
 }
 
 // watch returns a channel that is closed at the next branch update.
@@ -343,6 +345,9 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 	if repoSize+stageSize+4096 > r.limits.MaxRepositoryBytes {
 		return "", storageLimit()
 	}
+	// added is what the objects moved in take up, so the repository's new
+	// size is known without walking it again (storage.go).
+	var added int64
 	err = filepath.WalkDir(stage, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -363,11 +368,20 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 		} else if !os.IsNotExist(err) {
 			return err
 		}
-		return os.Rename(path, dest)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if err := os.Rename(path, dest); err != nil {
+			return err
+		}
+		added += info.Size()
+		return nil
 	})
 	if err != nil {
 		return "", err
 	}
+	r.usage.setGit(repoSize+added, time.Now())
 	if old == "" {
 		old = strings.Repeat("0", 40)
 	}

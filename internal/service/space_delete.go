@@ -164,6 +164,7 @@ func (s *Service) purgeSpace(ctx context.Context, id string) error {
 		"DELETE FROM metatrash_space_aliases WHERE space_id = ?",
 		"DELETE FROM metatrash_action_schedules WHERE space_id = ?",
 		"DELETE FROM metatrash_virtual_refresh WHERE space_id = ?",
+		"DELETE FROM metatrash_space_usage WHERE space_id = ?",
 	} {
 		if _, err := tx.ExecContext(ctx, query, id); err != nil {
 			return fmt.Errorf("cannot mark space purged")

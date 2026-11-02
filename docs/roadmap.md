@@ -1,6 +1,19 @@
 # Roadmap
 
-Open work as of Metatrash 0.87.0 and Slate Viewer 0.21.0 (2026-11-01). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+Open work as of Metatrash 0.89.0 and Slate Viewer 0.23.0 (2026-11-02). Finished plans and the decisions behind them are in [roadmap-archive.md](roadmap-archive.md); release details in [CHANGELOG.md](../CHANGELOG.md).
+
+## Payment rollout (Dave, 2026-11-02)
+
+Plan, phases and decisions in `business/payment-rollout-plan.md` in the
+space dave-zap/metatrash.
+
+- **Phase 1, measure storage:** *written in 0.89.0 (Viewer 0.23.0)*: each
+  owned space's Git repository plus its unique bucket objects, totalled per
+  owner, updated after each write and measured in full daily; shown in
+  Settings → Spaces and by `mt users usage` and `mt spaces usage`. No limits.
+  Live checks after deploy: the first full measurement at start, the numbers
+  against `du` on a few repositories, and Settings.
+- **Next:** phase 2, enforce the allowance (still free).
 
 ## Next: Settings dialog and space picker (Dave, 2026-10-31)
 
