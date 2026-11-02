@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.92.1 - Storage hints, CI schema, Viewer change notes (2026-11-02)
+
+No schema, grant or `accounts.json` change; tool-schema unchanged; mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.26.1.
+
+- **Settings → Billing → Storage** says why extra storage can't be changed instead of showing nothing: a comped plan, a payment past due, a paused subscription, or a server without a Paddle API key (Viewer 0.26.1).
+- **CI**: `ci.yml` applied schema v24 but recorded the database as v23, so every database test failed in 0.91.0 and 0.92.0 CI (`account schema v24/migration is not ready`). It now records v24. (Copy `.github/workflows/ci.yml` by hand.)
+- **mtsync test**: `TestLoopUploadsLocalSaves` missed its time on GitHub's Windows and macOS machines twice. It now waits up to 30 s and prints mtsync's own log when it fails or is slow, to find out why; it passes in well under a second on Linux.
+- Slate Viewer 0.26.1 also fixes Check for Updates' change notes, which broke when the docs became the site app in 0.87.0: it reads the change-logs folder's `llms.txt` and each note's `?format=md`, which this server already serves.
+
 ## 0.92.0 - Extra storage from Settings (2026-11-02)
 
 No schema, grant or `accounts.json` change; tool-schema unchanged; mtsync's `minVersion` stays 0.61.0. The Paddle API key now also needs **Subscriptions: write** (see Pricing and checkout in docs/deployment.md); without it Settings says the server's key can't change subscriptions. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.26.0 has the new Storage part of Settings → Billing. Phase 3 of the payment rollout (`business/payment-rollout-plan.md`), last part. Still test mode, and nothing is limited yet.

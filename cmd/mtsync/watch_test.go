@@ -79,17 +79,32 @@ func TestLoopHearsChangesAtOnce(t *testing.T) {
 func TestLoopUploadsLocalSaves(t *testing.T) {
 	server, _ := testSpace(t)
 	dir := t.TempDir()
-	h, _ := runLoop(t, server, dir, 100*time.Millisecond)
-	eventually(t, 5*time.Second, "first download", func() bool { _, ok := h.localText("AGENTS.md"); return ok })
+	h, logs := runLoop(t, server, dir, 100*time.Millisecond)
+	// The shared Windows and macOS CI machines have missed even 15 s here
+	// (0.91.0 and 0.92.0 CI) while Linux takes well under a second: say
+	// what the loop was doing when it fails, to find out why.
+	defer func() {
+		if t.Failed() {
+			for _, line := range logs() {
+				t.Log("mtsync: " + line)
+			}
+		}
+	}()
+	eventually(t, 15*time.Second, "first download", func() bool { _, ok := h.localText("AGENTS.md"); return ok })
 	if err := os.WriteFile(filepath.Join(dir, "mine.txt"), []byte("saved here\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// 15s, not 5: the shared Windows and macOS runners can stall a scan for
-	// seconds (failed there once, 0.91.0 CI).
-	eventually(t, 15*time.Second, "local save uploaded", func() bool {
+	start := time.Now()
+	eventually(t, 30*time.Second, "local save uploaded", func() bool {
 		text, err := h.agent.read(context.Background(), "mine.txt", "")
 		return err == nil && text == "saved here\n"
 	})
+	if took := time.Since(start); took > 5*time.Second {
+		t.Logf("local save took %s to upload", took)
+		for _, line := range logs() {
+			t.Log("mtsync: " + line)
+		}
+	}
 }
 
 // A server from before 0.34.0 refuses after=; mtsync falls back to checking
