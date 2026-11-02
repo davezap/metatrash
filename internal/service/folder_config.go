@@ -29,6 +29,7 @@ const (
 	maxPublishedVersion  = 1000000
 	maxAcknowledgeFiles  = 50
 	maxPrintImage        = 2000
+	maxFooter            = 500
 	githubDefaultBranch  = "main"
 	githubDefaultPush    = "agent"
 	githubDefaultPull    = "auto"
@@ -36,6 +37,7 @@ const (
 )
 
 var (
+	footerLinkPattern = regexp.MustCompile(`\]\(([^)\s]*)\)`)
 	childNamePattern  = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._-]*/?$`)
 	githubRepoPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$`)
 	gitBranchPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`)
@@ -62,6 +64,12 @@ type folderConfig struct {
 	// the https address of an image put centred above the title of the
 	// first page. Never in the files themselves. Inherited like purpose.
 	Print *folderPrint `json:"print,omitempty"`
+	// Footer is one line of Markdown the website shows below every page in
+	// the folder and the folders under it (Slate Viewer's site app): the
+	// nearest folder that sets one wins, whether or not folders inherit, and
+	// "" turns it off. Links, emphasis and code only, no HTML; :metatrash:
+	// stands for the Metatrash wordmark.
+	Footer *string `json:"footer,omitempty"`
 }
 
 type folderPrint struct {
@@ -182,7 +190,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion, actions, print or locked, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion, actions, print, footer or locked, not %q.", key))
 		}
 	}
 	if c.Locked["locked"] == lockEveryone {
@@ -201,6 +209,11 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	if c.Print != nil && c.Print.Image != "" && !printImageAddress(c.Print.Image) {
 		return c, folderConfigError(fmt.Sprintf("print image must be an https address of an image, such as https://example.com/logo.png, of at most %d characters.", maxPrintImage))
+	}
+	if c.Footer != nil {
+		if err := checkFooter(*c.Footer); err != nil {
+			return c, err
+		}
 	}
 	if len(c.Services) > maxFolderServices {
 		return c, folderConfigError(fmt.Sprintf("services is limited to %d entries.", maxFolderServices))
@@ -231,6 +244,44 @@ func parseFolderConfig(text string) (folderConfig, error) {
 func printImageAddress(image string) bool {
 	u, err := url.Parse(image)
 	return err == nil && len(image) <= maxPrintImage && u.Scheme == "https" && u.Host != "" && u.User == nil && !strings.ContainsAny(image, " \t\r\n")
+}
+
+// checkFooter checks a footer line: one line of at most maxFooter
+// characters, no HTML, and links only to https or mailto: addresses or to
+// pages of this site (/docs/about.md), which read the same from every folder.
+func checkFooter(footer string) error {
+	if utf8.RuneCountInString(footer) > maxFooter {
+		return folderConfigError(fmt.Sprintf("footer is limited to %d characters.", maxFooter))
+	}
+	for _, r := range footer {
+		if r < ' ' || r == 0x7f || r == 0x2028 || r == 0x2029 {
+			return folderConfigError("footer is one line of text: no line breaks, tabs or control characters.")
+		}
+	}
+	if strings.ContainsAny(footer, "<>") {
+		return folderConfigError("footer is Markdown without HTML: no < or >. Use [text](https://...) for links and :metatrash: for the Metatrash wordmark.")
+	}
+	for _, m := range footerLinkPattern.FindAllStringSubmatch(footer, -1) {
+		if !footerLinkTarget(m[1]) {
+			return folderConfigError(fmt.Sprintf("footer link %q must be an https or mailto: address, or a page of this site starting with /, such as /docs/about.md.", m[1]))
+		}
+	}
+	return nil
+}
+
+// footerLinkTarget reports whether a footer link goes somewhere every page
+// can reach the same way: https with a host and no credentials, mailto:, or
+// a path on this site (not // or a relative link, which would change with
+// the folder).
+func footerLinkTarget(target string) bool {
+	if strings.HasPrefix(target, "/") {
+		return !strings.HasPrefix(target, "//") && !strings.Contains(target, "\\")
+	}
+	if strings.HasPrefix(strings.ToLower(target), "mailto:") {
+		return len(target) > len("mailto:")
+	}
+	u, err := url.Parse(target)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil
 }
 
 // withDefaults fills the documented defaults of a GitHub service.
@@ -474,7 +525,7 @@ func (r *repository) folderConfigs(ctx context.Context, files map[string]record)
 }
 
 // lockableKeys are the keys locked may name.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "locked": true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "locked": true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.

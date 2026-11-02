@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.88.0 - A page footer for folders (2026-11-02)
+
+No schema, grant or `accounts.json` change; tool-schema 0.17.4 (the write tool's description names `footer`); mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.22.0 draws the footer and edits it in Properties.
+
+- **New `.metatrash.json` key `footer`**: one line of Markdown the website shows centred below a rule at the bottom of every page of the folder and the folders under it, for example `":metatrash: is a ⚡[Zaptronics](https://zaptronics.co.nz/) product"`. A page uses the footer of the nearest folder at or above it that sets one, whether or not folders inherit; `""` turns it off from that folder down. Lockable like any key.
+- **Checked like the other keys**: at most 500 characters on one line (no line breaks, tabs or control characters), no HTML (no `<` or `>`), and links only to `https://` or `mailto:` addresses or to pages of this site starting with `/` (such as `/docs/about.md`), so a link reads the same from every folder. A refusal says which rule.
+- **Drawn by the site app, not the server**: Slate Viewer reads the folders' settings and draws links, `**bold**`, `*italic*` and `` `code` `` as page elements, never as HTML, so the CSP and Slate's no-attribute rule for HTML stay as they were. `:metatrash:` is the Metatrash wordmark as on the sign-in page. The footer is never put in the files: `?format=md`, exports and `llms.txt` don't carry it.
+- Slate Viewer 0.22.0 also fixes the address bar keeping another file's address when you go back to the page you first opened.
+- Tested: the key's rules (unit tests, `go vet`). Browser-checked with the Viewer website build against a stand-in site API: the footer on a page, in a subfolder, turned off with `""` below it, light and dark, phone width, its site link opening in place, its web link opening a new tab, and printing.
+
 ## 0.87.0 - The app at the spaces' own addresses (2026-11-01)
 
 No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): the Viewer source changed too.

@@ -19,6 +19,9 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"actions":[{"name":"x","every":"Monday 08:00","do":"y","web":false},{"name":"z","every":"hour :30","do":"y","member":"alice"}]}`,
 		`{"print":{"image":"https://example.com/brand/logo.png?v=2"},"locked":{"print":"everyone"}}`,
 		`{"print":{}}`,
+		`{"footer":":metatrash: is a ⚡[Zaptronics](https://zaptronics.co.nz/) product"}`,
+		`{"footer":"","locked":{"footer":"everyone"}}`,
+		`{"footer":"**Bartco** · [About](/docs/about.md) · [Write to us](mailto:hello@example.com) · ` + "`v2`" + `"}`,
 	}
 	for _, text := range good {
 		if _, err := parseFolderConfig(text); err != nil {
@@ -51,7 +54,17 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"print":{"image":"https://a:b@example.com/x.png"}}`:                          "https address",
 		`{"print":{"image":"https://example.com/a b.png"}}`:                            "https address",
 		`{"print":{"image":"https://example.com/x","size":1}}`:                         "unknown",
-		`{} {}`: "",
+		`{"footer":"one\ntwo"}`:                                                        "one line",
+		`{"footer":"tab\there"}`:                                                       "one line",
+		`{"footer":"<b>bold</b>"}`:                                                     "without HTML",
+		`{"footer":"[x](http://example.com/)"}`:                                        "footer link",
+		`{"footer":"[x](javascript:alert(1))"}`:                                        "footer link",
+		`{"footer":"[x](about.md)"}`:                                                   "footer link",
+		`{"footer":"[x](//evil.example/)"}`:                                            "footer link",
+		`{"footer":"[x](https://a:b@example.com/)"}`:                                   "footer link",
+		`{"footer":1}`:                    "wrong value type",
+		`{"locked":{"footers":"agents"}}`: "footer or locked",
+		`{} {}`:                           "",
 	}
 	for text, want := range bad {
 		_, err := parseFolderConfig(text)
@@ -61,6 +74,12 @@ func TestParseFolderConfig(t *testing.T) {
 	}
 	if _, err := parseFolderConfig(`{"purpose":"` + strings.Repeat("ā", maxFolderPurpose+1) + `"}`); err == nil {
 		t.Error("accepted an over-long purpose")
+	}
+	if _, err := parseFolderConfig(`{"footer":"` + strings.Repeat("ā", maxFooter) + `"}`); err != nil {
+		t.Errorf("refused a footer of %d characters: %v", maxFooter, err)
+	}
+	if _, err := parseFolderConfig(`{"footer":"` + strings.Repeat("ā", maxFooter+1) + `"}`); err == nil {
+		t.Error("accepted an over-long footer")
 	}
 	for path, want := range map[string]bool{".metatrash.json": true, "a/b/.metatrash.json": true, "a.metatrash.json": false, ".metatrash.json/x": false, ".metatrash/files.json": false, "a/.git": false, ".gitignore": false} {
 		if validPath(path) && isFolderConfig(path) != want || !validPath(path) && want {
