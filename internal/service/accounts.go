@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"metatrash.com/metatrash/extension"
 	"net/mail"
 	"net/url"
 	"os"
@@ -40,19 +41,9 @@ type accountConfig struct {
 	// DocsSpace, when set, is the owner/slug of a space shown as the site's
 	// documentation under /docs/ while its owner keeps it readable on the web.
 	DocsSpace string `json:"docsSpace"`
-	// Microsoft turns on Sign in with Microsoft (microsoft.go).
-	Microsoft *microsoftConfig `json:"microsoft"`
-	// Paddle turns on the pricing and checkout pages (paddle.go).
-	Paddle *paddleConfig `json:"paddle"`
 }
 
-type userAccount struct {
-	Username         string    `json:"-"`
-	ID               string    `json:"id"`
-	Email            string    `json:"email"`
-	CreatedAt        time.Time `json:"createdAt"`
-	MaxPrivateSpaces int       `json:"maxPrivateSpaces"`
-}
+type userAccount = extension.User
 
 type accountFile struct {
 	Version int                    `json:"version"`
@@ -115,10 +106,6 @@ type accounts struct {
 	github *githubSettings
 	// agents is nil unless the account configuration enables folder actions.
 	agents *agentSettings
-	// microsoft is nil unless Sign in with Microsoft is on (microsoft.go).
-	microsoft *oidcProvider
-	// paddle is nil unless the pricing and checkout pages are on (paddle.go).
-	paddle *paddleConfig
 	// totpKey seals authenticator-app secrets; nil without totpKeyFile.
 	totpKey cipher.AEAD
 	// recoveryReveals holds new recovery codes until their page shows them
@@ -161,6 +148,9 @@ func (a *accounts) mac(value string) string {
 
 // EnableAccounts is called once before serving HTTP, while the service owns the data lock.
 func (s *Service) EnableAccounts(configPath string) error {
+	if s.configurationFrozen || s.accounts != nil {
+		return fmt.Errorf("accounts already initialized or server configuration frozen")
+	}
 	a, passwordText, err := loadAccountSettings(configPath)
 	if err != nil {
 		return err
@@ -201,7 +191,9 @@ func (s *Service) EnableAccounts(configPath string) error {
 		return sendMail(ctx, cfg, passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
 	}
 	s.accounts = a
-	s.startBillingCheck()
+	if err := s.startExtensions(); err != nil {
+		return err
+	}
 	if a.agents != nil {
 		runner, err := newAgentRunner(s, a.agents, dbJobStore{store.db})
 		if err != nil {
@@ -265,16 +257,6 @@ func loadAccountSettings(configPath string) (*accounts, string, error) {
 	}
 	if cfg.Agents != nil && cfg.Agents.Enabled {
 		if a.agents, err = cfg.Agents.settings(); err != nil {
-			return nil, "", err
-		}
-	}
-	if cfg.Microsoft != nil && cfg.Microsoft.Enabled {
-		if a.microsoft, err = cfg.Microsoft.settings(); err != nil {
-			return nil, "", err
-		}
-	}
-	if cfg.Paddle != nil && cfg.Paddle.Enabled {
-		if a.paddle, err = cfg.Paddle.settings(); err != nil {
 			return nil, "", err
 		}
 	}

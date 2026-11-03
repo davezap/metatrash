@@ -159,6 +159,11 @@ func (db *accountDatabase) purgeAccount(ctx context.Context, userID string, befo
 		}
 		return "", false, err
 	}
+	if db.extensionPurge != nil {
+		if err := db.extensionPurge(ctx, tx, userID); err != nil {
+			return "", false, err
+		}
+	}
 	steps := []string{
 		"DELETE FROM metatrash_oauth_grants WHERE user_id = ?",
 		"DELETE FROM metatrash_action_optins WHERE user_id = ? OR agent_id IN (SELECT agent_id FROM metatrash_agents WHERE user_id = ?)",
@@ -171,13 +176,9 @@ func (db *accountDatabase) purgeAccount(ctx context.Context, userID string, befo
 		"DELETE FROM metatrash_github_installations WHERE user_id = ?",
 		"DELETE FROM metatrash_passkeys WHERE user_id = ?",
 		"DELETE FROM metatrash_totp WHERE user_id = ?",
-		"DELETE FROM metatrash_identities WHERE user_id = ?",
 		"DELETE FROM metatrash_recovery_codes WHERE user_id = ?",
 		"DELETE FROM metatrash_sessions WHERE user_id = ?",
 		"DELETE FROM metatrash_web_refs WHERE user_id = ?",
-		// Billing state (0.91.0). Paddle keeps the invoices; the subscription
-		// itself is cancelled with the account from phase 4 of the payment plan.
-		"DELETE FROM metatrash_subscriptions WHERE user_id = ?",
 	}
 	for _, step := range steps {
 		args := []any{userID}
@@ -188,7 +189,7 @@ func (db *accountDatabase) purgeAccount(ctx context.Context, userID string, befo
 			return "", false, fmt.Errorf("cannot purge account: %s", firstWords(step))
 		}
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE metatrash_users SET email = ?, username = NULL, comped_at = NULL, deleted_at = ? WHERE user_id = ?", deletedEmail(userID), now.Unix(), userID); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE metatrash_users SET email = ?, username = NULL, deleted_at = ? WHERE user_id = ?", deletedEmail(userID), now.Unix(), userID); err != nil {
 		return "", false, fmt.Errorf("cannot purge account")
 	}
 	if err := tx.Commit(); err != nil {

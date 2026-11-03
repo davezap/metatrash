@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"metatrash.com/metatrash/extension"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,20 +31,25 @@ type outcome struct {
 }
 
 type Service struct {
-	ownedMu    sync.RWMutex
-	ownedRepos map[string]*repository
-	ownedRoot  string
-	ownedDB    *accountDatabase
-	accounts   *accounts
-	config     Config
-	keys       map[string]Keys
-	repos      map[string]*repository
-	rates      limiter
-	cursorKey  []byte
-	queue      chan job
-	stop       chan struct{}
-	done       chan struct{}
-	lockPath   string
+	configurationFrozen bool
+	modules             []extension.Module
+	extensions          []extension.Hooks
+	extensionCancel     context.CancelFunc
+	frontend            *frontendBundle
+	ownedMu             sync.RWMutex
+	ownedRepos          map[string]*repository
+	ownedRoot           string
+	ownedDB             *accountDatabase
+	accounts            *accounts
+	config              Config
+	keys                map[string]Keys
+	repos               map[string]*repository
+	rates               limiter
+	cursorKey           []byte
+	queue               chan job
+	stop                chan struct{}
+	done                chan struct{}
+	lockPath            string
 	// githubSourceHook replaces the GitHub reader in tests.
 	githubSourceHook func(ctx context.Context, r *repository, repo string) (githubSource, error)
 	// githubPushHook replaces the GitHub writer in tests.
@@ -74,8 +80,6 @@ type Service struct {
 	virtualTexts textCache
 	// storage writes spaces' usage to the database (storage.go).
 	storage storageMeter
-	// billing is the daily check against Paddle (billing.go).
-	billing billingChecker
 }
 
 // Open provisions missing configured spaces and locks the data directory to one process.
@@ -143,6 +147,7 @@ func (s *Service) worker() {
 
 // Close is called once, after the HTTP server has stopped accepting requests.
 func (s *Service) Close() {
+	s.closeExtensions()
 	if a := s.agents.Load(); a != nil {
 		a.stop()
 	}
@@ -152,7 +157,6 @@ func (s *Service) Close() {
 	<-s.done
 	// The storage meter writes what changed before the database closes.
 	s.stopStorageMeter()
-	s.billing.wg.Wait()
 	if s.accounts != nil {
 		_ = s.accounts.store.Close()
 	}

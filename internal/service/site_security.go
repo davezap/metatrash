@@ -14,8 +14,7 @@ import (
 //	     passkeys/add {"name", "client_data", "attestation", "transports"}, passkeys/rename {"passkey", "name"},
 //	     passkeys/remove {"passkey"}, totp/start, totp/enable {"code"}, totp/remove, recovery/create,
 //	     email-login {"email_login": "on|off"}, email/change {"email"}, email/verify {"code"}, email/cancel,
-//	     sessions/end, sessions/remove {"session"}, microsoft/link (answers {"redirect"}), microsoft/confirm,
-//	     microsoft/forget, microsoft/remove {"identity"}
+//	     sessions/end, sessions/remove {"session"}
 //
 // Confirming it’s you is /api/v1/site/account/confirm/... (site_account.go). Every
 // change runs signInChange, the same code as the form, with its rate limits,
@@ -51,40 +50,26 @@ type siteDevice struct {
 	Current  bool   `json:"current,omitempty"`
 }
 
-type siteIdentity struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Created  string `json:"created"`
-	LastUsed string `json:"lastUsed"`
-}
-
-type siteMicrosoft struct {
-	Accounts []siteIdentity `json:"accounts"`
-	Waiting  string         `json:"waiting,omitempty"`
-	Max      bool           `json:"max,omitempty"`
-}
-
 type siteSecurity struct {
 	Email   string `json:"email"`
 	Fresh   bool   `json:"fresh,omitempty"`
 	Minutes int    `json:"minutes,omitempty"`
-	// Notice is a change finished on another page (Microsoft's return).
+	// Notice is a change finished on another page (a provider return).
 	Notice      string        `json:"notice,omitempty"`
 	Passkeys    []sitePasskey `json:"passkeys"`
 	MaxPasskeys bool          `json:"maxPasskeys,omitempty"`
 	// CreateOptions are WebAuthn creation options (JSON), while fresh.
-	CreateOptions   string         `json:"createOptions,omitempty"`
-	TOTP            *siteTOTP      `json:"totp,omitempty"`
-	EmailLogin      bool           `json:"emailLogin,omitempty"`
-	CanTurnOffEmail bool           `json:"canTurnOffEmail,omitempty"`
-	Strong          bool           `json:"strong,omitempty"`
-	Recovery        int            `json:"recovery"`
-	RecoveryCreated string         `json:"recoveryCreated,omitempty"`
-	NewRecovery     []string       `json:"newRecoveryCodes,omitempty"`
-	EmailChangeTo   string         `json:"emailChangeTo,omitempty"`
-	Sessions        []siteDevice   `json:"sessions"`
-	OtherSessions   int            `json:"otherSessions"`
-	Microsoft       *siteMicrosoft `json:"microsoft,omitempty"`
+	CreateOptions   string       `json:"createOptions,omitempty"`
+	TOTP            *siteTOTP    `json:"totp,omitempty"`
+	EmailLogin      bool         `json:"emailLogin,omitempty"`
+	CanTurnOffEmail bool         `json:"canTurnOffEmail,omitempty"`
+	Strong          bool         `json:"strong,omitempty"`
+	Recovery        int          `json:"recovery"`
+	RecoveryCreated string       `json:"recoveryCreated,omitempty"`
+	NewRecovery     []string     `json:"newRecoveryCodes,omitempty"`
+	EmailChangeTo   string       `json:"emailChangeTo,omitempty"`
+	Sessions        []siteDevice `json:"sessions"`
+	OtherSessions   int          `json:"otherSessions"`
 }
 
 // serveSiteSecurity serves /account/security/...; parts is the path after
@@ -104,7 +89,7 @@ func (h *httpAdapter) serveSiteSecurity(w http.ResponseWriter, r *http.Request, 
 		}
 		out := siteSecurityOf(user, page)
 		out.Notice = h.takeNotice(w, r)
-		sendJSON(w, 200, out)
+		h.extensionJSON(w, r, "security", out, user, session)
 		return
 	}
 	path := "/account/" + route
@@ -119,7 +104,7 @@ func (h *httpAdapter) serveSiteSecurity(w http.ResponseWriter, r *http.Request, 
 	fields := map[string]string{
 		"name": body.Name, "client_data": body.ClientData, "attestation": body.Attestation, "transports": body.Transports,
 		"passkey": body.Passkey, "code": body.Code, "email_login": body.EmailLogin, "email": body.Email,
-		"session": body.Session, "identity": body.Identity,
+		"session": body.Session,
 	}
 	notice, redirect, err := h.signInChange(w, r, session, client, path, user, func(name string) string { return fields[name] })
 	if err != nil {
@@ -147,12 +132,6 @@ func siteSecurityOf(user userAccount, page *signInPage) siteSecurity {
 	}
 	for _, s := range page.Sessions {
 		out.Sessions = append(out.Sessions, siteDevice{ID: s.ID, Device: s.Device, IP: s.IP, SignedIn: s.SignedIn, LastUsed: s.LastUsed, Current: s.Current})
-	}
-	if m := page.Microsoft; m != nil {
-		out.Microsoft = &siteMicrosoft{Accounts: []siteIdentity{}, Waiting: m.Waiting, Max: m.Max}
-		for _, id := range m.Accounts {
-			out.Microsoft.Accounts = append(out.Microsoft.Accounts, siteIdentity{ID: id.ID, Label: id.Label, Created: id.Created, LastUsed: id.LastUsed})
-		}
 	}
 	return out
 }

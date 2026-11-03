@@ -36,7 +36,7 @@ type httpAdapter struct {
 }
 
 func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...string) (http.Handler, error) {
-	h := &httpAdapter{service: s, schema: schema}
+	h := &httpAdapter{service: s, schema: append([]byte(nil), schema...)}
 	publicURL := "https://metatrash.com"
 	if len(publicURLs) > 0 {
 		publicURL = publicURLs[0]
@@ -87,6 +87,7 @@ func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...
 			return nil, err
 		}
 	}
+	s.configurationFrozen = true
 	return h, nil
 }
 
@@ -163,6 +164,14 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sendError(w, invalid("Credentials belong in the Authorization header, never in the URL."))
 		return
 	}
+	// Go resolves the public module directly from its canonical repository.
+	if r.URL.Path == "/metatrash" && r.URL.RawQuery == "go-get=1" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.Method != http.MethodHead {
+			_, _ = io.WriteString(w, `<!doctype html><html><head><meta name="go-import" content="metatrash.com/metatrash git https://github.com/davezap/metatrash"></head></html>`)
+		}
+		return
+	}
 	if r.URL.Path == "/mcp" {
 		h.serveMCP(w, r)
 		return
@@ -171,7 +180,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveMCPAccount(w, r)
 		return
 	}
-	if h.serveOAuth(w, r, client) || h.serveGitHub(w, r, client) || h.serveMicrosoft(w, r, client) || h.serveAsset(w, r) || h.serveApp(w, r, client) || h.servePaddleWebhook(w, r) || h.servePricing(w, r) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveDocs(w, r, client) || h.serveOwnedBrowser(w, r, client) {
+	if h.serveExtensionRoute(w, r, "public", r.URL.Path, userAccount{}, "") || h.serveOAuth(w, r, client) || h.serveGitHub(w, r, client) || h.serveAsset(w, r) || h.serveApp(w, r, client) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveDocs(w, r, client) || h.serveOwnedBrowser(w, r, client) {
 		return
 	}
 	if r.URL.Path == "/api/v1/spaces/public/recent" {

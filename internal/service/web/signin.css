@@ -1,4 +1,4 @@
-/* The sign-in, app connection (OAuth consent) and GitHub/Microsoft return
+/* The sign-in, app connection (OAuth consent) and provider return
    pages. Standalone: they don't use style.css. The colours are Slate Viewer's
    (the site app at /app/), so these pages follow the theme chosen there:
    theme.js sets data-theme on <html> from the saved choice before anything
@@ -186,7 +186,7 @@ form { margin: 0; }
 /* Connect comes first in the page, so Enter connects; it shows on the right. */
 .buttons.decision { flex-direction: row-reverse; justify-content: flex-start; }
 
-/* One-tap ways in (passkey, Microsoft), above the email form. The block and
+/* One-tap ways in (passkeys and registered providers), above the email form. The block and
    its "or" line only show when one of them is offered: the passkey form stays
    hidden until passkey.js finds the browser can use one. */
 .quick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }

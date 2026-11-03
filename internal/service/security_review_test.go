@@ -10,7 +10,7 @@ import (
 )
 
 // Checks for the fixes from the 2026-10-31 security review
-// (docs/security-review-2026-10-31.md).
+// (the private business repository security review dated 2026-10-31).
 
 // blockingStore holds ByID until release is closed, like a slow database.
 type blockingStore struct {

@@ -221,7 +221,7 @@ Schema v22 and grants (`metatrash_identities`): apply `deploy/account-schema-v22
 
 ## 0.76.0 - Fixes from the sign-in security review (2026-10-31)
 
-No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. The review is [docs/security-review-2026-10-31.md](docs/security-review-2026-10-31.md): it found no way into an account without a sign-in method; these are its budget and availability findings.
+No schema, grant, `accounts.json` or tool-schema change; mtsync's `minVersion` stays 0.61.0. Only the server needs releasing. The review is [docs/security-review-2026-10-31.md](https://github.com/Zaptronics/metatrash.com/blob/main/docs/security-review-2026-10-31.md): it found no way into an account without a sign-in method; these are its budget and availability findings.
 
 - **Authenticator app: at most 10 codes a day per address** (and per account when confirming), on top of 5 per 15 minutes, so steady guessing of six-digit codes gets about 1% in a year instead of about 40%. When wrong codes at the sign-in page use up the day, the account gets one email saying so; until 00:00 UTC that address signs in with a passkey, an emailed code or a recovery code, and the page says that. (F1)
 - **Security notices have their own daily budget** (200), apart from the 100 emailed codes a day, so whoever spends the code budget can no longer also stop the "sign-in method added", "recovery code used" and similar emails. A spent code budget now writes `mail budget used up: …` to the journal (once an hour), and a skipped notice `security notice not sent …`. (F2)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"metatrash.com/metatrash/extension"
 )
 
 // Only persistent account operations live here. Login challenges stay
@@ -33,7 +34,10 @@ type accountDatabaseConfig struct {
 	PasswordFile string `json:"passwordFile"`
 }
 
-type accountDatabase struct{ db *sql.DB }
+type accountDatabase struct {
+	db             *sql.DB
+	extensionPurge func(context.Context, *sql.Tx, string) error
+}
 
 func readLimitedFile(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)
@@ -109,6 +113,9 @@ func openAccountDatabase(ctx context.Context, configPath string) (*accountDataba
 func (s *accountDatabase) Close() error { return s.db.Close() }
 
 func (s *accountDatabase) ready(ctx context.Context) error {
+	if err := extension.RequireSchema(ctx, s.db, "core", 1, "1609e5a468263995274373ebbc024c8270a934cb522289c1ee92cadbdfa38b3d"); err != nil {
+		return err
+	}
 	if err := s.checkEngines(ctx); err != nil {
 		return err
 	}
@@ -151,13 +158,7 @@ func (s *accountDatabase) ready(ctx context.Context) error {
 	if err := s.checkAgentJobSchema(ctx); err != nil {
 		return err
 	}
-	if err := s.checkIdentitySchema(ctx); err != nil {
-		return err
-	}
 	if err := s.checkWebSchema(ctx); err != nil {
-		return err
-	}
-	if err := s.checkBillingSchema(ctx); err != nil {
 		return err
 	}
 	if err := s.checkStorageSchema(ctx); err != nil {

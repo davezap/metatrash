@@ -25,23 +25,19 @@ import (
 // (with /account/ dropped). Confirming it's you is site_account.go's
 // /api/v1/site/account/confirm/....
 var signInRoutes = map[string]bool{
-	"/account/passkeys/add":      true,
-	"/account/passkeys/rename":   true,
-	"/account/passkeys/remove":   true,
-	"/account/totp/start":        true,
-	"/account/totp/enable":       true,
-	"/account/totp/remove":       true,
-	"/account/recovery/create":   true,
-	"/account/email-login":       true,
-	"/account/email/change":      true,
-	"/account/email/verify":      true,
-	"/account/email/cancel":      true,
-	"/account/sessions/end":      true,
-	"/account/sessions/remove":   true,
-	"/account/microsoft/link":    true,
-	"/account/microsoft/confirm": true,
-	"/account/microsoft/forget":  true,
-	"/account/microsoft/remove":  true,
+	"/account/passkeys/add":    true,
+	"/account/passkeys/rename": true,
+	"/account/passkeys/remove": true,
+	"/account/totp/start":      true,
+	"/account/totp/enable":     true,
+	"/account/totp/remove":     true,
+	"/account/recovery/create": true,
+	"/account/email-login":     true,
+	"/account/email/change":    true,
+	"/account/email/verify":    true,
+	"/account/email/cancel":    true,
+	"/account/sessions/end":    true,
+	"/account/sessions/remove": true,
 }
 
 var passkeyAssertionFields = []string{"credential", "client_data", "authenticator_data", "signature", "user_handle"}
@@ -79,21 +75,6 @@ type signInPage struct {
 	// counts the rest.
 	Sessions      []sessionView
 	OtherSessions int
-	// Microsoft is the Microsoft accounts card; nil while Sign in with
-	// Microsoft is off.
-	Microsoft *microsoftView
-}
-
-type microsoftView struct {
-	Accounts []identityView
-	// Waiting names an unlinked Microsoft account this browser signed in
-	// with, which the user can link or forget.
-	Waiting string
-	Max     bool
-}
-
-type identityView struct {
-	ID, Label, Created, LastUsed string
 }
 
 // signInSection is the state Settings → Security shows (siteSecurityOf).
@@ -147,25 +128,6 @@ func (h *httpAdapter) signInSection(r *http.Request, user userAccount) (*signInP
 	c, waiting := a.challenges[confirmKey(session)]
 	page.ConfirmSent = waiting && c.Ready && now.Before(c.Expires)
 	a.mu.Unlock()
-	if a.microsoft != nil {
-		ids, err := h.service.ownedDB.identities(r.Context(), user.ID)
-		if err != nil {
-			page.Unavailable = true
-			return page, false
-		}
-		view := &microsoftView{Max: len(ids) >= maxIdentitiesPerUser}
-		for _, id := range ids {
-			v := identityView{ID: id.ID, Label: id.Label(), Created: time.Unix(id.CreatedAt, 0).UTC().Format("2 Jan 2006"), LastUsed: "never"}
-			if id.LastUsedAt > 0 {
-				v.LastUsed = time.Unix(id.LastUsedAt, 0).UTC().Format("2 Jan 2006")
-			}
-			view.Accounts = append(view.Accounts, v)
-		}
-		if id, ok := h.microsoftWaiting(r); ok {
-			view.Waiting = id.Label()
-		}
-		page.Microsoft = view
-	}
 	page.MaxPasskeys = len(list) >= maxPasskeysPerUser
 	if page.Fresh && !page.MaxPasskeys {
 		page.CreateOptions = a.creationOptions(session, user, list, now)
@@ -227,11 +189,10 @@ func passkeyAssertionFrom(get func(string) string) (passkeyAssertion, error) {
 // signsOutOthers are the changes after which the account's other sessions
 // are signed out: removing a sign-in method or changing the address.
 var signsOutOthers = map[string]bool{
-	"passkey-removed":   true,
-	"totp-removed":      true,
-	"email-login-off":   true,
-	"email-changed":     true,
-	"microsoft-removed": true,
+	"passkey-removed": true,
+	"totp-removed":    true,
+	"email-login-off": true,
+	"email-changed":   true,
 }
 
 var errConfirmFirst = problem(403, "confirm_required", "Confirm it’s you first. Adding or removing a sign-in method needs a sign-in or confirmation within the last 10 minutes.")
@@ -239,8 +200,7 @@ var errConfirmFirst = problem(403, "confirm_required", "Confirm it’s you first
 // signInChange makes one Security change (path is its form route,
 // /account/...) for the session's user, reading its fields with get: for the
 // Security forms and the Settings dialog's Security tab (0.81.0). It answers
-// the notice to show, or where to send the browser next (Microsoft, to link
-// an account).
+// the notice to show, or where to send the browser next.
 func (h *httpAdapter) signInChange(w http.ResponseWriter, r *http.Request, session, client, path string, user userAccount, get func(string) string) (string, string, error) {
 	a, db := h.service.accounts, h.service.ownedDB
 	if db == nil {
@@ -249,16 +209,6 @@ func (h *httpAdapter) signInChange(w http.ResponseWriter, r *http.Request, sessi
 	ctx, now := r.Context(), time.Now()
 	notice := ""
 	err := h.service.rates.take(allowance{"signin:user:" + user.ID, 30, 600})
-	if err == nil && strings.HasPrefix(path, "/account/microsoft/") && a.microsoft == nil {
-		err = missing()
-	}
-	if err == nil && path == "/account/microsoft/link" {
-		if fresh, _ := a.sessionFresh(session, now); fresh {
-			redirect, err := h.beginMicrosoft(w, client, user.ID, session)
-			return "", redirect, err
-		}
-		err = errConfirmFirst
-	}
 	if err == nil {
 		switch path {
 		case "/account/totp/start", "/account/totp/enable", "/account/totp/remove":
@@ -296,23 +246,6 @@ func (h *httpAdapter) signInChange(w http.ResponseWriter, r *http.Request, sessi
 				h.notifySignInChange(user, "removed", "passkey \""+name+"\"")
 			}
 			notice = "passkey-removed"
-		case "/account/microsoft/confirm":
-			err = h.confirmMicrosoftLink(r, session, user, now)
-			notice = "microsoft-linked"
-		case "/account/microsoft/forget":
-			a.microsoft.takeWaiting(cookieToken(r, h.microsoftCookieName()))
-			h.setMicrosoftCookie(w, "")
-			notice = "microsoft-forgotten"
-		case "/account/microsoft/remove":
-			if fresh, _ := a.sessionFresh(session, now); !fresh {
-				err = errConfirmFirst
-				break
-			}
-			var label string
-			if label, err = db.removeIdentity(ctx, user.ID, get("identity")); err == nil {
-				h.notifySignInChange(user, "removed", "Microsoft account "+label)
-			}
-			notice = "microsoft-removed"
 		case "/account/sessions/end":
 			var n int
 			n, err = a.endOtherSessions(user.ID, session)

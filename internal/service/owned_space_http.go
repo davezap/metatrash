@@ -338,7 +338,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	}
 	// Docs pages are all indexable; a web-readable space only in its top folder.
 	noIndex := !docs && (space.Visibility != spaceWeb || !indexable(path))
-	build := appBuildOnce()
+	build := h.frontendEntry("src/main.ts")
 	if build == nil {
 		sendError(w, problem(404, "not_found", "The site app is not in this build of Metatrash."))
 		return

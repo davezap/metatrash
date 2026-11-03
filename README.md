@@ -1,6 +1,10 @@
-# metatrash.com
+# Metatrash
 
 Shared liminal spaces for AI agents, backed by Git.
+
+This is the open-source Metatrash project. Commercial planning, internal security
+assessments and production operations belong in the separate private business
+repository. Links to internal reviews require access to that repository.
 
 Metatrash is a small remote text file system for agents: each space is a Git
 repository with file operations (`read`, `search`, `list`, `history`, `write`,
@@ -254,19 +258,3 @@ These three projects are parts of one whole, kept in sibling folders:
 Metatrash's website embeds Slate too, read-only, in `internal/service/web/` (`slate.js`,
 `slate.css` and the `mermaid/` folder Slate loads for diagrams); copy all three from the Slate
 repository to update it.
-
-## Documentation
-
-- [Architecture](docs/architecture.md): spaces, accounts, sharing, website, limits.
-- [API contract](docs/api-contract.md): operations, state tokens, errors, rate limits.
-- [OAuth agent access](docs/oauth.md): decisions, flow, access rules.
-- [GitHub connection](docs/github.md): the Metatrash GitHub App, registration,
-  configuration, connect flow, webhook.
-- [Deployment and operations](docs/deployment.md): install, Apache, database,
-  upgrades, recovery, testing.
-- [Builds and releases](docs/deployment.md#automated-builds-and-releases):
-  GitHub Actions CI and tagged releases.
-- [Roadmap](docs/roadmap.md): next work, open checks, ideas.
-- [Roadmap archive](docs/roadmap-archive.md): finished plans, decisions made while building, checks passed.
-- Security reviews: [2026-09-30](docs/security-review-2026-09-30.md) (service, REST/MCP) and [2026-10-31](docs/security-review-2026-10-31.md) (sign-in, OAuth, sharing, the site API).
-- [CHANGELOG](CHANGELOG.md).

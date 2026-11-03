@@ -1,0 +1,16 @@
+# Place inside your existing HTTPS VirtualHost.
+# Requires mod_proxy, mod_proxy_http and mod_headers.
+# Metatrash listens on 127.0.0.1:8080 and trusts proxy 127.0.0.1/32.
+
+ProxyRequests Off
+ProxyPreserveHost On
+ProxyAddHeaders On
+ProxyTimeout 660
+
+# Replace client-supplied forwarding headers with Apache's client address.
+RequestHeader unset X-Forwarded-For
+RequestHeader unset Forwarded
+RequestHeader unset X-Forwarded-Host
+
+ProxyPass        / http://127.0.0.1:8080/
+ProxyPassReverse / http://127.0.0.1:8080/

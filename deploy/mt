@@ -1,4 +1,4 @@
 #!/bin/sh
 # Shortcut for console commands: mt users list, mt help, ...
-# upgrade.sh installs it as /usr/local/bin/mt.
+# Install as /usr/local/bin/mt alongside the edition-specific binary.
 exec sudo -u metatrash /usr/local/bin/metatrash "$@"

@@ -24,8 +24,6 @@ import (
 //	POST /api/v1/site/account/invitations/accept       {"space", "invitation"}
 //	POST /api/v1/site/account/offers/{accept|decline}  {"space"}
 //	POST /api/v1/site/account/delete                   {"email"}
-//	POST /api/v1/site/account/billing/portal           {} (0.91.0, site_billing.go)
-//	POST /api/v1/site/account/billing/storage          {"storageGb", "preview"?} (0.92.0, site_billing.go)
 //	GET  /api/v1/site/account/confirm                  how this session can confirm it's you
 //	POST /api/v1/site/account/confirm/{send|verify|totp|passkey}
 //	     /api/v1/site/account/services/...             connected apps, agents and GitHub (0.80.0, site_services.go)
@@ -119,9 +117,6 @@ type siteAccount struct {
 	// Storage is the account's storage (0.89.0); absent when it could not
 	// be read.
 	Storage *siteStorage `json:"storage,omitempty"`
-	// Billing is the account's plan (0.91.0, site_billing.go); absent when
-	// the server sells no plans.
-	Billing *siteBilling `json:"billing,omitempty"`
 	// Unavailable names the parts that could not be read just now.
 	Unavailable []string `json:"unavailable,omitempty"`
 }
@@ -201,10 +196,6 @@ type siteAccountBody struct {
 	Passkey     string `json:"passkey"`
 	EmailLogin  string `json:"email_login"`
 	Session     string `json:"session"`
-	Identity    string `json:"identity"`
-	// Billing (0.92.0, site_billing.go).
-	StorageGB *int `json:"storageGb"`
-	Preview   bool `json:"preview"`
 }
 
 type siteNotice struct {
@@ -217,8 +208,6 @@ type siteNotice struct {
 	Failed bool `json:"failed,omitempty"`
 	// Redirect is where to go next (GitHub, to connect it).
 	Redirect string `json:"redirect,omitempty"`
-	// Preview is what a change of extra storage would cost (0.92.0).
-	Preview *siteStoragePreview `json:"preview,omitempty"`
 }
 
 // siteSpaceActions are the POST routes /account/spaces/{id}/{action}.
@@ -229,15 +218,13 @@ var siteSpaceActions = map[string]bool{
 
 // stepUpMessages say why a route needed a recent confirmation.
 var stepUpMessages = map[string]string{
-	"visibility":      "Making a space readable on the web needs a sign-in within the last 10 minutes. Confirm it’s you first.",
-	"transfer-offer":  "Offering a space to someone needs a sign-in within the last 10 minutes. Confirm it’s you first.",
-	"delete":          "Deleting a space needs a sign-in within the last 10 minutes. Confirm it’s you first.",
-	"billing-portal":  "Managing your subscription needs a sign-in within the last 10 minutes. Confirm it’s you first.",
-	"billing-storage": "Changing your storage needs a sign-in within the last 10 minutes, as it changes what you pay. Confirm it’s you first.",
-	"account-delete":  "Deleting your account needs a sign-in within the last 10 minutes. Confirm it’s you first.",
-	"app-spaces":      "Giving an app more of your spaces needs a sign-in within the last 10 minutes. Confirm it’s you first.",
-	"security":        "Changing how you sign in needs a sign-in within the last 10 minutes. Confirm it’s you first.",
-	"agent-add":       "Adding an agent needs a sign-in within the last 10 minutes, because its endpoint receives the files your folder actions read. Confirm it’s you first.",
+	"visibility":     "Making a space readable on the web needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"transfer-offer": "Offering a space to someone needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"delete":         "Deleting a space needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"account-delete": "Deleting your account needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"app-spaces":     "Giving an app more of your spaces needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"security":       "Changing how you sign in needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"agent-add":      "Adding an agent needs a sign-in within the last 10 minutes, because its endpoint receives the files your folder actions read. Confirm it’s you first.",
 }
 
 // sendSiteAccountError answers a failed account route. A missing step-up is
@@ -295,6 +282,9 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 		return read
 	}
 	route := strings.Join(parts, "/")
+	if h.serveExtensionRoute(w, r, "account", route, user, session) {
+		return
+	}
 	if len(parts) > 0 && parts[0] == "services" {
 		h.serveSiteServices(w, r, user, session, parts[1:])
 		return
@@ -306,7 +296,7 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 	switch {
 	case len(parts) == 0:
 		if get() {
-			sendJSON(w, 200, h.siteAccountOverview(r.Context(), user, session))
+			h.extensionJSON(w, r, "account", h.siteAccountOverview(r.Context(), user, session), user, session)
 		}
 		return
 	case route == "confirm":
@@ -332,7 +322,7 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 	}
 	known := route == "username" || route == "spaces" || route == "invitations/accept" || route == "offers/accept" ||
 		route == "offers/decline" || route == "delete" || route == "confirm/send" || route == "confirm/verify" ||
-		route == "confirm/totp" || route == "confirm/passkey" || (route == "billing/portal" || route == "billing/storage") && h.service.accounts.paddle != nil ||
+		route == "confirm/totp" || route == "confirm/passkey" ||
 		len(parts) == 3 && parts[0] == "spaces" && idPattern.MatchString(parts[1]) && siteSpaceActions[parts[2]]
 	if !known {
 		sendError(w, missing())
@@ -363,12 +353,6 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 	case route == "delete":
 		value, err = h.siteDeleteAccount(w, ctx, user, session, body.Email)
 		route = "account-delete"
-	case route == "billing/portal":
-		value, err = h.siteBillingPortal(ctx, user, session)
-		route = "billing-portal"
-	case route == "billing/storage":
-		value, err = h.siteBillingStorage(ctx, user, session, body)
-		route = "billing-storage"
 	case strings.HasPrefix(route, "confirm/"):
 		value, err = h.siteConfirm(ctx, user, session, client, strings.TrimPrefix(route, "confirm/"), body)
 	default:
@@ -425,16 +409,6 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 		out.Unavailable = append(out.Unavailable, "storage")
 	} else {
 		out.Storage = &siteStorage{siteUsage: siteUsage{Bytes: storage.Total, Git: storage.Git, Files: storage.Files, Measured: siteTime(storage.Oldest)}, Deleted: storage.Deleted}
-	}
-	var used *int64
-	if storageErr == nil {
-		used = &storage.Total
-	}
-	if billing, err := h.siteBillingState(ctx, user, used); err != nil {
-		log.Printf("site account: billing for %s: %v", user.ID, err)
-		out.Unavailable = append(out.Unavailable, "billing")
-	} else {
-		out.Billing = billing
 	}
 	if spaces, err := h.accountSpaces(ctx, user); err != nil {
 		out.Unavailable = append(out.Unavailable, "spaces")

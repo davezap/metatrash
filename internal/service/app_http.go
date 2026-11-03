@@ -43,10 +43,12 @@ type appBuild struct {
 
 // appManifest is the build's .vite/manifest.json, by source file.
 type appManifest map[string]struct {
-	File    string   `json:"file"`
-	CSS     []string `json:"css"`
-	Imports []string `json:"imports"`
-	IsEntry bool     `json:"isEntry"`
+	File           string   `json:"file"`
+	CSS            []string `json:"css"`
+	Imports        []string `json:"imports"`
+	IsEntry        bool     `json:"isEntry"`
+	DynamicImports []string `json:"dynamicImports"`
+	Assets         []string `json:"assets"`
 }
 
 var appManifestOnce = sync.OnceValue(func() appManifest {
@@ -63,7 +65,7 @@ var appManifestOnce = sync.OnceValue(func() appManifest {
 
 // entry is the build of one entry script: its file and every stylesheet it
 // needs, its own and those of the chunks it shares with the other entry
-// (since 0.90.0 the build has two: the app and the pricing page).
+// (one application entry plus shared chunks).
 func (m appManifest) entry(src string) *appBuild {
 	chunk, ok := m[src]
 	if !ok || !chunk.IsEntry || chunk.File == "" {
@@ -95,12 +97,6 @@ func (m appManifest) entry(src string) *appBuild {
 // appBuildOnce is the app (src/main.ts in the Viewer's website build).
 var appBuildOnce = sync.OnceValue(func() *appBuild {
 	return appManifestOnce().entry("src/main.ts")
-})
-
-// pricingBuildOnce is the pricing page (src/pricing.ts, 0.90.0); nil in a
-// build from before it.
-var pricingBuildOnce = sync.OnceValue(func() *appBuild {
-	return appManifestOnce().entry("src/pricing.ts")
 })
 
 var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
@@ -216,7 +212,7 @@ func (h *httpAdapter) writeAppPage(w http.ResponseWriter, build *appBuild, page 
 // (or its first note), when there is a docs space readable on the web and a
 // build of the app. Otherwise it leaves / to the built-in home page.
 func (h *httpAdapter) serveAppHome(w http.ResponseWriter, r *http.Request, client string) bool {
-	ref, build := h.docsSpace(), appBuildOnce()
+	ref, build := h.docsSpace(), h.frontendEntry("src/main.ts")
 	if ref == "" || build == nil || r.URL.RawQuery != "" || !strings.EqualFold(r.Host, h.publicHost) {
 		return false
 	}
@@ -260,7 +256,7 @@ func (h *httpAdapter) serveAppAsset(w http.ResponseWriter, r *http.Request, name
 		sendError(w, missing())
 		return
 	}
-	data, err := appFiles.ReadFile("web/app/assets/" + name)
+	data, err := h.frontendAsset(name)
 	if err != nil {
 		sendError(w, missing())
 		return

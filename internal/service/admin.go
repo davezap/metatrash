@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"metatrash.com/metatrash/extension"
 )
 
 // Console commands (cmd/metatrash) read the same accounts.json and account
@@ -56,8 +57,6 @@ type AdminUserDetail struct {
 	// Sessions are the signed-in browsers stored in the database; last use
 	// there lags by up to five minutes.
 	Sessions []AdminSession `json:"sessions"`
-	// Billing is the account's plan (0.91.0, admin_billing.go).
-	Billing *AdminBilling `json:"billing,omitempty"`
 }
 
 type AdminSession struct {
@@ -142,6 +141,10 @@ func OpenAdminDB(ctx context.Context, accountsConfigPath string) (*AdminDB, erro
 	}
 	store, err := openAccountDatabase(ctx, cfg.DatabaseConfigFile)
 	if err != nil {
+		return nil, err
+	}
+	if err := extension.RequireSchema(ctx, store.db, "core", 1, "1609e5a468263995274373ebbc024c8270a934cb522289c1ee92cadbdfa38b3d"); err != nil {
+		store.Close()
 		return nil, err
 	}
 	if err := store.checkEngines(ctx); err != nil {
@@ -352,11 +355,6 @@ WHERE i.email = ? AND i.status = 'pending' AND i.expires_at > ? ORDER BY i.creat
 	}, "SELECT device, ip, created_at, last_used_at, expires_at FROM metatrash_sessions WHERE user_id = ? AND expires_at > ? ORDER BY last_used_at DESC, created_at DESC", u.ID, time.Now().Unix()); err != nil {
 		return detail, fail
 	}
-	billing, err := d.Billing(ctx, u)
-	if err != nil {
-		return detail, fail
-	}
-	detail.Billing = &billing
 	return detail, nil
 }
 
@@ -700,6 +698,7 @@ func accountFeatures(a *accounts) string {
 // PRIV") and column privileges ("table PRIV (column)"). A test keeps the two
 // in step.
 var accountGrants = []string{
+	"metatrash_schema_components SELECT",
 	"metatrash_users SELECT", "metatrash_users INSERT",
 	"metatrash_users UPDATE (username)", "metatrash_users UPDATE (email_login)", "metatrash_users UPDATE (email)", "metatrash_users UPDATE (max_private_spaces)",
 	"metatrash_account_meta SELECT", "metatrash_account_meta UPDATE",
@@ -740,19 +739,9 @@ var accountGrants = []string{
 	"metatrash_virtual_refresh UPDATE (stale_since)", "metatrash_virtual_refresh UPDATE (stale_reason)",
 	"metatrash_spaces UPDATE (deleted_at)", "metatrash_spaces UPDATE (slug)",
 	"metatrash_users UPDATE (deletion_requested_at)", "metatrash_users UPDATE (deleted_at)",
-	"metatrash_identities SELECT", "metatrash_identities INSERT", "metatrash_identities DELETE",
-	"metatrash_identities UPDATE (email_hint)", "metatrash_identities UPDATE (display_name)", "metatrash_identities UPDATE (last_used_at)",
 	"metatrash_space_usage SELECT", "metatrash_space_usage INSERT", "metatrash_space_usage DELETE",
 	"metatrash_space_usage UPDATE (git_bytes)", "metatrash_space_usage UPDATE (file_bytes)", "metatrash_space_usage UPDATE (file_objects)",
 	"metatrash_space_usage UPDATE (git_measured_at)", "metatrash_space_usage UPDATE (files_measured_at)",
-	"metatrash_subscriptions SELECT", "metatrash_subscriptions INSERT", "metatrash_subscriptions DELETE",
-	"metatrash_subscriptions UPDATE (customer_id)", "metatrash_subscriptions UPDATE (subscription_id)", "metatrash_subscriptions UPDATE (status)",
-	"metatrash_subscriptions UPDATE (storage_gb)", "metatrash_subscriptions UPDATE (trial_ends_at)", "metatrash_subscriptions UPDATE (period_ends_at)",
-	"metatrash_subscriptions UPDATE (next_billed_at)", "metatrash_subscriptions UPDATE (scheduled_change)", "metatrash_subscriptions UPDATE (scheduled_at)",
-	"metatrash_subscriptions UPDATE (canceled_at)", "metatrash_subscriptions UPDATE (paddle_updated_at)", "metatrash_subscriptions UPDATE (updated_at)",
-	"metatrash_subscriptions UPDATE (billing_interval)",
-	"metatrash_paddle_events SELECT", "metatrash_paddle_events INSERT", "metatrash_paddle_events DELETE",
-	"metatrash_users UPDATE (comped_at)",
 }
 
 // checkPrivileges compares the login's privileges in this database with
@@ -821,3 +810,6 @@ func (s *accountDatabase) checkPrivileges(ctx context.Context) (missing, extra [
 	sort.Strings(extra)
 	return missing, extra, nil
 }
+
+// Database provides the connection for statically composed extension stores.
+func (d *AdminDB) Database() *sql.DB { return d.store.db }

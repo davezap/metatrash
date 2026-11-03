@@ -29,16 +29,20 @@ const returnCookie = "__Host-metatrash-return"
 var loginHTML string
 var loginTemplate = template.Must(template.New("login").Parse(loginHTML))
 
+type loginProviderView struct{ Path, Label, Hint string }
+type loginWaitingView struct{ Provider, Label string }
 type loginView struct {
-	BasePath string
-	Legal    bool
-	Disabled bool
-	Verify   bool
-	CSRF     string
-	Email    string
-	Message  string
-	Pow      string // login proof-of-work challenge
-	PowBits  int
+	Providers []loginProviderView
+	Waiting   []loginWaitingView
+	BasePath  string
+	Legal     bool
+	Disabled  bool
+	Verify    bool
+	CSRF      string
+	Email     string
+	Message   string
+	Pow       string // login proof-of-work challenge
+	PowBits   int
 	// LoginPasskey is WebAuthn request options for passkey sign-in.
 	LoginPasskey string
 	// ForgetPasskey is a passkey (credential ID, base64url) the site has no
@@ -49,10 +53,6 @@ type loginView struct {
 	// TOTPEmail show that form again after it failed.
 	TOTPLogin, TOTPOpen bool
 	TOTPEmail           string
-	// MicrosoftLogin offers Sign in with Microsoft; MicrosoftWaiting names
-	// an unlinked Microsoft account waiting in this browser (microsoft.go).
-	MicrosoftLogin   bool
-	MicrosoftWaiting string
 	// RecoveryOpen and RecoveryEmail show the recovery-code form again
 	// after it failed.
 	RecoveryOpen  bool
@@ -85,12 +85,9 @@ func (h *httpAdapter) returnCookieName() string {
 
 // returnTarget reports whether target, a path and query on this site with
 // the base path removed, is a page signing in may go back to: a space page or
-// an account page, or Start free trial (/pricing/start, 0.90.1). Nothing
+// an account page. Nothing
 // else, so the cookie cannot send anyone off-site.
 func returnTarget(target string) bool {
-	if target == pricingStart {
-		return true
-	}
 	return len(target) <= 2048 && (strings.HasPrefix(target, "/spaces/") || strings.HasPrefix(target, "/app/") || strings.HasPrefix(target, "/account/")) && !strings.ContainsAny(target, "\\\r\n")
 }
 
@@ -98,7 +95,7 @@ func returnTarget(target string) bool {
 // page it asked for, so signing in comes back to it (a link from a printed
 // PDF or an email) instead of going to Settings.
 func (h *httpAdapter) redirectToLogin(w http.ResponseWriter, r *http.Request) {
-	if target := r.URL.RequestURI(); r.Method == http.MethodGet && returnTarget(target) {
+	if target := r.URL.RequestURI(); r.Method == http.MethodGet && h.returnTarget(target) {
 		accountCookie(w, h.returnCookieName(), base64.RawURLEncoding.EncodeToString([]byte(target)), 1200)
 	}
 	http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
@@ -113,7 +110,7 @@ func (h *httpAdapter) takeReturn(w http.ResponseWriter, r *http.Request) string 
 	}
 	accountCookie(w, h.returnCookieName(), "", -1)
 	target, err := base64.RawURLEncoding.DecodeString(cookie.Value)
-	if err != nil || !returnTarget(string(target)) {
+	if err != nil || !h.returnTarget(string(target)) {
 		return ""
 	}
 	return string(target)
@@ -178,17 +175,30 @@ func settingsAddress(path string) string {
 
 // loginPosts are the sign-in page's forms.
 var loginPosts = map[string]bool{
-	"/login/send":      true,
-	"/login/verify":    true,
-	"/login/passkey":   true,
-	"/login/totp":      true,
-	"/login/recovery":  true,
-	"/login/microsoft": true,
-	"/login/restart":   true,
+	"/login/send":     true,
+	"/login/verify":   true,
+	"/login/passkey":  true,
+	"/login/totp":     true,
+	"/login/recovery": true,
+	"/login/restart":  true,
 }
 
 func (h *httpAdapter) renderLogin(w http.ResponseWriter, r *http.Request, status int, page loginView) {
 	page.BasePath = h.basePath
+	for _, hooks := range h.service.extensions {
+		if provider := hooks.Login; provider != nil {
+			page.Providers = append(page.Providers, loginProviderView{provider.Path, provider.Label, provider.Hint})
+			if provider.Waiting != nil && page.ContinueURL == "" {
+				label, email, _ := provider.Waiting(r, h.extensionContext(userAccount{}, ""))
+				if label != "" {
+					page.Waiting = append(page.Waiting, loginWaitingView{provider.Label, label})
+					if !page.Verify && page.Email == "" {
+						page.Email = email
+					}
+				}
+			}
+		}
+	}
 	page.Legal = h.docsSpace() != ""
 	var b bytes.Buffer
 	if err := loginTemplate.Execute(&b, page); err != nil {
@@ -203,7 +213,7 @@ func (h *httpAdapter) renderLogin(w http.ResponseWriter, r *http.Request, status
 }
 
 func (a *accounts) loginPage(browser string) loginView {
-	page := loginView{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now()), TOTPLogin: a.totpKey != nil, MicrosoftLogin: a.microsoft != nil}
+	page := loginView{CSRF: browser, Pow: a.newPowChallenge(browser, time.Now()), PowBits: loginPowBits, LoginPasskey: a.requestOptions("login", browser, nil, time.Now()), TOTPLogin: a.totpKey != nil}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cleanup(time.Now())
@@ -217,7 +227,7 @@ func (a *accounts) loginPage(browser string) loginView {
 func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, client string) bool {
 	path := r.URL.Path
 	oldPage := accountPages[path] || settingsAddress(path) != ""
-	if !oldPage && path != "/login" && !loginPosts[path] && path != "/logout" {
+	if !oldPage && path != "/login" && !loginPosts[path] && h.extensionLogin(path) == nil && path != "/logout" {
 		return false
 	}
 	loginCookie, sessionCookie := loginCookie, sessionCookie
@@ -227,9 +237,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sessionCookie += suffix
 	}
 	formAction := "'self'"
-	if a := h.service.accounts; a != nil && a.microsoft != nil {
-		// Sign in with Microsoft posts here and is redirected to Microsoft.
-		formAction += " " + a.microsoft.authority
+	for _, hooks := range h.service.extensions {
+		if provider := hooks.Login; provider != nil && provider.FormOrigin != "" {
+			formAction += " " + provider.FormOrigin
+		}
 	}
 	// script-src 'self' is for theme.js (the saved theme), login.js (the
 	// login form's proof of work) and passkey.js (the browser's passkey prompt).
@@ -308,12 +319,6 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		accountCookie(w, loginCookie, browser, 1200)
 		page := a.loginPage(browser)
 		page.Notice = h.takeNotice(w, r)
-		if id, ok := h.microsoftWaiting(r); ok {
-			page.MicrosoftWaiting = id.Label()
-			if !page.Verify {
-				page.Email = id.Email
-			}
-		}
 		h.renderLogin(w, r, 200, page)
 		return true
 	}
@@ -392,8 +397,8 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
 		return true
 	}
-	if path == "/login/microsoft" {
-		h.startMicrosoft(w, r, client, "", "")
+	if provider := h.extensionLogin(path); provider != nil {
+		provider.Start(w, r, h.extensionContext(userAccount{}, session))
 		return true
 	}
 	if path == "/login/restart" {
@@ -554,11 +559,14 @@ func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.basePath+"/oauth/consent", http.StatusSeeOther)
 		return
 	}
-	// A Microsoft account no one has linked waits in this browser: offer to
-	// link it (Security asks first; it is never linked by itself).
-	if _, ok := h.microsoftWaiting(r); ok {
-		http.Redirect(w, r, h.basePath+"/spaces/#settings/security/microsoft", http.StatusSeeOther)
-		return
+	for _, hooks := range h.service.extensions {
+		if provider := hooks.Login; provider != nil && provider.Waiting != nil {
+			label, _, target := provider.Waiting(r, h.extensionContext(userAccount{}, cookieToken(r, h.sessionCookieName())))
+			if label != "" && localReturnAddress(target) {
+				http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
+				return
+			}
+		}
 	}
 	// Go back to the page that sent this browser to sign in.
 	if target := h.takeReturn(w, r); target != "" {
@@ -620,4 +628,18 @@ func (h *httpAdapter) changeSpaceVisibility(ctx context.Context, user userAccoun
 	}
 	h.sendSecurityNotice(user, "A Metatrash space is now readable on the web", spaceWebMail(a.config.Origin, name, time.Now()))
 	return "space-web", nil
+}
+
+func (h *httpAdapter) returnTarget(target string) bool {
+	if returnTarget(target) {
+		return true
+	}
+	for _, hooks := range h.service.extensions {
+		for _, route := range hooks.PublicRoutes {
+			if route.Method == http.MethodGet && route.Path == target {
+				return true
+			}
+		}
+	}
+	return false
 }

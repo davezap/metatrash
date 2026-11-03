@@ -77,8 +77,7 @@ func (h *httpAdapter) githubCookieName() string {
 // githubPage is the page shown on return from GitHub.
 type githubPage struct {
 	BasePath, Title, Message, ContinueURL string
-	// Eyebrow and Button default to GitHub's; Sign in with Microsoft uses
-	// this page too (microsoft.go).
+	// Eyebrow and Button default to GitHub; registered providers may customize them.
 	Eyebrow, Button string
 	OK, Legal       bool
 }

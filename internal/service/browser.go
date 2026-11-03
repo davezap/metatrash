@@ -19,7 +19,7 @@ var loginJS []byte
 //go:embed web/passkey.js
 var passkeyJS []byte
 
-// The sign-in, app connection and GitHub/Microsoft return pages' own look
+// The sign-in, app connection and provider return pages' own look
 // (Slate Viewer's colours), and the script that picks the saved theme for them.
 //
 //go:embed web/signin.css
@@ -49,9 +49,9 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	var kind string
 	switch r.URL.Path {
 	case "/assets/slate.js":
-		data, kind = slateJS, "text/javascript; charset=utf-8"
+		data, kind = h.editorAsset("slate.js", slateJS), "text/javascript; charset=utf-8"
 	case "/assets/slate.css":
-		data, kind = slateCSS, "text/css; charset=utf-8"
+		data, kind = h.editorAsset("slate.css", slateCSS), "text/css; charset=utf-8"
 	case "/assets/login.js":
 		data, kind = loginJS, "text/javascript; charset=utf-8"
 	case "/assets/passkey.js":
@@ -312,7 +312,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 			return true
 		}
 	}
-	build := appBuildOnce()
+	build := h.frontendEntry("src/main.ts")
 	if build == nil {
 		sendError(w, problem(404, "not_found", "The site app is not in this build of Metatrash."))
 		return true

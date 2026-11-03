@@ -8,23 +8,12 @@
   "totpKeyFile": "/etc/metatrash/totp-key",
   "databaseConfigFile": "/etc/metatrash/account-database.json",
   "docsSpace": "",
-  "paddle": {
-    "enabled": false,
-    "environment": "sandbox",
-    "clientToken": "test_...",
-    "planPriceId": "pri_...",
-    "storagePriceId": "pri_...",
-    "webhookSecretFile": "/etc/metatrash/paddle-webhook-secret",
-    "apiKeyFile": "/etc/metatrash/paddle-api-key"
-  },
-  "microsoft": {
-    "enabled": false,
-    "clientId": "",
-    "clientSecretFile": "/etc/metatrash/microsoft-client-secret"
-  },
   "oauth": {
     "enabled": false,
-    "clientHosts": ["claude.ai", "chatgpt.com"],
+    "clientHosts": [
+      "claude.ai",
+      "chatgpt.com"
+    ],
     "accessTokenMinutes": 60,
     "refreshTokenDays": 30,
     "codeSeconds": 60,
@@ -43,7 +32,10 @@
     "enabled": false,
     "keyFile": "/etc/metatrash/agents-key",
     "timezone": "Pacific/Auckland",
-    "search": {"provider": "brave", "keyFile": "/etc/metatrash/brave-key"},
+    "search": {
+      "provider": "brave",
+      "keyFile": "/etc/metatrash/brave-key"
+    },
     "downloads": {
       "endpoint": "https://s3.us-west-004.backblazeb2.com",
       "bucket": "metatrash-web",

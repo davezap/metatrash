@@ -1,26 +1,15 @@
--- Runtime permissions for the service's database login, schema v1-v24
--- (0.60.2 and later; v11 needs no new grants).
--- Run as database administrator after the schema scripts. Safe to repeat.
--- For loopback TCP use 'metatrash_accounts'@'127.0.0.1' throughout instead.
--- The login needs no DDL, FILE or administration privileges.
-
--- v1 accounts
+-- Runtime grants; apply as schema administrator.
 GRANT SELECT, INSERT ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, UPDATE ON metatrash.metatrash_account_meta TO 'metatrash_accounts'@'localhost';
--- v2 usernames
 GRANT UPDATE (username) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
--- v3 owned spaces
 GRANT SELECT, INSERT ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (provisioning_state) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
--- v7 web-readable spaces
 GRANT UPDATE (visibility) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
--- v4 memberships and invitations
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_memberships TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (status, updated_at) ON metatrash.metatrash_memberships TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT ON metatrash.metatrash_invitations TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (invitation_id, status, created_at, expires_at, accepted_user_id)
     ON metatrash.metatrash_invitations TO 'metatrash_accounts'@'localhost';
--- v5 OAuth (metatrash_oauth_grants is a table of app connections, unrelated to GRANT)
 GRANT UPDATE (agent_permission) ON metatrash.metatrash_memberships TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_oauth_grants TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (client_name, scope, updated_at, last_used_at, expires_at)
@@ -28,76 +17,46 @@ GRANT UPDATE (client_name, scope, updated_at, last_used_at, expires_at)
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_oauth_grant_spaces TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_oauth_tokens TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (used_at) ON metatrash.metatrash_oauth_tokens TO 'metatrash_accounts'@'localhost';
--- v6 GitHub connections
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_github_installations TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (github_user_id, github_login, account_login, account_type, status, updated_at)
     ON metatrash.metatrash_github_installations TO 'metatrash_accounts'@'localhost';
--- v8 sign-in methods
 GRANT UPDATE (email_login) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_passkeys TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (sign_count, backed_up, last_used_at, name) ON metatrash.metatrash_passkeys TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_totp TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (enabled_at, last_used_step) ON metatrash.metatrash_totp TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_recovery_codes TO 'metatrash_accounts'@'localhost';
--- 0.26.0 change email address (no schema change)
 GRANT UPDATE (email) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
--- 0.28.0 console command users set-limit (no schema change)
 GRANT UPDATE (max_private_spaces) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
--- v9 space ownership transfer
 GRANT UPDATE (owner_user_id) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (member_user_id) ON metatrash.metatrash_oauth_grant_spaces TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_transfers TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_aliases TO 'metatrash_accounts'@'localhost';
--- v10 sessions that survive restarts
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_sessions TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (auth_at, last_used_at) ON metatrash.metatrash_sessions TO 'metatrash_accounts'@'localhost';
--- v12 policy acknowledgements
 GRANT SELECT, INSERT ON metatrash.metatrash_acknowledgements TO 'metatrash_accounts'@'localhost';
-
--- v13 form submissions
 GRANT SELECT, INSERT ON metatrash.metatrash_form_submissions TO 'metatrash_accounts'@'localhost';
--- v14 reviews
 GRANT UPDATE (status, score, marks, reviewed_by, reviewed_at, note, text)
     ON metatrash.metatrash_form_submissions TO 'metatrash_accounts'@'localhost';
--- v15 folder agent tasks
 GRANT SELECT, INSERT ON metatrash.metatrash_agent_jobs TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (status, started_at, finished_at, steps, input_tokens, output_tokens, error)
     ON metatrash.metatrash_agent_jobs TO 'metatrash_accounts'@'localhost';
--- v16 users' agents
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_agents TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (is_default, name, daily_cap, key_sealed, key_hint) ON metatrash.metatrash_agents TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (agent_id) ON metatrash.metatrash_agent_jobs TO 'metatrash_accounts'@'localhost';
--- v17 bring your own key and members' own actions
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_action_optins TO 'metatrash_accounts'@'localhost';
--- v18 web tools and schedules
 GRANT UPDATE (timezone) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_action_schedules TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (every, next_run_at, last_run_at) ON metatrash.metatrash_action_schedules TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_web_objects TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (uploaded_at) ON metatrash.metatrash_web_objects TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_web_refs TO 'metatrash_accounts'@'localhost';
--- v19 virtual file refresh
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_virtual_refresh TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (every, next_run_at, last_run_at, stale_since, stale_reason)
     ON metatrash.metatrash_virtual_refresh TO 'metatrash_accounts'@'localhost';
--- v20 deleting a space
 GRANT UPDATE (deleted_at, slug) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
--- v21 deleting an account
 GRANT UPDATE (deletion_requested_at, deleted_at) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
--- v22 sign in with Microsoft
-GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_identities TO 'metatrash_accounts'@'localhost';
-GRANT UPDATE (email_hint, display_name, last_used_at) ON metatrash.metatrash_identities TO 'metatrash_accounts'@'localhost';
--- v23 measuring storage
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)
     ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
--- v24 billing state from Paddle
-GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_subscriptions TO 'metatrash_accounts'@'localhost';
-GRANT UPDATE (customer_id, subscription_id, status, storage_gb, trial_ends_at, period_ends_at, next_billed_at, scheduled_change, scheduled_at, canceled_at, paddle_updated_at, updated_at)
-    ON metatrash.metatrash_subscriptions TO 'metatrash_accounts'@'localhost';
-GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_paddle_events TO 'metatrash_accounts'@'localhost';
-GRANT UPDATE (comped_at) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
--- v25 yearly billing
-GRANT UPDATE (billing_interval) ON metatrash.metatrash_subscriptions TO 'metatrash_accounts'@'localhost';
-
-SHOW GRANTS FOR 'metatrash_accounts'@'localhost';
+GRANT SELECT ON metatrash.metatrash_schema_components TO 'metatrash_accounts'@'localhost';

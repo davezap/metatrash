@@ -1,4 +1,4 @@
-// The sign-in, app connection and GitHub/Microsoft return pages use the theme
+// The sign-in, app connection and provider return pages use the theme
 // chosen in the site app (/app/), which keeps it in localStorage on this
 // origin. Runs in <head>, before anything paints. No saved choice (or
 // "system"): the system's light or dark setting. The same rule as

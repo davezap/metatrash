@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"metatrash.com/metatrash"
+	"metatrash.com/metatrash/console"
 	"metatrash.com/metatrash/internal/service"
 )
 
@@ -28,7 +29,7 @@ func run() error {
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
 		log.SetFlags(0)
 		log.SetPrefix("metatrash: ")
-		return runCommand(os.Args[1], os.Args[2:])
+		return console.Run(os.Args[1], os.Args[2:])
 	}
 	config := flag.String("config", "config/spaces.example.json", "Space configuration")
 	keys := flag.String("keys", "", "Private key digest JSON file")

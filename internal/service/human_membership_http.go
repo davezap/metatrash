@@ -164,10 +164,6 @@ var accountNotices = map[string]string{
 	"email-changed":              "Email address changed and your other sessions signed out. Sign in with the new address from now on. We’ve emailed a notice to both addresses.",
 	"email-change-cancelled":     "Email address change cancelled. Your address is unchanged.",
 	"passkey-renamed":            "Passkey renamed.",
-	"microsoft-linked":           "Microsoft account linked. Next time, choose Sign in with Microsoft. We’ve emailed you a notice of this change.",
-	"microsoft-already":          "That Microsoft account is already linked to your account.",
-	"microsoft-forgotten":        "The Microsoft account was not linked.",
-	"microsoft-removed":          "Microsoft account removed and your other sessions signed out. We’ve emailed you a notice of this change.",
 	"sessions-ended":             "Signed out everywhere else. This browser is still signed in.",
 	"session-ended":              "That device is signed out.",
 	"agent-added":                "Agent added. Use Test to check the key works. Your folder actions run on your default agent unless an action names a model.",
@@ -201,7 +197,15 @@ func (h *httpAdapter) takeNotice(w http.ResponseWriter, r *http.Request) string 
 		return ""
 	}
 	accountCookie(w, h.noticeCookieName(), "", -1)
-	return accountNotices[cookie.Value]
+	if notice := accountNotices[cookie.Value]; notice != "" {
+		return notice
+	}
+	for _, hooks := range h.service.extensions {
+		if notice := hooks.Notices[cookie.Value]; notice != "" {
+			return notice
+		}
+	}
+	return ""
 }
 
 // emailInvitation runs after the invitation is committed and returns a notice
