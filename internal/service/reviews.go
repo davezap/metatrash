@@ -185,7 +185,7 @@ func (s *Service) reviewCopy(ctx context.Context, repo *repository, userID strin
 		sub.Status = in.Status
 	}
 	text := t.render(answers, sub)
-	if _, err := s.queued(ctx, func() (any, error) {
+	if _, err := s.queued(ctx, repo, func() (any, error) {
 		head, files, err := repo.snapshot(ctx, "")
 		if err != nil {
 			return nil, err

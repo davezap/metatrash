@@ -585,7 +585,7 @@ func (s *Service) push(ctx context.Context, r *repository, space, folderArg, mes
 	if len(next.Converted) == 0 {
 		next.Converted = nil
 	}
-	value, err := s.queued(ctx, func() (any, error) {
+	value, err := s.queued(ctx, r, func() (any, error) {
 		now, current, err := r.snapshot(ctx, "")
 		if err != nil {
 			return nil, err

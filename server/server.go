@@ -25,6 +25,8 @@ type Config struct {
 	PublicURL      string
 	TrustedProxies []string
 	Frontend       fs.FS
+	// Optional application policy. Nil preserves Core's serial write worker.
+	WriteScheduler extension.WriteSchedulerFactory
 }
 type Server struct {
 	core    *service.Service
@@ -33,7 +35,7 @@ type Server struct {
 }
 
 func Open(ctx context.Context, config Config) (*Server, error) {
-	core, err := service.Open(ctx, config.SpacesFile, config.KeysFile, config.DataDirectory, metatrash.SpaceAGENTS)
+	core, err := service.OpenWithWriteScheduler(ctx, config.SpacesFile, config.KeysFile, config.DataDirectory, metatrash.SpaceAGENTS, config.WriteScheduler)
 	if err != nil {
 		return nil, err
 	}

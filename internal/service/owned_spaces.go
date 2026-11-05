@@ -264,10 +264,11 @@ func (s *Service) ownedRepository(id string) *repository {
 	return s.ownedRepos[id]
 }
 
-// The existing write queue serializes retries/provisioning with other Git writes.
+// The stable repository path serializes provisioning retries with space writes.
 // Readers see a repository only after both Git and the database are ready.
 func (s *Service) prepareOwnedSpace(ctx context.Context, space ownedSpace) error {
-	_, err := s.queued(ctx, func() (any, error) {
+	path := filepath.Join(s.ownedRoot, space.ID+".git")
+	_, err := s.submitWrite(ctx, path, "owner:"+space.OwnerID, func() (any, error) {
 		if s.ownedRepository(space.ID) != nil {
 			return nil, nil
 		}
@@ -278,7 +279,9 @@ func (s *Service) prepareOwnedSpace(ctx context.Context, space ownedSpace) error
 			return nil, fmt.Errorf("cannot read space preparation state")
 		}
 		space = current
-		path := filepath.Join(s.ownedRoot, space.ID+".git")
+		if space.State != "ready" && space.State != "provisioning" {
+			return nil, missing()
+		}
 		if space.State == "ready" {
 			// Never recreate a missing ready repository: it may contain user history.
 			if _, err := os.Lstat(path); err != nil {

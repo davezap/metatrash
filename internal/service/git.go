@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +23,8 @@ const serviceDir = ".metatrash/"
 const indexPath = serviceDir + "files.json"
 
 type repository struct {
+	// closed prevents already-resolved handles from writing after deletion.
+	closed atomic.Bool
 	path   string
 	limits Storage
 	// owned marks account-owned spaces, the only ones that may attach services.

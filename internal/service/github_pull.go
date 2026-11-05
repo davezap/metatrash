@@ -673,7 +673,7 @@ func (s *Service) pull(ctx context.Context, r *repository, space, folderArg stri
 	if count+len(final) > r.limits.MaxFiles || total+folderBytes > r.limits.MaxCurrentTextBytes {
 		return nil, problem(507, "storage_limit", fmt.Sprintf("%s does not fit in this space: the folder needs %d files and %d bytes of text, and with the rest of the space that makes %d files and %d bytes (the space holds at most %d files and %d bytes).", svc.Repo, len(final), folderBytes, count+len(final), total+folderBytes, r.limits.MaxFiles, r.limits.MaxCurrentTextBytes))
 	}
-	return s.queued(ctx, func() (any, error) { return s.applyPull(ctx, r, plan) })
+	return s.queued(ctx, r, func() (any, error) { return s.applyPull(ctx, r, plan) })
 }
 
 // applyPull commits a pull plan. It runs in the write queue and refuses if

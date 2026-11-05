@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.94.0 - Pluggable write scheduling, serial by default (2026-11-05)
+
+- Add the trusted build-time `extension.WriteScheduler` contract and optional `server.Config.WriteScheduler` factory. Core keeps a bounded, single-worker FIFO queue by default; it contains no concurrent scheduling policy, account budgets, concurrency JSON settings or write-scheduler metrics. The existing `spaces.json` maxQueuedWrites remains unchanged. Queue saturation from an implementation maps to retryable HTTP 503 queue_full.
+- Supply stable repository and owner-group keys for mutations, GitHub commits/baselines, form filing/reviews, provisioning and usage measurement. Provisioning uses the future repository path; changing an owner does not change the space key. Account-wide creation/transfer constraints remain in database transactions.
+- Keep generic lifecycle safety in Core: retirement blocks stale/pending writes, joins the running write without queue admission, and retains the closed handle on timeout to prevent unsafe purge. Shutdown and failed startup close the selected scheduler before releasing storage or closing the database. Implementations must preserve per-space FIFO, join active callbacks and be owned per server.
+- Add serial-default, composition, lifecycle, error-mapping and source-boundary regression coverage for David/CI. No schema, grants, dependencies, tool schema, frontend or Core configuration changes. No tests/builds run by Codex. Application-specific scheduling is supplied by the composing application; company staging instructions remain in the private repository.
+
 ## 0.93.1 - Cheap unchanged change checks (2026-11-04)
 
 - REST and site API lists with `since=` now check the current Git revision first. When it matches, return the existing empty changes response without loading either file index, folder settings or blob contents. Changed/unknown states keep the existing diff/ancestry path; authentication, quotas, validation and long-poll waiting remain in place. Ordinary listings and `after=` without `since=` retain their file-list response.

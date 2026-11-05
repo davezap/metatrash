@@ -322,7 +322,7 @@ func (s *Service) measureSpace(ctx context.Context, r *repository, sweeper objec
 	if !r.owned || !idPattern.MatchString(r.id) {
 		return nil
 	}
-	_, err := s.queued(ctx, func() (any, error) {
+	_, err := s.queued(ctx, r, func() (any, error) {
 		size, err := dirBytes(r.path)
 		if err != nil {
 			return nil, err

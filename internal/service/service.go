@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"metatrash.com/metatrash/extension"
 	"os"
@@ -20,11 +21,6 @@ import (
 	"unicode/utf8"
 )
 
-type job struct {
-	ctx    context.Context
-	run    func() (any, error)
-	result chan outcome
-}
 type outcome struct {
 	value any
 	err   error
@@ -46,9 +42,8 @@ type Service struct {
 	repos               map[string]*repository
 	rates               limiter
 	cursorKey           []byte
-	queue               chan job
+	writes              extension.WriteScheduler
 	stop                chan struct{}
-	done                chan struct{}
 	lockPath            string
 	// githubSourceHook replaces the GitHub reader in tests.
 	githubSourceHook func(ctx context.Context, r *repository, repo string) (githubSource, error)
@@ -86,6 +81,10 @@ type Service struct {
 
 // Open provisions missing configured spaces and locks the data directory to one process.
 func Open(ctx context.Context, configPath, keysPath, dataDir string, rootAgents []byte) (*Service, error) {
+	return OpenWithWriteScheduler(ctx, configPath, keysPath, dataDir, rootAgents, nil)
+}
+
+func OpenWithWriteScheduler(ctx context.Context, configPath, keysPath, dataDir string, rootAgents []byte, factory extension.WriteSchedulerFactory) (*Service, error) {
 	c, keys, err := loadConfig(configPath, keysPath)
 	if err != nil {
 		return nil, err
@@ -114,7 +113,7 @@ func Open(ctx context.Context, configPath, keysPath, dataDir string, rootAgents 
 	if err = os.MkdirAll(reposPath, 0700); err != nil {
 		return nil, err
 	}
-	s := &Service{ownedRepos: map[string]*repository{}, ownedRoot: filepath.Join(dataDir, "owned-repos"), config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), queue: make(chan job, c.Global.MaxQueuedWrites), stop: make(chan struct{}), done: make(chan struct{}), lockPath: lock, rootAgents: rootAgents}
+	s := &Service{ownedRepos: map[string]*repository{}, ownedRoot: filepath.Join(dataDir, "owned-repos"), config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), stop: make(chan struct{}), lockPath: lock, rootAgents: rootAgents}
 	if _, err = rand.Read(s.cursorKey); err != nil {
 		return nil, err
 	}
@@ -125,26 +124,22 @@ func Open(ctx context.Context, configPath, keysPath, dataDir string, rootAgents 
 		}
 		s.repos[name] = r
 	}
-	go s.worker()
-	success = true
-	return s, nil
-}
-
-func (s *Service) worker() {
-	defer close(s.done)
-	for {
-		select {
-		case <-s.stop:
-			return
-		case j := <-s.queue:
-			if err := j.ctx.Err(); err != nil {
-				j.result <- outcome{err: err}
-				continue
+	if factory == nil {
+		s.writes = newSerialWrites(c.Global.MaxQueuedWrites)
+	} else {
+		s.writes, err = factory(c.Global.MaxQueuedWrites)
+		if err != nil {
+			if s.writes != nil {
+				s.writes.Close()
 			}
-			value, err := j.run()
-			j.result <- outcome{value: value, err: err}
+			return nil, fmt.Errorf("write scheduler: %w", err)
+		}
+		if s.writes == nil {
+			return nil, fmt.Errorf("write scheduler factory returned no scheduler")
 		}
 	}
+	success = true
+	return s, nil
 }
 
 // Close is called once, after the HTTP server has stopped accepting requests.
@@ -154,9 +149,11 @@ func (s *Service) Close() {
 		a.stop()
 	}
 	close(s.stop)
+	// Reject pending work and join every executing write before closing the
+	// database or releasing the data-directory lock.
+	s.writes.Close()
 	// Automatic pulls see the stop and give up.
 	s.autoPull.wg.Wait()
-	<-s.done
 	// The storage meter writes what changed before the database closes.
 	s.stopStorageMeter()
 	if s.accounts != nil {
@@ -165,25 +162,29 @@ func (s *Service) Close() {
 	os.RemoveAll(s.lockPath)
 }
 
-func (s *Service) queued(ctx context.Context, fn func() (any, error)) (any, error) {
-	j := job{ctx: ctx, run: fn, result: make(chan outcome, 1)}
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.stop:
-		return nil, fmt.Errorf("service stopped")
-	case s.queue <- j:
-	default:
-		return nil, &Error{Status: 503, Code: "queue_full", Message: "Write queue is full.", RetryAfterSeconds: 1}
+func (s *Service) queued(ctx context.Context, r *repository, fn func() (any, error)) (any, error) {
+	if r == nil || r.closed.Load() {
+		return nil, missing()
 	}
-	select {
-	case o := <-j.result:
-		return o.value, o.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.stop:
-		return nil, fmt.Errorf("service stopped")
+	account := "configured:" + r.path
+	if r.owned {
+		account = "owner:" + s.repositoryOwner(r)
 	}
+	return s.submitWrite(ctx, r.path, account, func() (any, error) {
+		// A caller may have resolved the repository before its deletion.
+		if r.closed.Load() {
+			return nil, missing()
+		}
+		return fn()
+	})
+}
+
+func (s *Service) submitWrite(ctx context.Context, space, account string, fn func() (any, error)) (any, error) {
+	value, err := s.writes.Submit(ctx, space, account, fn)
+	if errors.Is(err, extension.ErrWriteQueueFull) {
+		return nil, &Error{Status: 503, Code: "queue_full", Message: "Write queue is full; retry shortly.", RetryAfterSeconds: 1}
+	}
+	return value, err
 }
 
 // Access authorizes before atomically reserving operation counters. Every adapter
@@ -312,7 +313,7 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		if err := check(in); err != nil {
 			return nil, err
 		}
-		value, err := s.queued(ctx, func() (any, error) { return run(ctx, r, space, in) })
+		value, err := s.queued(ctx, r, func() (any, error) { return run(ctx, r, space, in) })
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +346,7 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 				return nil, problem(403, "protected_file", folderConfigName+" files cannot be moved; write the new one and delete the old one.")
 			}
 		}
-		value, err := s.queued(ctx, func() (any, error) { return s.mutate(ctx, r, space, op, in) })
+		value, err := s.queued(ctx, r, func() (any, error) { return s.mutate(ctx, r, space, op, in) })
 		if err != nil {
 			return nil, err
 		}

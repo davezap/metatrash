@@ -389,7 +389,7 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 		return Receipt{}, problem(413, "payload_too_large", "The filled-in form is larger than a file can be.")
 	}
 	base := target.folder + slug + "-" + who + "-" + t.Form + "-" + now.Format("2006-01-02T1504Z")
-	value, err := s.queued(ctx, func() (any, error) {
+	value, err := s.queued(ctx, target.repo, func() (any, error) {
 		return fileSubmission(ctx, target.repo, base, t.Form, text)
 	})
 	if err != nil {

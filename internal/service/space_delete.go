@@ -58,8 +58,8 @@ func (db *accountDatabase) deleteOwnedSpace(ctx context.Context, ownerID, spaceI
 	return deleted, err
 }
 
-// deleteOwnedSpace deletes the space in the database, then closes it: once
-// the writes queued before it finish, nothing reaches the repository.
+// deleteOwnedSpace deletes the space in the database, then blocks new/pending
+// writes and joins any running write before removing the open handle.
 func (s *Service) deleteOwnedSpace(ctx context.Context, owner userAccount, spaceID, typedName string) (ownedSpace, error) {
 	if s.ownedDB == nil {
 		return ownedSpace{}, problem(503, "unavailable", "Spaces are temporarily unavailable.")
@@ -80,13 +80,23 @@ func (s *Service) deleteOwnedSpace(ctx context.Context, owner userAccount, space
 	return space, nil
 }
 
-// closeOwnedSpace takes a deleted space out of the open repositories, once
-// the writes queued before the delete finish. A restart would too: deleted
-// spaces are not loaded.
+// closeOwnedSpace takes a deleted space out of the open repositories after
+// its active write finishes. Pending writes fail instead of changing a deleted
+// space. A restart also excludes deleted spaces.
 func (s *Service) closeOwnedSpace(spaceID string) {
+	r := s.ownedRepository(spaceID)
+	if r == nil {
+		return
+	}
+	// Pending and stale-handle writes will now fail at execution. Join an
+	// already-running write before allowing the repository to be purged.
+	r.closed.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	_, _ = s.queued(ctx, func() (any, error) { return nil, nil })
+	if err := s.writes.WaitSpace(ctx, r.path); err != nil {
+		log.Printf("deleted spaces: waiting for active write: %v", err)
+		return // Retain the closed handle so purge cannot remove active storage.
+	}
 	s.ownedMu.Lock()
 	delete(s.ownedRepos, spaceID)
 	s.ownedMu.Unlock()
@@ -125,6 +135,9 @@ func (s *Service) purgeDeletedSpaces(ctx context.Context, now time.Time) {
 }
 
 func (s *Service) purgeSpace(ctx context.Context, id string) error {
+	if r := s.ownedRepository(id); r != nil && r.closed.Load() {
+		s.closeOwnedSpace(id) // Retry a close whose active-write wait timed out.
+	}
 	if !idPattern.MatchString(id) || s.ownedRepository(id) != nil {
 		return fmt.Errorf("space is open")
 	}
