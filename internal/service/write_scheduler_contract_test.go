@@ -85,22 +85,32 @@ func TestWriteSchedulerFactoryFailureAndSaturation(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 	q := &fullWrites{}
+	factoryError := errors.New("factory failed")
 	for _, kind := range []string{"failure", "nil"} {
+		called := false
 		_, err := OpenWithWriteScheduler(ctx, "../../config/spaces.example.json", "", filepath.Join(dir, "data"), metatrash.SpaceAGENTS, func(int) (extension.WriteScheduler, error) {
+			called = true
 			if kind == "nil" {
 				return nil, nil
 			}
-			return q, errors.New("factory failed")
+			return q, factoryError
 		})
-		if err == nil {
-			t.Fatal("accepted failed/nil factory")
+		if !called {
+			t.Fatalf("%s factory was not reached; startup failed earlier: %v", kind, err)
+		}
+		if kind == "failure" && !errors.Is(err, factoryError) {
+			t.Fatalf("wrong factory error: %v", err)
+		}
+		if kind == "nil" && (err == nil || !strings.Contains(err.Error(), "returned no scheduler")) {
+			t.Fatalf("wrong nil-factory error: %v", err)
 		}
 	}
 	if q.closed != 1 {
-		t.Fatal("partly created scheduler not closed")
+		t.Fatalf("partly created scheduler Close called %d times, want 1", q.closed)
 	}
 	// Reopening the same directory proves failed construction released its lock.
-	s, err := OpenWithWriteScheduler(ctx, "../../config/spaces.example.json", "", filepath.Join(dir, "data"), metatrash.SpaceAGENTS, func(int) (extension.WriteScheduler, error) { return q, nil })
+	saturated := &fullWrites{}
+	s, err := OpenWithWriteScheduler(ctx, "../../config/spaces.example.json", "", filepath.Join(dir, "data"), metatrash.SpaceAGENTS, func(int) (extension.WriteScheduler, error) { return saturated, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +120,34 @@ func TestWriteSchedulerFactoryFailureAndSaturation(t *testing.T) {
 	var problem *Error
 	if !errors.As(err, &problem) || problem.Status != 503 || problem.Code != "queue_full" || problem.RetryAfterSeconds != 1 {
 		t.Fatalf("saturation mapping: %v", err)
+	}
+}
+
+func TestWriteSchedulerClosesOnProvisionFailure(t *testing.T) {
+	dir := t.TempDir()
+	data := filepath.Join(dir, "data")
+	if err := os.MkdirAll(filepath.Join(data, "repos"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// A file occupying the repository path fails deterministically before Git,
+	// exercising cleanup after successful scheduler construction on every OS.
+	if err := os.WriteFile(filepath.Join(data, "repos", "public.git"), []byte("not a directory"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q := &fullWrites{}
+	called := false
+	_, err := OpenWithWriteScheduler(context.Background(), "../../config/spaces.example.json", "", data, metatrash.SpaceAGENTS, func(int) (extension.WriteScheduler, error) {
+		called = true
+		return q, nil
+	})
+	if !called || err == nil || !strings.Contains(err.Error(), "invalid repository directory") {
+		t.Fatalf("wrong startup path: factory called=%v, error=%v", called, err)
+	}
+	if q.closed != 1 {
+		t.Fatalf("scheduler Close called %d times after provisioning failure, want 1", q.closed)
+	}
+	if _, err := os.Stat(filepath.Join(data, ".service-lock")); !os.IsNotExist(err) {
+		t.Fatalf("failed construction kept its data-directory lock: %v", err)
 	}
 }
 

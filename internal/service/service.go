@@ -101,8 +101,12 @@ func OpenWithWriteScheduler(ctx context.Context, configPath, keysPath, dataDir s
 		return nil, fmt.Errorf("data directory locked; if no service is running, remove %s: %w", lock, err)
 	}
 	success := false
+	var s *Service
 	defer func() {
 		if !success {
+			if s != nil && s.writes != nil {
+				s.writes.Close()
+			}
 			os.RemoveAll(lock)
 		}
 	}()
@@ -113,30 +117,29 @@ func OpenWithWriteScheduler(ctx context.Context, configPath, keysPath, dataDir s
 	if err = os.MkdirAll(reposPath, 0700); err != nil {
 		return nil, err
 	}
-	s := &Service{ownedRepos: map[string]*repository{}, ownedRoot: filepath.Join(dataDir, "owned-repos"), config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), stop: make(chan struct{}), lockPath: lock, rootAgents: rootAgents}
+	s = &Service{ownedRepos: map[string]*repository{}, ownedRoot: filepath.Join(dataDir, "owned-repos"), config: c, keys: keys, repos: map[string]*repository{}, rates: limiter{buckets: map[string]bucket{}}, cursorKey: make([]byte, 32), stop: make(chan struct{}), lockPath: lock, rootAgents: rootAgents}
 	if _, err = rand.Read(s.cursorKey); err != nil {
 		return nil, err
-	}
-	for name, sc := range c.Spaces {
-		r, err := provision(ctx, filepath.Join(reposPath, name+".git"), sc.Limits.Storage, rootAgents, name, false)
-		if err != nil {
-			return nil, fmt.Errorf("provision %s: %w", name, err)
-		}
-		s.repos[name] = r
 	}
 	if factory == nil {
 		s.writes = newSerialWrites(c.Global.MaxQueuedWrites)
 	} else {
 		s.writes, err = factory(c.Global.MaxQueuedWrites)
 		if err != nil {
-			if s.writes != nil {
-				s.writes.Close()
-			}
 			return nil, fmt.Errorf("write scheduler: %w", err)
 		}
 		if s.writes == nil {
 			return nil, fmt.Errorf("write scheduler factory returned no scheduler")
 		}
+	}
+	// Fail fast on a bad factory before repository creation. The deferred cleanup
+	// closes any constructed scheduler if later provisioning fails, before unlock.
+	for name, sc := range c.Spaces {
+		r, err := provision(ctx, filepath.Join(reposPath, name+".git"), sc.Limits.Storage, rootAgents, name, false)
+		if err != nil {
+			return nil, fmt.Errorf("provision %s: %w", name, err)
+		}
+		s.repos[name] = r
 	}
 	success = true
 	return s, nil

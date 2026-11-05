@@ -303,13 +303,22 @@ func TestSyncBothWays(t *testing.T) {
 	}
 	os.RemoveAll(filepath.Join(h.dir, ".git"))
 
-	// Files the space refuses stay local and are reported once.
+	// Ordinary dotfiles are allowed, including outside GitHub folders.
 	h.put(".vscode/settings.json", "{}\n")
+	h.sync()
+	h.sync()
+	if got := h.remoteText(".vscode/settings.json"); got != "{}\n" {
+		t.Fatalf("dotfile was not uploaded: %q", got)
+	}
+
+	// A key-connected space cannot accept text above its 64 KiB limit.
+	// Keep warning-once coverage using an actual server policy refusal.
+	h.put("too-large.txt", strings.Repeat("x", (64<<10)+1))
 	h.sync()
 	h.sync()
 	refusals := 0
 	for _, line := range h.logs {
-		if strings.Contains(line, ".vscode/settings.json was not uploaded") {
+		if strings.Contains(line, "too-large.txt was not uploaded") {
 			refusals++
 		}
 	}
@@ -319,8 +328,11 @@ func TestSyncBothWays(t *testing.T) {
 
 	// Everything else matches the space.
 	_, files = h.remote()
+	if _, exists := files["too-large.txt"]; exists {
+		t.Fatal("refused file reached the space")
+	}
 	for _, p := range localPaths(t, h.dir) {
-		if p == ".vscode/settings.json" {
+		if p == "too-large.txt" {
 			continue
 		}
 		text, _ := h.localText(p)

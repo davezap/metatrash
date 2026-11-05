@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.94.3 - Sync regression and scheduler startup cleanup (2026-11-06)
+
+- Fix TestSyncBothWays, which still expected .vscode/settings.json to be refused after 0.94.2 intentionally allowed ordinary dotfiles. Explicitly check that the dotfile uploads, and keep warning-once/local-preservation coverage with a file above the key-connected test space's 64 KiB text limit. The 0.94.2 Linux, Windows and macOS CI failures all reported this stale assertion; the service tests passed.
+- Construct/validate the write scheduler before provisioning configured repositories. A failed factory now fails before Git/filesystem setup; any later startup failure closes the constructed scheduler before releasing the data-directory lock. Strengthen factory-error assertions so an unrelated early startup failure cannot masquerade as missing cleanup, and add a deterministic provisioning-failure cleanup/lock-release regression.
+- Normal running write policy, schema, dependencies, configuration and tool-schema minimum are unchanged. Release with new v0.94.3; never replace v0.94.2. Company 0.96.6 records the actual new committed Core pin after David releases it. Instructions are in private docs/production-0.96.6.md. David/Actions run tests; Codex has not run them.
+
 ## 0.94.2 - Unicode filenames and safe platform sync (2026-11-06)
 
 - Preserve Unicode, spaces, punctuation and case in file/folder names, including PDF uploads, tool-schema paths, folder child settings, dotfiles outside GitHub folders and empty-folder sync. Keep the existing 240 UTF-8 byte/eight-segment limits. Reject invalid UTF-8, control characters, separators, traversal and reserved Git/service/client metadata paths.
