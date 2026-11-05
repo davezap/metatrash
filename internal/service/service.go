@@ -67,6 +67,8 @@ type Service struct {
 	listWaiters atomic.Int64
 	// listWait replaces listWaitTime in tests.
 	listWait time.Duration
+	// listChecks measures the revision probe for REST change checks (since=).
+	listChecks listCheckMetrics
 	// rootAgents is the AGENTS.md text a new space root starts with.
 	rootAgents []byte
 	// clock replaces time.Now in tests.
@@ -711,6 +713,20 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 	}
 	if op == "list" && in.After != "" {
 		s.waitForChange(ctx, r, in.After)
+	}
+	if op == "list" && in.Since != "" {
+		// Equal revisions cannot contain file changes. Probe HEAD before loading
+		// either index; a concurrent commit is picked up on the next check, just
+		// as when snapshot captures HEAD before a concurrent commit today.
+		started := time.Now()
+		head, err := r.head(ctx)
+		s.listChecks.record(time.Since(started), err == nil && head == in.Since, err != nil)
+		if err != nil {
+			return nil, err
+		}
+		if head == in.Since {
+			return ListResult{Space: space, State: head, Files: []File{}}, nil
+		}
 	}
 	state, files, err := r.snapshot(ctx, c.State)
 	if err != nil {

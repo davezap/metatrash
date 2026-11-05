@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.93.1 - Cheap unchanged change checks (2026-11-04)
+
+- REST and site API lists with `since=` now check the current Git revision first. When it matches, return the existing empty changes response without loading either file index, folder settings or blob contents. Changed/unknown states keep the existing diff/ancestry path; authentication, quotas, validation and long-poll waiting remain in place. Ordinary listings and `after=` without `since=` retain their file-list response.
+- Add rate-limited, aggregate journal counters for revision probes, unchanged responses, diff fallbacks, probe failures and cumulative probe time. No new endpoint or configuration. Add focused regression coverage and an old-path/new-path benchmark for David to run; no tests or benchmarks run by Codex.
+- No schema, grants, dependencies, configuration, tool schema or frontend changes. mtsync's minimum server version remains 0.61.0. Company release instructions are in the private `metatrash.com` repository, `docs/release-0.95.8.md`; company must pin the committed Core revision before building.
+
 ## 0.93.0 - Yearly billing (2026-11-02)
 
 Schema v25 and a new grant (apply `deploy/account-schema-v25.sql` and `deploy/account-grants.sql` before the new binary starts). New optional `planYearlyPriceId` and `storageYearlyPriceId` in `accounts.json`'s `paddle` part, both or neither (see Pricing and checkout in docs/deployment.md). Tool-schema unchanged; mtsync's `minVersion` stays 0.61.0. Release it together with a new Slate Viewer website build (run `scripts/build-frontends.ps1`): Slate Viewer 0.27.0. CI applies schema v25 (copy `.github/workflows/ci.yml` by hand).
