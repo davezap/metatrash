@@ -29,6 +29,7 @@ type httpAdapter struct {
 	basePath     string
 	publicOrigin string
 	publicHost   string
+	ingress      IngressLimits
 	// oauth is nil unless accounts are enabled with oauth.enabled.
 	oauth *oauthServer
 	// github is nil unless accounts are enabled with github.enabled.
@@ -36,11 +37,31 @@ type httpAdapter struct {
 }
 
 func (s *Service) Handler(schema []byte, trustedProxies []string, publicURLs ...string) (http.Handler, error) {
-	h := &httpAdapter{service: s, schema: append([]byte(nil), schema...)}
 	publicURL := "https://metatrash.com"
 	if len(publicURLs) > 0 {
 		publicURL = publicURLs[0]
 	}
+	return s.HandlerWithIngressLimits(schema, trustedProxies, publicURL, nil)
+}
+
+// IngressLimits bounds all HTTP requests in fixed one-minute windows.
+// Both values must be positive; per-client admission cannot exceed the global limit.
+type IngressLimits struct {
+	GlobalPerMinute int
+	ClientPerMinute int
+}
+
+// HandlerWithIngressLimits snapshots a trusted composition policy. Nil retains
+// the standard limits. Request data and space configuration cannot change it.
+func (s *Service) HandlerWithIngressLimits(schema []byte, trustedProxies []string, publicURL string, limits *IngressLimits) (http.Handler, error) {
+	policy := IngressLimits{GlobalPerMinute: 2400, ClientPerMinute: 240}
+	if limits != nil {
+		policy = *limits
+		if policy.GlobalPerMinute <= 0 || policy.ClientPerMinute <= 0 || policy.ClientPerMinute > policy.GlobalPerMinute {
+			return nil, fmt.Errorf("ingress limits must be positive and client must not exceed global")
+		}
+	}
+	h := &httpAdapter{service: s, schema: append([]byte(nil), schema...), ingress: policy}
 	u, err := url.Parse(publicURL)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" {
 		return nil, fmt.Errorf("public URL must be an HTTPS origin with an optional plain path prefix")
@@ -150,7 +171,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	client := h.client(r)
 	// A separate ingress ceiling covers discovery, malformed routes, and authentication attempts.
-	if err := h.service.rates.reserve(allowance{"ingress", 2400, 60}, allowance{"ingress:" + client, 240, 60}); err != nil {
+	if err := h.service.rates.reserve(allowance{"ingress", h.ingress.GlobalPerMinute, 60}, allowance{"ingress:" + client, h.ingress.ClientPerMinute, 60}); err != nil {
 		sendError(w, err)
 		return
 	}

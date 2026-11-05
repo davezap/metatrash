@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.94.1 - Composable HTTP ingress limits (2026-11-05)
+
+- Add optional constructor-only `server.Config.IngressLimits`, copied and validated before serving. Nil retains 2,400 global and 240 per-client-IP requests per minute; both configured values must be positive and the client limit cannot exceed global. Admission still covers every route and uses the existing atomic limiter and retryable 429 response.
+- Keep application policies outside Core. Standalone and existing compositions retain their defaults; no JSON setting, schema, dependency or frontend change. Add regression coverage for defaults, validation, independent global/client enforcement and copied policy. David/Actions run tests; company release instructions are in private `docs/release-0.96.3.md`.
+
 ## 0.94.0 - Pluggable write scheduling, serial by default (2026-11-05)
 
 - Add the trusted build-time `extension.WriteScheduler` contract and optional `server.Config.WriteScheduler` factory. Core keeps a bounded, single-worker FIFO queue by default; it contains no concurrent scheduling policy, account budgets, concurrency JSON settings or write-scheduler metrics. The existing `spaces.json` maxQueuedWrites remains unchanged. Queue saturation from an implementation maps to retryable HTTP 503 queue_full.

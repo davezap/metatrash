@@ -27,7 +27,14 @@ type Config struct {
 	Frontend       fs.FS
 	// Optional application policy. Nil preserves Core's serial write worker.
 	WriteScheduler extension.WriteSchedulerFactory
+	// Optional trusted HTTP admission policy, copied at construction.
+	// Nil preserves 2,400 global and 240 per-client-IP requests per minute.
+	IngressLimits *IngressLimits
 }
+
+// IngressLimits bounds all HTTP routes, independently of file-operation quotas.
+type IngressLimits = service.IngressLimits
+
 type Server struct {
 	core    *service.Service
 	handler http.Handler
@@ -65,7 +72,7 @@ func Open(ctx context.Context, config Config) (*Server, error) {
 	if origin == "" {
 		origin = "https://metatrash.com"
 	}
-	handler, err := core.Handler(metatrash.ToolSchema, config.TrustedProxies, origin)
+	handler, err := core.HandlerWithIngressLimits(metatrash.ToolSchema, config.TrustedProxies, origin, config.IngressLimits)
 	if err != nil {
 		return nil, err
 	}
