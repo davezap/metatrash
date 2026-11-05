@@ -27,8 +27,12 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 		}
 	}
 	path := q.Get("path")
-	if err != nil || !validPath(path) {
+	if err != nil {
 		sendError(w, invalid("Send path (and revision for GET, ifInState for PUT), each once."))
+		return
+	}
+	if !validPath(path) {
+		sendError(w, invalid("Invalid path: use valid Unicode names without control characters, backslashes, traversal or reserved metadata names; at most 8 levels and 240 UTF-8 bytes."))
 		return
 	}
 	// Up to 100 MB each way: past the server's read and write timeouts.

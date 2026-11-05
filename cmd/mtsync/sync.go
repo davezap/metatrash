@@ -14,13 +14,15 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"metatrash.com/metatrash/internal/filenames"
 )
 
 // stateDir holds mtsync's own files inside the synced folder. It is never
@@ -106,8 +108,9 @@ type syncer struct {
 	cache  map[string]localEntry
 	// warned remembers refused uploads by path and blob, so a refusal is
 	// reported once and retried only after the file changes.
-	warned   map[string]string
-	readOnly bool
+	warned      map[string]string
+	readOnly    bool
+	insensitive bool // actual sync volume case behavior
 	// leftEmpty holds folders a deletion emptied but could not remove.
 	leftEmpty map[string]bool
 	// noChanges is set when the server can't list changes (before 0.37.0).
@@ -162,6 +165,10 @@ func openSyncer(c *client, root, server, space string, logf func(string, ...any)
 	if err := os.MkdirAll(filepath.Join(root, stateDir), 0700); err != nil {
 		return nil, err
 	}
+	insensitive, err := insensitiveFolder(root)
+	if err != nil {
+		return nil, fmt.Errorf("check sync folder case sensitivity: %w", err)
+	}
 	s := &syncer{c: c, root: root, statePath: filepath.Join(root, stateDir, "state.json"), logf: logf, now: time.Now, settle: time.Second, cache: map[string]localEntry{}, warned: map[string]string{}}
 	st := &syncState{Server: server, Space: space, Files: map[string]baseFile{}}
 	b, err := os.ReadFile(s.statePath)
@@ -181,6 +188,7 @@ func openSyncer(c *client, root, server, space string, logf func(string, ...any)
 		}
 	}
 	s.st = st
+	s.insensitive = insensitive
 	return s, nil
 }
 
@@ -283,10 +291,6 @@ func (s *syncer) scan() (map[string]localFile, map[string]bool, error) {
 	return files, unstable, err
 }
 
-// folderNamePattern is a folder name the space accepts (no dot names, which
-// only GitHub folders allow).
-var folderNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
 // newFolderConfig is the .metatrash.json mtsync puts in a new empty folder,
 // as the space does for a folder's first file.
 const newFolderConfig = "{\"inherit\": true}\n"
@@ -296,11 +300,11 @@ const newFolderConfig = "{\"inherit\": true}\n"
 // GitHub folder, or with a name the space refuses, is left alone, and so is
 // every folder of a read-only space. It returns the file's path.
 func (s *syncer) startFolder(dir string) (string, bool) {
-	if s.readOnly || s.leftEmpty[dir] || strings.Count(dir, "/") > 6 || len(dir) > 200 {
+	if !filenames.Path(dir+"/.metatrash.json") || s.readOnly || s.leftEmpty[dir] || strings.Count(dir, "/") > 6 || len(dir) > 200 {
 		return "", false
 	}
 	for _, name := range strings.Split(dir, "/") {
-		if !folderNamePattern.MatchString(name) {
+		if !filenames.Segment(name) {
 			return "", false
 		}
 	}
@@ -485,11 +489,25 @@ func (p *pass) run() error {
 	for path := range p.local {
 		all[path] = true
 	}
+	for path := range p.unstable {
+		all[path] = true
+	}
 	paths := make([]string, 0, len(all))
 	for path := range all {
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
+	allPaths := paths
+	problems := pathProblems(paths, runtime.GOOS == "windows", p.insensitive)
+	paths = make([]string, 0, len(allPaths))
+	for _, name := range allPaths {
+		if _, blocked := problems[name]; !blocked {
+			paths = append(paths, name)
+		}
+	}
+	if len(problems) > 0 {
+		p.deferred = true
+	}
 	handled, err := p.moves(paths)
 	if err != nil {
 		return err
@@ -540,6 +558,9 @@ func (p *pass) run() error {
 		if err != nil {
 			return err
 		}
+	}
+	if len(problems) > 0 {
+		return describePathProblems(allPaths, problems)
 	}
 	return nil
 }

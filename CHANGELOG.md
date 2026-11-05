@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.94.2 - Unicode filenames and safe platform sync (2026-11-06)
+
+- Preserve Unicode, spaces, punctuation and case in file/folder names, including PDF uploads, tool-schema paths, folder child settings, dotfiles outside GitHub folders and empty-folder sync. Keep the existing 240 UTF-8 byte/eight-segment limits. Reject invalid UTF-8, control characters, separators, traversal and reserved Git/service/client metadata paths.
+- mtsync skips names Windows cannot represent (including device names and trailing dots/spaces) and protects files/folder prefixes that collide by case on a case-insensitive sync root. Skipped files remain untouched on both sides; unrelated files sync and status reports the affected paths. The schema's recommended mtsync minimum becomes 0.94.2: update clients before broad names are created; this metadata does not forcibly stop old running clients.
+- Distinguish invalid content paths from malformed query parameters. Add Unicode write/read/move/history, path-boundary, PDF upload/download and platform/collision regressions for David/Actions. No schema, configuration or dependency migration. Pair with Slate Viewer 0.27.3 to preserve names in creation/rename dialogs. Company release instructions are in private `docs/release-core-0.94.2.md`. Tests/builds not run by Codex.
+
 ## 0.94.1 - Composable HTTP ingress limits (2026-11-05)
 
 - Add optional constructor-only `server.Config.IngressLimits`, copied and validated before serving. Nil retains 2,400 global and 240 per-client-IP requests per minute; both configured values must be positive and the client limit cannot exceed global. Admission still covers every route and uses the existing atomic limiter and retryable 429 response.

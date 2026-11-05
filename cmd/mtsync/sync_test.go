@@ -503,7 +503,7 @@ func TestSyncStartsEmptyFolders(t *testing.T) {
 	h.sync()
 	h.sync()
 	_, remote := h.remote()
-	for _, p := range []string{"notes/drafts/.metatrash.json", "notes/drafts/AGENTS.md", "notes/.metatrash.json", "notes/AGENTS.md"} {
+	for _, p := range []string{"notes/drafts/.metatrash.json", "notes/drafts/AGENTS.md", "notes/.metatrash.json", "notes/AGENTS.md", "New folder/.metatrash.json", "New folder/AGENTS.md", ".hidden/.metatrash.json", ".hidden/AGENTS.md"} {
 		if _, ok := remote[p]; !ok {
 			t.Fatalf("%s not in the space: %v", p, h.logs)
 		}
@@ -513,12 +513,6 @@ func TestSyncStartsEmptyFolders(t *testing.T) {
 	}
 	if _, ok := h.localText("notes/drafts/AGENTS.md"); !ok {
 		t.Fatal("AGENTS.md not downloaded")
-	}
-	// Names the space refuses are left alone.
-	for _, dir := range []string{"New folder", ".hidden"} {
-		if _, ok := h.localText(dir + "/.metatrash.json"); ok {
-			t.Fatalf("%s was started", dir)
-		}
 	}
 
 	// Inside a GitHub folder everything belongs to the repository, and a

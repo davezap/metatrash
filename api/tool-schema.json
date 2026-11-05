@@ -2,7 +2,7 @@
   "schemaVersion": "0.17.4",
   "status": "implemented",
   "clients": {
-    "mtsync": {"minVersion": "0.61.0"},
+    "mtsync": {"minVersion": "0.94.2"},
     "slateViewer": {"minVersion": "0.2.0"}
   },
   "description": "Git-backed text storage; messaging via file conventions. Every folder has an AGENTS.md (instructions for agents) and a .metatrash.json (settings); read the space root AGENTS.md first.",
@@ -38,7 +38,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Case-sensitive relative path."
           },
           "revision": {
@@ -92,7 +92,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
               },
               "bytes": {
                 "type": "integer",
@@ -224,7 +224,7 @@
           "prefix": {
             "type": "string",
             "maxLength": 241,
-            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}$",
             "default": "",
             "description": "Folder prefix ending in /; empty selects all."
           },
@@ -283,7 +283,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 240,
-                  "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+                  "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
                   "description": "Case-sensitive relative path."
                 },
                 "id": {
@@ -355,7 +355,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Case-sensitive relative path."
           },
           "text": {
@@ -413,7 +413,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
               },
               "bytes": {
                 "type": "integer",
@@ -500,7 +500,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Existing case-sensitive relative path."
           },
           "edits": {
@@ -578,7 +578,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
               },
               "bytes": {
                 "type": "integer",
@@ -665,7 +665,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Case-sensitive relative path."
           },
           "text": {
@@ -713,7 +713,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
               },
               "bytes": {
                 "type": "integer",
@@ -797,7 +797,7 @@
           "prefix": {
             "type": "string",
             "maxLength": 241,
-            "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]*/){0,7}$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}$",
             "default": "",
             "description": "Folder prefix ending in /; empty selects all."
           },
@@ -848,7 +848,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 240,
-                  "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                  "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
                 },
                 "bytes": {
                   "type": "integer",
@@ -950,14 +950,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Existing case-sensitive relative path."
           },
           "to": {
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Absent case-sensitive relative path."
           },
           "ifInState": {
@@ -1006,7 +1006,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
               },
               "bytes": {
                 "type": "integer",
@@ -1085,7 +1085,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Existing case-sensitive relative path."
           },
           "ifInState": {
@@ -1133,7 +1133,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
               },
               "bytes": {
                 "type": "integer",
@@ -1257,7 +1257,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 240,
-                  "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                  "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
                 },
                 "operation": {
                   "type": "string",
@@ -1351,7 +1351,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
             "description": "Case-sensitive relative path."
           },
           "source": {
@@ -1408,7 +1408,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$"
+                "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$"
               },
               "bytes": {
                 "type": "integer",
@@ -1766,7 +1766,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 241,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,6}[A-Za-z0-9._][A-Za-z0-9._-]*/?$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,6}[^/\\\\\u0000-\u001f\u007f-\u009f]+/?$",
             "description": "The GitHub folder, e.g. site/."
           }
         },
@@ -1930,7 +1930,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 241,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,6}[A-Za-z0-9._][A-Za-z0-9._-]*/?$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,6}[^/\\\\\u0000-\u001f\u007f-\u009f]+/?$",
             "description": "The GitHub folder, e.g. site/."
           }
         },
@@ -2115,7 +2115,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 241,
-            "pattern": "^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,6}[A-Za-z0-9._][A-Za-z0-9._-]*/?$",
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,6}[^/\\\\\u0000-\u001f\u007f-\u009f]+/?$",
             "description": "The GitHub folder, e.g. site/."
           },
           "message": {

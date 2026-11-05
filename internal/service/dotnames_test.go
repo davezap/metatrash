@@ -10,8 +10,8 @@ import (
 	"metatrash.com/metatrash"
 )
 
-// Names starting with a dot live only inside GitHub folders (step 2b).
-func TestDotNamesInGitHubFolders(t *testing.T) {
+// Ordinary dot names work with and without GitHub; reserved metadata stays protected.
+func TestDotNamesInSpaces(t *testing.T) {
 	dir := t.TempDir()
 	b, err := os.ReadFile("../../config/spaces.example.json")
 	if err != nil {
@@ -51,12 +51,12 @@ func TestDotNamesInGitHubFolders(t *testing.T) {
 	text := func(s string) *string { return &s }
 	github := text(`{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
 
-	// Outside GitHub folders, dot names are refused with a reason.
+	// Outside GitHub folders, dot names now work too.
 	for _, path := range []string{".gitignore", "notes/.env", "notes/.hidden/a.md", ".github/workflows/ci.yml"} {
-		do(owned, "write", Input{Path: path, Text: text("x")}, "invalid_request")
+		do(owned, "write", Input{Path: path, Text: text("x")}, "")
 	}
 	public := s.repos["public"]
-	do(public, "write", Input{Path: "a/.gitignore", Text: text("x")}, "invalid_request")
+	do(public, "write", Input{Path: "a/.gitignore", Text: text("x")}, "")
 	// Never .git, anywhere, in any case; never the service's index at the root.
 	for _, path := range []string{"site/.git", "site/.git/config", "site/.GIT/HEAD", "site/sub/.git", ".metatrash/files.json"} {
 		do(owned, "write", Input{Path: path, Text: text("x")}, "invalid_request")
@@ -80,25 +80,25 @@ func TestDotNamesInGitHubFolders(t *testing.T) {
 	// Underscore names are fine everywhere.
 	do(owned, "write", Input{Path: "notes/_drafts/a.md", Text: text("x")}, "")
 
-	// Moves: out of the GitHub folder refused for dot names, within it fine.
-	do(owned, "move", Input{From: "site/.gitignore", To: "notes/.gitignore"}, "invalid_request")
+	// Moving dot names works across ordinary and GitHub folders.
+	do(owned, "move", Input{From: "site/.gitignore", To: "notes/.gitignore"}, "")
 	do(owned, "move", Input{From: "site/src/.env.example", To: "site/.env.example"}, "")
 	do(owned, "write", Input{Path: "notes/plain.txt", Text: text("x")}, "")
 	do(owned, "move", Input{From: "notes/plain.txt", To: "site/.plain"}, "")
 	do(owned, "move", Input{From: "site/.plain", To: "notes/plain.txt"}, "")
 
-	// The github service cannot be removed, nor its config deleted, while dot names remain.
-	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"purpose":"no longer a repo"}`)}, "invalid_request")
+	// Removing the GitHub service no longer depends on dot names.
+	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"purpose":"no longer a repo"}`)}, "")
 	do(owned, "delete", Input{Path: "site/.metatrash.json"}, "protected_file")
 	// Changing other settings keeps the service and is fine.
 	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"purpose":"site","services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)}, "")
-	for _, path := range []string{"site/.gitignore", "site/.github/workflows/ci.yml", "site/.github/.metatrash.json", "site/.env.example"} {
+	for _, path := range []string{"notes/.gitignore", "site/.github/workflows/ci.yml", "site/.github/.metatrash.json", "site/.env.example"} {
 		do(owned, "delete", Input{Path: path}, "")
 	}
 	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text("{}\n")}, "")
-	// Plain files stay; the folder is ordinary again and refuses dot names.
+	// Plain files stay; the ordinary folder also accepts dot names.
 	do(owned, "read", Input{Path: "site/pkg/__init__.py"}, "")
-	do(owned, "write", Input{Path: "site/.gitignore", Text: text("x")}, "invalid_request")
+	do(owned, "write", Input{Path: "site/.gitignore", Text: text("x")}, "")
 
 	// A config written together with the dot name's folder decides for itself:
 	// a GitHub folder's own config can sit beside dot names in a fresh folder.

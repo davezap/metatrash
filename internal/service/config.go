@@ -71,12 +71,6 @@ var hashPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 var idPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// Path segments start with a letter or digit. The one exception is the folder
-// configuration file name, .metatrash.json, as the last segment.
-// Path syntax. Names start with a letter, digit, underscore or dot; whether a
-// dot name is allowed depends on the folder (see validPath and dotNameRule).
-var pathPattern = regexp.MustCompile(`^([A-Za-z0-9._][A-Za-z0-9._-]*/){0,7}[A-Za-z0-9._][A-Za-z0-9._-]*$`)
-
 func strictJSON(b []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()

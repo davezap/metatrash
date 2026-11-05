@@ -37,7 +37,7 @@ Linux and macOS.
   - A new empty folder here (mtsync 0.66.0): mtsync puts a `.metatrash.json`
     (`{"inherit": true}`) in it, so the folder reaches the space, which adds
     its `AGENTS.md`. Not inside a GitHub folder, not in a read-only space, and
-    not for names the space refuses (`New folder` waits until you rename it).
+    including names with spaces, Unicode and punctuation. Reserved metadata paths are left alone.
   - Changed on both sides: the space's version keeps the name and yours is
     saved beside it as `name.conflict-<UTC time>.ext`, then uploaded too.
 - **Virtual files** (mtsync 0.61.0, metatrash 0.60.0 on the site, signed-in
@@ -51,9 +51,8 @@ Linux and macOS.
   copy and the space's version put back. A folder synced by mtsync before
   0.61.0 holds such files' text; the first pass replaces it with the file.
 - **What stays local.** Files a space can't hold (over 100 MB, binaries in a
-  space reached with a key, which holds text only, names with spaces or a
-  leading dot outside a GitHub folder) and editor or
-  system files (`*.swp`, `*~`, `*.tmp`, `.DS_Store`, `Thumbs.db`, …). A `.git` folder is skipped entirely, so you can `git init` a synced folder for your own local history. Refusals
+  space reached with a key, which holds text only, invalid or reserved paths) and editor or
+  system files (`*.swp`, `*~`, `*.tmp`, `.DS_Store`, `Thumbs.db`, …). A `.git` folder is skipped entirely, so you can `git init` a synced folder for your own local history. Windows-incompatible names and case collisions are skipped on affected computers, with a sync error explaining the paths; unrelated files continue syncing. Neither local nor server copies are renamed or removed. Ordinary upload refusals
   are reported once and retried when the file changes. A folder's `AGENTS.md`
   and `.metatrash.json` can't be deleted in a space, so deleting them locally
   brings them back; delete the folder's other files and the space removes

@@ -535,7 +535,7 @@ func TestGitHubPull(t *testing.T) {
 
 	// The first pull.
 	got := w.pull("site/", "")
-	kept := []string{"README.md", "index.html", "docs/guide.md", ".gitignore", ".github/workflows/ci.yml", "run.sh", "export/ignored.txt", "version.txt"}
+	kept := []string{"README.md", "index.html", "docs/guide.md", ".gitignore", ".github/workflows/ci.yml", "run.sh", "export/ignored.txt", "version.txt", "My File.txt", "-dash.md"}
 	// utf16.md is held converted to UTF-8 (with a UTF-8 byte order mark).
 	const utf16Converted = "\xef\xbb\xbf# x\r\n"
 	if got.Commit != first || got.UpToDate || got.Created != len(kept) || got.Unchanged != 1 || got.Updated != 0 || got.Deleted != 1 || got.NewState == got.OldState || got.Folder != "site/" || got.Repo != "dave-zap/site" || got.Branch != "main" {
@@ -543,7 +543,7 @@ func TestGitHubPull(t *testing.T) {
 	}
 	reasons := skippedReasons(got)
 	wantSkipped := map[string]string{
-		"logo.png": "binary file", "latin1.txt": "Latin-1", "big.txt": "larger than", "My File.txt": "name not allowed", "-dash.md": "name not allowed",
+		"logo.png": "binary file", "latin1.txt": "Latin-1", "big.txt": "larger than",
 		strings.Repeat("d/", 8) + "too-deep.md": "name not allowed", "current": "symbolic link", "vendor/lib": "submodule",
 		".metatrash.json": "settings file", "docs/.metatrash.json": "settings file",
 	}

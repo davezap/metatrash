@@ -218,7 +218,7 @@ func classifyRepoEntries(folder string, entries []githubTreeEntry, maxFileBytes,
 		case segments[len(segments)-1] == folderConfigName:
 			skip(e, "Metatrash folder settings file ("+folderConfigName+")")
 		case !validPath(folder + e.Path):
-			skip(e, "name not allowed in Metatrash (letters, digits, . _ - only, not starting with -; at most 8 levels and 240 characters)")
+			skip(e, "name not allowed in Metatrash (use valid Unicode names without controls, backslashes or reserved paths; at most 8 levels and 240 UTF-8 bytes)")
 		case e.Size > maxFileBytes && maxVirtual > 0 && e.Size > maxVirtual:
 			skip(e, fmt.Sprintf("larger than the %d MB a virtual file holds", maxVirtual>>20))
 		case e.Size > maxFileBytes && maxVirtual == 0:

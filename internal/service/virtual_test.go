@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -194,6 +195,23 @@ func TestVirtualFilesAgainstDatabase(t *testing.T) {
 		w.h.ServeHTTP(res, r)
 		return res
 	}
+
+	// Regression: mtsync preserves the original PDF filename, including spaces.
+	pdfPath := "test/Downloading Controller Logs with PyVMS-r1.pdf"
+	pdf := []byte("%PDF-1.4\n\x00binary PDF content")
+	pdfTarget := base + url.QueryEscape(pdfPath)
+	pdfResponse := call("PUT", pdfTarget+"&ifInState="+state, "application/octet-stream", pdf)
+	var pdfPut WriteResult
+	if pdfResponse.Code != 201 || json.Unmarshal(pdfResponse.Body.Bytes(), &pdfPut) != nil || pdfPut.File.Path != pdfPath || pdfPut.File.Virtual == nil || pdfPut.File.Virtual.Type != "application/pdf" {
+		t.Fatalf("PDF upload: %d %s", pdfResponse.Code, pdfResponse.Body)
+	}
+	if res := call("GET", pdfTarget, "", nil); res.Code != 200 || !bytes.Equal(res.Body.Bytes(), pdf) {
+		t.Fatalf("PDF download: %d %s", res.Code, res.Body)
+	}
+	if res := call("GET", pdfTarget+"&revision="+pdfPut.NewState, "", nil); res.Code != 200 || !bytes.Equal(res.Body.Bytes(), pdf) {
+		t.Fatalf("PDF revision download: %d %s", res.Code, res.Body)
+	}
+	state = pdfPut.NewState
 
 	// Upload, then download.
 	res := call("PUT", base+"pics/logo.png&ifInState="+state, "image/png", testPNG)

@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"strings"
+
+	"metatrash.com/metatrash/internal/filenames"
 )
 
 type Error struct {
@@ -184,22 +186,8 @@ type storedRecord struct {
 	Virtual   *VirtualInfo `json:"virtual,omitempty"`
 }
 
-// validPath checks path syntax only. ".", "..", ".git" (any case, trailing
-// dots ignored as Windows does) are never names, and ".metatrash" at the root
-// is the service's own index. Other names starting with a dot are allowed only
-// inside a GitHub folder, which a write checks against the space (dotNameRule).
-func validPath(path string) bool {
-	if len(path) > 240 || !pathPattern.MatchString(path) {
-		return false
-	}
-	for i, segment := range strings.Split(path, "/") {
-		lower := strings.TrimRight(strings.ToLower(segment), ".")
-		if segment == "." || segment == ".." || lower == ".git" || (i == 0 && lower == ".metatrash") {
-			return false
-		}
-	}
-	return true
-}
+// validPath checks storage syntax without normalizing spelling or case.
+func validPath(path string) bool { return filenames.Path(path) }
 
 // hasDotName reports a path segment starting with a dot, other than a final
 // .metatrash.json (allowed in every folder).

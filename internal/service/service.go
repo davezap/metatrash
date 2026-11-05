@@ -424,11 +424,6 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if f.Protected {
 			return nil, folderFileKept(in.Path)
 		}
-		if isFolderConfig(in.Path) {
-			if err := r.dotNameRule(ctx, files, "", in.Path, nil); err != nil {
-				return nil, err
-			}
-		}
 		delete(files, in.Path)
 		changes := append([]commitChange{{f.ID, "delete", in.Path}}, removeEmptyFolderFiles(files, github, keep, in.Path)...)
 		state, err := r.commitFiles(ctx, head, files, nil, nil, changes, "")
@@ -445,19 +440,6 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 			return nil, err
 		}
 		if err := s.checkActionsWriter(ctx, r, files, in.Path, *in.Text); err != nil {
-			return nil, err
-		}
-	}
-	if op == "write" {
-		configPath := ""
-		if isFolderConfig(in.Path) {
-			configPath = in.Path
-		}
-		if err := r.dotNameRule(ctx, files, in.Path, configPath, in.Text); err != nil {
-			return nil, err
-		}
-	} else if op == "move" {
-		if err := r.dotNameRule(ctx, files, in.To, "", nil); err != nil {
 			return nil, err
 		}
 	}
