@@ -49,6 +49,7 @@ type repository struct {
 	committed func(ctx context.Context, old, state string)
 	// usage is what the space takes up (owned spaces, storage.go).
 	usage spaceUsage
+	quota repositoryBytes
 }
 
 // watch returns a channel that is closed at the next branch update.
@@ -167,7 +168,10 @@ func dirBytes(path string) (int64, error) {
 			if err != nil {
 				return err
 			}
-			size += i.Size()
+			size, err = checkedBytes(size, i.Size())
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -198,6 +202,25 @@ func (r *repository) commit(ctx context.Context, old string, files map[string]re
 //
 // Stage objects outside the repository. Over-budget writes leave no unreachable objects behind.
 func (r *repository) commitFiles(ctx context.Context, old string, files map[string]record, texts map[string]string, service map[string][]byte, changes []commitChange, summary string) (string, error) {
+	state, err := func() (string, error) {
+		r.quota.mu.Lock()
+		defer r.quota.mu.Unlock()
+		return r.commitFilesLocked(ctx, old, files, texts, service, changes, summary)
+	}()
+	if err == nil {
+		r.notify()
+		if r.committed != nil {
+			previous := old
+			if previous == "" {
+				previous = strings.Repeat("0", 40)
+			}
+			r.committed(ctx, previous, state)
+		}
+	}
+	return state, err
+}
+
+func (r *repository) commitFilesLocked(ctx context.Context, old string, files map[string]record, texts map[string]string, service map[string][]byte, changes []commitChange, summary string) (string, error) {
 	if len(files) > r.limits.MaxFiles {
 		return "", storageLimit()
 	}
@@ -212,7 +235,11 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(stagingDir)
+	defer func() {
+		if err := os.RemoveAll(stagingDir); err != nil {
+			log.Printf("storage: staging cleanup %s: %v", stagingDir, err)
+		}
+	}()
 	stage := filepath.Join(stagingDir, "objects")
 	if err := os.Mkdir(stage, 0700); err != nil {
 		return "", err
@@ -336,27 +363,74 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 		return "", err
 	}
 	commit := strings.TrimSpace(string(b))
-	repoSize, err := dirBytes(r.path)
-	if err != nil {
-		return "", err
-	}
 	stageSize, err := dirBytes(stage)
 	if err != nil {
 		return "", err
 	}
-	// Reserve reference/config overhead; conservatively count duplicate staged objects too.
-	if repoSize+stageSize+4096 > r.limits.MaxRepositoryBytes {
-		return "", storageLimit()
+	repoSize, err := r.admitRepositoryBytes(stageSize)
+	if err != nil {
+		return "", err
+	}
+	// Any failure after reservation invalidates quota authority, including a
+	// partial promotion or an ambiguous update-ref. A subsequent write scans.
+	completed := false
+	defer func() {
+		if !completed {
+			r.quota.valid = false
+		}
+	}()
+	refBefore, err := repositoryRefBytes(r.path)
+	if err != nil {
+		return "", err
 	}
 	// added is what the objects moved in take up, so the repository's new
 	// size is known without walking it again (storage.go).
-	var added int64
+	added, err := r.promoteObjects(stage, os.Rename)
+	if err != nil {
+		return "", err
+	}
+	if old == "" {
+		old = strings.Repeat("0", 40)
+	}
+	if _, err = git(ctx, r.path, "", nil, "update-ref", branch, commit, old); err != nil {
+		return "", err
+	}
+	// Ref publication has succeeded: observation trouble must not report a
+	// committed operation as failed. Unsupported metadata layouts keep scanning.
+	refAfter, observeErr := repositoryRefBytes(r.path)
+	if r.quota.fast && observeErr == nil && refAfter == 41 && (refBefore == 0 || refBefore == 41) {
+		r.quota.bytes = repoSize + added + refAfter - refBefore
+		r.usage.setGit(r.quota.bytes, time.Now())
+	} else {
+		r.quota.valid = false
+		// Reporting for unsupported layouts needs an actual measurement too.
+		if size, err := r.measureRepositoryBytes(); err == nil {
+			r.usage.setGit(size, time.Now())
+		} else {
+			log.Printf("storage: repository accounting %s: %v", r.path, err)
+		}
+	}
+	completed = true
+	return commit, nil
+}
+
+// promoteObjects runs under quota.mu after reservation. The move primitive is
+// supplied so regressions can inject failure after each real filesystem move.
+func (r *repository) promoteObjects(stage string, move func(string, string) error) (added int64, err error) {
+	defer func() {
+		if err != nil {
+			r.quota.valid = false
+		}
+	}()
 	err = filepath.WalkDir(stage, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
+		}
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("invalid staged object")
 		}
 		rel, err := filepath.Rel(stage, path)
 		if err != nil {
@@ -366,7 +440,10 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 		if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
 			return err
 		}
-		if _, err := os.Stat(dest); err == nil {
+		if info, err := os.Lstat(dest); err == nil {
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("invalid stored object")
+			}
 			return nil
 		} else if !os.IsNotExist(err) {
 			return err
@@ -375,27 +452,16 @@ func (r *repository) commitFiles(ctx context.Context, old string, files map[stri
 		if err != nil {
 			return err
 		}
-		if err := os.Rename(path, dest); err != nil {
+		if err := move(path, dest); err != nil {
 			return err
 		}
-		added += info.Size()
+		added, err = checkedBytes(added, info.Size())
+		if err != nil {
+			return err
+		}
 		return nil
 	})
-	if err != nil {
-		return "", err
-	}
-	r.usage.setGit(repoSize+added, time.Now())
-	if old == "" {
-		old = strings.Repeat("0", 40)
-	}
-	if _, err = git(ctx, r.path, "", nil, "update-ref", branch, commit, old); err != nil {
-		return "", err
-	}
-	r.notify()
-	if r.committed != nil {
-		r.committed(ctx, old, commit)
-	}
-	return commit, nil
+	return added, err
 }
 
 // serviceFiles lists the service's own files under .metatrash/ in a revision,

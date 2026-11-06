@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.0 - Maintained repository quota accounting (2026-11-06)
+
+- Avoid full historical repository walks on warm commits in Core-created plain bare repositories. Keep a separate in-memory quota counter, measure cold/reopened handles, reserve staged bytes before promotion, and account for actual object/ref growth after success. SQL-seeded account usage is reporting only. Quota arithmetic and filesystem summation reject overflow.
+- Invalidate accounting on partial promotion/ref failure; restart always scans before admission. Reconcile daily and once before a conservative quota refusal. Reflogs, symbolic refs and unfamiliar repository config keep full-walk admission. Existing scheduler ordering, serial default, file-byte quota definition and 4096-byte admission allowance remain; external maintenance/writers must stop the service.
+- Share reconciliation with the account storage meter and keep callbacks outside the accounting mutex. Add focused warm/cold/reopen, quota, partial-move/ref-failure, unsupported-layout, symlink and parallel-space regressions for David/Actions. No schema, grant, configuration, dependency, tool-schema or frontend changes. Tests/builds not run by Codex. Release with new v0.95.0; company v0.96.7 instructions and scripts are in private docs/release-0.96.7.md. Company pin remains pending David's Core commit/release.
+
 ## 0.94.3 - Sync regression and scheduler startup cleanup (2026-11-06)
 
 - Fix TestSyncBothWays, which still expected .vscode/settings.json to be refused after 0.94.2 intentionally allowed ordinary dotfiles. Explicitly check that the dotfile uploads, and keep warning-once/local-preservation coverage with a file above the key-connected test space's 64 KiB text limit. The 0.94.2 Linux, Windows and macOS CI failures all reported this stale assertion; the service tests passed.

@@ -26,8 +26,8 @@ import (
 //
 // The numbers live on the repository (spaceUsage) and in the table
 // metatrash_space_usage, which Settings and the console read. They are kept
-// up to date cheaply: a commit already adds up the repository's size before
-// it moves new objects in, so it knows the new size; storing a virtual file
+// up to date cheaply: commits maintain a separate, verified repository-byte
+// counter and measure reference growth after publishing; storing a virtual file
 // adds the object when it is new to the space; the sweep takes away what it
 // removes. Changed spaces are written to the database a few seconds later
 // (storageMeter). Everything is measured again in full on start and then
@@ -323,7 +323,9 @@ func (s *Service) measureSpace(ctx context.Context, r *repository, sweeper objec
 		return nil
 	}
 	_, err := s.queued(ctx, r, func() (any, error) {
-		size, err := dirBytes(r.path)
+		r.quota.mu.Lock()
+		defer r.quota.mu.Unlock()
+		size, err := r.measureRepositoryBytes()
 		if err != nil {
 			return nil, err
 		}
