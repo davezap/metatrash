@@ -94,6 +94,16 @@ func checkReadOnlyEntry(entry string) error {
 // folders. readOnly is never inherited: its names are relative to its folder.
 func (r *repository) readOnlyRules(ctx context.Context, files map[string]record, written map[string]string) (map[string]lockMap, error) {
 	rules := map[string]lockMap{}
+	var hashes []string
+	for p, f := range files {
+		if _, ok := written[p]; !ok && isFolderConfig(p) {
+			hashes = append(hashes, f.Blob)
+		}
+	}
+	configs, err := r.cachedConfigs(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
 	for p, f := range files {
 		if !isFolderConfig(p) {
 			continue
@@ -101,10 +111,7 @@ func (r *repository) readOnlyRules(ctx context.Context, files map[string]record,
 		if _, ok := written[p]; ok {
 			continue
 		}
-		c, err := r.cachedConfig(ctx, f.Blob)
-		if err != nil {
-			return nil, err
-		}
+		c := configs[f.Blob].config
 		if len(c.ReadOnly) > 0 {
 			rules[configFolder(p)] = c.ReadOnly
 		}

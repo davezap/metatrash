@@ -158,15 +158,13 @@ func githubFolderArg(arg string) (string, error) {
 func (r *repository) githubFolderService(ctx context.Context, files map[string]record, folder string) (folderService, error) {
 	f, ok := files[folder+folderConfigName]
 	if ok {
-		b, err := r.blob(ctx, f.Blob)
+		c, err := r.cachedConfig(ctx, f.Blob)
 		if err != nil {
 			return folderService{}, err
 		}
-		if c, err := parseFolderConfig(string(b)); err == nil {
-			for _, svc := range c.Services {
-				if svc.Type == "github" {
-					return svc.withDefaults(), nil
-				}
+		for _, svc := range c.Services {
+			if svc.Type == "github" {
+				return svc.withDefaults(), nil
 			}
 		}
 	}

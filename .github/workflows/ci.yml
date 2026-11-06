@@ -57,8 +57,8 @@ jobs:
             '{network: "tcp", address: "127.0.0.1:3306", database: "metatrash", username: "metatrash_accounts", passwordFile: $pw}' \
             > "$RUNNER_TEMP/account-database.json"
 
-      - name: Write scheduling, repository accounting and snapshot cache regression
-        run: go test -race ./internal/service -run '^TestSnapshotCache|^TestRepositoryBytes|^TestWriteScheduler|^TestSerialWrite|^TestCoreRejectsCompanySchedulingSettings$' -count=5 -timeout=180s
+      - name: B2 Git/cache, scheduling and repository accounting regression
+        run: go test -race ./internal/service -run '^TestGitBatch|^TestConfigCache|^TestSnapshotCache|^TestRepositoryBytes|^TestWriteScheduler|^TestSerialWrite|^TestCoreRejectsCompanySchedulingSettings$' -count=5 -timeout=300s
 
       - name: go test
         env:

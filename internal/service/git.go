@@ -43,7 +43,7 @@ type repository struct {
 	rootAgents string
 	// configBlobs caches .metatrash.json texts parsed, by blob hash (see
 	// cachedConfig).
-	configBlobs sync.Map
+	configBlobs configCache
 	// snapshots holds immutable, decorated indexes; callers receive deep copies.
 	snapshots snapshotCache
 	// committed, when set, hears of every commit (old and new state), so
@@ -77,6 +77,19 @@ func (r *repository) notify() {
 func git(ctx context.Context, repo, objects string, input []byte, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	cmd := gitCommand(ctx, repo, objects, args...)
+	cmd.Stdin = bytes.NewReader(input)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %w (%s)", args[0], err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+// Keep ordinary and streaming Git operations on the same hardened environment.
+func gitCommand(ctx context.Context, repo, objects string, args ...string) *exec.Cmd {
 	base := []string{"-c", "gc.auto=0", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false"}
 	if repo != "" {
 		base = append(base, "--git-dir="+repo)
@@ -91,14 +104,7 @@ func git(ctx context.Context, repo, objects string, input []byte, args ...string
 	if objects != "" {
 		cmd.Env = append(cmd.Env, "GIT_OBJECT_DIRECTORY="+objects, "GIT_ALTERNATE_OBJECT_DIRECTORIES="+filepath.Join(repo, "objects"), "GIT_INDEX_FILE="+filepath.Join(filepath.Dir(objects), "index"))
 	}
-	cmd.Stdin = bytes.NewReader(input)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git %s: %w (%s)", args[0], err, strings.TrimSpace(stderr.String()))
-	}
-	return out, nil
+	return cmd
 }
 
 func (r *repository) head(ctx context.Context) (string, error) {
@@ -168,13 +174,19 @@ func (r *repository) loadSnapshot(ctx context.Context, revision string) (map[str
 	if err = json.Unmarshal(b, &files); err != nil {
 		return nil, 0, err
 	}
-	github, err := r.githubFolders(ctx, files, nil)
+	configs, err := r.folderConfigs(ctx, files)
 	if err != nil {
 		return nil, 0, err
 	}
-	readOnly, err := r.readOnlyRules(ctx, files, nil)
-	if err != nil {
-		return nil, 0, err
+	github := map[string]bool{}
+	readOnly := map[string]lockMap{}
+	for folder, config := range configs {
+		if folder != "" && config.has("github") {
+			github[folder] = true
+		}
+		if len(config.ReadOnly) > 0 {
+			readOnly[folder] = config.ReadOnly
+		}
 	}
 	markFolderFiles(files, github, readOnly)
 	return files, snapshotCost(files, len(b)), nil

@@ -2,6 +2,7 @@ package service
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,10 +56,16 @@ func TestIngressLimits(t *testing.T) {
 }
 
 func TestIngressLimitsInvalid(t *testing.T) {
-	s := openPublicTestService(t)
+	// Invalid constructor policy must fail before handler/service setup. No Git
+	// repository, scheduler or filesystem fixture is needed for this check.
+	s := &Service{}
 	for _, limits := range []IngressLimits{{}, {1, 0}, {0, 1}, {-1, 1}, {1, -1}, {1, 2}} {
-		if _, err := s.HandlerWithIngressLimits(nil, nil, "https://metatrash.com", &limits); err == nil {
-			t.Fatalf("accepted invalid limits: %+v", limits)
+		handler, err := s.HandlerWithIngressLimits(nil, nil, "https://metatrash.com", &limits)
+		if err == nil || handler != nil || !strings.Contains(err.Error(), "ingress limits must be positive and client must not exceed global") {
+			t.Fatalf("limits %+v: handler=%v err=%v; want ingress policy rejection", limits, handler, err)
 		}
+	}
+	if s.configurationFrozen {
+		t.Fatal("invalid ingress policy froze service configuration")
 	}
 }

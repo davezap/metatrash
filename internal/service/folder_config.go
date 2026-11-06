@@ -329,11 +329,11 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 		return folderConfigError("the space root has no parent folder to inherit from.")
 	}
 	if f, ok := files[path]; ok && c.PublishedVersion != nil {
-		b, err := r.blob(ctx, f.Blob)
+		old, err := r.cachedConfig(ctx, f.Blob)
 		if err != nil {
 			return err
 		}
-		if old, err := parseFolderConfig(string(b)); err == nil && old.PublishedVersion != nil && *c.PublishedVersion < *old.PublishedVersion {
+		if old.PublishedVersion != nil && *c.PublishedVersion < *old.PublishedVersion {
 			return folderConfigError(fmt.Sprintf("publishedVersion only goes up: it is %d, so publish the next version as %d.", *old.PublishedVersion, *old.PublishedVersion+1))
 		}
 	}
@@ -359,14 +359,9 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 		if !strings.HasPrefix(folder, otherFolder) && !strings.HasPrefix(otherFolder, folder) {
 			continue
 		}
-		b, err := r.blob(ctx, f.Blob)
+		existing, err := r.cachedConfig(ctx, f.Blob)
 		if err != nil {
 			return err
-		}
-		existing, err := parseFolderConfig(string(b))
-		if err != nil {
-			// Written before a rule tightened; it attaches nothing we can rely on.
-			continue
 		}
 		for _, svc := range c.Services {
 			if existing.has(svc.Type) && !serviceKinds[svc.Type].nest {
@@ -445,16 +440,23 @@ func jsonProblem(err error) string {
 // folder it describes. Files that no longer validate are skipped.
 func (r *repository) folderConfigs(ctx context.Context, files map[string]record) (map[string]folderConfig, error) {
 	configs := map[string]folderConfig{}
+	var hashes []string
+	for path, f := range files {
+		if isFolderConfig(path) {
+			hashes = append(hashes, f.Blob)
+		}
+	}
+	parsed, err := r.cachedConfigs(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
 	for path, f := range files {
 		if !isFolderConfig(path) {
 			continue
 		}
-		b, err := r.blob(ctx, f.Blob)
-		if err != nil {
-			return nil, err
-		}
-		if c, err := parseFolderConfig(string(b)); err == nil {
-			configs[configFolder(path)] = c
+		if c := parsed[f.Blob]; c.valid {
+			// Identical blobs in different folders must not share mutable maps.
+			configs[configFolder(path)] = cloneFolderConfig(c.config)
 		}
 	}
 	return configs, nil

@@ -56,19 +56,11 @@ func folderChain(path string) []string {
 // cachedConfig returns the parsed .metatrash.json stored as blob; a text
 // that no longer validates counts as no settings.
 func (r *repository) cachedConfig(ctx context.Context, blob string) (folderConfig, error) {
-	if c, ok := r.configBlobs.Load(blob); ok {
-		return c.(folderConfig), nil
-	}
-	b, err := r.blob(ctx, blob)
+	configs, err := r.cachedConfigs(ctx, []string{blob})
 	if err != nil {
 		return folderConfig{}, err
 	}
-	c, err := parseFolderConfig(string(b))
-	if err != nil {
-		c = folderConfig{}
-	}
-	r.configBlobs.Store(blob, c)
-	return c, nil
+	return configs[blob].config, nil
 }
 
 // githubFolders returns the folders whose .metatrash.json attaches a GitHub
@@ -76,6 +68,16 @@ func (r *repository) cachedConfig(ctx context.Context, blob string) (folderConfi
 // which decide for their own folders.
 func (r *repository) githubFolders(ctx context.Context, files map[string]record, written map[string]string) (map[string]bool, error) {
 	folders := map[string]bool{}
+	var hashes []string
+	for p, f := range files {
+		if _, ok := written[p]; !ok && isFolderConfig(p) && p != folderConfigName {
+			hashes = append(hashes, f.Blob)
+		}
+	}
+	configs, err := r.cachedConfigs(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
 	for p, f := range files {
 		if !isFolderConfig(p) || p == folderConfigName {
 			continue
@@ -83,10 +85,7 @@ func (r *repository) githubFolders(ctx context.Context, files map[string]record,
 		if _, ok := written[p]; ok {
 			continue
 		}
-		c, err := r.cachedConfig(ctx, f.Blob)
-		if err != nil {
-			return nil, err
-		}
+		c := configs[f.Blob].config
 		if c.has("github") {
 			folders[configFolder(p)] = true
 		}

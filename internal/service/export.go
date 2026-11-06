@@ -2,7 +2,6 @@ package service
 
 import (
 	"archive/zip"
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -141,52 +139,6 @@ func (r *repository) exportZip(ctx context.Context, space string, out io.Writer,
 		return "", err
 	}
 	return state, nil
-}
-
-// blobs reads many blobs with one git process.
-func (r *repository) blobs(ctx context.Context, hashes []string) (map[string][]byte, error) {
-	out := map[string][]byte{}
-	var input bytes.Buffer
-	for _, h := range hashes {
-		if !hashPattern.MatchString(h) {
-			return nil, fmt.Errorf("invalid stored blob")
-		}
-		if _, ok := out[h]; !ok {
-			out[h] = nil
-			input.WriteString(h + "\n")
-		}
-	}
-	if len(out) == 0 {
-		return out, nil
-	}
-	b, err := git(ctx, r.path, "", input.Bytes(), "cat-file", "--batch")
-	if err != nil {
-		return nil, err
-	}
-	rd := bufio.NewReader(bytes.NewReader(b))
-	for range len(out) {
-		header, err := rd.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("short blob batch")
-		}
-		fields := strings.Fields(header)
-		if len(fields) != 3 || fields[1] != "blob" {
-			return nil, fmt.Errorf("stored blob missing")
-		}
-		size, err := strconv.Atoi(fields[2])
-		if err != nil || size < 0 {
-			return nil, fmt.Errorf("invalid blob batch")
-		}
-		text := make([]byte, size+1)
-		if _, err := io.ReadFull(rd, text); err != nil || text[size] != '\n' {
-			return nil, fmt.Errorf("short blob batch")
-		}
-		if _, ok := out[fields[0]]; !ok {
-			return nil, fmt.Errorf("unexpected blob in batch")
-		}
-		out[fields[0]] = text[:size]
-	}
-	return out, nil
 }
 
 // ExportRepository exports the Git repository at gitDir the way the REST

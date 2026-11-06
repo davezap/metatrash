@@ -384,10 +384,12 @@ func (w *runnerWorld) exists(path string) bool {
 	return ok
 }
 
-// wait waits until n jobs have finished and none is queued or running.
+// wait waits until n jobs have finished and their workers have returned, including
+// recording runner.md. store.finish happens before the log append, so terminal
+// statuses alone (or a fixed pause) do not make subsequent log reads safe.
 func (w *runnerWorld) wait(n int) []agentJob {
 	w.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		jobs := w.store.list("")
 		finished := 0
@@ -396,8 +398,10 @@ func (w *runnerWorld) wait(n int) []agentJob {
 				finished++
 			}
 		}
-		if finished >= n && finished == len(jobs) && w.exists("hr/"+runnerLogName) {
-			time.Sleep(50 * time.Millisecond) // let the runner.md append land
+		w.runner.mu.Lock()
+		running := w.runner.running[w.repo.id]
+		w.runner.mu.Unlock()
+		if finished >= n && finished == len(jobs) && !running {
 			return w.store.list("")
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -406,8 +410,8 @@ func (w *runnerWorld) wait(n int) []agentJob {
 	return nil
 }
 
-// readUntil reads a file until it holds want, for up to 5 seconds: wait's
-// pause can be too short on a slow machine when runner.md already existed.
+// readUntil reads a file until it holds want, for up to 5 seconds, including
+// entries recorded outside a tracked worker (such as enqueue-time skips).
 func (w *runnerWorld) readUntil(path, want string) string {
 	w.t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

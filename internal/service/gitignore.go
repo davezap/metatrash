@@ -221,13 +221,19 @@ func (m *ignoreMatcher) ignored(path string) bool {
 // Metatrash folders and is never part of the repo.
 func (r *repository) repoFiles(ctx context.Context, files map[string]record, folder string) (send, skip []string, err error) {
 	gitignores := map[string]string{}
+	var hashes []string
 	for p, f := range files {
 		if rel, ok := strings.CutPrefix(p, folder); ok && (rel == ".gitignore" || strings.HasSuffix(rel, "/.gitignore")) {
-			b, err := r.blob(ctx, f.Blob)
-			if err != nil {
-				return nil, nil, err
-			}
-			gitignores[rel] = string(b)
+			hashes = append(hashes, f.Blob)
+		}
+	}
+	texts, err := r.blobs(ctx, hashes)
+	if err != nil {
+		return nil, nil, err
+	}
+	for p, f := range files {
+		if rel, ok := strings.CutPrefix(p, folder); ok && (rel == ".gitignore" || strings.HasSuffix(rel, "/.gitignore")) {
+			gitignores[rel] = string(texts[f.Blob])
 		}
 	}
 	m := newIgnoreMatcher(gitignores)
