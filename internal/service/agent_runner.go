@@ -530,11 +530,7 @@ func (a *agentRunner) queue(ctx context.Context, spaceID string, t actionTrigger
 
 // configsChanged reports whether a change touched any .metatrash.json.
 func (r *repository) configsChanged(ctx context.Context, old, state string) (bool, error) {
-	_, before, err := r.snapshot(ctx, old)
-	if err != nil {
-		return false, err
-	}
-	_, after, err := r.snapshot(ctx, state)
+	before, after, err := r.snapshotPair(ctx, old, state)
 	if err != nil {
 		return false, err
 	}

@@ -44,6 +44,8 @@ type repository struct {
 	// configBlobs caches .metatrash.json texts parsed, by blob hash (see
 	// cachedConfig).
 	configBlobs sync.Map
+	// snapshots holds immutable, decorated indexes; callers receive deep copies.
+	snapshots snapshotCache
 	// committed, when set, hears of every commit (old and new state), so
 	// folder actions can queue jobs (Service.agentCommitted).
 	committed func(ctx context.Context, old, state string)
@@ -116,6 +118,27 @@ func (r *repository) snapshot(ctx context.Context, revision string) (string, map
 	if err != nil {
 		return "", nil, err
 	}
+	return r.snapshotAtHead(ctx, revision, head)
+}
+
+// snapshotPair compares immutable revisions against a single observed HEAD.
+// Commit callbacks use this for config changes and folder-action triggers.
+func (r *repository) snapshotPair(ctx context.Context, before, after string) (map[string]record, map[string]record, error) {
+	head, err := r.head(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, old, err := r.snapshotAtHead(ctx, before, head)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, files, err := r.snapshotAtHead(ctx, after, head)
+	return old, files, err
+}
+
+// snapshotAtHead reuses a HEAD already captured by this operation. Cached
+// historical data must still pass ancestry validation against that HEAD.
+func (r *repository) snapshotAtHead(ctx context.Context, revision, head string) (string, map[string]record, error) {
 	if revision == "" {
 		revision = head
 	}
@@ -127,24 +150,34 @@ func (r *repository) snapshot(ctx context.Context, revision string) (string, map
 			return "", nil, missing()
 		}
 	}
-	b, err := git(ctx, r.path, "", nil, "show", revision+":"+indexPath)
+	files, err := r.snapshots.load(ctx, revision, func() (map[string]record, int64, error) {
+		return r.loadSnapshot(ctx, revision)
+	})
 	if err != nil {
 		return "", nil, err
+	}
+	return revision, files, nil
+}
+
+func (r *repository) loadSnapshot(ctx context.Context, revision string) (map[string]record, int64, error) {
+	b, err := git(ctx, r.path, "", nil, "show", revision+":"+indexPath)
+	if err != nil {
+		return nil, 0, err
 	}
 	files := map[string]record{}
 	if err = json.Unmarshal(b, &files); err != nil {
-		return "", nil, err
+		return nil, 0, err
 	}
 	github, err := r.githubFolders(ctx, files, nil)
 	if err != nil {
-		return "", nil, err
+		return nil, 0, err
 	}
 	readOnly, err := r.readOnlyRules(ctx, files, nil)
 	if err != nil {
-		return "", nil, err
+		return nil, 0, err
 	}
 	markFolderFiles(files, github, readOnly)
-	return revision, files, nil
+	return files, snapshotCost(files, len(b)), nil
 }
 
 func (r *repository) blob(ctx context.Context, hash string) ([]byte, error) {

@@ -31,6 +31,9 @@ func TestListUnchangedWithoutIndex(t *testing.T) {
 	if !hashPattern.MatchString(hash) {
 		t.Fatalf("invalid index hash %q", hash)
 	}
+	// This fixture tests the no-index fast path, independently of warm caches
+	// populated during service startup.
+	r.snapshots = snapshotCache{}
 	if err := os.Remove(filepath.Join(r.path, "objects", hash[:2], hash[2:])); err != nil {
 		t.Fatal(err)
 	}

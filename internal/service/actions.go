@@ -280,11 +280,7 @@ type actionTrigger struct {
 // and matches an action. A folder's own files (AGENTS.md, .metatrash.json)
 // and its runner.md never trigger. The actions are those of the new state.
 func (r *repository) triggersBetween(ctx context.Context, old, state string) ([]actionTrigger, error) {
-	_, before, err := r.snapshot(ctx, old)
-	if err != nil {
-		return nil, err
-	}
-	_, after, err := r.snapshot(ctx, state)
+	before, after, err := r.snapshotPair(ctx, old, state)
 	if err != nil {
 		return nil, err
 	}

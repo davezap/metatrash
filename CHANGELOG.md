@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.1 - Reuse immutable Git snapshots (2026-11-06)
+
+- Cache decoded indexes and revision-derived folder protection/lock flags per repository, with LRU eviction at four revisions or 8 MiB of estimated storage. Coalesce simultaneous loads of a revision; failed and oversized loads are not retained. Return independent maps and virtual/stale metadata to readers and writers.
+- Keep HEAD fresh and validate historical ancestry before cache access. Changed-list requests and paired config/action-trigger comparisons reuse one captured HEAD, removing duplicate revision probes while keeping the unchanged-list fast path. Reopened repository handles start cold; permissions and live virtual refresh status are outside this cache.
+- Add cache isolation, byte/entry eviction, concurrent load, cancellation, failure retry, HEAD/ancestry/reopen regressions and cold/warm snapshot benchmarks for David/Actions. No schema, grants, configuration, dependencies, lockfiles, frontend or tool-schema change. Existing parsed-config caching is unchanged; batched/persistent Git processes remain future work. Codex has not run tests/builds or measured a speedup. Company adoption and release commands: private docs/release-0.96.8.md (Core v0.95.1 / Company v0.96.8).
+
 ## 0.95.0 - Maintained repository quota accounting (2026-11-06)
 
 - Avoid full historical repository walks on warm commits in Core-created plain bare repositories. Keep a separate in-memory quota counter, measure cold/reopened handles, reserve staged bytes before promotion, and account for actual object/ref growth after success. SQL-seeded account usage is reporting only. Quota arithmetic and filesystem summation reject overflow.

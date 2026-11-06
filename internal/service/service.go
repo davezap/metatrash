@@ -628,7 +628,7 @@ func (s *Service) waitForChange(ctx context.Context, r *repository, after string
 // this space is not_found; the client then lists in full.
 func (s *Service) listChanges(ctx context.Context, r *repository, space, state string, files map[string]record, in Input) (ListResult, error) {
 	result := ListResult{Space: space, State: state, Files: []File{}}
-	_, old, err := r.snapshot(ctx, in.Since)
+	_, old, err := r.snapshotAtHead(ctx, in.Since, state)
 	if err != nil {
 		return result, err
 	}
@@ -700,6 +700,7 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 	if op == "list" && in.After != "" {
 		s.waitForChange(ctx, r, in.After)
 	}
+	var capturedHead string
 	if op == "list" && in.Since != "" {
 		// Equal revisions cannot contain file changes. Probe HEAD before loading
 		// either index; a concurrent commit is picked up on the next check, just
@@ -713,8 +714,16 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		if head == in.Since {
 			return ListResult{Space: space, State: head, Files: []File{}}, nil
 		}
+		capturedHead = head
 	}
-	state, files, err := r.snapshot(ctx, c.State)
+	var state string
+	var files map[string]record
+	var err error
+	if capturedHead != "" {
+		state, files, err = r.snapshotAtHead(ctx, c.State, capturedHead)
+	} else {
+		state, files, err = r.snapshot(ctx, c.State)
+	}
 	if err != nil {
 		return nil, err
 	}
