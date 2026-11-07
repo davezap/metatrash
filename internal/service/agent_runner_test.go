@@ -135,6 +135,16 @@ func (m *memoryJobStore) queued(_ context.Context, limit int) ([]agentJob, error
 	return jobs, nil
 }
 
+func (m *memoryJobStore) recent(_ context.Context, space string, since time.Time) ([]agentJob, error) {
+	var out []agentJob
+	for _, j := range m.list("") {
+		if j.SpaceID == space && !j.QueuedAt.Before(since) {
+			out = append([]agentJob{j}, out...)
+		}
+	}
+	return out, nil
+}
+
 func (m *memoryJobStore) running(context.Context) ([]agentJob, error) { return m.list(jobRunning), nil }
 
 func (m *memoryJobStore) get(_ context.Context, id string) (agentJob, bool, error) {

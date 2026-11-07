@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.95.9 - Space activity: conversions, agent jobs and who is here (2026-11-07)
+
+- New `activity` call for account spaces (`GET /api/v1/account/spaces/{owner}/{slug}/activity`, and `/api/v1/site/spaces/…/activity` for the site), so a client can show what is happening beyond the files instead of leaving people to wait for files to move (David, 2026-11-07). It answers `{space, docling, items}`; each item has `kind`, `path` (or `folder`), `state`, a `message` for a person and `since`:
+  - `conversion`: Docling's queue and pairing, `queued` (with `ahead`), `converting`, `pairing`, `failed` and `retrying` (with the reason and `retryAt`), `kept` (converted but left where it is, with why: the page exists, an `assets/` or GitHub folder, over the converter's size limit, a refused move) for an hour, and `converted` on the new page (with `from`) for 15 minutes.
+  - `agent`: folder action jobs from the account database (`queued`, `running`, and `done`, `failed` or `skipped` for 15 minutes after).
+  - `presence`: signed-in site pages that send `?viewing=<path>` are listed to the space's other readers for a minute after they last asked, with the file they have open.
+- Docling's queue now remembers when each conversion was queued and started and why it failed; pairing reports why it left an upload where it is. Conversions and presence live in memory: a restart forgets them, and each Metatrash process answers for its own.
+- TestActivity covers the conversion states, pairing results, agent jobs, presence and the HTTP answer; TestPresenceBoard the presence board; TestDatabaseAgentJobs the new job query with the runtime grants. No schema, grants, configuration, tool-schema or mtsync change.
+
 ## 0.95.8 - Uploads become Markdown pages; uploads on the site (2026-11-07)
 
 - Pairing (docs/docling.md): once Docling has converted an upload, the server moves `report.pdf` to `assets/report.pdf` (same file ID and history) and writes `report.md` in its place, starting with an "Open original PDF" link, as Slate Viewer's Convert to Markdown does. The site and Slate Viewer then open the Markdown, and the person may delete the original. Only uploads are paired (David's choice); files stored before stay where they are. Left where they are too: uploads into an `assets/` folder, ones whose `.md` or `assets/` copy exists, refreshing web downloads, files in GitHub folders, files changed before the conversion finished, and moves the folder's locks refuse. After pairing, `report.md` is an ordinary file that a later Docling never rewrites. `agents.docling.pair: false` turns it off; `metatrash check` shows it.

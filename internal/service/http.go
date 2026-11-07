@@ -342,6 +342,16 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		} else if r.Method == "PUT" {
 			op = "upload"
 		}
+	case "activity":
+		// Conversions, agent jobs and presence (0.95.9, activity.go), in
+		// owned spaces.
+		if !accountResource {
+			sendError(w, missing())
+			return
+		}
+		if r.Method == "GET" {
+			op = "activity"
+		}
 	case "configure":
 		// A virtual file's source and refresh (0.60.2).
 		if !accountResource {
@@ -409,6 +419,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	case "configure":
 		h.serveConfigure(w, r, repo, space)
+		return
+	case "activity":
+		h.serveActivity(w, r, repo, space)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)

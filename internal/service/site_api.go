@@ -54,6 +54,7 @@ var siteResources = map[string]string{
 	"file": "GET, PUT, DELETE", "files": "GET", "history": "GET", "search": "GET", "export": "GET",
 	"edit": "POST", "move": "POST", "append": "POST",
 	"content": "GET, PUT", "acknowledgements": "GET, POST", "submissions": "GET, POST", "reviews": "POST",
+	"activity": "GET",
 }
 
 // siteSpace is one space in the session answer.

@@ -49,6 +49,14 @@ reading order across columns, and OCR for scanned pages.
   and the Markdown ends with a line saying so.
 - Pages after the first start with `<!-- page N -->`, as with `pdftotext`.
   Pictures appear as `<!-- image -->`.
+- **Activity** (0.95.9). A space's `activity` call (`GET
+  /api/v1/account/spaces/{space}/activity`, and the site's) lists each file's
+  conversion as it goes: queued (with how many are ahead), converting,
+  pairing, failed or retrying with the reason, kept as is with the reason
+  (for example `report.md already exists`, or over `maxMB`), and converted on
+  the new page for 15 minutes. It also lists folder action jobs and who has
+  the space open on the site. The site's Files list shows it (Slate Viewer
+  0.30.0). The queue keeps this in memory, so a restart forgets it.
 
 ## Where it runs
 

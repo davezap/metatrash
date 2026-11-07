@@ -27,6 +27,8 @@ type outcome struct {
 }
 
 type Service struct {
+	// presence is who has each space open on the site (activity.go).
+	presence            presenceBoard
 	configurationFrozen bool
 	modules             []extension.Module
 	extensions          []extension.Hooks

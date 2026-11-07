@@ -48,6 +48,9 @@ type agentJobStore interface {
 	finish(ctx context.Context, j agentJob) error
 	// running returns jobs left running, as after a restart.
 	running(ctx context.Context) ([]agentJob, error)
+	// recent returns a space's jobs queued at or after since, newest
+	// first, at most 200 (activity.go).
+	recent(ctx context.Context, spaceID string, since time.Time) ([]agentJob, error)
 	// get returns one job; false when there is none.
 	get(ctx context.Context, id string) (agentJob, bool, error)
 	// Schedules of actions with "every" (schedules.go): a space's rows, the
@@ -162,6 +165,10 @@ func (s dbJobStore) list(ctx context.Context, query string, args ...any) ([]agen
 
 func (s dbJobStore) queued(ctx context.Context, limit int) ([]agentJob, error) {
 	return s.list(ctx, "WHERE status = 'queued' ORDER BY queued_at, job_id LIMIT ?", limit)
+}
+
+func (s dbJobStore) recent(ctx context.Context, spaceID string, since time.Time) ([]agentJob, error) {
+	return s.list(ctx, "WHERE space_id = ? AND queued_at >= ? ORDER BY queued_at DESC, job_id LIMIT 200", spaceID, since.Unix())
 }
 
 func (s dbJobStore) running(ctx context.Context) ([]agentJob, error) {

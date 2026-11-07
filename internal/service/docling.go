@@ -231,6 +231,13 @@ type doclingQueue struct {
 	ctx      context.Context
 	pairWant map[string][]string
 	paired   func(n int, err error)
+	// For activity (0.95.9, activity.go): when each key was queued and
+	// started converting, why the last try failed, and pairing's word on
+	// uploaded paths, by space ID then path.
+	queuedAt map[string]time.Time
+	running  map[string]time.Time
+	failures map[string]doclingFailure
+	notes    map[string]map[string]pathNote
 }
 
 // doclingRetrySoon marks a failure of the converter rather than of the PDF
@@ -242,7 +249,8 @@ func (e doclingRetrySoon) Error() string { return e.err.Error() }
 const doclingRetrySoonAfter = 15 * time.Minute
 
 func newDoclingQueue(s *Service, d *doclingSettings) *doclingQueue {
-	q := &doclingQueue{s: s, settings: d, jobs: make(chan doclingJob, doclingQueueSize), pending: map[string]bool{}, missing: map[string]time.Time{}, failed: map[string]time.Time{}, pairWant: map[string][]string{}}
+	q := &doclingQueue{s: s, settings: d, jobs: make(chan doclingJob, doclingQueueSize), pending: map[string]bool{}, missing: map[string]time.Time{}, failed: map[string]time.Time{}, pairWant: map[string][]string{},
+		queuedAt: map[string]time.Time{}, running: map[string]time.Time{}, failures: map[string]doclingFailure{}, notes: map[string]map[string]pathNote{}}
 	q.version, q.ident = d.version, d.ident
 	q.run = q.convertFile
 	if d.url != "" {
@@ -272,25 +280,43 @@ func (q *doclingQueue) start(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case j := <-q.jobs:
+					q.mu.Lock()
+					q.running[j.key] = time.Now()
+					q.mu.Unlock()
 					err := q.convert(ctx, j)
 					q.mu.Lock()
 					delete(q.pending, j.key)
+					delete(q.running, j.key)
+					delete(q.queuedAt, j.key)
+					now := time.Now()
 					var soon doclingRetrySoon
 					if errors.As(err, &soon) {
-						q.failed[j.key] = time.Now().Add(doclingRetrySoonAfter - doclingRetryAfter)
+						q.failed[j.key] = now.Add(doclingRetrySoonAfter - doclingRetryAfter)
+						q.failures[j.key] = doclingFailure{why: soon.Error(), soon: true, at: now, due: now.Add(doclingRetrySoonAfter)}
 					} else if err != nil {
-						q.failed[j.key] = time.Now()
+						q.failed[j.key] = now
+						q.failures[j.key] = doclingFailure{why: err.Error(), at: now, due: now.Add(doclingRetryAfter)}
 					} else {
 						delete(q.missing, j.key)
+						delete(q.failures, j.key)
+					}
+					for key, f := range q.failures {
+						if now.After(f.due) {
+							delete(q.failures, key)
+						}
+					}
+					uploaded := q.pairWant[j.key]
+					delete(q.pairWant, j.key)
+					if err == nil && len(uploaded) > 0 && ctx.Err() == nil {
+						// Listed as pairing from now, so activity has no gap.
+						for _, p := range uploaded {
+							q.note(j.r.id, p, pathNote{state: "pairing", message: "Converted. Moving the original into assets/ and writing the Markdown page in its place."})
+						}
 					}
 					q.mu.Unlock()
 					if err != nil && ctx.Err() == nil {
 						log.Printf("docling: space %s, file %s: %v", j.r.id, j.info.SHA256[:12], err)
 					}
-					q.mu.Lock()
-					uploaded := q.pairWant[j.key]
-					delete(q.pairWant, j.key)
-					q.mu.Unlock()
 					if err == nil && len(uploaded) > 0 {
 						q.pairLater(j.r, j.info, uploaded)
 					}
@@ -421,6 +447,7 @@ func (q *doclingQueue) enqueue(r *repository, v VirtualInfo) {
 	select {
 	case q.jobs <- doclingJob{r: r, info: v, key: key}:
 		q.pending[key] = true
+		q.queuedAt[key] = time.Now()
 	default:
 	}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/url"
 	"path"
@@ -36,6 +37,15 @@ func doclingPairLink(name, label string) string {
 // enqueueUpload converts an uploaded file and pairs it at path once
 // converted.
 func (q *doclingQueue) enqueueUpload(r *repository, path string, v VirtualInfo) {
+	if q == nil {
+		return
+	}
+	if format, ok := doclingFormats[v.Type]; ok && v.Size > q.settings.maxBytes && r.owned && r.id != "" {
+		q.mu.Lock()
+		q.note(r.id, path, pathNote{state: "kept", until: time.Now().Add(activityKeptFor),
+			message: fmt.Sprintf("Not converted to Markdown: this %s is over %d MB, the largest the converter takes. Agents read its plain text instead.", format.label, q.settings.maxBytes>>20)})
+		q.mu.Unlock()
+	}
 	if !q.wants(r, v) {
 		return
 	}
@@ -50,11 +60,18 @@ func (q *doclingQueue) enqueueUpload(r *repository, path string, v VirtualInfo) 
 	q.enqueue(r, v)
 }
 
+// pairOutcome is what pairing did with one uploaded path: page and
+// original when it paired it, why when it left it where it is.
+type pairOutcome struct{ path, page, original, why string }
+
 // pairLater pairs the uploaded paths in the background.
 func (q *doclingQueue) pairLater(r *repository, v VirtualInfo, paths []string) {
 	q.mu.Lock()
 	base := q.ctx
 	if base == nil || base.Err() != nil {
+		for _, p := range paths {
+			q.forget(r.id, p)
+		}
 		q.mu.Unlock()
 		return
 	}
@@ -64,9 +81,21 @@ func (q *doclingQueue) pairLater(r *repository, v VirtualInfo, paths []string) {
 		defer q.wg.Done()
 		ctx, cancel := context.WithTimeout(base, 2*time.Minute)
 		defer cancel()
-		n, err := q.pair(ctx, r, v, paths)
+		outcomes, err := q.pair(ctx, r, v, paths)
 		if err != nil && ctx.Err() == nil {
 			log.Printf("docling: space %s, file %s: pairing: %v", r.id, v.SHA256[:12], err)
+		}
+		n := 0
+		q.mu.Lock()
+		for _, p := range paths {
+			q.forget(r.id, p)
+		}
+		q.pairedNotes(r, outcomes)
+		q.mu.Unlock()
+		for _, o := range outcomes {
+			if o.page != "" {
+				n++
+			}
 		}
 		if q.paired != nil {
 			q.paired(n, err)
@@ -74,69 +103,89 @@ func (q *doclingQueue) pairLater(r *repository, v VirtualInfo, paths []string) {
 	}()
 }
 
-// pair moves each uploaded PDF into assets/ and writes its page, returning
-// how many it paired.
-func (q *doclingQueue) pair(ctx context.Context, r *repository, v VirtualInfo, paths []string) (int, error) {
+// pair moves each uploaded PDF into assets/ and writes its page, saying
+// what it did with each path.
+func (q *doclingQueue) pair(ctx context.Context, r *repository, v VirtualInfo, paths []string) ([]pairOutcome, error) {
 	text, ok, _ := q.text(ctx, r, v)
 	if !ok {
-		return 0, nil
+		return nil, nil
 	}
 	head, files, err := r.snapshot(ctx, "")
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	github, err := r.githubFolders(ctx, files, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	paired := 0
+	var outcomes []pairOutcome
 	for _, p := range paths {
 		f, ok := files[p]
-		if !ok || f.Virtual == nil || f.Virtual.SHA256 != v.SHA256 || !pairable(p, *f.Virtual, github) {
+		if !ok || f.Virtual == nil || f.Virtual.SHA256 != v.SHA256 {
+			continue // changed, moved or deleted before the conversion finished
+		}
+		if why := pairWhy(p, *f.Virtual, github); why != "" {
+			outcomes = append(outcomes, pairOutcome{path: p, why: why})
 			continue
 		}
 		dir, name := path.Split(p)
 		page := dir + strings.TrimSuffix(name, path.Ext(name)) + ".md"
 		original := dir + "assets/" + name
 		if _, exists := files[page]; exists {
+			outcomes = append(outcomes, pairOutcome{path: p, why: path.Base(page) + " already exists"})
 			continue
 		}
 		if _, exists := files[original]; exists {
+			outcomes = append(outcomes, pairOutcome{path: p, why: "assets/" + name + " already exists"})
 			continue
 		}
 		body := doclingPairLink(name, doclingFormats[f.Virtual.Type].label) + text
 		if int64(len(body)) > r.limits.MaxFileBytes {
+			outcomes = append(outcomes, pairOutcome{path: p, why: "its Markdown is larger than a file in this space may be"})
 			continue
 		}
 		moved, err := q.s.dispatchRepository(ctx, r, r.id, "move", Input{From: p, To: original, IfInState: head})
 		if err != nil {
-			return paired, err
+			outcomes = append(outcomes, pairOutcome{path: p, why: "moving it into assets/ was refused (" + err.Error() + ")"})
+			return outcomes, err
 		}
 		head = moved.(Mutation).NewState
 		written, err := q.s.dispatchRepository(ctx, r, r.id, "write", Input{Path: page, Text: &body, IfInState: head, CreateOnly: true})
 		if err != nil {
-			return paired, err
+			// The original is in assets/ now; its note goes there.
+			outcomes = append(outcomes, pairOutcome{path: original, why: "writing " + path.Base(page) + " was refused (" + err.Error() + ")"})
+			return outcomes, err
 		}
 		head = written.(WriteResult).NewState
 		files[original], files[page] = f, record{}
-		paired++
+		outcomes = append(outcomes, pairOutcome{path: p, page: page, original: original})
 	}
-	return paired, nil
+	return outcomes, nil
 }
 
 // pairable reports an uploaded file that pairing may move.
 func pairable(p string, v VirtualInfo, github map[string]bool) bool {
+	return pairWhy(p, v, github) == ""
+}
+
+// pairWhy says why pairing leaves an upload where it is, "" when it may move.
+func pairWhy(p string, v VirtualInfo, github map[string]bool) string {
 	format, ok := doclingFormats[v.Type]
-	if !ok || v.Refresh != "" || !strings.EqualFold(path.Ext(p), "."+format.ext) {
-		return false
+	switch {
+	case !ok:
+		return "Metatrash doesn't pair this type"
+	case v.Refresh != "":
+		return "it is fetched from the web again on a schedule"
+	case !strings.EqualFold(path.Ext(p), "."+format.ext):
+		return "its name doesn't end in ." + format.ext
 	}
 	if path.Base(path.Dir(p)) == "assets" {
-		return false
+		return "it is in an assets/ folder"
 	}
 	for folder := range github {
 		if strings.HasPrefix(p, folder) {
-			return false
+			return "it is in a folder that mirrors GitHub"
 		}
 	}
-	return true
+	return ""
 }

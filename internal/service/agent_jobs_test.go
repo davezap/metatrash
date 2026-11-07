@@ -97,6 +97,13 @@ func TestDatabaseAgentJobs(t *testing.T) {
 	if n, err := store.tokensSince(ctx, first.ID, time.Now().Add(-time.Hour)); err != nil || n != 1060 {
 		t.Errorf("tokensSince %d %v", n, err)
 	}
+	// Activity (0.95.9) lists the finished job from the database.
+	if recent, err := store.recent(ctx, w.ownedID, time.Now().Add(-time.Hour)); err != nil || len(recent) != 1 || recent[0].ID != jobs[0].ID {
+		t.Errorf("recent %+v %v", recent, err)
+	}
+	if a, err := w.s.activity(ctx, repo, w.ownedName, nil); err != nil || len(a.Items) != 1 || a.Items[0].Kind != "agent" || a.Items[0].State != "done" || a.Items[0].Path != "inbox/a.txt" {
+		t.Errorf("activity %+v %v", a, err)
+	}
 	deadline = time.Now().Add(5 * time.Second)
 	var log string
 	for time.Now().Before(deadline) && !strings.Contains(log, "Noted.") {
