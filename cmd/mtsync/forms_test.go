@@ -43,15 +43,15 @@ func TestSubmitAndReceipts(t *testing.T) {
 	}))
 	defer server.Close()
 	c := newClient(server.URL, "dave/work/hr", func(context.Context, bool) (string, error) { return "t", nil }, true)
-	r, err := c.submit(context.Background(), "forms/leave.md", "abc", 0, json.RawMessage(`{"name":"Pat"}`))
-	if err != nil || r.Template != "forms/leave.md" || posted["path"] != "hr/forms/leave.md" || posted["blob"] != "abc" || posted["today"] == "" || posted["version"] != nil {
+	r, err := c.submit(context.Background(), "forms/leave.md", "abc", 0, "", json.RawMessage(`{"name":"Pat"}`))
+	if err != nil || r.Template != "forms/leave.md" || posted["path"] != "hr/forms/leave.md" || posted["blob"] != "abc" || posted["today"] == "" || posted["version"] != nil || posted["resends"] != nil {
 		t.Fatalf("submit: %+v %v %v", r, posted, err)
 	}
 	posted = nil
-	if _, err := c.submit(context.Background(), "forms/leave.md", "abc", 3, json.RawMessage(`{"name":"Pat"}`)); err != nil || posted["version"] != float64(3) || posted["blob"] != nil {
+	if _, err := c.submit(context.Background(), "forms/leave.md", "abc", 3, "0123456789abcdef0123456789abcdef", json.RawMessage(`{"name":"Pat"}`)); err != nil || posted["version"] != float64(3) || posted["blob"] != nil || posted["resends"] != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("submit published: %v %v", posted, err)
 	}
-	_, err = c.submit(context.Background(), "forms/leave.md", "abc", 0, json.RawMessage(`{"name":""}`))
+	_, err = c.submit(context.Background(), "forms/leave.md", "abc", 0, "", json.RawMessage(`{"name":""}`))
 	var refused *apiError
 	if !errors.As(err, &refused) || refused.Status != 400 || len(refused.Fields) != 1 || refused.Fields[0].Name != "name" {
 		t.Fatalf("refused: %v", err)
@@ -121,6 +121,9 @@ func TestReview(t *testing.T) {
 	}
 	if got := reviewLine(r); got != "Not passed (75%): Read it again." {
 		t.Fatalf("line: %q", got)
+	}
+	if got := reviewLine(receipt{ID: "r9", Status: "needs-info", Note: "Your full name."}); got != "Needs more information (fix it and send it again with -resends r9): Your full name." {
+		t.Fatal(got)
 	}
 	if got := reviewLine(receipt{Status: "approved"}); got != "Approved" {
 		t.Fatalf("form line: %q", got)

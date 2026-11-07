@@ -23,7 +23,10 @@ import (
 //
 // POST .../reviews  {"path", "status"?, "note"?, "marks"?}
 //
-// path is the copy in this space. A form takes status approved or declined;
+// path is the copy in this space. A form takes status approved or declined,
+// or needs-info with a note saying what is missing (0.95.10): the sender
+// fixes the form and sends it again as a new copy that names this one
+// (resends), and this one becomes resent and can't be reviewed any more;
 // a quiz takes marks ({"field": true|false}) for at least every answer still
 // to tick, and its status follows from the score. The receipt (My
 // Submissions) and the copy are updated; the copy is filled in again from
@@ -41,17 +44,17 @@ type reviewRequest struct {
 
 // reviewedRow is a receipt as a review needs it.
 type reviewedRow struct {
-	id, spaceID, userID, blob, templatePath, revision, targetFileID string
-	quiz                                                            bool
-	answers, marks                                                  sql.NullString
+	id, spaceID, userID, blob, templatePath, revision, targetFileID, status string
+	quiz                                                                    bool
+	answers, marks                                                          sql.NullString
 }
 
 func (db *accountDatabase) reviewedRow(ctx context.Context, id, targetSpaceID string) (reviewedRow, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var r reviewedRow
-	err := db.db.QueryRowContext(ctx, "SELECT submission_id, space_id, user_id, template_blob, template_path, template_revision, target_file_id, quiz, answers, marks FROM metatrash_form_submissions WHERE submission_id = ? AND target_space_id = ?", id, targetSpaceID).
-		Scan(&r.id, &r.spaceID, &r.userID, &r.blob, &r.templatePath, &r.revision, &r.targetFileID, &r.quiz, &r.answers, &r.marks)
+	err := db.db.QueryRowContext(ctx, "SELECT submission_id, space_id, user_id, template_blob, template_path, template_revision, target_file_id, status, quiz, answers, marks FROM metatrash_form_submissions WHERE submission_id = ? AND target_space_id = ?", id, targetSpaceID).
+		Scan(&r.id, &r.spaceID, &r.userID, &r.blob, &r.templatePath, &r.revision, &r.targetFileID, &r.status, &r.quiz, &r.answers, &r.marks)
 	if err == sql.ErrNoRows {
 		return r, false, nil
 	}
@@ -112,6 +115,9 @@ func (s *Service) reviewCopy(ctx context.Context, repo *repository, userID strin
 	if !found || row.targetFileID != f.ID {
 		return Receipt{}, notCopy
 	}
+	if row.status == "resent" {
+		return Receipt{}, problem(409, "resent", "This copy was sent again after you asked for more information; review the new copy, which names this one as resends.")
+	}
 	quizRepo := s.ownedRepository(row.spaceID)
 	if quizRepo == nil {
 		return Receipt{}, problem(409, "conflict", "The space this form came from is gone, so its copy cannot be filled in again.")
@@ -150,9 +156,12 @@ func (s *Service) reviewCopy(ctx context.Context, repo *repository, userID strin
 	}
 	now := s.now().UTC()
 	sub := submission{Template: copied.keys["template"], Revision: row.revision, Blob: row.blob, ID: row.id, By: copied.keys["submittedBy"], At: at, ReviewedBy: reviewer, ReviewedAt: now, Note: note}
+	if r := copied.keys["resends"]; receiptIDPattern.MatchString(r) {
+		sub.Resends = r
+	}
 	if row.quiz {
 		if in.Status != "" {
-			return Receipt{}, invalid("A quiz's status follows from its marks; send marks, not status.")
+			return Receipt{}, invalid("A quiz's status follows from its marks; send marks, not status. A quiz can't be sent back for more information: mark it, and the person can try again.")
 		}
 		var marks map[string]*bool
 		if !row.marks.Valid || json.Unmarshal([]byte(row.marks.String), &marks) != nil {
@@ -179,8 +188,11 @@ func (s *Service) reviewCopy(ctx context.Context, repo *repository, userID strin
 		if in.Marks != nil {
 			return Receipt{}, invalid("Only quizzes take marks.")
 		}
-		if in.Status != "approved" && in.Status != "declined" {
-			return Receipt{}, invalid(`status is "approved" or "declined".`)
+		if in.Status != "approved" && in.Status != "declined" && in.Status != "needs-info" {
+			return Receipt{}, invalid(`status is "approved", "declined" or "needs-info".`)
+		}
+		if in.Status == "needs-info" && note == "" {
+			return Receipt{}, invalid("needs-info takes a note saying what the sender should add or change.")
 		}
 		sub.Status = in.Status
 	}
@@ -250,7 +262,7 @@ func (h *httpAdapter) serveReviews(w http.ResponseWriter, r *http.Request, repo 
 	}
 	var body reviewRequest
 	if err := strictJSON(b, &body); err != nil || body.Path == "" {
-		sendError(w, invalid(`Send {"path": "...", "status": "approved"} for a form, or {"path": "...", "marks": {"field": true}} for a quiz, with an optional "note".`))
+		sendError(w, invalid(`Send {"path": "...", "status": "approved"} for a form ("declined", or "needs-info" with a note saying what is missing), or {"path": "...", "marks": {"field": true}} for a quiz, with an optional "note".`))
 		return
 	}
 	value, err := h.service.reviewCopy(r.Context(), repo, identity.oauth.UserID, body)

@@ -82,8 +82,13 @@ type Receipt struct {
 	// Only in the answer to sending.
 	Acknowledged int `json:"acknowledged,omitempty"`
 	// Status is submitted (waiting for review), approved or declined
-	// (0.50.0); Note and ReviewedAt come from the reviewer.
-	Status     string `json:"status"`
+	// (0.50.0), needs-info (the reviewer's note asks for more; send the form
+	// again with resends) or resent (it was sent again) (0.95.10); Note and
+	// ReviewedAt come from the reviewer.
+	Status string `json:"status"`
+	// Resends is the needs-info copy this one replaced; only in the answer
+	// to sending (0.95.10).
+	Resends    string `json:"resends,omitempty"`
 	Note       string `json:"note,omitempty"`
 	ReviewedAt string `json:"reviewedAt,omitempty"`
 	// Quiz copies have a score once marked and a tick or cross per marked
@@ -263,6 +268,91 @@ type submitRequest struct {
 	// Today is the person's local date, for date limits given as today; the
 	// server's UTC date is used when it is missing or more than a day away.
 	Today string `json:"today,omitempty"`
+	// Resends is the receipt ID of the person's copy of this form that a
+	// reviewer marked needs-info (0.95.10). The new copy names it, and it
+	// becomes resent.
+	Resends string `json:"resends,omitempty"`
+}
+
+// resendRow is a needs-info copy being sent again.
+type resendRow struct {
+	targetSpaceID, targetFileID string
+}
+
+// claimResend marks the person's needs-info copy id of the form fileID as
+// resent, so it is sent again only once. found is false when there is no
+// such copy, and claimed false when it is not needs-info (status says what
+// it is).
+func (db *accountDatabase) claimResend(ctx context.Context, id, spaceID, userID, fileID string) (row resendRow, status string, found, claimed bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var quiz bool
+	err = db.db.QueryRowContext(ctx, "SELECT target_space_id, target_file_id, status, quiz FROM metatrash_form_submissions WHERE submission_id = ? AND space_id = ? AND user_id = ? AND template_file_id = ?", id, spaceID, userID, fileID).
+		Scan(&row.targetSpaceID, &row.targetFileID, &status, &quiz)
+	if err == sql.ErrNoRows || err == nil && quiz {
+		return row, "", false, false, nil
+	}
+	if err != nil {
+		return row, "", false, false, fmt.Errorf("cannot read submissions")
+	}
+	if status != "needs-info" {
+		return row, status, true, false, nil
+	}
+	res, err := db.db.ExecContext(ctx, "UPDATE metatrash_form_submissions SET status = 'resent' WHERE submission_id = ? AND status = 'needs-info'", id)
+	if err != nil {
+		return row, status, true, false, fmt.Errorf("cannot record submission")
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		// A reviewer or another send got there first.
+		return row, "changed since", true, false, nil
+	}
+	return row, "resent", true, true, nil
+}
+
+// releaseResend puts a claimed copy back to needs-info when sending it
+// again failed.
+func (db *accountDatabase) releaseResend(ctx context.Context, id string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := db.db.ExecContext(ctx, "UPDATE metatrash_form_submissions SET status = 'needs-info' WHERE submission_id = ? AND status = 'resent'", id); err != nil {
+		log.Printf("form submission %s stays resent after sending it again failed: %v", id, err)
+	}
+}
+
+// resentText records the old copy's text after its file was marked resent.
+func (db *accountDatabase) resentText(ctx context.Context, id, text string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := db.db.ExecContext(ctx, "UPDATE metatrash_form_submissions SET text = ? WHERE submission_id = ?", text, id); err != nil {
+		return fmt.Errorf("cannot record submission")
+	}
+	return nil
+}
+
+// markResent is a filed copy's text with its status changed from needs-info
+// to resent and the new copy's receipt named as resentAs, or "" when the
+// text is not a needs-info copy.
+func markResent(text, newID string) string {
+	keys, _ := splitFrontMatter(text)
+	if keys == nil || keys["status"] != "needs-info" {
+		return ""
+	}
+	lines := strings.SplitAfter(text, "\n")
+	for i, line := range lines[1:] {
+		trimmed := strings.TrimRight(line, " \t\r\n")
+		if trimmed == "---" || trimmed == "..." {
+			break
+		}
+		if trimmed == "status: needs-info" {
+			end := line[len(strings.TrimRight(line, "\r\n")):]
+			if end == "" {
+				end = "\n"
+			}
+			lines[i+1] = "status: resent" + end + "resentAs: " + newID + end
+			return strings.Join(lines, "")
+		}
+	}
+	return ""
 }
 
 // submitForm checks a submission of the form at in.Path and files it.
@@ -363,6 +453,9 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	}
 	_, slug, _ := strings.Cut(space, "/")
 	sub := submission{Template: space + "/" + in.Path, Revision: revision, Blob: blob, By: who, At: now, Status: "submitted"}
+	if in.Resends != "" && t.Quiz {
+		return Receipt{}, invalid("A quiz is never sent back for more information; send it again without resends.")
+	}
 	if t.Quiz {
 		if err := s.quizAllowed(ctx, repo.id, userID, f.ID, blob, t, now); err != nil {
 			return Receipt{}, err
@@ -384,19 +477,47 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	if sub.ID, err = randomHex(16); err != nil {
 		return Receipt{}, err
 	}
+	sub.Resends = in.Resends
 	text := t.render(answers, sub)
 	if int64(len(text)) > target.repo.limits.MaxFileBytes {
 		return Receipt{}, problem(413, "payload_too_large", "The filled-in form is larger than a file can be.")
 	}
+	// Sending a needs-info copy again (0.95.10): claim it first, so it is
+	// sent again once, and mark its file resent in the same commit as the
+	// new copy when both are in the same space.
+	var old *resentCopy
+	if in.Resends != "" {
+		row, status, found, claimed, err := s.ownedDB.claimResend(ctx, in.Resends, repo.id, userID, f.ID)
+		if err != nil {
+			return Receipt{}, err
+		}
+		if !found {
+			return Receipt{}, invalid("resends names none of your copies of this form.")
+		}
+		if !claimed {
+			return Receipt{}, problem(409, "not_needs_info", "That copy is not waiting for more information any more (it is "+status+"); send the form without resends.")
+		}
+		if row.targetSpaceID == target.spaceID {
+			old = &resentCopy{fileID: row.targetFileID, newID: sub.ID}
+		}
+	}
 	base := target.folder + slug + "-" + who + "-" + t.Form + "-" + now.Format("2006-01-02T1504Z")
 	value, err := s.queued(ctx, target.repo, func() (any, error) {
-		return fileSubmission(ctx, target.repo, base, t.Form, text)
+		return fileSubmission(ctx, target.repo, base, t.Form, text, old)
 	})
 	if err != nil {
+		if in.Resends != "" {
+			s.ownedDB.releaseResend(ctx, in.Resends)
+		}
 		return Receipt{}, err
 	}
 	filed := value.(filedFile)
-	receipt := Receipt{ID: sub.ID, Form: t.Form, Title: t.Title, Template: in.Path, Revision: revision, Target: target.space + "/" + filed.path, SubmittedAt: now.Format(time.RFC3339), Text: text, Status: sub.Status, Quiz: t.Quiz, Score: sub.Score, Marks: sub.Marks, Answers: answers}
+	if old != nil && old.text != "" {
+		if err := s.ownedDB.resentText(ctx, in.Resends, old.text); err != nil {
+			log.Printf("form submission %s marked resent in its file but not its receipt text: %v", in.Resends, err)
+		}
+	}
+	receipt := Receipt{ID: sub.ID, Form: t.Form, Title: t.Title, Template: in.Path, Revision: revision, Target: target.space + "/" + filed.path, SubmittedAt: now.Format(time.RFC3339), Text: text, Status: sub.Status, Quiz: t.Quiz, Score: sub.Score, Marks: sub.Marks, Answers: answers, Resends: in.Resends}
 	if t.Quiz {
 		receipt.PassMark = t.PassMark
 	}
@@ -507,6 +628,14 @@ func (s *Service) acknowledgeSent(ctx context.Context, repo *repository, state s
 	return 0, nil
 }
 
+// resentCopy is the needs-info copy a submission sends again: fileSubmission
+// marks the file with fileID resent (as newID) and sets text to its new
+// text, when it still is a needs-info copy the folder's locks let it change.
+type resentCopy struct {
+	fileID, newID string
+	text          string
+}
+
 // filedFile is where fileSubmission filed a copy.
 type filedFile struct {
 	path, id string
@@ -514,7 +643,7 @@ type filedFile struct {
 
 // fileSubmission writes the copy as a new file named base.md, or base-2.md
 // and so on when that name is taken. Runs on the write queue.
-func fileSubmission(ctx context.Context, r *repository, base, form, text string) (filedFile, error) {
+func fileSubmission(ctx context.Context, r *repository, base, form, text string, old *resentCopy) (filedFile, error) {
 	head, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return filedFile{}, err
@@ -562,7 +691,35 @@ func fileSubmission(ctx context.Context, r *repository, base, form, text string)
 		return filedFile{}, err
 	}
 	changes := append([]commitChange{{id, "create", path}}, added...)
-	if _, err := r.commitFiles(ctx, head, files, texts, nil, changes, "Form submission: "+form); err != nil {
+	message := "Form submission: " + form
+	if old != nil {
+		old.text = ""
+		for p, rec := range files {
+			if rec.ID != old.fileID || p == path {
+				continue
+			}
+			if blocks(fileLock(readOnly, p), true) {
+				break
+			}
+			b, err := r.blob(ctx, rec.Blob)
+			if err != nil {
+				return filedFile{}, err
+			}
+			if marked := markResent(string(b), old.newID); marked != "" {
+				rec.Bytes = int64(len(marked))
+				files[p] = rec
+				texts[p] = marked
+				changes = append(changes, commitChange{rec.ID, "write", p})
+				old.text = marked
+				message = "Form submission: " + form + " (sent again)"
+			}
+			break
+		}
+	}
+	if _, err := r.commitFiles(ctx, head, files, texts, nil, changes, message); err != nil {
+		if old != nil {
+			old.text = ""
+		}
 		return filedFile{}, err
 	}
 	return filedFile{path, id}, nil
@@ -627,7 +784,7 @@ func (h *httpAdapter) serveSubmissions(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	var body submitRequest
-	if err := strictJSON(b, &body); err != nil || body.Path == "" || body.Answers == nil || body.Revision != "" && !hashPattern.MatchString(body.Revision) || body.Blob != "" && !hashPattern.MatchString(body.Blob) {
+	if err := strictJSON(b, &body); err != nil || body.Path == "" || body.Answers == nil || body.Revision != "" && !hashPattern.MatchString(body.Revision) || body.Blob != "" && !hashPattern.MatchString(body.Blob) || body.Resends != "" && !receiptIDPattern.MatchString(body.Resends) {
 		sendError(w, invalid(`Send {"path": "...", "answers": {"field": "answer", ...}, "revision": "..."}: the form, your answers by field name, and the space state you filled it in from.`))
 		return
 	}

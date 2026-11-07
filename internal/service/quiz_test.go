@@ -333,4 +333,66 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	if got := call(person, "GET", base+"submissions", "", 200)["submissions"].([]any)[0].(map[string]any); got["status"] != "approved" || got["note"] != "Enjoy." {
 		t.Fatalf("list: %v", got)
 	}
+
+	// needs-info (0.95.10): the reviewer asks for more with a note; the
+	// person sends the form again naming the copy, which becomes resent.
+	clock = clock.Add(time.Minute)
+	asked := call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "P"}}), 201)
+	askedPath := strings.TrimPrefix(asked["target"].(string), w.member.Username+"/"+review.Slug+"/")
+	call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": askedPath, "status": "needs-info"}), 400)
+	if got := call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": askedPath, "status": "needs-info", "note": "Your full name, please."}), 200); got["status"] != "needs-info" || !strings.Contains(got["text"].(string), "status: needs-info\n") {
+		t.Fatalf("needs-info: %v", got)
+	}
+	// Not for quizzes, not someone else's copy, not an approved one.
+	call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": copyPath, "status": "needs-info", "note": "x"}), 400)
+	call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "Pat"}, "resends": "nope"}), 400)
+	call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "Pat"}, "resends": strings.Repeat("a", 32)}), 400)
+	if got := code(call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "Pat"}, "resends": leave["id"]}), 409)); got != "not_needs_info" {
+		t.Fatalf("approved resend: %s", got)
+	}
+	// Bad answers leave the copy needs-info.
+	call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{}, "resends": asked["id"]}), 400)
+	clock = clock.Add(time.Minute)
+	again := call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "Pat Smith"}, "resends": asked["id"]}), 201)
+	if again["resends"] != asked["id"] || again["status"] != "submitted" || !strings.Contains(again["text"].(string), "resends: "+asked["id"].(string)+"\n") {
+		t.Fatalf("again: %v", again)
+	}
+	reviewRepo := w.s.ownedRepository(review.ID)
+	_, reviewFiles, err := reviewRepo.snapshot(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBlob, _ := reviewRepo.blob(ctx, reviewFiles[askedPath].Blob)
+	if old := string(oldBlob); !strings.Contains(old, "status: resent\nresentAs: "+again["id"].(string)+"\n") || !strings.Contains(old, "note: \"Your full name, please.\"") {
+		t.Fatalf("old copy:\n%s", old)
+	}
+	if got := call(person, "GET", base+"submissions?id="+asked["id"].(string), "", 200); got["status"] != "resent" || !strings.Contains(got["text"].(string), "status: resent\n") {
+		t.Fatalf("old receipt: %v", got)
+	}
+	if got := code(call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "Pat"}, "resends": asked["id"]}), 409)); got != "not_needs_info" {
+		t.Fatalf("twice: %s", got)
+	}
+	if got := code(call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": askedPath, "status": "approved"}), 409)); got != "resent" {
+		t.Fatalf("review resent: %s", got)
+	}
+	// Reviewing the new copy keeps its link to the old one.
+	againPath := strings.TrimPrefix(again["target"].(string), w.member.Username+"/"+review.Slug+"/")
+	if got := call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": againPath, "status": "approved"}), 200); !strings.Contains(got["text"].(string), "resends: "+asked["id"].(string)+"\n") {
+		t.Fatalf("approved again: %v", got)
+	}
+}
+
+func TestMarkResent(t *testing.T) {
+	text := "---\nform: leave\nsubmission: " + strings.Repeat("a", 32) + "\nstatus: needs-info\nnote: \"status: needs-info\"\n---\nstatus: needs-info\n"
+	want := "---\nform: leave\nsubmission: " + strings.Repeat("a", 32) + "\nstatus: resent\nresentAs: " + strings.Repeat("b", 32) + "\nnote: \"status: needs-info\"\n---\nstatus: needs-info\n"
+	if got := markResent(text, strings.Repeat("b", 32)); got != want {
+		t.Fatalf("got:\n%s", got)
+	}
+	crlf := strings.ReplaceAll(text, "\n", "\r\n")
+	if got := markResent(crlf, "b"); !strings.Contains(got, "status: resent\r\nresentAs: b\r\n") {
+		t.Fatalf("crlf: %q", got)
+	}
+	if markResent(strings.Replace(text, "status: needs-info\nnote", "status: approved\nnote", 1), "b") != "" || markResent("# Notes\n", "b") != "" {
+		t.Fatal("marked a copy that is not needs-info")
+	}
 }

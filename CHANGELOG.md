@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.95.10 - Forms: ask the sender for more information (2026-11-08)
+
+- A reviewer can send a form's copy back with `{"status": "needs-info", "note": "..."}` on `POST .../reviews` (the note is required and says what to add or change). Forms only: a quiz is marked, not sent back. The copy's front matter and the sender's receipt show `needs-info` and the note. Core, not Company, by the open-core test (David, 2026-11-07): it completes the review loop a single self-hosted instance already has.
+- The sender sends the form again with `"resends": "<receipt id>"` on `POST .../submissions` (mtsync: `submit -resends ID`). The new copy is filed as usual with `resends: <id>` in its front matter, and the old copy becomes `resent`: its file gets `status: resent` and `resentAs: <new id>` in the same commit (when both are in the same review space) and its receipt text and status follow. A copy is sent again once: the server claims it before filing, and gives it back to `needs-info` when filing fails. Refusals: `resends` that is not one of the person's copies of this form (400), a copy that is not `needs-info` (409 `not_needs_info`), a quiz (400). Reviewing a `resent` copy answers 409 `resent`; reviewing the new copy keeps its `resends` line. A reviewer may still approve or decline a `needs-info` copy, after which it can't be sent again.
+- mtsync: `submit -resends ID`; `submissions` shows "Needs more information (fix it and send it again with -resends ID)" and "Sent again"; `review` takes `"needs-info"`.
+- No schema or grants change: `status` was already VARCHAR(16) and the runtime grant already covers `status` and `text`. No configuration or tool-schema change (forms are REST only). TestQuizzesAgainstDatabase covers asking, the refusals, resending once, the old copy's file and receipt, and reviewing both copies; TestMarkResent the front-matter change; the mtsync tests `-resends` and the new status lines.
+
 ## 0.95.9 - Space activity: conversions, agent jobs and who is here (2026-11-07)
 
 - New `activity` call for account spaces (`GET /api/v1/account/spaces/{owner}/{slug}/activity`, and `/api/v1/site/spaces/…/activity` for the site), so a client can show what is happening beyond the files instead of leaving people to wait for files to move (David, 2026-11-07). It answers `{space, docling, items}`; each item has `kind`, `path` (or `folder`), `state`, a `message` for a person and `since`:

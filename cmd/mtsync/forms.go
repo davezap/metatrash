@@ -31,8 +31,10 @@ type receipt struct {
 	Target      string `json:"target"`
 	SubmittedAt string `json:"submittedAt"`
 	Text        string `json:"text,omitempty"`
-	// Review (metatrash 0.50.0): submitted, approved or declined.
+	// Review (metatrash 0.50.0): submitted, approved or declined; needs-info
+	// or resent (metatrash 0.95.10).
 	Status     string           `json:"status,omitempty"`
+	Resends    string           `json:"resends,omitempty"`
 	Note       string           `json:"note,omitempty"`
 	ReviewedAt string           `json:"reviewedAt,omitempty"`
 	Quiz       bool             `json:"quiz,omitempty"`
@@ -57,7 +59,9 @@ func gitBlobHash(text []byte) string {
 
 // submit sends answers to the form at path; blob is the template text's
 // hash, or version the published version of its folder they answer.
-func (c *client) submit(ctx context.Context, path, blob string, version int, answers json.RawMessage) (receipt, error) {
+// resends names the needs-info copy these answers replace (metatrash
+// 0.95.10).
+func (c *client) submit(ctx context.Context, path, blob string, version int, resends string, answers json.RawMessage) (receipt, error) {
 	var out receipt
 	if !c.account {
 		return out, fmt.Errorf("forms need a signed-in space (mtsync login), not a space key")
@@ -67,6 +71,9 @@ func (c *client) submit(ctx context.Context, path, blob string, version int, ans
 		body["version"] = version
 	} else {
 		body["blob"] = blob
+	}
+	if resends != "" {
+		body["resends"] = resends
 	}
 	err := c.do(ctx, "POST", "submissions", nil, body, &out)
 	out.Template = strings.TrimPrefix(out.Template, c.prefix)
@@ -133,7 +140,7 @@ func readAnswers(name string, stdin io.Reader) (json.RawMessage, error) {
 // set, to that published version of it, as Slate Viewer shows it. With
 // asJSON the receipt is printed as JSON, and so is a refusal (with each
 // field's problem), for Slate Viewer.
-func submitForm(ctx context.Context, file, answersFile string, version int, asJSON bool, stdin io.Reader, out io.Writer) error {
+func submitForm(ctx context.Context, file, answersFile string, version int, resends string, asJSON bool, stdin io.Reader, out io.Writer) error {
 	e, rel, err := syncedFile(file)
 	if err != nil {
 		return err
@@ -147,7 +154,7 @@ func submitForm(ctx context.Context, file, answersFile string, version int, asJS
 		return err
 	}
 	c := folderClient(e, tokenSource(e.Server))
-	r, err := c.submit(ctx, rel, gitBlobHash(text), version, answers)
+	r, err := c.submit(ctx, rel, gitBlobHash(text), version, resends, answers)
 	if err != nil {
 		return printRefusal(err, asJSON, out)
 	}
@@ -155,6 +162,9 @@ func submitForm(ctx context.Context, file, answersFile string, version int, asJS
 		return printJSON(out, r)
 	}
 	fmt.Fprintf(out, "Sent %s at %s. Filed as %s.\n", r.Title, localTime(r.SubmittedAt), r.Target)
+	if r.Resends != "" {
+		fmt.Fprintf(out, "It replaces %s, which a reviewer sent back.\n", r.Resends)
+	}
 	if r.Quiz {
 		fmt.Fprintln(out, reviewLine(r))
 	}
@@ -177,7 +187,7 @@ func printRefusal(err error, asJSON bool, out io.Writer) error {
 
 // reviewLine says where a copy's review stands.
 func reviewLine(r receipt) string {
-	status := map[string]string{"submitted": "Waiting for review", "approved": "Approved", "declined": "Declined"}[r.Status]
+	status := map[string]string{"submitted": "Waiting for review", "approved": "Approved", "declined": "Declined", "needs-info": "Needs more information (fix it and send it again with -resends " + r.ID + ")", "resent": "Sent again"}[r.Status]
 	if r.Quiz {
 		status = map[string]string{"submitted": "Waiting for a reviewer", "approved": "Passed", "declined": "Not passed"}[r.Status]
 		if r.Score != nil {
