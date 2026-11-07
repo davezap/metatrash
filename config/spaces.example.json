@@ -22,7 +22,8 @@
       "reads": 1200,
       "writes": 120
     },
-    "maxQueuedWrites": 32
+    "maxQueuedWrites": 32,
+    "maxListWaiters": 256
   },
   "spaces": {
     "public": {

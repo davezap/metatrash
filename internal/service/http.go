@@ -145,6 +145,10 @@ func (h *httpAdapter) client(r *http.Request) string {
 
 func sendJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if list, ok := value.(ListResult); ok && list.RetryAfterSeconds > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(list.RetryAfterSeconds))
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }

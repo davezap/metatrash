@@ -72,13 +72,6 @@ func (s *syncer) loop(ctx context.Context, interval time.Duration, once bool) er
 	}
 }
 
-// retryWait is how long to wait after the failures-th failure in a row:
-// growing to 12 times the interval, and never under 5 s a step, so a short
-// interval doesn't press a server that is struggling.
-func retryWait(interval time.Duration, failures int) time.Duration {
-	return max(interval, 5*time.Second) * time.Duration(min(failures, 12))
-}
-
 // syncOnce runs one complete pass, retrying a pass the space interrupted.
 func (s *syncer) syncOnce(ctx context.Context, interval time.Duration) error {
 	for failures := 0; ; {
@@ -130,7 +123,7 @@ func (s *syncer) watchRemote(ctx context.Context, interval time.Duration, change
 		if polling {
 			wait = ""
 		}
-		state, err := s.c.waitHead(ctx, wait)
+		state, retryAfter, err := s.c.waitHeadAdvice(ctx, wait)
 		s.remoteLive.Store(err == nil)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -141,8 +134,8 @@ func (s *syncer) watchRemote(ctx context.Context, interval time.Duration, change
 				s.logf("this server does not announce changes; checking every %s", interval)
 				continue
 			}
-			failures++
-			if sleepContext(ctx, retryWait(interval, failures)) != nil {
+			failures = min(failures+1, 12)
+			if s.c.sleep(ctx, retryWait(interval, failures)) != nil {
 				return
 			}
 			continue
@@ -155,8 +148,8 @@ func (s *syncer) watchRemote(ctx context.Context, interval time.Duration, change
 		after = state
 		// Polling, or a server that answered without waiting (too busy to
 		// hold the request), is checked again after the interval.
-		if polling || (unchanged && time.Since(start) < time.Second) {
-			if sleepContext(ctx, interval) != nil {
+		if polling || unchanged && (retryAfter > 0 || time.Since(start) < time.Second) {
+			if s.c.sleep(ctx, pollRetryWait(interval, retryAfter)) != nil {
 				return
 			}
 		}

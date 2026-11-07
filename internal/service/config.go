@@ -41,6 +41,9 @@ type Global struct {
 		Writes        int `json:"writes"`
 	} `json:"rates"`
 	MaxQueuedWrites int `json:"maxQueuedWrites"`
+	// MaxListWaiters bounds held HTTP long polls, independently of write workers.
+	// Omitted or zero retains the historical 256-request default.
+	MaxListWaiters int `json:"maxListWaiters,omitempty"`
 }
 
 type SpaceConfig struct {
@@ -99,6 +102,9 @@ func loadConfig(path, keyPath string) (Config, map[string]Keys, error) {
 	}
 	if c.ConfigVersion != "0.1.0" || !validLimits(c.Defaults) || c.Global.Rates.WindowSeconds <= 0 || c.Global.Rates.WindowSeconds > 86400 || c.Global.Rates.Reads <= 0 || c.Global.Rates.Writes <= 0 || c.Global.MaxQueuedWrites <= 0 || c.Global.MaxQueuedWrites > 10000 {
 		return c, nil, fmt.Errorf("invalid configuration version or limits")
+	}
+	if c.Global.MaxListWaiters, err = listWaiterLimit(c.Global.MaxListWaiters); err != nil {
+		return c, nil, err
 	}
 	keys := map[string]Keys{}
 	if keyPath != "" {

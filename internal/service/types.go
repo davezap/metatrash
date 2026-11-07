@@ -89,6 +89,9 @@ type ListResult struct {
 	// Removed lists paths gone since the state a REST list with since= named;
 	// Files then holds only what was added or changed (see listChanges).
 	Removed []string `json:"removed,omitempty"`
+	// RetryAfterSeconds advises an unchanged after= caller when the server could
+	// not hold its request. The listing remains authoritative and successful.
+	RetryAfterSeconds int `json:"retryAfterSeconds,omitempty"`
 }
 
 type Mutation struct {

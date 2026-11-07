@@ -589,23 +589,38 @@ func (s *Service) encodeCursor(c cursor) *string {
 
 // listWaitTime is how long a list with after= waits for the space to move.
 // It stays well under the HTTP server's 45-second write timeout and Apache's
-// proxy timeout. maxListWaiters bounds the requests held open at once; past
-// it, lists answer at once.
+// proxy timeout. maxListWaiters is the default held-request capacity; the
+// configured limit can override it. Overflow answers immediately with advice.
 const listWaitTime = 25 * time.Second
 const maxListWaiters = 256
+const listWaitRetrySeconds = 5
+
+func listWaiterLimit(configured int) (int, error) {
+	if configured == 0 {
+		return maxListWaiters, nil
+	}
+	if configured < 1 || configured > 65536 {
+		return 0, fmt.Errorf("global.maxListWaiters must be between 1 and 65536 (zero uses 256)")
+	}
+	return configured, nil
+}
 
 // waitForChange holds a list request while the space is still at state
 // after, until a write moves the branch, the wait ends or the client leaves.
 // Sync clients use it to hear of changes as they happen without polling.
-func (s *Service) waitForChange(ctx context.Context, r *repository, after string) {
-	if s.listWaiters.Add(1) > maxListWaiters {
+func (s *Service) waitForChange(ctx context.Context, r *repository, after string) int {
+	limit := s.config.Global.MaxListWaiters
+	if limit == 0 {
+		limit = maxListWaiters
+	}
+	if s.listWaiters.Add(1) > int64(limit) {
 		s.listWaiters.Add(-1)
-		return
+		return listWaitRetrySeconds
 	}
 	defer s.listWaiters.Add(-1)
 	changed := r.watch()
 	if head, err := r.head(ctx); err != nil || head != after {
-		return
+		return 0
 	}
 	wait := listWaitTime
 	if s.listWait > 0 {
@@ -619,6 +634,7 @@ func (s *Service) waitForChange(ctx context.Context, r *repository, after string
 	case <-ctx.Done():
 	case <-s.stop:
 	}
+	return 0
 }
 
 // listChanges answers a list with since=: only the files under the prefix
@@ -697,8 +713,9 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 	if op == "list" && in.Since != "" && (!hashPattern.MatchString(in.Since) || in.Cursor != "") {
 		return nil, invalid("since must be a state, without cursor.")
 	}
+	retryAfter := 0
 	if op == "list" && in.After != "" {
-		s.waitForChange(ctx, r, in.After)
+		retryAfter = s.waitForChange(ctx, r, in.After)
 	}
 	var capturedHead string
 	if op == "list" && in.Since != "" {
@@ -712,7 +729,10 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 			return nil, err
 		}
 		if head == in.Since {
-			return ListResult{Space: space, State: head, Files: []File{}}, nil
+			if head != in.After {
+				retryAfter = 0
+			}
+			return ListResult{Space: space, State: head, Files: []File{}, RetryAfterSeconds: retryAfter}, nil
 		}
 		capturedHead = head
 	}
@@ -728,8 +748,13 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		return nil, err
 	}
 	c.State = state
+	if state != in.After {
+		retryAfter = 0
+	}
 	if op == "list" && in.Since != "" {
-		return s.listChanges(ctx, r, space, state, files, in)
+		result, err := s.listChanges(ctx, r, space, state, files, in)
+		result.RetryAfterSeconds = retryAfter
+		return result, err
 	}
 	if op == "list" {
 		paths := []string{}
@@ -746,7 +771,7 @@ func (s *Service) page(ctx context.Context, r *repository, space, op string, in 
 		if end > len(paths) {
 			end = len(paths)
 		}
-		result := ListResult{Space: space, State: state, Files: []File{}}
+		result := ListResult{Space: space, State: state, Files: []File{}, RetryAfterSeconds: retryAfter}
 		for _, p := range paths[c.Offset:end] {
 			f := files[p].File
 			if in.Blobs {

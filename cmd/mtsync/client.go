@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -90,6 +91,9 @@ type client struct {
 	token  func(ctx context.Context, refresh bool) (string, error)
 	// sleep waits out rate limits; tests replace it.
 	sleep func(ctx context.Context, d time.Duration) error
+	// Older servers may support after= without since=. Probe once and retain
+	// long polling when falling back to their ordinary one-file response.
+	waitSinceUnsupported atomic.Bool
 }
 
 // newClient reaches target: a space ("owner/slug", "public", an ID, or a key
@@ -232,11 +236,8 @@ func (c *client) sendRaw(ctx context.Context, hc *http.Client, method, resource 
 			continue
 		}
 		if (resp.StatusCode == 429 || resp.StatusCode == 503 && e.Code != "virtual_unavailable") && attempt < 20 {
-			wait, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
-			if wait < 1 {
-				wait = 1
-			}
-			if err := c.sleep(ctx, time.Duration(wait)*time.Second); err != nil {
+			wait := httpRetryWait(resp.Header.Get("Retry-After"), attempt, time.Now())
+			if err := c.sleep(ctx, wait); err != nil {
 				return nil, err
 			}
 			continue
@@ -287,8 +288,14 @@ func (c *client) head(ctx context.Context) (string, error) {
 // the space is still at that state (up to about 25 seconds) and answers as
 // soon as it moves.
 func (c *client) waitHead(ctx context.Context, after string) (string, error) {
+	state, _, err := c.waitHeadAdvice(ctx, after)
+	return state, err
+}
+
+func (c *client) waitHeadAdvice(ctx context.Context, after string) (string, time.Duration, error) {
 	var out struct {
-		State string `json:"state"`
+		State             string `json:"state"`
+		RetryAfterSeconds int    `json:"retryAfterSeconds"`
 	}
 	query := url.Values{"limit": {"1"}}
 	if c.prefix != "" {
@@ -296,9 +303,19 @@ func (c *client) waitHead(ctx context.Context, after string) (string, error) {
 	}
 	if after != "" {
 		query.Set("after", after)
+		if !c.waitSinceUnsupported.Load() {
+			query.Set("since", after)
+		}
 	}
 	err := c.do(ctx, "GET", "files", query, nil, &out)
-	return out.State, err
+	if errorCode(err) == "invalid_request" && query.Has("since") {
+		c.waitSinceUnsupported.Store(true)
+		query.Del("since")
+		err = c.do(ctx, "GET", "files", query, nil, &out)
+	}
+	// Bound advisory input before converting seconds to a duration.
+	retry := time.Duration(min(max(out.RetryAfterSeconds, 0), 300)) * time.Second
+	return out.State, retry, err
 }
 
 // list returns every file with its blob hash, from one snapshot.
