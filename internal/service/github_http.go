@@ -89,7 +89,7 @@ func (h *httpAdapter) renderGitHub(w http.ResponseWriter, status int, page githu
 		page.Eyebrow, page.Button = "GitHub", "Back to Settings →"
 	}
 	// script-src 'self' is for theme.js (the saved theme).
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
 	var b bytes.Buffer

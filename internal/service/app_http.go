@@ -107,6 +107,8 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 {{if .Home}}<meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">{{end}}{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}
 <meta name="metatrash-app" content="{{.Config}}">
 <title>{{.Title}}</title>
+<link rel="icon" href="{{.BasePath}}/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="{{.BasePath}}/apple-touch-icon.png">
 {{if .Markdown}}<link rel="alternate" type="text/markdown" href="{{.BasePath}}{{.Markdown}}">
 {{end}}
 <script src="{{.BasePath}}/assets/app-start.js" nonce="{{.Nonce}}"></script>

@@ -51,6 +51,12 @@ func TestSlateAndMermaidAssets(t *testing.T) {
 			t.Fatalf("%s: %d %q", chunk.Name(), w.Code, w.Header().Get("Cache-Control"))
 		}
 	}
+	for path, kind := range map[string]string{"/favicon.ico": "image/x-icon", "/apple-touch-icon.png": "image/png"} {
+		w := get(path)
+		if w.Code != 200 || w.Header().Get("Content-Type") != kind || w.Body.Len() == 0 || !strings.Contains(w.Header().Get("Cache-Control"), "max-age") {
+			t.Fatalf("%s: %d %q %d bytes", path, w.Code, w.Header().Get("Content-Type"), w.Body.Len())
+		}
+	}
 	for _, path := range []string{"/assets/mermaid/", "/assets/mermaid/chunks", "/assets/mermaid/nope.js", "/assets/mermaid/../slate.js", "/assets/mermaid/chunks/../mermaid.js"} {
 		if w := get(path); w.Code != 404 {
 			t.Fatalf("%s: %d, want 404", path, w.Code)

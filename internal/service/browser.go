@@ -28,6 +28,15 @@ var signinCSS []byte
 //go:embed web/theme.js
 var themeJS []byte
 
+// The site's icon (Slate Viewer's app icon): /favicon.ico holds 16-256 px
+// sizes, /apple-touch-icon.png is the 256 px one for phone home screens.
+//
+//go:embed web/favicon.ico
+var faviconICO []byte
+
+//go:embed web/apple-touch-icon.png
+var appleTouchIconPNG []byte
+
 //go:embed web/slate.js
 var slateJS []byte
 
@@ -42,12 +51,18 @@ var mermaidFiles embed.FS
 
 // Only developer-owned, embedded assets belong here. Never serve space storage.
 func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
-	if !strings.HasPrefix(r.URL.Path, "/assets/") {
+	if !strings.HasPrefix(r.URL.Path, "/assets/") && r.URL.Path != "/favicon.ico" && r.URL.Path != "/apple-touch-icon.png" {
 		return false
 	}
 	var data []byte
 	var kind string
 	switch r.URL.Path {
+	case "/favicon.ico":
+		data, kind = faviconICO, "image/x-icon"
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	case "/apple-touch-icon.png":
+		data, kind = appleTouchIconPNG, "image/png"
+		w.Header().Set("Cache-Control", "public, max-age=86400")
 	case "/assets/slate.js":
 		data, kind = h.editorAsset("slate.js", slateJS), "text/javascript; charset=utf-8"
 	case "/assets/slate.css":

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.95.4 - Site icon (2026-11-07)
+
+- Serve a favicon: /favicon.ico (Slate Viewer's app icon, 16-256 px) and /apple-touch-icon.png (256 px), cached for a day. The app page and the sign-in, app connection and GitHub return pages link both; those three pages' Content-Security-Policy adds img-src 'self' so browsers that apply it to icons still load it. TestSlateAndMermaidAssets checks both files. No schema, configuration, tool-schema or mtsync change.
+
 ## 0.95.3 - B3 HTTP long-poll capacity and sync backoff (2026-11-07)
 
 - Bound the serial-append integration test's real-Git bursts to four concurrent writes while retaining all twelve writes, unique-line assertions and an exact line-count check. David's laptop rerun had one failure: the twelve-at-once serial burst exhausted a queued operation's existing 30-second deadline. This aligns with the Company composition fixture correction; gated scheduler contract tests retain admission/order coverage. Runtime deadlines, serialization and queue limits are unchanged. The corrected fixture has not been rerun by Codex.
