@@ -163,6 +163,7 @@ func (s *Service) putVirtualUpload(ctx context.Context, r *repository, space, pa
 	if err != nil {
 		return WriteResult{}, err
 	}
+	s.docling().enqueue(r, info)
 	return value.(WriteResult), nil
 }
 

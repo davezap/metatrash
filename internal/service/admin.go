@@ -689,6 +689,9 @@ func accountFeatures(a *accounts) string {
 			} else {
 				s += " (no PDF text: install poppler-utils for pdftotext)"
 			}
+			if d := a.agents.docling; d != nil {
+				s += fmt.Sprintf(", Docling PDF conversion (%s; %d at once, %d threads, %d pages, %d MB, OCR %s)", d.version, d.workers, d.threads, d.maxPages, d.maxBytes>>20, d.ocr)
+			}
 		}
 	}
 	return s

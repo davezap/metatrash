@@ -106,7 +106,9 @@ gives a PDF, Word or HTML file's text as Markdown, shows a picture to the
 model, and `search` looks inside them. `configure` keeps a file up to date
 from a web address on a schedule. mtsync and Slate Viewer upload and
 download the files themselves. Up to 100 MB per file and 5 GB per space;
-see [Virtual files](docs/api-contract.md#virtual-files).
+see [Virtual files](docs/api-contract.md#virtual-files). PDFs read as
+`pdftotext`'s plain text, or, with the optional [Docling conversion](docs/docling.md),
+as Markdown with headings, tables and OCR for scanned pages.
 
 ## Connect from ChatGPT
 

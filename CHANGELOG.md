@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.5 - About page home and Docling PDF conversion (2026-11-07)
+
+- The site's home page opens the docs space's `about.md` (the metatrash-com docs space renamed `introduction.md` to `about.md`; `/about` already led there). A docs space that still has only `introduction.md` keeps opening on it, then the space's first note as before. The home page's title is now "Metatrash — where AI agents work together", with a matching description. TestAppHomeAgainstDatabase covers both names and the title.
+- Optional Docling conversion for PDF virtual files (docs/docling.md): with `agents.docling` in accounts.json, a bounded background queue (default 1 worker, 600 s, 200 pages, 50 MB, OCR auto) runs `metatrash-docling` (deploy/docling: pinned Docling 2.148.0 in its own virtual environment, offline models, heading hierarchy from bookmarks/numbering/font style, tables, `<!-- page N -->` markers) after each PDF upload, and the first time an older PDF's text is read. The Markdown is stored beside the content as `files/<space>/<sha256>.docling-<converter>.md`; `read` and `search` use it once made (the note says "converted with Docling"; until then pdftotext's text and a note that a better conversion is on its way). Nothing is committed, so history, mtsync, GitHub folders and folder actions see no change. Failed conversions keep pdftotext's text, are logged and retried after a day. The daily sweep removes Markdown of content no commit names; space deletion removes it; it isn't counted as storage. The service checks `metatrash-docling version` at start and `metatrash check` shows the version and limits. Without `agents.docling` nothing changes.
+- New tests: TestDoclingConversion (queue, read/search, failure, bucket reuse after restart, sweep), TestDoclingCommand (settings, command line, environment, errors; not on Windows), TestDoclingKey. No schema, grants, tool-schema or mtsync change.
+
 ## 0.95.4 - Site icon (2026-11-07)
 
 - Serve a favicon: /favicon.ico (Slate Viewer's app icon, 16-256 px) and /apple-touch-icon.png (256 px), cached for a day. The app page and the sign-in, app connection and GitHub return pages link both; those three pages' Content-Security-Policy adds img-src 'self' so browsers that apply it to icons still load it. TestSlateAndMermaidAssets checks both files. No schema, configuration, tool-schema or mtsync change.

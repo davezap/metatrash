@@ -202,6 +202,7 @@ func (s *Service) putVirtual(ctx context.Context, r *repository, space, path, if
 	if err != nil {
 		return WriteResult{}, err
 	}
+	s.docling().enqueue(r, info)
 	return value.(WriteResult), nil
 }
 
@@ -256,20 +257,35 @@ func virtualSpaceBytes(files map[string]record, path string) int64 {
 // readVirtual fills a read of a virtual file with its text, or says why it
 // has none.
 func (s *Service) readVirtual(ctx context.Context, r *repository, path string, v VirtualInfo, result *ReadResult) error {
+	// A PDF's Docling Markdown (0.95.5) comes first, when there is one.
+	text, ok, converting := s.docling().text(ctx, r, v)
+	if ok {
+		result.File.Text = text
+		result.Note = fmt.Sprintf("%s is a virtual %s file (%s); this is its text as Markdown, converted with Docling.", path, v.Type, humanBytes(v.Size))
+		return nil
+	}
+	const better = " A better conversion (Docling: headings and tables) is being made; read again in a few minutes."
 	if v.TextSHA256 == "" {
 		result.Note = fmt.Sprintf("%s is a virtual file (%s, %s) with no text to read: its content is kept outside Git.", path, v.Type, humanBytes(v.Size))
 		if v.Type == "application/pdf" {
-			result.Note += " A PDF has text only when the server can read it (pdftotext) and it is not scanned pages."
+			if converting {
+				result.Note += better
+			} else {
+				result.Note += " A PDF has text only when the server can read it (pdftotext) and it is not scanned pages."
+			}
 		}
 		return nil
 	}
-	text, err := s.virtualTextOf(ctx, r, path, v)
+	text, err := s.pointerTextOf(ctx, r, path, v)
 	if err != nil {
 		return err
 	}
 	result.File.Text = text
 	if !v.textIsContent() {
 		result.Note = fmt.Sprintf("%s is a virtual %s file (%s); this is its text as Markdown.", path, v.Type, humanBytes(v.Size))
+		if converting {
+			result.Note += better
+		}
 	}
 	return nil
 }
@@ -295,8 +311,21 @@ func (s *Service) readPicture(ctx context.Context, r *repository, path string, v
 	return nil
 }
 
-// virtualTextOf is a virtual file's text, from the cache or the bucket.
+// virtualTextOf is a virtual file's text, from the cache or the bucket: a
+// PDF's Docling Markdown when it has been made (0.95.5), else the text its
+// pointer names; "" for a file with neither.
 func (s *Service) virtualTextOf(ctx context.Context, r *repository, path string, v VirtualInfo) (string, error) {
+	if text, ok, _ := s.docling().text(ctx, r, v); ok {
+		return text, nil
+	}
+	if v.TextSHA256 == "" {
+		return "", nil
+	}
+	return s.pointerTextOf(ctx, r, path, v)
+}
+
+// pointerTextOf is the text a virtual file's pointer names.
+func (s *Service) pointerTextOf(ctx context.Context, r *repository, path string, v VirtualInfo) (string, error) {
 	key := v.textKey(r.id)
 	if text, ok := s.virtualTexts.get(key); ok {
 		return text, nil

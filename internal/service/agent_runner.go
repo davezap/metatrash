@@ -74,6 +74,9 @@ type agentRunner struct {
 	// already in a file (uploads, 0.68.0).
 	pdfText pdfTextFunc
 	pdfFile pdfFileTextFunc
+	// docling converts PDFs to better Markdown in the background (0.95.5);
+	// nil without agents.docling.
+	docling *doclingQueue
 	// refreshes holds virtual files' refresh schedules (virtual_refresh.go);
 	// nil without the account database. refreshSlots bounds the refreshes
 	// running at once.
@@ -213,6 +216,9 @@ func newAgentRunner(s *Service, settings *agentSettings, store agentJobStore) (*
 		a.pdfText = pdfToText(settings.pdftotext)
 		a.pdfFile = pdfFileToText(settings.pdftotext)
 	}
+	if settings.docling != nil {
+		a.docling = newDoclingQueue(s, settings.docling)
+	}
 	if s.ownedDB != nil {
 		a.webRefs = dbWebStore{s.ownedDB.db}
 		a.refreshes = dbRefreshStore{s.ownedDB.db}
@@ -315,12 +321,18 @@ func (a *agentRunner) start() {
 	}
 	a.wg.Add(1)
 	go a.loop()
+	if a.docling != nil {
+		a.docling.start(a.ctx)
+	}
 }
 
 // stop cancels running jobs and waits for them to record their outcome.
 func (a *agentRunner) stop() {
 	a.cancel()
 	a.wg.Wait()
+	if a.docling != nil {
+		a.docling.wait()
+	}
 }
 
 func (a *agentRunner) poke() {

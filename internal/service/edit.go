@@ -278,12 +278,13 @@ func (s *Service) search(ctx context.Context, r *repository, space string, in In
 		return nil, err
 	}
 	// Virtual files are searched in their text (0.60.1): the content for a
-	// text file, the Markdown of a PDF, Word or HTML file. Those without
-	// text are left out, and so are pointers. A text the bucket cannot give
-	// is skipped.
+	// text file, the Markdown of a PDF (Docling's when made, 0.95.5), Word
+	// or HTML file. Those without text are left out, and so are pointers. A
+	// text the bucket cannot give is skipped.
+	docling := s.docling()
 	paths := []string{}
 	for p, f := range files {
-		if strings.HasPrefix(p, in.Prefix) && (f.Virtual == nil || f.Virtual.TextSHA256 != "") {
+		if strings.HasPrefix(p, in.Prefix) && (f.Virtual == nil || f.Virtual.TextSHA256 != "" || docling.wants(r, *f.Virtual)) {
 			paths = append(paths, p)
 		}
 	}

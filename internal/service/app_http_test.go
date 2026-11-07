@@ -117,7 +117,8 @@ func TestAppPagesAgainstDatabase(t *testing.T) {
 	}
 }
 
-// The home page (0.75.0): the app on the docs space's introduction.md, while
+// The home page (0.75.0): the app on the docs space's about.md (0.95.5;
+// introduction.md while a space still has only that), while
 // the docs space is readable on the web; the public space otherwise.
 func TestAppHomeAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
@@ -139,19 +140,27 @@ func TestAppHomeAgainstDatabase(t *testing.T) {
 	if _, err := w.db.db.ExecContext(context.Background(), "UPDATE metatrash_spaces SET visibility = 'web' WHERE space_id = ?", w.ownedID); err != nil {
 		t.Fatal(err)
 	}
-	// No introduction.md yet: the space's first note.
+	// No about.md yet: the space's first note.
 	if res := home(); res.Code != 200 || !strings.Contains(res.Body.String(), "&#34;file&#34;:null") {
-		t.Fatalf("no introduction: %d %s", res.Code, res.Body)
+		t.Fatalf("no about page: %d %s", res.Code, res.Body)
 	}
 	token := w.connect(w.owner, map[string]string{w.ownedID: "read_write"}, "")
 	state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
-	w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "introduction.md", "text": "# Welcome\n", "ifInState": state}, "")
+	// A docs space not renamed yet still opens on introduction.md.
+	state = w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "introduction.md", "text": "# Welcome\n", "ifInState": state}, "")["newState"]
+	if body := home().Body.String(); !strings.Contains(body, "&#34;file&#34;:&#34;/spaces/"+w.ownedName+"/introduction.md&#34;") {
+		t.Fatalf("introduction.md: %s", body)
+	}
+	w.tool(token, "move", map[string]any{"space": w.ownedName, "from": "introduction.md", "to": "about.md", "ifInState": state}, "")
 	res := home()
 	body := res.Body.String()
-	if res.Code != 200 || !strings.Contains(body, "&#34;file&#34;:&#34;/spaces/"+w.ownedName+"/introduction.md&#34;") || !strings.Contains(body, "&#34;address&#34;:&#34;/&#34;") {
+	if res.Code != 200 || !strings.Contains(body, "&#34;file&#34;:&#34;/spaces/"+w.ownedName+"/about.md&#34;") || !strings.Contains(body, "&#34;address&#34;:&#34;/&#34;") {
 		t.Fatalf("home: %d %s", res.Code, body)
 	}
-	if strings.Contains(body, "noindex") || res.Header().Get("X-Robots-Tag") != "" || !strings.Contains(body, `href="/docs/introduction.md?format=md"`) || !strings.Contains(body, "&#34;addressRoot&#34;:&#34;/docs&#34;") {
+	if !strings.Contains(body, "<title>Metatrash — where AI agents work together</title>") {
+		t.Fatalf("home title: %s", body)
+	}
+	if strings.Contains(body, "noindex") || res.Header().Get("X-Robots-Tag") != "" || !strings.Contains(body, `href="/docs/about.md?format=md"`) || !strings.Contains(body, "&#34;addressRoot&#34;:&#34;/docs&#34;") {
 		t.Fatalf("home should be indexed, with a link for no JavaScript: %v %s", res.Header(), body)
 	}
 }

@@ -1,0 +1,10 @@
+# Pinned converter for Metatrash's Docling PDF conversion (deploy/docling).
+# install.sh installs these into their own virtual environment and records
+# the full resolved set in <venv>/installed-freeze.txt; check that file into
+# your own deployment notes after a staging install so production installs
+# the same packages (pip install -r installed-freeze.txt).
+docling==2.148.0
+docling-core==2.106.0
+# RapidOCR on onnxruntime: Docling's automatic OCR picks it on a CPU server.
+rapidocr>=3.9.1,<4
+onnxruntime>=1.24.1,<2

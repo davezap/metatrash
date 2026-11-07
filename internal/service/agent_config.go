@@ -32,6 +32,9 @@ type agentsConfig struct {
 	Timezone  string              `json:"timezone"`
 	Search    *webSearchConfig    `json:"search"`
 	Downloads *webDownloadsConfig `json:"downloads"`
+	// Docling converts PDF virtual files to better Markdown (0.95.5,
+	// docling.go); it needs downloads.
+	Docling *doclingConfig `json:"docling"`
 	// Settings of 0.54.x, when the server held one API key. They are refused
 	// with a pointer to the account page rather than silently ignored.
 	Owners        json.RawMessage `json:"owners"`
@@ -81,6 +84,8 @@ type agentSettings struct {
 	// pdftotext is the program that reads PDFs' text (0.59.0), "" when it is
 	// not installed.
 	pdftotext string
+	// docling is the Docling converter (0.95.5), nil when not set up.
+	docling *doclingSettings
 }
 
 const (
@@ -188,6 +193,14 @@ func (c *agentsConfig) settings() (*agentSettings, error) {
 		}
 		if settings.fetchLimit < 1 || settings.fetchLimit > 100000 {
 			return nil, fmt.Errorf("agents downloads dailyLimit must be 1 to 100000")
+		}
+	}
+	if c.Docling != nil {
+		if settings.downloads == nil {
+			return nil, fmt.Errorf("agents docling needs agents downloads: PDFs are virtual files, kept in that bucket")
+		}
+		if settings.docling, err = c.Docling.settings(); err != nil {
+			return nil, err
 		}
 	}
 	return settings, nil

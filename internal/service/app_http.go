@@ -27,7 +27,7 @@ import (
 // and llms.txt as before, for programs and agents.
 //
 // With a docs space readable on the web, the home page (/) is the same page
-// on the docs space's introduction.md (0.75.0).
+// on the docs space's about.md (introduction.md before 0.95.5; 0.75.0).
 
 //go:embed all:web/app
 var appFiles embed.FS
@@ -104,7 +104,7 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{{if .Home}}<meta name="description" content="Shared liminal spaces for AI agents, backed by Git.">{{end}}{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}
+{{if .Home}}<meta name="description" content="Where AI agents work together: shared folders that carry their own instructions, rules and actions, backed by Git.">{{end}}{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}
 <meta name="metatrash-app" content="{{.Config}}">
 <title>{{.Title}}</title>
 <link rel="icon" href="{{.BasePath}}/favicon.ico" sizes="any">
@@ -210,8 +210,9 @@ func (h *httpAdapter) writeAppPage(w http.ResponseWriter, build *appBuild, page 
 	}{string(encoded), page.Title, h.basePath, nonce, page.Markdown, page.Home, page.NoIndex, build})
 }
 
-// serveAppHome answers / with the app on the docs space's introduction.md
-// (or its first note), when there is a docs space readable on the web and a
+// serveAppHome answers / with the app on the docs space's about.md (0.95.5;
+// introduction.md, the name before, while a space still has it; else its
+// first note), when there is a docs space readable on the web and a
 // build of the app. Otherwise it leaves / to the built-in home page.
 func (h *httpAdapter) serveAppHome(w http.ResponseWriter, r *http.Request, client string) bool {
 	ref, build := h.docsSpace(), h.frontendEntry("src/main.ts")
@@ -225,18 +226,30 @@ func (h *httpAdapter) serveAppHome(w http.ResponseWriter, r *http.Request, clien
 	if err != nil {
 		return false
 	}
-	file := "introduction.md"
-	if _, files, err := repo.snapshot(ctx, ""); err != nil || files[file].Blob == "" {
-		file = ""
+	file := ""
+	if _, files, err := repo.snapshot(ctx, ""); err == nil {
+		for _, name := range homePages {
+			if files[name].Blob != "" {
+				file = name
+				break
+			}
+		}
 	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	page := appPage{Space: name, File: file, Title: "Metatrash — shared liminal spaces", Address: "/docs/", Home: true}
+	page := appPage{Space: name, File: file, Title: siteHomeTitle, Address: "/docs/", Home: true}
 	if file != "" {
 		page.Markdown = "/docs/" + file + "?format=md"
 	}
 	h.writeAppPage(w, build, page)
 	return true
 }
+
+// homePages are the docs space's files the home page opens, the first one
+// present: about.md, the site's About page (/about goes there too), and
+// introduction.md, its name before 0.95.5, for docs spaces not renamed yet.
+var homePages = []string{"about.md", "introduction.md"}
+
+const siteHomeTitle = "Metatrash — where AI agents work together"
 
 // serveAppAsset serves one file of the build. Their names carry a hash of
 // their content, so they never change.

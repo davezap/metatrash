@@ -85,11 +85,20 @@ func sweepSpace(ctx context.Context, r *repository, sweeper objectSweeper, now t
 	}
 	for _, o := range objects {
 		hash, ok := strings.CutPrefix(o.Key, prefix)
+		// A PDF's Docling Markdown (0.95.5) goes with its content; it is
+		// not counted as the space's storage.
+		derived := false
+		if sha, isDocling := isDoclingKey(hash); ok && isDocling {
+			hash, derived = sha, true
+		}
 		if !ok || !objectHashPattern.MatchString(hash) || used[hash] || now.Sub(o.Modified) < sweepGrace {
 			continue
 		}
 		if err := sweeper.remove(ctx, o.Key); err != nil {
 			return result, err
+		}
+		if derived {
+			continue
 		}
 		r.usage.removeObject(hash)
 		result.Removed++
