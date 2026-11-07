@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.6 - Docling on a machine of its own (2026-11-07)
+
+- A Docling conversion needs 1-2 GB of memory, more than a small Metatrash server can spare (metatrash.com's staging server has about 1.8 GB). `metatrash-docling serve` now runs the converter as an HTTP service on another machine (one conversion at a time, models loaded once, bearer token, 503 while busy, 422 for a PDF it can't convert), and `agents.docling` takes `url` and `tokenFile` instead of `command` to use it. Metatrash starts even when the converter is down: it learns the converter's version at start and every five minutes and converts nothing until then; unreachable or busy conversions are retried in 15 minutes, failed PDFs in a day. The queue, stored Markdown, reads, search and sweep are unchanged.
+- deploy/docling/install-server.sh sets up the converter machine (install.sh, a system user, a token, a hardened systemd unit with MemoryMax=90%); install.sh now builds in /var/tmp, since /tmp is often a small memory disk (it ran out of space on Amazon Linux 2023). docs/docling.md describes both ways.
+- TestDoclingRemote covers the version handshake, busy/unreachable retries, an unconvertible PDF, reads of remote Markdown, wrong tokens and the url/tokenFile settings. The service's HTTP layer was checked with a stand-in converter (auth, limits, busy, errors). No schema, grants, tool-schema or mtsync change.
+
 ## 0.95.5 - About page home and Docling PDF conversion (2026-11-07)
 
 - The site's home page opens the docs space's `about.md` (the metatrash-com docs space renamed `introduction.md` to `about.md`; `/about` already led there). A docs space that still has only `introduction.md` keeps opening on it, then the space's first note as before. The home page's title is now "Metatrash — where AI agents work together", with a matching description. TestAppHomeAgainstDatabase covers both names and the title.

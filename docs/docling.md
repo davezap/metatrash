@@ -1,6 +1,6 @@
 # Docling PDF conversion
 
-Optional, from Core 0.95.5. Without it, a PDF's text comes from `pdftotext`
+Optional, from Core 0.95.5 (on a machine of its own from 0.95.6). Without it, a PDF's text comes from `pdftotext`
 (poppler-utils): plain lines, no headings, no tables, no OCR. With it, the
 server also converts each PDF with [Docling](https://github.com/docling-project/docling)
 and reads and search use that Markdown instead: headings with levels (from
@@ -32,7 +32,62 @@ reading order across columns, and OCR for scanned pages.
 - Pages after the first start with `<!-- page N -->`, as with `pdftotext`.
   Pictures appear as `<!-- image -->`.
 
-## Install
+## Where it runs
+
+A conversion needs 1–2 GB of memory while it runs, plus about 6 GB of disk
+for Docling and its models. On a small server (2 GB of RAM or less) that can
+run Metatrash itself out of memory, so run the converter **on a machine of
+its own** (0.95.6): `metatrash-docling serve` there, and `agents.docling.url`
+on the Metatrash server. On a server with room to spare, Metatrash can run it
+directly (`agents.docling.command`). Everything else (the queue, the stored
+Markdown, reads, search, the sweep) is the same either way.
+
+## On a machine of its own
+
+For example an EC2 t4g.medium (2 vCPU, 4 GB) with a 20 GB disk, in the same
+VPC as the Metatrash server. On that machine, as root, from a Core checkout:
+
+```sh
+sudo dnf install -y python3.11 git
+git clone --depth 1 --branch v0.95.6 https://github.com/davezap/metatrash.git
+sudo PYTHON=python3.11 bash metatrash/deploy/docling/install-server.sh
+```
+
+`install-server.sh` runs `install.sh` (below), creates the
+`metatrash-docling` user, a token in `/etc/metatrash-docling/token`, and the
+`metatrash-docling` systemd service on port 8090 (`LISTEN` and `THREADS`
+change the address and CPU threads). It prints the token and the
+`agents.docling` lines to add on the Metatrash server.
+
+The service answers plain HTTP with a bearer token: keep it on the private
+network. Allow port 8090 only from the Metatrash servers' security group (or
+their private addresses), never from the internet. It converts one PDF at a
+time (others get 503 and Metatrash tries them again in 15 minutes), keeps the
+models loaded between conversions, and systemd caps it at 90% of the
+machine's memory.
+
+On the Metatrash server, put the token in a file only the service reads and
+point `agents.docling` at the converter's private address:
+
+```sh
+sudo install -m 0640 -o root -g metatrash /dev/null /etc/metatrash/docling-token
+sudoedit /etc/metatrash/docling-token         # the token, one line
+```
+
+```json
+"docling": {
+  "url": "http://10.0.1.5:8090",
+  "tokenFile": "/etc/metatrash/docling-token"
+}
+```
+
+Metatrash starts even when the converter is down: it asks the converter for
+its version at start and every five minutes, and converts nothing until it
+answers (reads keep pdftotext's text). A PDF the converter can't reach or is
+busy for is tried again in 15 minutes; one it can't convert, in a day. Several
+Metatrash servers (staging and production) can share one converter.
+
+## Install (on the Metatrash server)
 
 On the server, as root (Python 3.10 or later; on Amazon Linux 2023
 `sudo dnf install python3.11`):
@@ -75,11 +130,12 @@ Add `docling` to the `agents` section of `accounts.json` (it needs
 }
 ```
 
-Only `command` is needed; the others show their defaults. `workers` 1–4,
+Only `command` (or `url` and `tokenFile`) is needed; the others show their
+defaults. `workers` 1–4,
 `threads` 1–16 (CPU threads per conversion), `timeoutSeconds` 30–3600 per PDF,
 `maxPages` 1–2000, `maxMB` 1–100, `ocr` `"auto"` (RapidOCR reads scanned
-pages) or `"off"`. The service runs `command version` at start and refuses
-to start if it doesn't answer; `metatrash check` shows the version and limits.
+pages) or `"off"`. With `command`, the service runs `command version` at
+start and refuses to start if it doesn't answer; `metatrash check` shows the version and limits.
 
 Memory: Docling loads its layout and table models for each conversion (about
 1–2 GB while it runs). Size `workers` to the server's spare memory and

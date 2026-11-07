@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,8 +23,10 @@ import (
 // Docling conversion (0.95.5): a better Markdown for PDF virtual files, with
 // heading levels, tables and reading order, from Docling
 // (https://github.com/docling-project/docling) run as an outside program,
-// deploy/docling/metatrash-docling. It is optional: without agents.docling
-// PDFs keep pdftotext's text as before.
+// deploy/docling/metatrash-docling: on this server (command), or as a service
+// on a machine of its own (url, 0.95.6), since a conversion needs 1-2 GB of
+// memory. It is optional: without agents.docling PDFs keep pdftotext's text
+// as before.
 //
 // Conversion is slow (seconds a page on a CPU), so it never runs in a
 // request or in the write queue. A bounded queue of workers converts a PDF
@@ -57,6 +62,11 @@ const (
 type doclingConfig struct {
 	// Command is metatrash-docling's absolute path (deploy/docling/install.sh).
 	Command string `json:"command"`
+	// URL is a metatrash-docling service on another machine
+	// (deploy/docling/install-server.sh), such as http://10.0.1.5:8090, and
+	// TokenFile holds its token (0.95.6). Use command or url, not both.
+	URL       string `json:"url"`
+	TokenFile string `json:"tokenFile"`
 	// TimeoutSeconds bounds one PDF (default 600, 30 to 3600).
 	TimeoutSeconds int `json:"timeoutSeconds"`
 	// MaxPages are converted from each PDF (default 200, 1 to 2000); the
@@ -65,7 +75,8 @@ type doclingConfig struct {
 	// MaxMB is the largest PDF converted (default 50, 1 to 100); larger ones
 	// keep pdftotext's text.
 	MaxMB int `json:"maxMB"`
-	// Workers is how many PDFs convert at once (default 1, 1 to 4).
+	// Workers is how many PDFs convert at once (default 1, 1 to 4). A
+	// converter service converts one at a time, so keep 1 with url.
 	Workers int `json:"workers"`
 	// Threads is each conversion's CPU threads (default 2, 1 to 16).
 	Threads int `json:"threads"`
@@ -76,16 +87,34 @@ type doclingConfig struct {
 // doclingSettings are the checked settings, with the converter's version.
 type doclingSettings struct {
 	command, version, ident, ocr string
-	timeout                      time.Duration
-	maxPages, workers, threads   int
-	maxBytes                     int64
+	// url and token reach a converter service; version and ident are then
+	// learned from it once it answers (doclingQueue.identity).
+	url, token                 string
+	timeout                    time.Duration
+	maxPages, workers, threads int
+	maxBytes                   int64
 }
 
 func (c *doclingConfig) settings() (*doclingSettings, error) {
-	if !filepath.IsAbs(c.Command) {
-		return nil, fmt.Errorf("agents docling command must be the absolute path of metatrash-docling (deploy/docling/install.sh), such as /opt/metatrash-docling/bin/metatrash-docling")
-	}
 	d := &doclingSettings{command: c.Command, ocr: c.OCR}
+	switch {
+	case c.Command != "" && c.URL != "":
+		return nil, fmt.Errorf("agents docling takes command or url, not both")
+	case c.URL != "":
+		u, err := url.Parse(c.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("agents docling url must be the converter's address, such as http://10.0.1.5:8090 (deploy/docling/install-server.sh)")
+		}
+		token, err := readLimitedFile(c.TokenFile, 4096)
+		if err != nil || len(strings.TrimSpace(string(token))) < 32 {
+			return nil, fmt.Errorf("agents docling tokenFile must hold the converter's token (/etc/metatrash-docling/token on the converter)")
+		}
+		d.url, d.token = strings.TrimSuffix(c.URL, "/"), strings.TrimSpace(string(token))
+	case c.TokenFile != "":
+		return nil, fmt.Errorf("agents docling tokenFile goes with url")
+	case !filepath.IsAbs(c.Command):
+		return nil, fmt.Errorf("agents docling command must be the absolute path of metatrash-docling (deploy/docling/install.sh), such as /opt/metatrash-docling/bin/metatrash-docling, or url the address of a converter service")
+	}
 	timeout, err := intSetting("agents docling timeoutSeconds", c.TimeoutSeconds, defaultDoclingTimeout, 30, 3600)
 	if err != nil {
 		return nil, err
@@ -112,6 +141,11 @@ func (c *doclingConfig) settings() (*doclingSettings, error) {
 	default:
 		return nil, fmt.Errorf(`agents docling ocr must be "auto" or "off"`)
 	}
+	if d.url != "" {
+		// The service may be down or not yet started: Metatrash starts
+		// anyway and asks it for its version in the background.
+		return d, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, d.command, "version")
@@ -121,9 +155,14 @@ func (c *doclingConfig) settings() (*doclingSettings, error) {
 	if err != nil || !strings.HasPrefix(version, "metatrash-docling ") || strings.ContainsAny(version, "\n\r") {
 		return nil, fmt.Errorf("agents docling command %s does not run (`%s version` should print \"metatrash-docling ...\"): %v", d.command, d.command, err)
 	}
-	sum := sha256.Sum256([]byte(version))
-	d.version, d.ident = version, hex.EncodeToString(sum[:])[:12]
+	d.version, d.ident = version, doclingIdent(version)
 	return d, nil
+}
+
+// doclingIdent names a converter version in object keys.
+func doclingIdent(version string) string {
+	sum := sha256.Sum256([]byte(version))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // intSetting checks a number setting, 0 meaning its default.
@@ -174,15 +213,41 @@ type doclingQueue struct {
 	failed   map[string]time.Time // conversion failed (or the PDF is too big)
 	// done counts finished conversions, for tests.
 	done func(key string, err error)
+	// version and ident name the converter (doclingSettings); a service's
+	// are learned when it answers, "" until then (no conversions, no
+	// Docling text read).
+	idMu           sync.Mutex
+	version, ident string
+	http           *http.Client
 }
+
+// doclingRetrySoon marks a failure of the converter rather than of the PDF
+// (the service is down or busy): the PDF is tried again in minutes, not a day.
+type doclingRetrySoon struct{ err error }
+
+func (e doclingRetrySoon) Error() string { return e.err.Error() }
+
+const doclingRetrySoonAfter = 15 * time.Minute
 
 func newDoclingQueue(s *Service, d *doclingSettings) *doclingQueue {
 	q := &doclingQueue{s: s, settings: d, jobs: make(chan doclingJob, doclingQueueSize), pending: map[string]bool{}, missing: map[string]time.Time{}, failed: map[string]time.Time{}}
+	q.version, q.ident = d.version, d.ident
 	q.run = q.convertFile
+	if d.url != "" {
+		q.run = q.convertRemote
+		q.http = &http.Client{Timeout: d.timeout + time.Minute}
+	}
 	return q
 }
 
 func (q *doclingQueue) start(ctx context.Context) {
+	if q.settings.url != "" {
+		q.wg.Add(1)
+		go func() {
+			defer q.wg.Done()
+			q.watchVersion(ctx)
+		}()
+	}
 	for range q.settings.workers {
 		q.wg.Add(1)
 		go func() {
@@ -195,7 +260,10 @@ func (q *doclingQueue) start(ctx context.Context) {
 					err := q.convert(ctx, j)
 					q.mu.Lock()
 					delete(q.pending, j.key)
-					if err != nil {
+					var soon doclingRetrySoon
+					if errors.As(err, &soon) {
+						q.failed[j.key] = time.Now().Add(doclingRetrySoonAfter - doclingRetryAfter)
+					} else if err != nil {
 						q.failed[j.key] = time.Now()
 					} else {
 						delete(q.missing, j.key)
@@ -215,14 +283,74 @@ func (q *doclingQueue) start(ctx context.Context) {
 
 func (q *doclingQueue) wait() { q.wg.Wait() }
 
-// key names the Markdown of v in space r.
-func (q *doclingQueue) key(r *repository, v VirtualInfo) string {
-	return "files/" + r.id + "/" + v.SHA256 + ".docling-" + q.settings.ident + ".md"
+// identity is the converter's version line and its key name.
+func (q *doclingQueue) identity() (version, ident string) {
+	q.idMu.Lock()
+	defer q.idMu.Unlock()
+	return q.version, q.ident
 }
 
-// wants reports a virtual file Docling converts.
+// watchVersion asks the converter service for its version at start and every
+// five minutes, so a new Docling there makes new Markdown here.
+func (q *doclingQueue) watchVersion(ctx context.Context) {
+	for {
+		version, err := q.remoteVersion(ctx)
+		if err == nil {
+			q.idMu.Lock()
+			if version != q.version {
+				log.Printf("docling: converter %s is %s", q.settings.url, version)
+				q.version, q.ident = version, doclingIdent(version)
+			}
+			q.idMu.Unlock()
+		} else if ctx.Err() == nil {
+			log.Printf("docling: converter %s: %v", q.settings.url, err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Minute):
+		}
+	}
+}
+
+// remoteVersion is GET /version of the converter service.
+func (q *doclingQueue) remoteVersion(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.settings.url+"/version", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+q.settings.token)
+	res, err := q.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("not reachable")
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(res.Body, 1024))
+	version := strings.TrimSpace(string(b))
+	if res.StatusCode != http.StatusOK || !strings.HasPrefix(version, "metatrash-docling ") || strings.ContainsAny(version, "\n\r") {
+		return "", fmt.Errorf("answered %s to /version (check tokenFile)", res.Status)
+	}
+	return version, nil
+}
+
+// key names the Markdown of v in space r.
+func (q *doclingQueue) key(r *repository, v VirtualInfo) string {
+	_, ident := q.identity()
+	return "files/" + r.id + "/" + v.SHA256 + ".docling-" + ident + ".md"
+}
+
+// wants reports a virtual file Docling converts (none until the converter
+// is known).
 func (q *doclingQueue) wants(r *repository, v VirtualInfo) bool {
-	return q != nil && r.owned && idPattern.MatchString(r.id) && v.Type == "application/pdf" && objectHashPattern.MatchString(v.SHA256) && v.Size <= q.settings.maxBytes
+	if q == nil {
+		return false
+	}
+	if _, ident := q.identity(); ident == "" {
+		return false
+	}
+	return r.owned && idPattern.MatchString(r.id) && v.Type == "application/pdf" && objectHashPattern.MatchString(v.SHA256) && v.Size <= q.settings.maxBytes
 }
 
 // enqueue asks for v's conversion, unless it is queued, failed recently or
@@ -365,6 +493,49 @@ func (q *doclingQueue) convertFile(ctx context.Context, name string) (string, er
 		return "", fmt.Errorf("%v: %s", err, lastLine(errOut.String()))
 	}
 	return out.String(), nil
+}
+
+// convertRemote sends the PDF in file name to the converter service.
+func (q *doclingQueue) convertRemote(ctx context.Context, name string) (string, error) {
+	d := q.settings
+	f, err := os.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	query := url.Values{"maxPages": {strconv.Itoa(d.maxPages)}, "timeout": {strconv.Itoa(int(d.timeout / time.Second))}, "ocr": {d.ocr}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url+"/convert?"+query.Encode(), f)
+	if err != nil {
+		return "", err
+	}
+	req.ContentLength = info.Size()
+	req.Header.Set("Content-Type", "application/pdf")
+	req.Header.Set("Authorization", "Bearer "+d.token)
+	res, err := q.http.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", doclingRetrySoon{fmt.Errorf("converter not reachable")}
+	}
+	defer res.Body.Close()
+	var out limitedBuffer
+	out.limit = maxVirtualText + 4096
+	_, err = io.Copy(&out, res.Body)
+	if err != nil && !out.full {
+		return "", doclingRetrySoon{fmt.Errorf("converter answer cut off")}
+	}
+	switch {
+	case res.StatusCode == http.StatusOK:
+		return out.String(), nil
+	case res.StatusCode == http.StatusUnprocessableEntity || res.StatusCode == http.StatusRequestEntityTooLarge:
+		return "", fmt.Errorf("%s", lastLine(out.String()))
+	}
+	return "", doclingRetrySoon{fmt.Errorf("converter answered %s: %s", res.Status, lastLine(out.String()))}
 }
 
 // lastLine is the last non-empty line of s, for a log.

@@ -9,7 +9,9 @@
 # environment, the models (PREFIX/models) and the command Metatrash runs,
 # PREFIX/bin/metatrash-docling. Nothing is downloaded after this: conversion
 # runs offline. Set PYTHON to choose the interpreter (default python3.11,
-# else python3; Docling needs 3.10 or later).
+# else python3; Docling needs 3.10 or later). It needs about 6 GB free on
+# PREFIX's disk and /var/tmp while installing. To run the converter as a
+# service on its own machine, use install-server.sh instead (it runs this).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +27,11 @@ if sys.version_info < (3, 10):
 PY
 
 echo "Installing metatrash-docling into $prefix with $("$python" --version)"
+# pip unpacks PyTorch (over 1 GB) in TMPDIR; /tmp is often a small memory
+# disk (Amazon Linux 2023: half the RAM), so build on disk instead.
+build="$(mktemp -d /var/tmp/metatrash-docling-build.XXXXXX)"
+trap 'rm -rf "$build"' EXIT
+export TMPDIR="$build" PIP_CACHE_DIR="$build/cache"
 "$python" -m venv "$prefix"
 "$prefix/bin/pip" install --quiet --upgrade pip
 # On x86_64, take PyTorch's CPU-only build (the default one carries CUDA,
