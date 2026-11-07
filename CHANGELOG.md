@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.95.8 - Uploads become Markdown pages; uploads on the site (2026-11-07)
+
+- Pairing (docs/docling.md): once Docling has converted an upload, the server moves `report.pdf` to `assets/report.pdf` (same file ID and history) and writes `report.md` in its place, starting with an "Open original PDF" link, as Slate Viewer's Convert to Markdown does. The site and Slate Viewer then open the Markdown, and the person may delete the original. Only uploads are paired (David's choice); files stored before stay where they are. Left where they are too: uploads into an `assets/` folder, ones whose `.md` or `assets/` copy exists, refreshing web downloads, files in GitHub folders, files changed before the conversion finished, and moves the folder's locks refuse. After pairing, `report.md` is an ordinary file that a later Docling never rewrites. `agents.docling.pair: false` turns it off; `metatrash check` shows it.
+- Word (.docx), PowerPoint (.pptx) and Excel (.xlsx) files are converted and paired too, when the converter names them on its version line (`metatrash-docling 4 … formats pdf,docx,pptx,xlsx`); an older converter is sent PDFs only. Their Markdown comes in one piece, without page markers. Pictures are not converted. Uploads named .pptx or .xlsx get their media types.
+- metatrash-docling 4 (deploy/docling/metatrash_docling.py): `convert` takes .pdf, .docx, .pptx and .xlsx files by extension, `serve` takes `format=` on `/convert`. Its version line changes, so PDFs get new Markdown as they are read or uploaded. No new packages: Docling's standard install already reads these formats.
+- The site API takes uploads (`PUT /api/v1/site/spaces/…/content`, as on the account REST API) from a signed-in page with its CSRF token, so the website's Files list can take dropped and picked files (Slate Viewer 0.29.0).
+- TestDoclingPairing covers the move and page, Word uploads, existing pages, refreshing downloads, assets/ originals, files stored before pairing and pair off; TestDoclingPairable the rules.
+
 ## 0.95.7 - Docling converter fixes (2026-11-07)
 
 - Docling Markdown keeps `<`, `>` and `&` as typed. Docling had escaped them as HTML (a `VMS>` prompt read as `VMS&gt;`). The converter's version line changes (`metatrash-docling 3`), so PDFs are converted again as they are read or uploaded.

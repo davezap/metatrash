@@ -22,16 +22,18 @@ import (
 //	*    /api/v1/site/spaces/{owner}/{slug}/{resource}  an owned space
 //
 // {resource} is file, files, history, search, edit, move, append, export,
-// content (GET), acknowledgements, submissions or reviews, as on
-// /api/v1/account. GitHub pull/push/pending, uploads and configure stay with
-// the OAuth resource for now.
+// content (GET, and PUT to upload a file from 0.95.8), acknowledgements,
+// submissions or reviews, as on /api/v1/account. GitHub pull/push/pending
+// and configure stay with the OAuth resource for now.
 //
 // A person signed in on the site has their own access: the owner can change
 // a space, a member as their permission allows (the one mtsync uses), and
 // anyone, signed in or not, may read a space its owner made readable on the
 // web. Writes need a signed-in session, a same-origin Origin header and the
 // session's CSRF token in X-Metatrash-CSRF. The cookie is SameSite=Strict
-// and writes must be application/json, so these are a second and third lock.
+// and writes other than an upload must be application/json, so these are a
+// second and third lock (an upload's custom CSRF header already needs a
+// same-origin page: another site's form cannot send it).
 
 const siteCSRFHeader = "X-Metatrash-CSRF"
 
@@ -51,7 +53,7 @@ func siteRequest(ctx context.Context) bool {
 var siteResources = map[string]string{
 	"file": "GET, PUT, DELETE", "files": "GET", "history": "GET", "search": "GET", "export": "GET",
 	"edit": "POST", "move": "POST", "append": "POST",
-	"content": "GET", "acknowledgements": "GET, POST", "submissions": "GET, POST", "reviews": "POST",
+	"content": "GET, PUT", "acknowledgements": "GET, POST", "submissions": "GET, POST", "reviews": "POST",
 }
 
 // siteSpace is one space in the session answer.

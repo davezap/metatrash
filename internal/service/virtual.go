@@ -141,6 +141,10 @@ func virtualMedia(given, path string, body []byte) string {
 			media = "application/pdf"
 		case ".docx":
 			media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		case ".pptx":
+			media = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+		case ".xlsx":
+			media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 		case ".md", ".markdown":
 			media = "text/markdown"
 		}
@@ -202,7 +206,7 @@ func (s *Service) putVirtual(ctx context.Context, r *repository, space, path, if
 	if err != nil {
 		return WriteResult{}, err
 	}
-	s.docling().enqueue(r, info)
+	s.docling().enqueueUpload(r, path, info)
 	return value.(WriteResult), nil
 }
 
@@ -267,12 +271,10 @@ func (s *Service) readVirtual(ctx context.Context, r *repository, path string, v
 	const better = " A better conversion (Docling: headings and tables) is being made; read again in a few minutes."
 	if v.TextSHA256 == "" {
 		result.Note = fmt.Sprintf("%s is a virtual file (%s, %s) with no text to read: its content is kept outside Git.", path, v.Type, humanBytes(v.Size))
-		if v.Type == "application/pdf" {
-			if converting {
-				result.Note += better
-			} else {
-				result.Note += " A PDF has text only when the server can read it (pdftotext) and it is not scanned pages."
-			}
+		if converting {
+			result.Note += better
+		} else if v.Type == "application/pdf" {
+			result.Note += " A PDF has text only when the server can read it (pdftotext) and it is not scanned pages."
 		}
 		return nil
 	}

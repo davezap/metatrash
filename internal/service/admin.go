@@ -694,7 +694,11 @@ func accountFeatures(a *accounts) string {
 				if d.url != "" {
 					where = "converter service " + d.url
 				}
-				s += fmt.Sprintf(", Docling PDF conversion (%s; %d at once, %d threads, %d pages, %d MB, OCR %s)", where, d.workers, d.threads, d.maxPages, d.maxBytes>>20, d.ocr)
+				pairing := "pairs PDFs as name.md + assets/"
+				if !d.pair {
+					pairing = "no pairing"
+				}
+				s += fmt.Sprintf(", Docling PDF conversion (%s; %d at once, %d threads, %d pages, %d MB, OCR %s, %s)", where, d.workers, d.threads, d.maxPages, d.maxBytes>>20, d.ocr, pairing)
 			}
 		}
 	}

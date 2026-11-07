@@ -19,9 +19,27 @@ reading order across columns, and OCR for scanned pages.
 - The Markdown is stored in the space-files bucket beside the content:
   `files/<space ID>/<sha256>.docling-<converter>.md`. `<converter>` comes
   from `metatrash-docling version`, so a new Docling makes new Markdown
-  rather than mixing outputs. Git, history, mtsync, GitHub folders and folder
-  actions see no change: a conversion never commits, so it can't start a sync
-  loop or trigger an action again.
+  rather than mixing outputs. Making it never commits, so a new Docling
+  can't start a sync loop or trigger folder actions again.
+- **Pairing** (0.95.8, `pair`, on by default). Once an upload has its
+  Markdown, the server puts an editable page in its place, as Slate Viewer's
+  Convert to Markdown does: `report.pdf` moves to `assets/report.pdf` beside
+  it (a move: same file ID and history) and `report.md` is written where it
+  was, starting with `> [Open original PDF](assets/report.pdf)`. These are
+  two ordinary commits, seen once by mtsync, history and folder actions.
+  After that `report.md` is the person's file (a later Docling never
+  rewrites it) and the original in `assets/` may be deleted. Only uploads
+  are paired: files stored before stay where they are, and their Markdown
+  is used by `read` and `search`. Uploads also stay where they are when they
+  go into an `assets/` folder, when `report.md` or `assets/report.pdf`
+  exists, when they refresh from a web source, when they are in a GitHub
+  folder, when they changed before the conversion finished, or when the
+  folder's locks refuse the move. Links to `report.pdf` need the new path.
+- **Formats** (0.95.8). PDF, Word (`.docx`), PowerPoint (`.pptx`) and Excel
+  (`.xlsx`) files are converted, when the converter's version line names them
+  (`… formats pdf,docx,pptx,xlsx`, metatrash-docling 4); an older converter is
+  sent PDFs only. Word, PowerPoint and Excel Markdown comes in one piece,
+  without page markers. Pictures are not converted.
 - The Markdown is removed with its PDF by the daily sweep and with the space,
   and is not counted as the space's storage.
 - A conversion that fails (a damaged PDF, a timeout, no text) leaves the PDF
@@ -49,7 +67,7 @@ VPC as the Metatrash server. On that machine, as root, from a Core checkout:
 
 ```sh
 sudo dnf install -y git
-git clone --depth 1 --branch v0.95.7 https://github.com/davezap/metatrash.git
+git clone --depth 1 --branch v0.95.8 https://github.com/davezap/metatrash.git
 sudo bash metatrash/deploy/docling/install-server.sh
 ```
 
@@ -129,7 +147,8 @@ Add `docling` to the `agents` section of `accounts.json` (it needs
     "timeoutSeconds": 600,
     "maxPages": 200,
     "maxMB": 50,
-    "ocr": "auto"
+    "ocr": "auto",
+    "pair": true
   }
 }
 ```
@@ -138,7 +157,8 @@ Only `command` (or `url` and `tokenFile`) is needed; the others show their
 defaults. `workers` 1–4,
 `threads` 1–16 (CPU threads per conversion), `timeoutSeconds` 30–3600 per PDF,
 `maxPages` 1–2000, `maxMB` 1–100, `ocr` `"auto"` (RapidOCR reads scanned
-pages) or `"off"`. With `command`, the service runs `command version` at
+pages) or `"off"`, `pair` `true` or `false` (keep PDFs where they are; the
+Markdown is then used by `read` and `search` only). With `command`, the service runs `command version` at
 start and refuses to start if it doesn't answer; `metatrash check` shows the version and limits.
 
 Memory: Docling loads its layout and table models for each conversion (about

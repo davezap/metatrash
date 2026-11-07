@@ -185,8 +185,13 @@ func TestSiteAPIAgainstDatabase(t *testing.T) {
 			t.Fatalf("%s: %d", path, res.Code)
 		}
 	}
-	if res := siteCall(w, "PUT", owned+"/content?path=x.png", "x", ownerSession, csrf); res.Code != 405 {
-		t.Fatalf("upload: %d", res.Code)
+	// Uploads (0.95.8): the owner with the CSRF token, never without it.
+	state = siteJSON(t, siteCall(w, "GET", owned+"/files", "", ownerSession, ""))["state"].(string)
+	if res := siteCall(w, "PUT", owned+"/content?path=x.png&ifInState="+state, "x", ownerSession, ""); res.Code != 403 {
+		t.Fatalf("upload without CSRF: %d", res.Code)
+	}
+	if res := siteCall(w, "PUT", owned+"/content?path=x.png&ifInState="+state, "x", ownerSession, csrf); res.Code == 405 || res.Code == 403 || res.Code == 404 {
+		t.Fatalf("upload: %d %s", res.Code, res.Body)
 	}
 	if res := siteCall(w, "POST", "/api/v1/site/session", "", ownerSession, csrf); res.Code != 405 {
 		t.Fatalf("POST session: %d", res.Code)

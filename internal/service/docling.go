@@ -82,6 +82,11 @@ type doclingConfig struct {
 	Threads int `json:"threads"`
 	// OCR reads scanned pages: "auto" (default) or "off".
 	OCR string `json:"ocr"`
+	// Pair puts each converted PDF's Markdown in its place (0.95.8,
+	// docling_pair.go): report.md, with report.pdf moved to
+	// assets/report.pdf. Default true; false keeps the Markdown for reads
+	// and search only.
+	Pair *bool `json:"pair"`
 }
 
 // doclingSettings are the checked settings, with the converter's version.
@@ -93,10 +98,11 @@ type doclingSettings struct {
 	timeout                    time.Duration
 	maxPages, workers, threads int
 	maxBytes                   int64
+	pair                       bool
 }
 
 func (c *doclingConfig) settings() (*doclingSettings, error) {
-	d := &doclingSettings{command: c.Command, ocr: c.OCR}
+	d := &doclingSettings{command: c.Command, ocr: c.OCR, pair: c.Pair == nil || *c.Pair}
 	switch {
 	case c.Command != "" && c.URL != "":
 		return nil, fmt.Errorf("agents docling takes command or url, not both")
@@ -219,6 +225,12 @@ type doclingQueue struct {
 	idMu           sync.Mutex
 	version, ident string
 	http           *http.Client
+	// ctx is the queue's while it runs; pairWant holds, by key, the paths
+	// uploaded with that content, paired once converted (docling_pair.go);
+	// paired reports each pairing, for tests.
+	ctx      context.Context
+	pairWant map[string][]string
+	paired   func(n int, err error)
 }
 
 // doclingRetrySoon marks a failure of the converter rather than of the PDF
@@ -230,7 +242,7 @@ func (e doclingRetrySoon) Error() string { return e.err.Error() }
 const doclingRetrySoonAfter = 15 * time.Minute
 
 func newDoclingQueue(s *Service, d *doclingSettings) *doclingQueue {
-	q := &doclingQueue{s: s, settings: d, jobs: make(chan doclingJob, doclingQueueSize), pending: map[string]bool{}, missing: map[string]time.Time{}, failed: map[string]time.Time{}}
+	q := &doclingQueue{s: s, settings: d, jobs: make(chan doclingJob, doclingQueueSize), pending: map[string]bool{}, missing: map[string]time.Time{}, failed: map[string]time.Time{}, pairWant: map[string][]string{}}
 	q.version, q.ident = d.version, d.ident
 	q.run = q.convertFile
 	if d.url != "" {
@@ -241,6 +253,9 @@ func newDoclingQueue(s *Service, d *doclingSettings) *doclingQueue {
 }
 
 func (q *doclingQueue) start(ctx context.Context) {
+	q.mu.Lock()
+	q.ctx = ctx
+	q.mu.Unlock()
 	if q.settings.url != "" {
 		q.wg.Add(1)
 		go func() {
@@ -270,7 +285,14 @@ func (q *doclingQueue) start(ctx context.Context) {
 					}
 					q.mu.Unlock()
 					if err != nil && ctx.Err() == nil {
-						log.Printf("docling: space %s, PDF %s: %v", j.r.id, j.info.SHA256[:12], err)
+						log.Printf("docling: space %s, file %s: %v", j.r.id, j.info.SHA256[:12], err)
+					}
+					q.mu.Lock()
+					uploaded := q.pairWant[j.key]
+					delete(q.pairWant, j.key)
+					q.mu.Unlock()
+					if err == nil && len(uploaded) > 0 {
+						q.pairLater(j.r, j.info, uploaded)
 					}
 					if q.done != nil {
 						q.done(j.key, err)
@@ -335,6 +357,35 @@ func (q *doclingQueue) remoteVersion(ctx context.Context) (string, error) {
 	return version, nil
 }
 
+// doclingFormat is a file type Docling converts: its extension, as the
+// converter's version line names it (formats …), and what a page calls it.
+type doclingFormat struct{ ext, label string }
+
+// doclingFormats are the types Metatrash sends to Docling (0.95.8). Pictures
+// are left out on purpose: a photo should stay a picture.
+var doclingFormats = map[string]doclingFormat{
+	"application/pdf": {"pdf", "PDF"},
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   {"docx", "Word file"},
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": {"pptx", "PowerPoint file"},
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         {"xlsx", "Excel file"},
+}
+
+// doclingConverts reports a format the converter's version line accepts:
+// "… formats pdf,docx,…" from metatrash-docling 4, PDF only before.
+func doclingConverts(version, ext string) bool {
+	_, list, found := strings.Cut(version, " formats ")
+	if !found {
+		return ext == "pdf"
+	}
+	list, _, _ = strings.Cut(list, " ")
+	for _, f := range strings.Split(list, ",") {
+		if f == ext {
+			return true
+		}
+	}
+	return false
+}
+
 // key names the Markdown of v in space r.
 func (q *doclingQueue) key(r *repository, v VirtualInfo) string {
 	_, ident := q.identity()
@@ -347,10 +398,12 @@ func (q *doclingQueue) wants(r *repository, v VirtualInfo) bool {
 	if q == nil {
 		return false
 	}
-	if _, ident := q.identity(); ident == "" {
+	version, ident := q.identity()
+	if ident == "" {
 		return false
 	}
-	return r.owned && idPattern.MatchString(r.id) && v.Type == "application/pdf" && objectHashPattern.MatchString(v.SHA256) && v.Size <= q.settings.maxBytes
+	format, ok := doclingFormats[v.Type]
+	return ok && doclingConverts(version, format.ext) && r.owned && idPattern.MatchString(r.id) && objectHashPattern.MatchString(v.SHA256) && v.Size <= q.settings.maxBytes
 }
 
 // enqueue asks for v's conversion, unless it is queued, failed recently or
@@ -426,7 +479,7 @@ func (q *doclingQueue) convert(ctx context.Context, j doclingJob) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	name := filepath.Join(dir, "document.pdf")
+	name := filepath.Join(dir, "document."+doclingFormats[j.info.Type].ext)
 	if err := q.fetch(ctx, j, name); err != nil {
 		return err
 	}
@@ -508,12 +561,15 @@ func (q *doclingQueue) convertRemote(ctx context.Context, name string) (string, 
 		return "", err
 	}
 	query := url.Values{"maxPages": {strconv.Itoa(d.maxPages)}, "timeout": {strconv.Itoa(int(d.timeout / time.Second))}, "ocr": {d.ocr}}
+	if ext := strings.TrimPrefix(filepath.Ext(name), "."); ext != "pdf" {
+		query.Set("format", ext)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url+"/convert?"+query.Encode(), f)
 	if err != nil {
 		return "", err
 	}
 	req.ContentLength = info.Size()
-	req.Header.Set("Content-Type", "application/pdf")
+	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Authorization", "Bearer "+d.token)
 	res, err := q.http.Do(req)
 	if err != nil {

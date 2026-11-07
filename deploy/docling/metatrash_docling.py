@@ -7,12 +7,15 @@ service on another machine (agents.docling.url, 0.95.6), and keeps the
 Markdown it gives:
 
     metatrash-docling version
-        prints one line, "metatrash-docling <wrapper> docling <version> ...",
-        which names the conversion: a new line here means new Markdown.
+        prints one line, "metatrash-docling <wrapper> docling <version> ...
+        formats pdf,docx,pptx,xlsx", which names the conversion (a new line
+        here means new Markdown) and the file types it takes.
 
     metatrash-docling convert --input FILE [--max-pages N] [--timeout SECONDS]
                               [--ocr auto|off] [--threads N]
-        prints the PDF's Markdown on stdout and exits 0. Pages after the
+        prints the file's Markdown on stdout and exits 0. FILE is a PDF,
+        Word (.docx), PowerPoint (.pptx) or Excel (.xlsx) file, by its
+        extension; the page rules below are for PDFs. Pages after the
         first start with a "<!-- page N -->" line, as Metatrash's pdftotext
         text does. Only the first --max-pages pages are converted (a line at
         the end says so). On failure it prints one line on stderr and exits 1.
@@ -22,8 +25,9 @@ Markdown it gives:
         answers HTTP on ADDRESS:PORT (default 0.0.0.0:8090), one conversion
         at a time, with the models loaded once:
           GET  /version   the version line (text/plain)
-          POST /convert?maxPages=N&timeout=S&ocr=auto|off
-                          body: the PDF; answer: its Markdown (text/markdown),
+          POST /convert?maxPages=N&timeout=S&ocr=auto|off&format=pdf|docx|pptx|xlsx
+                          body: the file (format defaults to pdf); answer:
+                          its Markdown (text/markdown),
                           422 with a one-line reason when it can't be
                           converted, 503 while another conversion runs.
         Both need "Authorization: Bearer <token>" with the token in FILE.
@@ -44,7 +48,10 @@ import tempfile
 import threading
 import time
 
-WRAPPER_VERSION = "3"
+WRAPPER_VERSION = "4"
+# The file types convert takes (by extension), named on the version line so
+# Metatrash sends only these (0.95.8).
+FORMATS = ("pdf", "docx", "pptx", "xlsx")
 
 
 def models_dir():
@@ -54,7 +61,7 @@ def models_dir():
 def version_line():
     from importlib.metadata import version as package_version
 
-    return f"metatrash-docling {WRAPPER_VERSION} docling {package_version('docling')} docling-core {package_version('docling-core')}"
+    return f"metatrash-docling {WRAPPER_VERSION} docling {package_version('docling')} docling-core {package_version('docling-core')} formats {','.join(FORMATS)}"
 
 
 def offline(threads):
@@ -99,7 +106,10 @@ class Converter:
         )
         if ocr != "off":
             options.ocr_options = OcrAutoOptions()
-        converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
+        converter = DocumentConverter(
+            allowed_formats=[InputFormat.PDF, InputFormat.DOCX, InputFormat.PPTX, InputFormat.XLSX],
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)},
+        )
         self.cache[key] = converter
         return converter
 
@@ -107,6 +117,11 @@ class Converter:
         from docling.datamodel.base_models import ConversionStatus
         from docling_core.types.doc import ImageRefMode
 
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        if ext not in FORMATS:
+            raise ConversionError(f"cannot convert .{ext} files (only {', '.join(FORMATS)})")
+        if ext != "pdf":
+            return self._whole(path, timeout, ocr)
         pages = _page_count(path)
         result = self._docling(ocr, timeout).convert(path, raises_on_error=False, page_range=(1, max_pages))
         if result.status not in (ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS):
@@ -129,6 +144,22 @@ class Converter:
         if pages > max_pages:
             out += f"\n…(pages after {max_pages} of {pages} are left out)\n"
         return out
+
+
+    def _whole(self, path, timeout, ocr):
+        """A Word, PowerPoint or Excel file's Markdown, in one piece (their
+        items do not all carry page numbers)."""
+        from docling.datamodel.base_models import ConversionStatus
+        from docling_core.types.doc import ImageRefMode
+
+        result = self._docling(ocr, timeout).convert(path, raises_on_error=False)
+        if result.status not in (ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS):
+            reasons = "; ".join(str(e.error_message) for e in (result.errors or [])[:3]) or str(result.status.value)
+            raise ConversionError(f"conversion failed: {reasons}"[:500])
+        text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER, escape_underscores=False, escape_html=False).strip()
+        if not text:
+            raise ConversionError("the file has no text Docling could read")
+        return text + "\n"
 
 
 def _page_count(path):
@@ -212,10 +243,11 @@ def serve(args):
                 max_pages = int(q.get("maxPages", "200"))
                 timeout = int(q.get("timeout", "600"))
                 ocr = q.get("ocr", "auto")
+                fmt = q.get("format", "pdf")
                 length = int(self.headers.get("Content-Length", "-1"))
             except ValueError:
                 return self.reply(400, "bad request\n")
-            if not (1 <= max_pages <= 2000 and 30 <= timeout <= 3600 and ocr in ("auto", "off")):
+            if not (1 <= max_pages <= 2000 and 30 <= timeout <= 3600 and ocr in ("auto", "off") and fmt in FORMATS):
                 return self.reply(400, "bad request\n")
             if length < 1:
                 return self.reply(411, "Content-Length required\n")
@@ -224,7 +256,7 @@ def serve(args):
             if not busy.acquire(blocking=False):
                 return self.reply(503, "busy: another conversion is running\n")
             try:
-                with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
+                with tempfile.NamedTemporaryFile(suffix="." + fmt) as f:
                     remaining = length
                     while remaining:
                         chunk = self.rfile.read(min(remaining, 1 << 20))
