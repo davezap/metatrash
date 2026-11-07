@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.7 - Docling converter fixes (2026-11-07)
+
+- Docling Markdown keeps `<`, `>` and `&` as typed. Docling had escaped them as HTML (a `VMS>` prompt read as `VMS&gt;`). The converter's version line changes (`metatrash-docling 3`), so PDFs are converted again as they are read or uploaded.
+- `metatrash-docling serve` logs each conversion's size and seconds (or why it failed), for measuring the converter machine.
+- deploy/docling/install.sh installs python3.11 with dnf when it is missing (Amazon Linux 2023's python3 is 3.9, too old for Docling).
+
 ## 0.95.6 - Docling on a machine of its own (2026-11-07)
 
 - A Docling conversion needs 1-2 GB of memory, more than a small Metatrash server can spare (metatrash.com's staging server has about 1.8 GB). `metatrash-docling serve` now runs the converter as an HTTP service on another machine (one conversion at a time, models loaded once, bearer token, 503 while busy, 422 for a PDF it can't convert), and `agents.docling` takes `url` and `tokenFile` instead of `command` to use it. Metatrash starts even when the converter is down: it learns the converter's version at start and every five minutes and converts nothing until then; unreachable or busy conversions are retried in 15 minutes, failed PDFs in a day. The queue, stored Markdown, reads, search and sweep are unchanged.

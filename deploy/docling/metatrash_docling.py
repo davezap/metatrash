@@ -42,8 +42,9 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
-WRAPPER_VERSION = "2"
+WRAPPER_VERSION = "3"
 
 
 def models_dir():
@@ -114,7 +115,7 @@ class Converter:
         doc = result.document
         parts = []
         for page_no in sorted(doc.pages):
-            text = doc.export_to_markdown(page_no=page_no, image_mode=ImageRefMode.PLACEHOLDER, escape_underscores=False).strip()
+            text = doc.export_to_markdown(page_no=page_no, image_mode=ImageRefMode.PLACEHOLDER, escape_underscores=False, escape_html=False).strip()
             if not text:
                 continue
             if page_no > 1:
@@ -232,12 +233,16 @@ def serve(args):
                         f.write(chunk)
                         remaining -= len(chunk)
                     f.flush()
+                    started = time.monotonic()
                     try:
                         out = converter.markdown(f.name, max_pages, timeout, ocr)
                     except ConversionError as e:
+                        self.log_message("conversion failed after %.1f s (%d KB): %s", time.monotonic() - started, length >> 10, e)
                         return self.reply(422, str(e) + "\n")
                     except Exception as e:
+                        self.log_message("conversion failed after %.1f s (%d KB): %s", time.monotonic() - started, length >> 10, one_line(e))
                         return self.reply(422, f"conversion failed: {type(e).__name__}: {one_line(e)}\n")
+                    self.log_message("converted %d KB in %.1f s (ocr %s)", length >> 10, time.monotonic() - started, ocr)
                 self.reply(200, out, "text/markdown; charset=utf-8")
             finally:
                 busy.release()

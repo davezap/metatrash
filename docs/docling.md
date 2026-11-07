@@ -48,10 +48,14 @@ For example an EC2 t4g.medium (2 vCPU, 4 GB) with a 20 GB disk, in the same
 VPC as the Metatrash server. On that machine, as root, from a Core checkout:
 
 ```sh
-sudo dnf install -y python3.11 git
-git clone --depth 1 --branch v0.95.6 https://github.com/davezap/metatrash.git
-sudo PYTHON=python3.11 bash metatrash/deploy/docling/install-server.sh
+sudo dnf install -y git
+git clone --depth 1 --branch v0.95.7 https://github.com/davezap/metatrash.git
+sudo bash metatrash/deploy/docling/install-server.sh
 ```
+
+(`install.sh` installs `python3.11` with dnf when it is missing.) Each
+conversion is logged with its size and seconds:
+`sudo journalctl -u metatrash-docling -f`.
 
 `install-server.sh` runs `install.sh` (below), creates the
 `metatrash-docling` user, a token in `/etc/metatrash-docling/token`, and the
