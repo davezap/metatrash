@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.95.15 - Resilient pinned Jsign download for release signing (2026-11-08)
+
+- Fetch Jsign 7.5 from Maven Central first, with GitHub release assets as a fallback. Both use the existing SHA-256 pin. Bound connection/transfer time and retries, verify before using the JAR, fail immediately on a checksum mismatch, and stop publication if neither source works. This addresses repeated GitHub HTTP 504 failures before signing in v0.95.14.
+- No runtime, schema, configuration, dependency version or mtsync behavior change. David runs builds/tests, tags and publishes; v0.95.14 is never replaced. See docs/release-0.95.15.md.
+
 ## 0.95.14 - Optional change-wait lifecycle observer (2026-11-08)
 
 - Add a construction-only `server.Config.ListWaitObserver` composition contract for admitted, saturated and finished change waits, with bounded outcome values and elapsed duration. No identities, space names or credentials are passed. Nil keeps the default behavior; hosted metrics and load policy remain in Company.

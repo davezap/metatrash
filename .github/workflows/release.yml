@@ -105,10 +105,32 @@ jobs:
           java-version: 21
       # Jsign signs Windows files on Linux; $RUNNER_TEMP/sign FILE... signs in place.
       - name: Jsign
+        timeout-minutes: 7
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/jsign.jar" \
-            "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign-$JSIGN_VERSION.jar"
-          echo "$JSIGN_SHA256  $RUNNER_TEMP/jsign.jar" | sha256sum -c -
+          set -euo pipefail
+          jar="$RUNNER_TEMP/jsign.jar"
+          downloaded=false
+          # Both publishers distribute the same pinned standalone JAR. Prefer
+          # Maven Central so a GitHub release-assets outage cannot block signing.
+          for source in \
+            "https://repo.maven.apache.org/maven2/net/jsign/jsign/$JSIGN_VERSION/jsign-$JSIGN_VERSION.jar" \
+            "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign-$JSIGN_VERSION.jar"; do
+            if curl -fsSL --retry 4 --retry-connrefused --retry-delay 3 \
+              --retry-max-time 120 --connect-timeout 15 --max-time 60 \
+              -o "$jar.part" "$source"; then
+              # A checksum mismatch fails immediately; never try to work around it.
+              echo "$JSIGN_SHA256  $jar.part" | sha256sum -c -
+              mv -- "$jar.part" "$jar"
+              downloaded=true
+              break
+            fi
+            rm -f -- "$jar.part"
+            echo "::warning::Jsign download failed from $source after bounded retries."
+          done
+          if [[ "$downloaded" != true ]]; then
+            echo '::error::Neither Jsign source succeeded; signing and publication stopped.'
+            exit 1
+          fi
           cat > "$RUNNER_TEMP/sign" <<'EOF'
           #!/bin/sh
           exec java -jar "$RUNNER_TEMP/jsign.jar" --storetype TRUSTEDSIGNING \
