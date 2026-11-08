@@ -30,6 +30,8 @@ type Config struct {
 	// Optional trusted HTTP admission policy, copied at construction.
 	// Nil preserves 2,400 global and 240 per-client-IP requests per minute.
 	IngressLimits *IngressLimits
+	// Optional bounded change-wait instrumentation; nil preserves Core behavior.
+	ListWaitObserver extension.ListWaitObserver
 }
 
 // IngressLimits bounds all HTTP routes, independently of file-operation quotas.
@@ -53,6 +55,9 @@ func Open(ctx context.Context, config Config) (*Server, error) {
 		}
 	}()
 	if err := core.SetModules(config.Modules); err != nil {
+		return nil, err
+	}
+	if err := core.SetListWaitObserver(config.ListWaitObserver); err != nil {
 		return nil, err
 	}
 	if len(config.Modules) > 0 && config.AccountsFile == "" {

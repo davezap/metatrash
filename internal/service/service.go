@@ -62,7 +62,8 @@ type Service struct {
 	// unpushed-changes hint may be given (see unpushedHint).
 	githubHints sync.Map
 	// listWaiters counts list requests waiting with after= (maxListWaiters).
-	listWaiters atomic.Int64
+	listWaiters      atomic.Int64
+	listWaitObserver extension.ListWaitObserver
 	// listWait replaces listWaitTime in tests.
 	listWait time.Duration
 	// listChecks measures the revision probe for REST change checks (since=).
@@ -625,11 +626,32 @@ func (s *Service) waitForChange(ctx context.Context, r *repository, after string
 	}
 	if s.listWaiters.Add(1) > int64(limit) {
 		s.listWaiters.Add(-1)
+		if s.listWaitObserver != nil {
+			s.listWaitObserver.ListWaitSaturated()
+		}
 		return listWaitRetrySeconds
 	}
-	defer s.listWaiters.Add(-1)
+	began := time.Time{}
+	observer := s.listWaitObserver
+	if observer != nil {
+		began = time.Now()
+		observer.ListWaitStarted()
+	}
+	outcome := extension.ListWaitChanged
+	defer func() {
+		if observer != nil {
+			observer.ListWaitFinished(outcome, time.Since(began))
+		}
+		s.listWaiters.Add(-1)
+	}()
 	changed := r.watch()
 	if head, err := r.head(ctx); err != nil || head != after {
+		if err != nil {
+			outcome = extension.ListWaitFailed
+			if ctx.Err() != nil {
+				outcome = extension.ListWaitCancelled
+			}
+		}
 		return 0
 	}
 	wait := listWaitTime
@@ -641,8 +663,11 @@ func (s *Service) waitForChange(ctx context.Context, r *repository, after string
 	select {
 	case <-changed:
 	case <-timer.C:
+		outcome = extension.ListWaitTimeout
 	case <-ctx.Done():
+		outcome = extension.ListWaitCancelled
 	case <-s.stop:
+		outcome = extension.ListWaitStopped
 	}
 	return 0
 }

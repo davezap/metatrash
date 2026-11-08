@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.95.14 - Optional change-wait lifecycle observer (2026-11-08)
+
+- Add a construction-only `server.Config.ListWaitObserver` composition contract for admitted, saturated and finished change waits, with bounded outcome values and elapsed duration. No identities, space names or credentials are passed. Nil keeps the default behavior; hosted metrics and load policy remain in Company.
+- Keep the 256-waiter default, retry advice and authentication/authorization ordering. No schema, configuration, tool-schema or mtsync change. See docs/release-0.95.14.md. David runs builds and tests; none run by Codex.
+
 ## 0.95.13 - `version` lists every part of the build and its libraries (2026-11-08)
 
 - `metatrash version` (and `mt version`) names each part of the build with its version: Metatrash Core, any application built on Core (it adds itself with the new `console.AddComponents`), the Slate Viewer and Slate front ends with their commits (from the site build's `frontends.json`; `console.SetFrontend` points it at an application's own build), and Go, then the front-end libraries bundled into the site when the build recorded them (David, 2026-11-08).
