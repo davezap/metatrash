@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -108,20 +109,46 @@ func runnerWrite(ctx context.Context) bool {
 	return v
 }
 
+// runnerJobKey carries, for a job's tool calls, which action the job runs
+// and who pays for it: a job acts for its payer, and never changes its own
+// action.
+type runnerJobKey struct{}
+
+type runnerJobContext struct {
+	folder, action, payerID string
+	// contributor is set when a contributor who opted in pays.
+	contributor bool
+	// submit is set when the action lists the submit tool.
+	submit bool
+}
+
+func runnerJobOf(ctx context.Context) *runnerJobContext {
+	v, _ := ctx.Value(runnerJobKey{}).(*runnerJobContext)
+	return v
+}
+
 // agentTools are the space tools an agent job gets: the MCP tools without
 // the space argument. spaces, pull and push are left out. It returns the
 // slim definitions the model sees (runner_tools.go), the full schemas calls
 // are checked against, and those full input schemas as JSON.
 func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolved, map[string]json.RawMessage, error) {
+	type tool struct {
+		Name        string                     `json:"name"`
+		Description string                     `json:"description"`
+		InputSchema map[string]json.RawMessage `json:"inputSchema"`
+	}
 	var catalog struct {
-		Tools []struct {
-			Name        string                     `json:"name"`
-			Description string                     `json:"description"`
-			InputSchema map[string]json.RawMessage `json:"inputSchema"`
-		} `json:"tools"`
+		Tools        []tool `json:"tools"`
+		AccountTools []tool `json:"accountTools"`
 	}
 	if err := json.Unmarshal(schema, &catalog); err != nil {
 		return nil, nil, nil, err
+	}
+	// submit, an account tool, is offered to jobs whose action lists it.
+	for _, t := range catalog.AccountTools {
+		if t.Name == "submit" {
+			catalog.Tools = append(catalog.Tools, t)
+		}
 	}
 	var tools []json.RawMessage
 	schemas := map[string]*jsonschema.Resolved{}
@@ -695,7 +722,7 @@ func oneLine(s string) string {
 
 const runnerPreamble = `You are an unattended agent that Metatrash, a file service, runs for the action %q of the folder %s in a space owned by %s%s. No person is watching and nobody will answer questions, so do the whole task with your tools, then stop.
 
-Your tools work on this folder only: paths are relative to it, and an empty prefix means the whole folder. Each change is saved as you make it; there is nothing to push. Write, move and delete need ifInState from a read, list or search. Prefer edit and append to rewriting a whole file, and read long files by line range. You cannot change .metatrash.json files or %s; Metatrash adds your result to %s itself.
+Your tools work on this folder only: paths are relative to it, and an empty prefix means the whole folder. Each change is saved as you make it; there is nothing to push. Write, move and delete need ifInState from a read, list or search. Prefer edit and append to rewriting a whole file, and read long files by line range. You can change a .metatrash.json only where its locks let the agents of folder actions, and never this action itself; you cannot change %s, and Metatrash adds your result to %s itself.
 
 Read only what the task needs. When your instructions say what to write and how, follow them; do not read other files to copy their style.
 
@@ -834,6 +861,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 		web.see(user)
 	}
 	toolCtx := context.WithValue(ctx, runnerWriteKey{}, true)
+	toolCtx = context.WithValue(toolCtx, runnerJobKey{}, &runnerJobContext{folder: j.Folder, action: j.Action, payerID: payer.userID, contributor: payer.agentID != "", submit: slices.Contains(action.Tools, "submit")})
 	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: payerName, App: m.app, Kind: "agent"} })
 	cache := m.provider == "anthropic"
 	systemBlock := contentBlock{Type: "text", Text: system}
@@ -1122,6 +1150,36 @@ func (a *agentRunner) callTool(ctx context.Context, r *repository, space string,
 	if int64(len(raw)) > r.limits.MaxRequestBytes {
 		return fail(problem(413, "payload_too_large", "Arguments exceed the space request limit."))
 	}
+	if name == "submit" {
+		p := string(pin)
+		job := runnerJobOf(ctx)
+		var sargs agentSubmitArgs
+		if err := decodeAgentSubmit(raw, &sargs); err != nil {
+			return fail(err)
+		}
+		if job == nil || !job.submit {
+			return fail(invalid(`Unknown tool "submit".`))
+		}
+		var instance any
+		if err := json.Unmarshal(raw, &instance); err != nil {
+			return fail(invalid("Invalid arguments."))
+		}
+		if err := schema.Validate(instance); err != nil {
+			return fail(invalid("Arguments do not match the tool input schema: " + err.Error()))
+		}
+		sargs.Path = p + sargs.Path
+		receipt, err := a.s.agentSubmit(ctx, r, a.spaceAddress(ctx, space), job.payerID, sargs)
+		if err != nil {
+			return fail(err)
+		}
+		receipt.Template = strings.TrimPrefix(receipt.Template, p)
+		receipt.Text = ""
+		b, err := json.Marshal(receipt)
+		if err != nil {
+			return fail(err)
+		}
+		return string(b), false, "sent " + strings.TrimPrefix(sargs.Path, p) + " to " + receipt.Target, nil
+	}
 	args := mcpInput{Limit: 50}
 	if err := decodeMCPInput(raw, &args); err != nil {
 		return fail(err)
@@ -1218,12 +1276,10 @@ func mutationOf(value any) (Mutation, bool) {
 	return Mutation{}, false
 }
 
-// runnerOwnFile refuses agent changes to .metatrash.json files (so a job
-// cannot change actions) and to the folder's runner.md.
+// runnerOwnFile refuses agent changes to the folder's runner.md. Changes to
+// .metatrash.json files are held to their locks and to checkActionsWriter,
+// which keeps a job from changing its own action.
 func runnerOwnFile(pin pinnedFolder, rel string) error {
-	if isFolderConfig(rel) {
-		return problem(403, "protected_file", folderConfigName+" files cannot be changed by an action's agent; a person or a connected agent can change them.")
-	}
 	if rel == runnerLogName {
 		return problem(403, "protected_file", runnerLogName+" is the runner's record of jobs; read it, but Metatrash writes it.")
 	}

@@ -486,7 +486,7 @@ func TestRunnerTidyDraft(t *testing.T) {
 					t.Errorf("result %d: error %v, want %v: %s", i, results[i].IsError, want, results[i].Content)
 				}
 			}
-			if !strings.Contains(results[2].Content, "protected_file") || !strings.Contains(results[3].Content, "protected_file") {
+			if !strings.Contains(results[2].Content, "the action it runs for") || !strings.Contains(results[3].Content, "protected_file") {
 				t.Errorf("own files: %s %s", results[2].Content, results[3].Content)
 			}
 			return agentResponse{Content: []json.RawMessage{textBlock("Rewrote the leave draft into for-review/leave.md and moved it to completed/.")}, StopReason: "end_turn", Usage: agentUsage{InputTokens: 2000, OutputTokens: 80}}, nil

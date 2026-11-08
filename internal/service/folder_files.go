@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
@@ -23,9 +25,38 @@ const agentsFileName = "AGENTS.md"
 // root starts from the built-in template instead (docs/space-AGENTS.template.md).
 const folderAgentsStarter = "# Agent instructions\n\nNothing written here yet. Agents may describe what this folder holds and how to work in it.\n"
 
-// folderConfigEmpty is the .metatrash.json a new space root starts with: no
-// settings. Other folders start with folderConfigInherit.
-const folderConfigEmpty = "{}\n"
+// folderConfigEmpty is the .metatrash.json a new space root starts with: the
+// default locks and nothing else (0.95.12; "{}" before). Other folders start
+// with folderConfigInherit, so they share the root's locks.
+const folderConfigEmpty = `{
+  "locked": {
+    "actions": "folderAgents",
+    "publishedVersion": "folderAgents",
+    "readOnly": "folderAgents",
+    "services": "folderAgents",
+    "takeQuizzes": "agents"
+  }
+}
+`
+
+// defaultLocks are the locks every space starts with (0.95.12): the agents
+// of folder actions may not change actions, publish, change which files are
+// read-only, or attach services, and no agent may take a quiz. Everything
+// else, filling in forms included, is open until the owner locks it.
+var defaultLocks = lockMap{
+	"actions":          lockFolderAgents,
+	"publishedVersion": lockFolderAgents,
+	"readOnly":         lockFolderAgents,
+	"services":         lockFolderAgents,
+	lockTakeQuizzes:    lockAgents,
+}
+
+// defaultLocksPath is the service file that records a space has had the
+// default locks added (addDefaultLocks), so a lock its owner later lifts
+// stays lifted.
+const defaultLocksPath = serviceDir + "locks.json"
+
+const defaultLocksMarker = "{\"defaultLocks\": 1}\n"
 
 // fileFolder returns the folder holding path: "" for the space root,
 // otherwise a prefix ending in "/".
@@ -249,6 +280,140 @@ func removeEmptyFolderFiles(files map[string]record, github map[string]bool, kee
 		}
 	}
 	return changes
+}
+
+// addDefaultLocks adds the default locks, once, to a space made before
+// 0.95.12: to every .metatrash.json that does not inherit (the root, and any
+// folder that left its parent's settings), outside GitHub folders, keeping
+// any lock already set on the same name. Settings files that do not validate
+// are left alone. The marker file is written in the same commit, or alone
+// when nothing needed a lock, so this runs once.
+func (r *repository) addDefaultLocks(ctx context.Context) error {
+	head, files, err := r.snapshot(ctx, "")
+	if err != nil || head == "" {
+		return err
+	}
+	if marker, err := r.serviceFile(ctx, head, defaultLocksPath); err != nil || marker != nil {
+		return err
+	}
+	github, err := r.githubFolders(ctx, files, nil)
+	if err != nil {
+		return err
+	}
+	paths := make([]string, 0)
+	for p := range files {
+		if isFolderConfig(p) && githubFolderAround(github, fileFolder(p)) == "" {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	texts := map[string]string{}
+	var changes []commitChange
+	for _, p := range paths {
+		f := files[p]
+		b, err := r.blob(ctx, f.Blob)
+		if err != nil {
+			return err
+		}
+		text, changed := withDefaultLocks(string(b))
+		if !changed || int64(len(text)) > r.limits.MaxFileBytes {
+			continue
+		}
+		f.Bytes = int64(len(text))
+		files[p] = f
+		texts[p] = text
+		changes = append(changes, commitChange{f.ID, "write", p})
+	}
+	summary := "add the default locks to " + folderConfigName
+	if len(changes) == 0 {
+		summary = "record the default locks"
+	}
+	if _, err = r.commitFiles(ctx, head, files, texts, map[string][]byte{defaultLocksPath: []byte(defaultLocksMarker)}, changes, summary); err != nil {
+		return err
+	}
+	if len(changes) > 0 {
+		log.Printf("space %s: added the default locks to %d settings files", r.path, len(changes))
+	}
+	return nil
+}
+
+// withDefaultLocks returns a settings text with the default locks it lacks
+// added to locked, its other keys kept in order, and whether that changed
+// anything. A text that does not validate, or inherits, is left alone.
+func withDefaultLocks(text string) (string, bool) {
+	c, err := parseFolderConfig(text)
+	if err != nil || c.Inherit != nil && *c.Inherit {
+		return text, false
+	}
+	locked := lockMap{}
+	for name, level := range c.Locked {
+		locked[name] = level
+	}
+	added := false
+	for name, level := range defaultLocks {
+		if _, ok := locked[name]; !ok {
+			locked[name] = level
+			added = true
+		}
+	}
+	if !added {
+		return text, false
+	}
+	keys, values, err := orderedConfig(text)
+	if err != nil {
+		return text, false
+	}
+	lockedJSON, _ := json.Marshal(map[string]string(locked))
+	if _, ok := values["locked"]; !ok {
+		keys = append(keys, "locked")
+	}
+	values["locked"] = lockedJSON
+	var b bytes.Buffer
+	b.WriteString("{")
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		name, _ := json.Marshal(k)
+		b.Write(name)
+		b.WriteString(":")
+		b.Write(values[k])
+	}
+	b.WriteString("}")
+	var out bytes.Buffer
+	if err := json.Indent(&out, b.Bytes(), "", "  "); err != nil {
+		return text, false
+	}
+	out.WriteString("\n")
+	if _, err := parseFolderConfig(out.String()); err != nil {
+		return text, false
+	}
+	return out.String(), true
+}
+
+// orderedConfig returns a settings object's top-level keys in their order
+// and their raw values.
+func orderedConfig(text string) ([]string, map[string]json.RawMessage, error) {
+	d := json.NewDecoder(strings.NewReader(text))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		return nil, nil, fmt.Errorf("not an object")
+	}
+	var keys []string
+	values := map[string]json.RawMessage{}
+	for d.More() {
+		t, err := d.Token()
+		if err != nil {
+			return nil, nil, err
+		}
+		k, _ := t.(string)
+		var v json.RawMessage
+		if err := d.Decode(&v); err != nil {
+			return nil, nil, err
+		}
+		keys = append(keys, k)
+		values[k] = v
+	}
+	return keys, values, nil
 }
 
 // addMissingFolderFiles gives every folder of the space the files it lacks,

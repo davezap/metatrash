@@ -43,9 +43,9 @@ func TestGitHubAutoPull(t *testing.T) {
 	}
 
 	w.host.commit("dave-zap/site", "main", map[string]fakeRepoFile{"README.md": {text: "# v1\n"}})
-	w.write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
-	w.write("manual/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site","pull":"agent"}]}`)
-	w.write("dev/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	w.write("manual/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site","pull":"agent"}]}`)
+	w.write("dev/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)
 	pushed("Dave-Zap/Site", "main", 77) // GitHub's name in another case
 	if w.read("site/README.md") != "# v1\n" {
 		t.Fatal("first push not pulled")

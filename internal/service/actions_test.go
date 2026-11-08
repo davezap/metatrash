@@ -140,8 +140,7 @@ func TestTriggersBetween(t *testing.T) {
 	}
 }
 
-// asOwner is a context writing as the space owner through Metatrash Sync,
-// the only writer that may change actions.
+// asOwner is a context writing as the space owner through Metatrash Sync.
 func asOwner(ctx context.Context, r *repository) context.Context {
 	if r.owner == "" {
 		r.owner = strings.Repeat("e", 32)
@@ -150,26 +149,33 @@ func asOwner(ctx context.Context, r *repository) context.Context {
 	return context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: r.owner}})
 }
 
-// Only the owner, as a person, can add, change or remove actions.
-func TestActionsOwnerOnly(t *testing.T) {
+// Actions are changed for an account: the owner as a person or through an
+// agent connected as them, where the locks allow (0.95.12). Space keys and
+// members writing the owner's actions cannot.
+func TestActionsWhoMayChange(t *testing.T) {
 	_, owned, do := folderFilesHarness(t)
 	ctx := context.Background()
 	owner := asOwner(ctx, owned)
-	config := `{"actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}]}`
+	config := `{"inherit":true,"actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}]}`
 	member := context.WithValue(context.WithValue(ctx, personWriteKey{}, true), mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: strings.Repeat("f", 32)}})
 	ownersAgent := context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: owned.owner}})
-	for _, c := range []context.Context{ctx, member, ownersAgent} {
+	for _, c := range []context.Context{ctx, member} {
 		do(c, "write", Input{Path: "hr/.metatrash.json", Text: &config}, "forbidden")
 	}
-	do(owner, "write", Input{Path: "hr/.metatrash.json", Text: &config}, "")
+	do(ownersAgent, "write", Input{Path: "hr/.metatrash.json", Text: &config}, "")
 	// Others may change the rest of the file, but not the actions.
-	purpose := `{"purpose":"HR","actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}]}`
+	purpose := `{"inherit":true,"purpose":"HR","actions":[{"name":"tidy","on":"inbound/*.md","do":"Tidy it."}]}`
 	do(member, "write", Input{Path: "hr/.metatrash.json", Text: &purpose}, "")
-	for _, text := range []string{`{"purpose":"HR"}`, `{"purpose":"HR","actions":[{"name":"tidy","on":"*.md","do":"Tidy it."}]}`} {
+	for _, text := range []string{`{"inherit":true,"purpose":"HR"}`, `{"inherit":true,"purpose":"HR","actions":[{"name":"tidy","on":"*.md","do":"Tidy it."}]}`} {
 		do(member, "write", Input{Path: "hr/.metatrash.json", Text: &text}, "forbidden")
+		do(ctx, "write", Input{Path: "hr/.metatrash.json", Text: &text}, "forbidden")
 	}
-	do(ownersAgent, "edit", Input{Path: "hr/.metatrash.json", Edits: []Edit{{OldText: `"inbound/*.md"`, NewText: `"*.md"`}}}, "forbidden")
-	empty := `{"purpose":"HR"}`
+	do(ownersAgent, "edit", Input{Path: "hr/.metatrash.json", Edits: []Edit{{OldText: `"inbound/*.md"`, NewText: `"*.md"`}}}, "")
+	// The owner locks actions for every agent; their own agent is held to it.
+	locked := strings.Replace(folderConfigEmpty, `"actions": "folderAgents"`, `"actions": "agents"`, 1)
+	do(owner, "write", Input{Path: ".metatrash.json", Text: &locked}, "")
+	do(ownersAgent, "edit", Input{Path: "hr/.metatrash.json", Edits: []Edit{{OldText: `"*.md"`, NewText: `"in/*.md"`}}}, "locked_setting")
+	empty := `{"inherit":true,"purpose":"HR"}`
 	do(owner, "write", Input{Path: "hr/.metatrash.json", Text: &empty}, "")
 }
 
@@ -204,6 +210,7 @@ func TestActionsMembersOwn(t *testing.T) {
 	}
 	write := func(c context.Context, text, code string) {
 		t.Helper()
+		text = `{"inherit":true,` + strings.TrimPrefix(text, "{")
 		do(c, "write", Input{Path: "hr/.metatrash.json", Text: &text}, code)
 	}
 	ownerAction := `{"name":"tidy","on":"in/*.md","do":"Tidy."}`
@@ -217,10 +224,13 @@ func TestActionsMembersOwn(t *testing.T) {
 	write(member(alice), `{"actions":[`+aliceAction+`]}`, "forbidden")
 	write(member(alice), `{"actions":[{"name":"tidy","on":"*.md","do":"Tidy."},`+aliceAction+`]}`, "forbidden")
 	write(member(alice), `{"actions":[`+ownerAction+`,{"name":"mine","on":"*.md","do":"Mine.","member":"alice"}]}`, "")
-	// A member without a username, and agents, cannot.
+	// A member without a username cannot; an agent connected as Alice acts
+	// for her: her own actions only.
 	write(member(bob), `{"actions":[`+ownerAction+`]}`, "forbidden")
 	agentCtx := context.WithValue(ctx, mcpIdentityKey{}, mcpIdentity{oauth: &oauthIdentity{UserID: alice}})
-	write(agentCtx, `{"actions":[`+ownerAction+`]}`, "forbidden")
+	write(agentCtx, `{"actions":[{"name":"mine","on":"*.md","do":"Mine.","member":"alice"}]}`, "forbidden")
+	write(agentCtx, `{"actions":[`+ownerAction+`,{"name":"mine","on":"in/*.md","do":"Mine.","member":"alice"}]}`, "")
+	write(agentCtx, `{"actions":[`+ownerAction+`,{"name":"mine","on":"*.md","do":"Mine.","member":"alice"}]}`, "")
 	// The owner cannot change hers in her name, but can adopt or remove it.
 	write(owner, `{"actions":[`+ownerAction+`,{"name":"mine","on":"*.md","do":"Mine better.","member":"alice"}]}`, "forbidden")
 	write(owner, `{"actions":[`+ownerAction+`,{"name":"mine","on":"*.md","do":"Mine.","pays":"contributor","model":"minimax/MiniMax-M3"}]}`, "")

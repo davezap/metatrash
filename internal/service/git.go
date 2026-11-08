@@ -564,6 +564,13 @@ func provision(ctx context.Context, path string, limits Storage, rootAgents []by
 			// A full space keeps working without them.
 			log.Printf("space %s (%s): folder files not added: %s", name, filepath.Base(path), p.Message)
 		}
+		if err := r.addDefaultLocks(ctx); err != nil {
+			var p *Error
+			if !errors.As(err, &p) {
+				return nil, err
+			}
+			log.Printf("space %s (%s): default locks not added: %s", name, filepath.Base(path), p.Message)
+		}
 		return r, nil
 	} else if !os.IsNotExist(err) {
 		return nil, err
@@ -585,7 +592,7 @@ func provision(ctx context.Context, path string, limits Storage, rootAgents []by
 		return nil, err
 	}
 	staged := &repository{path: temp, limits: limits, owned: owned}
-	if _, err = staged.commitFiles(ctx, "", files, texts, nil, changes, ""); err != nil {
+	if _, err = staged.commitFiles(ctx, "", files, texts, map[string][]byte{defaultLocksPath: []byte(defaultLocksMarker)}, changes, ""); err != nil {
 		return nil, err
 	}
 	if err = os.Rename(temp, path); err != nil {

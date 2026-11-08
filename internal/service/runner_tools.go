@@ -24,6 +24,7 @@ var runnerToolText = map[string]string{
 	"delete":     "Delete a file. Needs ifInState.",
 	"history":    "A file's changes by file ID, newest first. Read an old text with read's path and revision.",
 	"web_search": "Search the web: titles, URLs and snippets.",
+	"submit":     "Fill in and send a form in this folder: path and answers by field name. The form decides where its copy goes; the reply is the receipt.",
 	"web_fetch":  "Download a URL already in this conversation into a web/… reference: path (the text, Markdown for a page) and original. Read and search it like a file; move it into the folder to keep it.",
 }
 
@@ -41,10 +42,14 @@ var runnerArgText = map[string]map[string]string{
 	"history":    {"id": "File ID from read or list.", "limit": "", "cursor": "nextCursor from the previous page."},
 	"web_search": {"query": "", "count": "Results, 1 to 20 (default 5)."},
 	"web_fetch":  {"url": "A full http or https address."},
+	"submit":     {"path": "The form, a .md file in this folder.", "answers": "Answers by field name.", "resends": "A copy of yours sent back for more information.", "today": "Today's date, YYYY-MM-DD."},
 }
 
 // runnerToolNames are the tools an action may list in "tools".
-var runnerToolNames = []string{"read", "search", "write", "edit", "append", "list", "move", "delete", "history", "web_search", "web_fetch"}
+var runnerToolNames = []string{"read", "search", "write", "edit", "append", "list", "move", "delete", "history", "web_search", "web_fetch", "submit"}
+
+// runnerOptInTools are offered only to actions whose tools list them.
+var runnerOptInTools = map[string]bool{"submit": true}
 
 // slimSchemaKeys are left out of what the model sees; the full schema still
 // enforces them.
@@ -110,15 +115,17 @@ func slim(v any) any {
 	return v
 }
 
-// toolsFor narrows a job's tools to those the action lists (all when it
-// lists none).
+// toolsFor narrows a job's tools to those the action lists: when it lists
+// none, all but the opt-in ones (submit).
 func toolsFor(tools []json.RawMessage, allowed []string) []json.RawMessage {
-	if len(allowed) == 0 {
-		return tools
-	}
 	keep := map[string]bool{}
 	for _, name := range allowed {
 		keep[name] = true
+	}
+	if len(allowed) == 0 {
+		for _, name := range runnerToolNames {
+			keep[name] = !runnerOptInTools[name]
+		}
 	}
 	out := []json.RawMessage{}
 	for _, raw := range tools {

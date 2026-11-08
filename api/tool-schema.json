@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.17.4",
+  "schemaVersion": "0.18.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.94.2"},
@@ -10,7 +10,7 @@
     "endpoint": "/mcp",
     "tools": "tools/list exposes tools only; tools/call uses the shared service.",
     "accountEndpoint": "/mcp/account",
-    "accountTools": "The OAuth endpoint adds the spaces, pull, pending and push tools. Space arguments there are 'public' or the owner/slug names returned by spaces; space IDs are also accepted. Results name owned spaces by owner/slug. The anonymous /mcp endpoint accepts configured space names only."
+    "accountTools": "The OAuth endpoint adds the spaces, pull, pending, push and submit tools. Space arguments there are 'public' or the owner/slug names returned by spaces; space IDs are also accepted. Results name owned spaces by owner/slug. The anonymous /mcp endpoint accepts configured space names only."
   },
   "authentication": {
     "public": "No key required.",
@@ -112,10 +112,12 @@
               "readOnly": {
                 "type": "string",
                 "enum": [
+                  "folderAgents",
+                  "connectedAgents",
                   "agents",
                   "everyone"
                 ],
-                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
               },
               "blob": {
                 "type": "string",
@@ -336,7 +338,7 @@
     },
     {
       "name": "write",
-      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": \"agents\" or \"everyone\"}), locked ({\"key\": \"agents\" or \"everyone\"}: settings agents or nobody may change), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (one line of Markdown the website shows below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}]) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
+      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": level}), locked ({\"key\": level}: settings only people may change; also \"fillForms\" and \"takeQuizzes\": who may send the folder's forms and quizzes; levels: \"folderAgents\" stops the agents of folder actions, \"connectedAgents\" other agents, \"agents\" both, \"everyone\" people too), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (one line of Markdown the website shows below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}]) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -433,10 +435,12 @@
               "readOnly": {
                 "type": "string",
                 "enum": [
+                  "folderAgents",
+                  "connectedAgents",
                   "agents",
                   "everyone"
                 ],
-                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
               },
               "blob": {
                 "type": "string",
@@ -598,10 +602,12 @@
               "readOnly": {
                 "type": "string",
                 "enum": [
+                  "folderAgents",
+                  "connectedAgents",
                   "agents",
                   "everyone"
                 ],
-                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
               },
               "blob": {
                 "type": "string",
@@ -733,10 +739,12 @@
               "readOnly": {
                 "type": "string",
                 "enum": [
+                  "folderAgents",
+                  "connectedAgents",
                   "agents",
                   "everyone"
                 ],
-                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
               },
               "blob": {
                 "type": "string",
@@ -868,10 +876,12 @@
                 "readOnly": {
                   "type": "string",
                   "enum": [
+                    "folderAgents",
+                    "connectedAgents",
                     "agents",
                     "everyone"
                   ],
-                  "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                  "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
                 },
                 "blob": {
                   "type": "string",
@@ -1026,10 +1036,12 @@
               "readOnly": {
                 "type": "string",
                 "enum": [
+                  "folderAgents",
+                  "connectedAgents",
                   "agents",
                   "everyone"
                 ],
-                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
               },
               "blob": {
                 "type": "string",
@@ -1153,10 +1165,12 @@
               "readOnly": {
                 "type": "string",
                 "enum": [
+                  "folderAgents",
+                  "connectedAgents",
                   "agents",
                   "everyone"
                 ],
-                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
               },
               "blob": {
                 "type": "string",
@@ -1428,10 +1442,12 @@
               "readOnly": {
                 "type": "string",
                 "enum": [
+                  "folderAgents",
+                  "connectedAgents",
                   "agents",
                   "everyone"
                 ],
-                "description": "\"agents\": agents cannot change, move or delete it; \"everyone\": nobody can until a person lifts the lock."
+                "description": "Who cannot change, move or delete it: \"folderAgents\" (the agents of folder actions), \"connectedAgents\" (other agents), \"agents\" (both) or \"everyone\" (nobody can until a person lifts the lock)."
               },
               "blob": {
                 "type": "string",
@@ -2262,6 +2278,110 @@
           "newState"
         ],
         "additionalProperties": false
+      }
+    },
+    {
+      "name": "submit",
+      "description": "Fill in and send a form (a .md file whose front matter names submitTo) as the signed-in person: answers by field name. The form decides where its copy is filed; the copy says an agent sent it. Refused where the folder's locked holds fillForms (or takeQuizzes for a quiz) for agents. Read the form first for its fields. Returns the receipt.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "owner/slug from spaces."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^([^/\\\\\u0000-\u001f\u007f-\u009f]+/){0,7}[^/\\\\\u0000-\u001f\u007f-\u009f]+$",
+            "description": "The form, a .md file."
+          },
+          "answers": {
+            "type": "object",
+            "description": "Answers by field name: text, a number, true/false, or a list for a multiple choice."
+          },
+          "resends": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "description": "Receipt ID of a copy sent back for more information, to send it again."
+          },
+          "today": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "Today's date where the person is, for date limits."
+          }
+        },
+        "required": [
+          "space",
+          "path",
+          "answers"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "form": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "description": "Where the copy was filed: owner/slug/path."
+          },
+          "submittedAt": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "resends": {
+            "type": "string"
+          },
+          "quiz": {
+            "type": "boolean"
+          },
+          "passMark": {
+            "type": "integer"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "marks": {
+            "type": "object"
+          },
+          "answers": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "form",
+          "template",
+          "target",
+          "status"
+        ]
       }
     }
   ]

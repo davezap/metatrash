@@ -400,7 +400,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 	}
 	// Files locked against the writer are left alone, and its change never
 	// removes such a folder file along with its emptied folder.
-	person := personWrite(ctx)
+	person := writerOf(ctx)
 	readOnly, err := r.readOnlyRules(ctx, files, nil)
 	if err != nil {
 		return nil, err
@@ -442,7 +442,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if err := r.checkFolderConfig(ctx, files, in.Path, *in.Text); err != nil {
 			return nil, err
 		}
-		if err := r.checkLocks(ctx, files, in.Path, *in.Text, personWrite(ctx)); err != nil {
+		if err := r.checkLocks(ctx, files, in.Path, *in.Text, writerOf(ctx)); err != nil {
 			return nil, err
 		}
 		if err := s.checkActionsWriter(ctx, r, files, in.Path, *in.Text); err != nil {

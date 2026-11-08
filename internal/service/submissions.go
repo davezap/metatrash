@@ -419,6 +419,17 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	if err != nil {
 		return Receipt{}, err
 	}
+	if err := repo.checkFormLock(ctx, files, in.Path, t.Quiz, writerOf(ctx)); err != nil {
+		return Receipt{}, err
+	}
+	// A signature is the person's own: an agent never signs (0.95.12).
+	if submittedVia(ctx) != "" {
+		for _, f := range t.Fields {
+			if f.Type == "sign" {
+				return Receipt{}, problem(403, "person_must_sign", in.Path+" asks for a signature, and only a person can sign a form: send it in Slate Viewer or with mtsync submit.")
+			}
+		}
+	}
 	if t.Quiz {
 		if folder == nil {
 			return Receipt{}, problem(409, "not_published", "A quiz can be taken once its folder publishes it; publish a new version first.")
@@ -452,7 +463,7 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 		return Receipt{}, err
 	}
 	_, slug, _ := strings.Cut(space, "/")
-	sub := submission{Template: space + "/" + in.Path, Revision: revision, Blob: blob, By: who, At: now, Status: "submitted"}
+	sub := submission{Template: space + "/" + in.Path, Revision: revision, Blob: blob, By: who, Via: submittedVia(ctx), At: now, Status: "submitted"}
 	if in.Resends != "" && t.Quiz {
 		return Receipt{}, invalid("A quiz is never sent back for more information; send it again without resends.")
 	}
@@ -528,8 +539,9 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	}
 	// Sending a form shows it was read: in a folder that asks people to read
 	// its files, it counts as confirming the published version. A quiz is
-	// not read but passed (its receipt says how it went).
-	if !t.Quiz {
+	// not read but passed (its receipt says how it went). An agent sending a
+	// form confirms nothing: reading is the person's own (0.95.12).
+	if !t.Quiz && sub.Via == "" {
 		if version, err := s.acknowledgeSent(ctx, repo, state, files, in.Path, userID, now); err != nil {
 			log.Printf("form submission %s filed without confirming %s as read: %v", receipt.ID, in.Path, err)
 		} else {
@@ -672,7 +684,7 @@ func fileSubmission(ctx context.Context, r *repository, base, form, text string,
 	if err != nil {
 		return filedFile{}, err
 	}
-	if level := fileLock(readOnly, path); blocks(level, true) {
+	if level := fileLock(readOnly, path); blocks(level, writerPerson) {
 		return filedFile{}, readOnlyFile(path, level)
 	}
 	for p := range files {
@@ -698,7 +710,7 @@ func fileSubmission(ctx context.Context, r *repository, base, form, text string,
 			if rec.ID != old.fileID || p == path {
 				continue
 			}
-			if blocks(fileLock(readOnly, p), true) {
+			if blocks(fileLock(readOnly, p), writerPerson) {
 				break
 			}
 			b, err := r.blob(ctx, rec.Blob)
@@ -762,10 +774,6 @@ func (h *httpAdapter) serveSubmissions(w http.ResponseWriter, r *http.Request, r
 	}
 	if r.URL.RawQuery != "" {
 		sendError(w, invalid("Unknown query parameter."))
-		return
-	}
-	if !personWrite(r.Context()) {
-		sendError(w, problem(403, "forbidden", "Only a person can send a form, in Slate Viewer or with mtsync submit; agents cannot."))
 		return
 	}
 	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))

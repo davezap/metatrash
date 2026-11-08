@@ -159,6 +159,9 @@ func (s *Service) reviewCopy(ctx context.Context, repo *repository, userID strin
 	if r := copied.keys["resends"]; receiptIDPattern.MatchString(r) {
 		sub.Resends = r
 	}
+	if v := copied.keys["submittedVia"]; v != "" && len(v) <= 120 {
+		sub.Via = v
+	}
 	if row.quiz {
 		if in.Status != "" {
 			return Receipt{}, invalid("A quiz's status follows from its marks; send marks, not status. A quiz can't be sent back for more information: mark it, and the person can try again.")
@@ -210,7 +213,7 @@ func (s *Service) reviewCopy(ctx context.Context, repo *repository, userID strin
 		if err != nil {
 			return nil, err
 		}
-		if level := fileLock(readOnly, in.Path); blocks(level, true) {
+		if level := fileLock(readOnly, in.Path); blocks(level, writerPerson) {
 			return nil, readOnlyFile(in.Path, level)
 		}
 		cur.Bytes = int64(len(text))

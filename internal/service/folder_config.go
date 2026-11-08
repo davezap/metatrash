@@ -191,7 +191,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked names keys of this file: purpose, children, services, inherit, readOnly, publishedVersion, actions, print, footer or locked, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file (purpose, children, services, inherit, readOnly, publishedVersion, actions, print, footer or locked), or fillForms or takeQuizzes for who may fill in this folder's forms and take its quizzes, not %q.", key))
 		}
 	}
 	if c.Locked["locked"] == lockEveryone {
@@ -462,8 +462,9 @@ func (r *repository) folderConfigs(ctx context.Context, files map[string]record)
 	return configs, nil
 }
 
-// lockableKeys are the keys locked may name.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "locked": true}
+// lockableKeys are the names locked may hold: keys of the file, and the
+// form locks fillForms and takeQuizzes.
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "locked": true, lockFillForms: true, lockTakeQuizzes: true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.

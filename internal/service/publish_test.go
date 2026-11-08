@@ -37,6 +37,8 @@ func TestPublishedVersionSettings(t *testing.T) {
 	agent := context.Background()
 	person := context.WithValue(agent, personWriteKey{}, true)
 	text := func(s string) *string { return &s }
+	// These checks start from a root without the default locks.
+	do(person, "write", Input{Path: ".metatrash.json", Text: text("{}")}, "")
 	do(agent, "write", Input{Path: "policies/leave.md", Text: text("Leave v1\n")}, "")
 	// acknowledge may sit on the root and nest; publishedVersion only goes up.
 	do(agent, "write", Input{Path: ".metatrash.json", Text: text(`{"services":[{"type":"acknowledge"}]}`)}, "")

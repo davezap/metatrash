@@ -708,7 +708,10 @@ type submission struct {
 	// Template is owner/slug/path; Revision the state it was checked
 	// against and Blob the template text's blob; ID the receipt's.
 	Template, Revision, Blob, ID, By string
-	At                               time.Time
+	// Via names the agent that sent the form for By, when one did
+	// (0.95.12): "Claude (agent)".
+	Via string
+	At  time.Time
 	// Status is submitted, approved, declined, needs-info (the reviewer
 	// asked for more, 0.95.10) or resent (it was sent again as a new copy).
 	Status string
@@ -748,6 +751,9 @@ func (t formTemplate) render(answers formAnswers, sub submission) string {
 		out.WriteString("resends: " + sub.Resends + "\n")
 	}
 	line("submittedBy", sub.By)
+	if sub.Via != "" {
+		line("submittedVia", sub.Via)
+	}
 	out.WriteString("submittedAt: " + sub.At.UTC().Format(time.RFC3339) + "\n")
 	status := sub.Status
 	if status == "" {

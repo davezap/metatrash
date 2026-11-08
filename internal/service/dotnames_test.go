@@ -49,7 +49,7 @@ func TestDotNamesInSpaces(t *testing.T) {
 		return value
 	}
 	text := func(s string) *string { return &s }
-	github := text(`{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	github := text(`{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)
 
 	// Outside GitHub folders, dot names now work too.
 	for _, path := range []string{".gitignore", "notes/.env", "notes/.hidden/a.md", ".github/workflows/ci.yml"} {
@@ -88,14 +88,14 @@ func TestDotNamesInSpaces(t *testing.T) {
 	do(owned, "move", Input{From: "site/.plain", To: "notes/plain.txt"}, "")
 
 	// Removing the GitHub service no longer depends on dot names.
-	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"purpose":"no longer a repo"}`)}, "")
+	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"inherit":true,"purpose":"no longer a repo"}`)}, "")
 	do(owned, "delete", Input{Path: "site/.metatrash.json"}, "protected_file")
 	// Changing other settings keeps the service and is fine.
-	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"purpose":"site","services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)}, "")
+	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(`{"inherit":true,"purpose":"site","services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)}, "")
 	for _, path := range []string{"notes/.gitignore", "site/.github/workflows/ci.yml", "site/.github/.metatrash.json", "site/.env.example"} {
 		do(owned, "delete", Input{Path: path}, "")
 	}
-	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text("{}\n")}, "")
+	do(owned, "write", Input{Path: "site/.metatrash.json", Text: text(folderConfigInherit)}, "")
 	// Plain files stay; the ordinary folder also accepts dot names.
 	do(owned, "read", Input{Path: "site/pkg/__init__.py"}, "")
 	do(owned, "write", Input{Path: "site/.gitignore", Text: text("x")}, "")
@@ -104,7 +104,7 @@ func TestDotNamesInSpaces(t *testing.T) {
 	// a GitHub folder's own config can sit beside dot names in a fresh folder.
 	do(owned, "write", Input{Path: "app/.metatrash.json", Text: github}, "")
 	do(owned, "write", Input{Path: "app/.gitignore", Text: text("node_modules/\n")}, "")
-	got := do(owned, "write", Input{Path: "app/.metatrash.json", Text: text(`{"services":[{"type":"github","repo":"dave-zap/app"}]}`)}, "").(WriteResult)
+	got := do(owned, "write", Input{Path: "app/.metatrash.json", Text: text(`{"inherit":true,"services":[{"type":"github","repo":"dave-zap/app"}]}`)}, "").(WriteResult)
 	if !got.Changed || strings.Contains(got.File.Path, "..") {
 		t.Fatalf("rewrite: %+v", got)
 	}

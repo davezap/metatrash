@@ -39,7 +39,7 @@ func TestRunnerToolDefinitions(t *testing.T) {
 			}
 		}
 	}
-	all, _ := json.Marshal(tools)
+	all, _ := json.Marshal(toolsFor(tools, nil))
 	t.Logf("tool definitions: %d bytes (full input schemas alone %d)", len(all), full)
 	if len(all) > 4500 {
 		t.Errorf("the runner's tool definitions are %d bytes", len(all))
@@ -53,7 +53,7 @@ func TestRunnerToolDefinitions(t *testing.T) {
 	if err := w.runner.setWebTools(true, true); err != nil {
 		t.Fatal(err)
 	}
-	withWeb, _ := json.Marshal(w.runner.webTools)
+	withWeb, _ := json.Marshal(toolsFor(w.runner.webTools, nil))
 	t.Logf("with the web tools: %d bytes", len(withWeb))
 	if len(withWeb) > 5500 || strings.Contains(string(withWeb), `"pattern"`) || !strings.Contains(string(withWeb), "A web/… reference to search instead of the folder.") {
 		t.Errorf("web tools %s", withWeb)

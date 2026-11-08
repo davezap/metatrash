@@ -138,7 +138,7 @@ func TestFolderFiles(t *testing.T) {
 	}
 
 	// GitHub folders get nothing; AGENTS.md there is a repository file.
-	do(ctx, "write", Input{Path: "site/.metatrash.json", Text: text(`{"services":[{"type":"github","repo":"dave-zap/site"}]}`)}, "")
+	do(ctx, "write", Input{Path: "site/.metatrash.json", Text: text(`{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)}, "")
 	do(ctx, "write", Input{Path: "site/docs/guide.md", Text: text("guide\n")}, "")
 	files := mustFiles(t, owned)
 	for _, p := range []string{"site/AGENTS.md", "site/docs/AGENTS.md", "site/docs/.metatrash.json"} {
@@ -206,6 +206,9 @@ func TestInheritAndLocked(t *testing.T) {
 		return m
 	}
 
+	// A new space starts with the default locks; a person can lift them.
+	do(agent, "write", Input{Path: ".metatrash.json", Text: text(`{}`)}, "locked_setting")
+	do(person, "write", Input{Path: ".metatrash.json", Text: text(`{}`)}, "")
 	do(agent, "write", Input{Path: ".metatrash.json", Text: text(`{"inherit":true}`)}, "invalid_request")
 	do(agent, "write", Input{Path: "notes/a.md", Text: text("a\n")}, "")
 	do(agent, "write", Input{Path: ".metatrash.json", Text: text(`{"purpose":"Space","children":{"notes/":"notes"}}`)}, "")

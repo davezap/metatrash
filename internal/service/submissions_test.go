@@ -65,8 +65,11 @@ func TestFormSubmissionsAgainstDatabase(t *testing.T) {
 		t.Fatalf("account: %d %s", res.Code, res.Body)
 	}
 
-	// Agents cannot send forms; wrong answers name each field.
-	send(agent, "hr/leave.md", good, "", 403)
+	// Agents cannot sign, so they cannot send a form with a signature;
+	// wrong answers name each field.
+	if got := send(agent, "hr/leave.md", good, "", 403)["error"].(map[string]any)["code"]; got != "person_must_sign" {
+		t.Fatal(got)
+	}
 	refused := send(person, "hr/leave.md", map[string]any{"type": "Holiday"}, "", 400)["error"].(map[string]any)
 	if refused["code"] != "invalid_answers" || len(refused["fields"].([]any)) != 3 {
 		t.Fatalf("refused: %v", refused)

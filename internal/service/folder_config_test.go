@@ -140,7 +140,9 @@ func TestFolderConfigRules(t *testing.T) {
 	do := func(r *repository, op string, in Input, code string) any {
 		t.Helper()
 		in.IfInState = state(r)
-		value, err := s.dispatchRepository(ctx, r, "test", op, in)
+		// A person writes, so the default locks don't get in the way of
+		// the rules checked here.
+		value, err := s.dispatchRepository(context.WithValue(ctx, personWriteKey{}, true), r, "test", op, in)
 		if code == "" && err != nil {
 			t.Fatalf("%s %s%s: %v", op, in.Path, in.From, err)
 		}
@@ -153,11 +155,13 @@ func TestFolderConfigRules(t *testing.T) {
 		return value
 	}
 	text := func(s string) *string { return &s }
-	github := func(repo string) *string { return text(`{"services":[{"type":"github","repo":"` + repo + `"}]}`) }
+	github := func(repo string) *string {
+		return text(`{"inherit":true,"services":[{"type":"github","repo":"` + repo + `"}]}`)
+	}
 
-	// New spaces start with an empty root config, which is kept.
+	// New spaces start with the default locks in the root config, which is kept.
 	read := do(owned, "read", Input{Path: ".metatrash.json"}, "").(ReadResult)
-	if read.File.Text != "{}\n" || !read.File.Protected || read.File.Deletable {
+	if read.File.Text != folderConfigEmpty || !read.File.Protected || read.File.Deletable {
 		t.Fatalf("root starter: %+v", read.File)
 	}
 	if _, err := parseFolderConfig(read.File.Text); err != nil {

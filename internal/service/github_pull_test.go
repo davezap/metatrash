@@ -514,7 +514,7 @@ func TestGitHubPull(t *testing.T) {
 	}
 
 	// A first pull refuses files that do not match the repository, naming them.
-	w.write("site/.metatrash.json", `{"purpose":"the website","services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"purpose":"the website","services":[{"type":"github","repo":"dave-zap/site"}]}`)
 	w.write("site/README.md", "# Site\n")       // identical: fine
 	w.write("site/index.html", "<h1>Hi</h1>\n") // differs
 	w.write("site/todo.md", "mine\n")           // not in the repo
@@ -690,7 +690,7 @@ func TestGitHubPull(t *testing.T) {
 	}
 
 	// Another branch that does not exist: the message names the default branch.
-	w.write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site","branch":"dev"}]}`)
 	if msg := w.pullMessage("site/"); !strings.Contains(msg, `no branch "dev"`) || !strings.Contains(msg, `default branch is "main"`) {
 		t.Fatalf("missing branch: %q", msg)
 	}
@@ -700,27 +700,27 @@ func TestGitHubPull(t *testing.T) {
 	if msg := w.pullMessage("site/"); !strings.Contains(msg, "first pull") || !strings.Contains(msg, "site/README.md (differs") {
 		t.Fatalf("branch change: %q", msg)
 	}
-	w.write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)
 	if r := w.pull("site/", ""); !r.UpToDate {
 		t.Fatalf("back on main: %+v", r)
 	}
 
 	// Repositories the app cannot reach, and ones that do not exist.
-	w.write("other/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/denied"}]}`)
+	w.write("other/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/denied"}]}`)
 	if msg := w.pullMessage("other/"); !strings.Contains(msg, "cannot reach dave-zap/denied") {
 		t.Fatalf("denied: %q", msg)
 	}
-	w.write("other/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/nothing"}]}`)
+	w.write("other/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/nothing"}]}`)
 	w.pull("other/", "forbidden")
 	w.host.commit("dave-zap/empty", "seed", map[string]fakeRepoFile{"a": {text: "a"}})
-	w.write("other/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/empty"}]}`)
+	w.write("other/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/empty"}]}`)
 	if msg := w.pullMessage("other/"); !strings.Contains(msg, "is empty") {
 		t.Fatalf("empty: %q", msg)
 	}
 
 	// A second GitHub folder pulls beside the first; both baselines stay.
 	w.host.commit("dave-zap/app", "main", map[string]fakeRepoFile{"main.go": {text: "package main\n"}})
-	w.write("deps/app/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/app"}]}`)
+	w.write("deps/app/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/app"}]}`)
 	if r := w.pull("deps/app", ""); r.Created != 1 || w.read("deps/app/main.go") != "package main\n" {
 		t.Fatalf("second folder: %+v", r)
 	}
@@ -765,7 +765,7 @@ func TestGitHubPullStorageLimits(t *testing.T) {
 		files[fmt.Sprintf("f%d.md", i)] = fakeRepoFile{text: fmt.Sprintf("file %d\n", i)}
 	}
 	w.host.commit("dave-zap/small", "main", files)
-	w.write("repo/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/small"}]}`)
+	w.write("repo/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/small"}]}`)
 	// README.md, root .metatrash.json, repo/.metatrash.json + 6 = 9 > 8 files.
 	if msg := w.pullMessage("repo/"); !strings.Contains(msg, "does not fit") || !strings.Contains(msg, "9 files") {
 		t.Fatalf("file count: %q", msg)
@@ -785,7 +785,7 @@ func TestGitHubPullStorageLimits(t *testing.T) {
 		more[fmt.Sprintf("g%d.md", i)] = fakeRepoFile{text: strings.Repeat("g", 999)}
 	}
 	w.host.commit("dave-zap/bytes", "main", more)
-	w.write("repo/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/bytes"}]}`)
+	w.write("repo/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/bytes"}]}`)
 	w.do("delete", Input{Path: "repo/big.md"}, "")
 	for i := 0; i < 4; i++ {
 		w.do("delete", Input{Path: fmt.Sprintf("repo/f%d.md", i)}, "")
@@ -798,7 +798,7 @@ func TestGitHubPullStorageLimits(t *testing.T) {
 func TestGitHubPullRateLimit(t *testing.T) {
 	w := newPullWorld(t, nil)
 	w.host.commit("dave-zap/site", "main", map[string]fakeRepoFile{"a.md": {text: "a"}})
-	w.write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)
 	for i := 0; i < githubPullsPerSpace; i++ {
 		if _, err := w.s.pull(w.ctx, w.repo, "same", "site/"); err != nil {
 			t.Fatal(err)
@@ -860,8 +860,8 @@ func TestGitHubPullAgainstDatabase(t *testing.T) {
 		state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
 		w.tool(token, "write", map[string]any{"space": w.ownedName, "path": path, "text": text, "ifInState": state}, "")
 	}
-	write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
-	write("tools/.metatrash.json", `{"services":[{"type":"github","repo":"zaptronics/tools"}]}`)
+	write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	write("tools/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"zaptronics/tools"}]}`)
 
 	// No GitHub connection on the owner's account yet.
 	res := w.mcp(token, "tools/call", map[string]any{"name": "pull", "arguments": map[string]any{"space": w.ownedName, "folder": "site/"}}, "")

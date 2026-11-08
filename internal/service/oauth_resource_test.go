@@ -131,7 +131,7 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	if init.status != 200 || !strings.Contains(init.result["instructions"].(string), "Call spaces first") {
 		t.Fatalf("initialize: %d %v", init.status, init.result)
 	}
-	if list := w.mcp(token, "tools/list", map[string]any{}, ""); len(list.result["tools"].([]any)) != 14 {
+	if list := w.mcp(token, "tools/list", map[string]any{}, ""); len(list.result["tools"].([]any)) != 15 {
 		t.Fatalf("tools: %v", list.result)
 	}
 	spaces := w.tool(token, "spaces", map[string]any{}, "")["spaces"].([]any)
@@ -161,7 +161,7 @@ func TestOAuthProtectedMCPAgainstDatabase(t *testing.T) {
 	if root["file"].(map[string]any)["text"].(string) != folderConfigEmpty {
 		t.Fatalf("root config: %v", root)
 	}
-	designated := w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "site/.metatrash.json", "text": `{"purpose":"site","services":[{"type":"github","repo":"dave-zap/site"}]}`, "ifInState": root["state"]}, "")
+	designated := w.tool(token, "write", map[string]any{"space": w.ownedName, "path": "site/.metatrash.json", "text": `{"inherit":true,"purpose":"site","services":[{"type":"github","repo":"dave-zap/site"}]}`, "ifInState": root["state"]}, "")
 	removed := w.tool(token, "delete", map[string]any{"space": w.ownedName, "path": "notes/b.md", "ifInState": designated["newState"]}, "")
 	w.tool(token, "delete", map[string]any{"space": w.ownedName, "path": ".metatrash.json", "ifInState": removed["newState"]}, "protected_file")
 	// Public space follows its anonymous rules; key-protected and unconnected spaces are invisible.

@@ -321,12 +321,16 @@ func (r *repository) triggersBetween(ctx context.Context, old, state string) ([]
 }
 
 // checkActionsWriter refuses a write to path that adds, changes or removes
-// actions unless a person makes it as themselves (Metatrash Sync or Slate
-// Viewer), since actions spend someone's tokens. The space owner may change
-// their own actions, remove a member's, or adopt one by taking out "member",
-// but never write one in a member's name. A member may add, change or remove
-// only their own actions, marked "member" with their username. No agent, the
-// owner's own included, may change actions.
+// actions on behalf of nobody in particular, since actions spend someone's
+// tokens. Locks (locked "actions") decide which writers may change actions at
+// all; this decides whose actions they may change. A person, or an agent
+// connected as a person, acts as that account; a folder action's job acts as
+// the account that pays for it, never changes its own action, and changes no
+// actions when a contributor pays. Space keys, apps without an account and
+// GitHub pulls change no actions. The space owner may change their own
+// actions, remove a member's, or adopt one by taking out "member", but never
+// write one in a member's name. A member may add, change or remove only their
+// own actions, marked "member" with their username.
 func (s *Service) checkActionsWriter(ctx context.Context, r *repository, files map[string]record, path, text string) error {
 	old, err := r.configText(ctx, files, configFolder(path))
 	if err != nil {
@@ -335,13 +339,28 @@ func (s *Service) checkActionsWriter(ctx context.Context, r *repository, files m
 	if configKeys(old)["actions"] == configKeys(text)["actions"] {
 		return nil
 	}
-	identity, _ := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
 	owner := s.repositoryOwner(r)
-	if !personWrite(ctx) || identity.oauth == nil || owner == "" {
-		return problem(403, "forbidden", path+": actions can be added, changed or removed only by a person writing as themselves through Metatrash Sync or Slate Viewer: the space owner, or a member for their own actions. Agents cannot, because actions run on someone's tokens.")
+	actor := ""
+	if job := runnerJobOf(ctx); job != nil {
+		if job.contributor {
+			return problem(403, "forbidden", path+": this job is paid for by a contributor who opted in, so it cannot add, change or remove actions.")
+		}
+		if configFolder(path) == job.folder {
+			b, was := actionsByName(old)[job.action]
+			a, now := actionsByName(text)[job.action]
+			if !was || !now || !sameAction(a, b) {
+				return problem(403, "forbidden", fmt.Sprintf("%s: a job cannot change or remove the action it runs for (%q); a person can.", path, job.action))
+			}
+		}
+		actor = job.payerID
+	} else if identity, _ := ctx.Value(mcpIdentityKey{}).(mcpIdentity); identity.oauth != nil && !githubPull(ctx) {
+		actor = identity.oauth.UserID
+	}
+	if actor == "" || owner == "" {
+		return problem(403, "forbidden", path+": actions can be added, changed or removed only by a person or an agent signed in as one (the space owner, or a member for their own actions), or by a folder action's job for the person who pays for it, where the folder's locks allow. Space keys cannot, because actions run on someone's tokens.")
 	}
 	before, after := actionsByName(old), actionsByName(text)
-	if identity.oauth.UserID == owner {
+	if actor == owner {
 		for name, a := range after {
 			if b, ok := before[name]; a.Member != "" && (!ok || !sameAction(a, b)) {
 				return problem(403, "forbidden", fmt.Sprintf("%s: action %q is %s's own and runs on their agent; you can remove it, or adopt it by taking out \"member\", but not add or change it in their name.", path, name, a.Member))
@@ -349,7 +368,7 @@ func (s *Service) checkActionsWriter(ctx context.Context, r *repository, files m
 		}
 		return nil
 	}
-	username := s.usernameOf(ctx, identity.oauth.UserID)
+	username := s.usernameOf(ctx, actor)
 	if username == "" {
 		return problem(403, "forbidden", path+": choose a username first (Settings → Profile); your own actions are marked with it.")
 	}

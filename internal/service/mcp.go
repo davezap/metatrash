@@ -82,6 +82,9 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			case "push":
 				server.AddTool(tool, h.mcpPush)
 				continue
+			case "submit":
+				server.AddTool(tool, h.mcpSubmit)
+				continue
 			}
 			if tool.Name != "spaces" {
 				return nil, fmt.Errorf("unknown MCP account tool %q", tool.Name)
@@ -352,6 +355,58 @@ func (h *httpAdapter) mcpPush(ctx context.Context, req *mcp.CallToolRequest) (*m
 		return mcpFailure(err), nil
 	}
 	return mcpValue(h.service.push(ctx, repo, space, args.Folder, args.Message, args.IfInState, author))
+}
+
+// agentSubmitArgs are the submit tool's arguments; the runner's job passes
+// them without space.
+type agentSubmitArgs struct {
+	Space   string                     `json:"space,omitempty"`
+	Path    string                     `json:"path"`
+	Answers map[string]json.RawMessage `json:"answers"`
+	Resends string                     `json:"resends,omitempty"`
+	Today   string                     `json:"today,omitempty"`
+}
+
+// decodeAgentSubmit reads submit's arguments.
+func decodeAgentSubmit(raw []byte, args *agentSubmitArgs) error {
+	if len(raw) > maxFormAnswerBytes+4096 || !validUnicodeJSON(raw) || noDuplicateKeys(raw) != nil || strictJSON(raw, args) != nil || args.Path == "" || args.Answers == nil || args.Resends != "" && !receiptIDPattern.MatchString(args.Resends) {
+		return invalid(`submit takes path (the form) and answers ({"field": answer, ...}), and optionally resends (a copy sent back for more information) and today (YYYY-MM-DD).`)
+	}
+	return nil
+}
+
+// agentSubmit sends a form for an agent, as userID (0.95.12): the saved
+// form decides where its copy goes; the folder's fillForms and takeQuizzes
+// locks decide whether an agent may.
+func (s *Service) agentSubmit(ctx context.Context, repo *repository, space, userID string, args agentSubmitArgs) (Receipt, error) {
+	if repo.id == "" || s.ownedDB == nil {
+		return Receipt{}, problem(404, "not_found", "Forms work only in your own and shared spaces.")
+	}
+	if err := s.rates.reserve(allowance{"submit:" + userID, submissionsPerHour, 3600}); err != nil {
+		return Receipt{}, err
+	}
+	return s.submitForm(ctx, repo, space, userID, submitRequest{Path: args.Path, Answers: args.Answers, Resends: args.Resends, Today: args.Today})
+}
+
+// mcpSubmit is the submit tool on /mcp/account: {space, path, answers,
+// resends?, today?}. Like a person, the agent needs only read access.
+func (h *httpAdapter) mcpSubmit(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	identity, ok := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
+	if !ok || identity.oauth == nil {
+		return mcpFailure(problem(401, "unauthorized", "Missing transport credentials.")), nil
+	}
+	var args agentSubmitArgs
+	if err := decodeAgentSubmit(req.Params.Arguments, &args); err != nil || args.Space == "" {
+		if err == nil {
+			err = invalid("submit needs space.")
+		}
+		return mcpFailure(err), nil
+	}
+	repo, space, err := h.service.agentSpaceAccess(ctx, *identity.oauth, args.Space, identity.client, false)
+	if err != nil {
+		return mcpFailure(err), nil
+	}
+	return mcpValue(h.service.agentSubmit(ctx, repo, space, identity.oauth.UserID, args))
 }
 
 func mcpValue(value any, err error) (*mcp.CallToolResult, error) {

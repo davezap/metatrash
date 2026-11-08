@@ -260,7 +260,7 @@ func TestGitHubPush(t *testing.T) {
 	w := newPullWorld(t, nil)
 	w.enablePush()
 	first := w.host.commit("dave-zap/site", "main", pushRepoFiles())
-	w.write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)
 
 	// Nothing to push before the first pull.
 	if msg := w.pushMessage("site/", "x", ""); !strings.Contains(msg, "pull first") {
@@ -472,11 +472,11 @@ func TestGitHubPush(t *testing.T) {
 	}
 
 	// Push modes: review refuses, auto pushes like agent.
-	w.write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site","push":"review"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site","push":"review"}]}`)
 	if msg := w.pushMessage("site/", "review", ""); !strings.Contains(msg, `"review"`) {
 		t.Fatalf("review: %q", msg)
 	}
-	w.write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site","push":"auto"}]}`)
+	w.write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site","push":"auto"}]}`)
 	if r := w.push("site/", "auto mode", "", ""); r.Modified != 1 {
 		t.Fatalf("auto: %+v", r)
 	}
@@ -494,7 +494,7 @@ func TestGitHubPullMerge(t *testing.T) {
 	w := newPullWorld(t, nil)
 	files := map[string]fakeRepoFile{"a.md": {text: "a\n"}, "b.md": {text: "b\n"}, "c.md": {text: "c\n"}, "d.md": {text: "d\n"}, "setup.ps1": {text: utf16Script}}
 	w.host.commit("dave-zap/m", "main", files)
-	w.write("m/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/m"}]}`)
+	w.write("m/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/m"}]}`)
 	w.pull("m/", "")
 	firstState, _ := w.repo.head(w.ctx)
 	// Here: a modified, b deleted, new.md added. GitHub: c modified, gh.md added.
@@ -635,7 +635,7 @@ func TestGitHubPushAgainstDatabase(t *testing.T) {
 		state := w.tool(token, "list", map[string]any{"space": w.ownedName}, "")["state"]
 		w.tool(token, "write", map[string]any{"space": w.ownedName, "path": path, "text": text, "ifInState": state}, "")
 	}
-	write("site/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/site"}]}`)
+	write("site/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/site"}]}`)
 	w.tool(token, "pull", map[string]any{"space": w.ownedName, "folder": "site/"}, "")
 	write("site/README.md", "# Site, from an agent\n")
 	pending := w.tool(token, "pending", map[string]any{"space": w.ownedName, "folder": "site"}, "")
@@ -692,7 +692,7 @@ func TestGitHubPushAgainstDatabase(t *testing.T) {
 func TestGitHubUnpushedHint(t *testing.T) {
 	w := newPullWorld(t, nil)
 	w.host.commit("dave-zap/h", "main", map[string]fakeRepoFile{"a.md": {text: "a\n"}, "b.md": {text: "b\n"}})
-	w.write("h/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/h"}]}`)
+	w.write("h/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/h"}]}`)
 	w.pull("h/", "")
 	write := func(path, text string) string {
 		t.Helper()
@@ -737,7 +737,7 @@ func TestGitHubUnpushedHint(t *testing.T) {
 		t.Fatalf("hint after push %q", hint)
 	}
 	// A review folder gets no hints.
-	w.write("h/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/h","push":"review"}]}`)
+	w.write("h/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/h","push":"review"}]}`)
 	w.s.clock = func() time.Time { return start.Add(400 * time.Minute) }
 	if hint := write("h/b.md", "b3\n"); hint != "" {
 		t.Fatalf("review hint %q", hint)

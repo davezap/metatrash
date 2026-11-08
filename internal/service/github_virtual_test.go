@@ -37,7 +37,7 @@ func TestGitHubVirtualFiles(t *testing.T) {
 		"latin1.txt":   {text: "caf\xe9\n"},
 	}
 	w.host.commit("dave-zap/bin", "main", files)
-	w.write("repo/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/bin"}]}`)
+	w.write("repo/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/bin"}]}`)
 	pulled := w.pull("repo/", "")
 	if pulled.Created != 4 || pulled.SkippedCount != 0 {
 		t.Fatalf("pull: %+v", pulled)
@@ -116,7 +116,7 @@ func TestGitHubVirtualFiles(t *testing.T) {
 func TestGitHubPullWithoutSpaceFiles(t *testing.T) {
 	w := newPullWorld(t, nil)
 	w.host.commit("dave-zap/bin", "main", map[string]fakeRepoFile{"README.md": {text: "# Repo\n"}, "logo.png": {text: "\x89PNG\r\n\x1a\n\x00"}})
-	w.write("repo/.metatrash.json", `{"services":[{"type":"github","repo":"dave-zap/bin"}]}`)
+	w.write("repo/.metatrash.json", `{"inherit":true,"services":[{"type":"github","repo":"dave-zap/bin"}]}`)
 	if pulled := w.pull("repo/", ""); pulled.SkippedCount != 1 || pulled.Skipped[0].Reason != "binary file" {
 		t.Fatalf("pull: %+v", pulled)
 	}
