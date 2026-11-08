@@ -307,6 +307,9 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	}
 	file, exists := files[path]
 	if !exists {
+		if !raw && redirectToFolder(w, r, files, path, root) {
+			return
+		}
 		sendError(w, missing())
 		return
 	}

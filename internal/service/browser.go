@@ -310,6 +310,9 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	}
 	file, exists := files[filePath]
 	if !exists {
+		if redirectToFolder(w, r, files, filePath, h.basePath+"/spaces/public/") {
+			return true
+		}
 		sendError(w, missing())
 		return true
 	}

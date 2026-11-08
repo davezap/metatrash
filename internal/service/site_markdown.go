@@ -145,6 +145,31 @@ func splitFolder(path string) (string, string) {
 	return "", path
 }
 
+// redirectToFolder answers a folder's address written without its trailing
+// slash (/spaces/x/guides for /spaces/x/guides/), which is how links are
+// often typed and how the site's Copy link gave them before 0.95.11. It is
+// called only when no file has that path: Git, like every file system,
+// cannot hold a file and a folder of the same name in one folder, so a file
+// always wins and nothing is hidden. The redirect is temporary (302) because
+// the folder may later be replaced by a file of that name. The query stays.
+func redirectToFolder(w http.ResponseWriter, r *http.Request, files map[string]record, path, root string) bool {
+	if path == "" {
+		return false
+	}
+	prefix := path + "/"
+	for name := range files {
+		if strings.HasPrefix(name, prefix) {
+			target := root + (&url.URL{Path: prefix}).EscapedPath()
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusFound)
+			return true
+		}
+	}
+	return false
+}
+
 // serveFolder answers a folder's own address (path/to/folder/): for a
 // client that asks for Markdown, the folder's README.md, else the list of
 // its pages; for a browser, a redirect to the page the folder opens on.

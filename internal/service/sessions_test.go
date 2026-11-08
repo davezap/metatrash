@@ -37,6 +37,33 @@ func TestEndOtherSessions(t *testing.T) {
 	}
 }
 
+// TestSessionLimitEndsIdlest: at the limit across all accounts, signing in
+// ends the session idle longest instead of refusing (0.95.11).
+func TestSessionLimitEndsIdlest(t *testing.T) {
+	s, _, _ := testAccounts(t)
+	a := s.accounts
+	now := time.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i := 0; i < maxSessions; i++ {
+		used := now.Add(-time.Duration(i%100) * time.Minute)
+		a.sessions[secretDigest(fmt.Sprint("t", i))] = accountSession{UserID: fmt.Sprintf("%032x", i), Created: now.Add(-time.Hour), LastUsed: used, Expires: now.Add(time.Hour)}
+	}
+	idle := secretDigest("idle")
+	a.sessions[idle] = accountSession{UserID: "u-idle", Created: now.Add(-3 * time.Hour), Expires: now.Add(time.Hour)}
+	delete(a.sessions, secretDigest("t1"))
+	token, err := a.startSessionLocked(context.Background(), "u-new", now)
+	if err != nil || token == "" {
+		t.Fatalf("sign-in at the limit: %v", err)
+	}
+	if _, ok := a.sessions[idle]; ok {
+		t.Fatal("the session idle longest was kept")
+	}
+	if _, ok := a.sessions[secretDigest(token)]; !ok || len(a.sessions) != maxSessions {
+		t.Fatalf("new session kept=%v, sessions %d, want %d", ok, len(a.sessions), maxSessions)
+	}
+}
+
 func TestSignOutEverywhereAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	ctx := context.Background()

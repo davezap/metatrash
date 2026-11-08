@@ -55,6 +55,13 @@ func TestAppPagesAgainstDatabase(t *testing.T) {
 	if res := withSession("/spaces/"+w.ownedName, ownerSession.Value); res.Code != 307 || res.Header().Get("Location") != "/spaces/"+w.ownedName+"/" {
 		t.Fatalf("bare address: %d %s", res.Code, res.Header().Get("Location"))
 	}
+	// A folder without its slash goes to the folder (0.95.11); ?raw on it is still refused.
+	if res := withSession("/spaces/"+w.ownedName+"/notes", ownerSession.Value); res.Code != 302 || res.Header().Get("Location") != "/spaces/"+w.ownedName+"/notes/" {
+		t.Fatalf("folder without slash: %d %s", res.Code, res.Header().Get("Location"))
+	}
+	if res := withSession("/spaces/"+w.ownedName+"/notes?raw", ownerSession.Value); res.Code != 404 {
+		t.Fatalf("raw folder: %d %s", res.Code, res.Header().Get("Location"))
+	}
 	if res := withSession("/spaces/"+w.ownedName+"/notes/missing.md", ownerSession.Value); res.Code != 404 {
 		t.Fatalf("missing file: %d", res.Code)
 	}

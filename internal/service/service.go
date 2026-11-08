@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"metatrash.com/metatrash/extension"
+	"metatrash.com/metatrash/internal/filenames"
 	"os"
 	"path/filepath"
 	"sort"
@@ -499,6 +500,13 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		}
 		f.Bytes = int64(len(*in.Text))
 		f.Virtual = in.Virtual
+	}
+	// A new name (a new file, or a move) may not hide characters that change
+	// how it reads (0.95.11); files that already have such names keep them.
+	if op == "move" || created {
+		if reason := filenames.NewName(dest); reason != "" {
+			return nil, invalid("Invalid path: " + reason + ".")
+		}
 	}
 	for p := range files {
 		if strings.HasPrefix(dest, p+"/") || strings.HasPrefix(p, dest+"/") {

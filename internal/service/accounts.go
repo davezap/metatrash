@@ -366,9 +366,6 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 	if err != nil {
 		return "", email, false, err
 	}
-	if len(a.sessions) >= maxSessions {
-		return "", email, false, problem(503, "sessions_busy", "Please try again later.")
-	}
 	// An account can turn email sign-in off (recovery.go). Checked here too,
 	// not only when sending, in case it was turned off after the code was sent.
 	if db, ok := a.store.(*accountDatabase); ok {

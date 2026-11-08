@@ -25,7 +25,8 @@ const lastUsedEvery = 5 * time.Minute
 // sessionSweepEvery is how often signing in also deletes expired rows.
 const sessionSweepEvery = time.Hour
 
-// maxSessions bounds sessions held at once, across all accounts.
+// maxSessions bounds sessions held at once, across all accounts; signing in
+// at the limit ends the session idle longest (idlestSession).
 const maxSessions = 4096
 
 // cleanupEvery is how often a signed-in request also sweeps expired codes,
@@ -197,9 +198,6 @@ func (a *accounts) loadStoredSessions(ctx context.Context, now time.Time) error 
 // the user is, and stores it before returning its token. The browser and
 // address come from ctx (withSessionOrigin). Callers hold mu.
 func (a *accounts) startSessionLocked(ctx context.Context, userID string, now time.Time) (string, error) {
-	if len(a.sessions) >= maxSessions {
-		return "", problem(503, "sessions_busy", "Please try again later.")
-	}
 	token, err := randomHex(32)
 	if err != nil {
 		return "", err
@@ -221,6 +219,15 @@ func (a *accounts) startSessionLocked(ctx context.Context, userID string, now ti
 			return "", unavailable
 		}
 	}
+	// At the limit across all accounts, end the session idle longest rather
+	// than turning everyone away (0.95.11; before, every new sign-in got 503
+	// until sessions expired).
+	if len(a.sessions) >= maxSessions {
+		if err := a.endSessionsLocked(idlestSession(a.sessions)); err != nil {
+			return "", unavailable
+		}
+		log.Printf("account session-limit ended=idlest")
+	}
 	origin := originFrom(ctx)
 	session := accountSession{UserID: userID, Created: now, Expires: now.Add(sessionLifetime), AuthAt: now, LastUsed: now, Device: clip(origin.Device, 64), IP: clip(origin.IP, 45)}
 	key := secretDigest(token)
@@ -239,6 +246,23 @@ func (a *accounts) startSessionLocked(ctx context.Context, userID string, now ti
 	a.sessions[key] = session
 	a.cancelDeletionOnSignIn(userID, now)
 	return token, nil
+}
+
+// idlestSession is the key of the session last used longest ago (its start
+// when it has no recorded use).
+func idlestSession(sessions map[string]accountSession) string {
+	key := ""
+	var idle time.Time
+	for k, s := range sessions {
+		used := s.LastUsed
+		if used.IsZero() {
+			used = s.Created
+		}
+		if key == "" || used.Before(idle) || used.Equal(idle) && k < key {
+			key, idle = k, used
+		}
+	}
+	return key
 }
 
 // endSessionsLocked ends the sessions with these keys (digests of their

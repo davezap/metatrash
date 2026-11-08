@@ -153,6 +153,18 @@ func TestSmoke(t *testing.T) {
 	if res.Code != 302 || res.Header().Get("Location") != "/spaces/public/archive/AGENTS.md" {
 		t.Fatalf("folder: %d %s", res.Code, res.Header().Get("Location"))
 	}
+	// Without its trailing slash (0.95.11), a folder's address goes to the
+	// address with one, query and all; a name no file or folder has is
+	// still not found, and neither is the start of a folder's name.
+	for page, want := range map[string]string{"/spaces/public/archive": "/spaces/public/archive/", "/spaces/public/archive?format=md": "/spaces/public/archive/?format=md", "/spaces/public/archiv": "", "/spaces/public/nothing": ""} {
+		r := httptest.NewRequest("GET", page, nil)
+		r.RemoteAddr = "127.0.0.1:12345"
+		res := httptest.NewRecorder()
+		h.ServeHTTP(res, r)
+		if want == "" && res.Code != 404 || want != "" && (res.Code != 302 || res.Header().Get("Location") != want) {
+			t.Fatalf("%s: %d %s", page, res.Code, res.Header().Get("Location"))
+		}
+	}
 	call("DELETE", "/api/v1/spaces/public/file?path=AGENTS.md", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=.metatrash.json", "", map[string]any{"ifInState": moved.NewState}, 403)
 	call("DELETE", "/api/v1/spaces/public/file?path=archive/a.txt", "", map[string]any{"ifInState": moved.NewState, "text": "x"}, 400)
@@ -167,6 +179,9 @@ func TestSmoke(t *testing.T) {
 	call("GET", "/api/v1/spaces/private/files", "wrong", nil, 401)
 	decode(call("GET", "/api/v1/spaces/private/files", "read-secret", nil, 200), &list)
 	call("PUT", "/api/v1/spaces/private/file?path=hello.txt", "read-secret", map[string]any{"text": "private", "ifInState": list.State}, 403)
+	// A new name may not hide a direction override or a zero-width space (0.95.11).
+	call("PUT", "/api/v1/spaces/private/file?path=invoice%E2%80%AEfdp.exe", "write-secret", map[string]any{"text": "x", "ifInState": list.State}, 400)
+	call("PUT", "/api/v1/spaces/private/file?path=a%E2%80%8Bb.md", "write-secret", map[string]any{"text": "x", "ifInState": list.State}, 400)
 	call("PUT", "/api/v1/spaces/private/file?path=hello.txt", "write-secret", map[string]any{"text": "private", "ifInState": list.State}, 201)
 	// blobs=true adds each file's Git blob hash (git hash-object of "private").
 	decode(call("GET", "/api/v1/spaces/private/files?blobs=true", "read-secret", nil, 200), &list)
