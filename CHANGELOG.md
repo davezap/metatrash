@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.95.13 - `version` lists every part of the build and its libraries (2026-11-08)
+
+- `metatrash version` (and `mt version`) names each part of the build with its version: Metatrash Core, any application built on Core (it adds itself with the new `console.AddComponents`), the Slate Viewer and Slate front ends with their commits (from the site build's `frontends.json`; `console.SetFrontend` points it at an application's own build), and Go, then the front-end libraries bundled into the site when the build recorded them (David, 2026-11-08).
+- `version -all` (or `--all`) also lists the third-party Go libraries compiled in, by name and version, from the binary's build information.
+- `version -core` prints only Core's version, as `version` did before: scripts that compare it should use `-core`.
+- No database schema, grants, configuration, tool-schema or mtsync change.
+
 ## 0.95.12 - Agents may send forms and change actions, where the folder's locks allow (2026-11-08)
 
 - Two new lock levels, beside `agents` and `everyone`, for `locked` and `readOnly` (David, 2026-11-08): `folderAgents` stops only the agents of folder actions (jobs), `connectedAgents` only other agents (assistants connected over MCP, apps, space keys, GitHub pulls). `agents` still stops both. When locks combine, the one that stops more wins; `folderAgents` plus `connectedAgents` counts as `agents`. Refusals name who is locked out.

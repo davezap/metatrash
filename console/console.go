@@ -26,7 +26,7 @@ const defaultAccountsConfig = "/etc/metatrash/accounts.json"
 // commandUsage is each command's synopsis, in the order help lists them.
 var commandUsage = map[string]string{
 	"help":              "help",
-	"version":           "version",
+	"version":           "version [-all] [-core]",
 	"keygen":            "keygen",
 	"accounts-migrate":  "accounts-migrate -database-config FILE -data DIR [-empty]",
 	"check":             "check [-config FILE] [-keys FILE] [-data DIR]",
@@ -95,11 +95,7 @@ func Run(name string, args []string) error {
 		printUsage(os.Stdout)
 		return nil
 	case "version":
-		if len(args) != 0 {
-			return fmt.Errorf("version takes no arguments")
-		}
-		fmt.Println(metatrash.Version)
-		return nil
+		return runVersion(args, os.Stdout)
 	case "keygen":
 		if len(args) != 0 {
 			return fmt.Errorf("keygen takes no arguments")
