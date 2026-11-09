@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.95.18 - Isolate CI database fixtures between test processes (2026-11-09)
+
+- Recreate only the Linux job's disposable MariaDB service database after the focused action-discovery race/SQL checks and before the full Go suite. Each Go test process chooses a different owned-repository directory; reusing the first process's ready-space rows caused cascading missing-repository failures in the second process.
+- Keep both test invocations, runtime-grant schema setup, the additive queue index, and the production missing-repository guard. No runtime, schema definition, dependency, configuration or scheduler-policy change from 0.95.17. Existing tags stay intact; see docs/release-0.95.18.md. CI rerun/release remain pending David.
+
 ## 0.95.17 - Bounded discovery of independent action jobs (2026-11-09)
 
 - Discover one oldest queued job per eligible space before limiting results. Traverse immutable space IDs with a bounded cursor, two eight-space pages per pass, the existing ten-second pass deadline and a one-second continuation. Preserve per-space `(queued_at, job_id)` ordering; cross-space scheduling rotates instead of prioritising the oldest global job rows. Keep two action jobs globally and one per space.

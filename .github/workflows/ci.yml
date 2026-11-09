@@ -68,6 +68,20 @@ jobs:
           METATRASH_TEST_DB_CONFIG: ${{ runner.temp }}/account-database.json
         run: go test -race -v ./internal/service -run '^TestAgentDiscovery|^TestDatabaseAgentDiscovery$' -count=1 -timeout=180s
 
+      # Each Go test process has its own owned-repository fixture directory.
+      # Reusing DB rows from the focused process makes the next process look for
+      # those repositories in a different directory. Reset only this job's
+      # disposable service database; never weaken the missing-repository guard.
+      - name: Recreate disposable database for the full test process
+        env:
+          DB: ${{ job.services.mariadb.id }}
+        run: |
+          sql() { docker exec -i "$DB" mariadb -uroot -pci-root "$@"; }
+          sql -e "DROP DATABASE metatrash;
+                  CREATE DATABASE metatrash CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;"
+          sql metatrash < deploy/account-schema.sql
+          sed "s/'metatrash_accounts'@'localhost'/'metatrash_accounts'@'%'/g" deploy/account-grants.sql | sql > /dev/null
+
       - name: go test
         env:
           METATRASH_TEST_DB_CONFIG: ${{ runner.temp }}/account-database.json
