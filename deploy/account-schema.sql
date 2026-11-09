@@ -323,6 +323,7 @@ CREATE TABLE IF NOT EXISTS metatrash_agent_jobs (
     error TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
     PRIMARY KEY (job_id),
     KEY metatrash_agent_jobs_status (status, queued_at),
+    KEY metatrash_agent_jobs_queue_space (status, space_id, queued_at, job_id),
     KEY metatrash_agent_jobs_folder (space_id, folder, queued_at),
     CONSTRAINT metatrash_agent_jobs_space FOREIGN KEY (space_id)
         REFERENCES metatrash_spaces (space_id) ON DELETE RESTRICT ON UPDATE RESTRICT

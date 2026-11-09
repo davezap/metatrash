@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -41,8 +42,9 @@ type agentJobStore interface {
 	// tokensSince sums the tokens of an agent's jobs that finished at or
 	// after since.
 	tokensSince(ctx context.Context, agentID string, since time.Time) (int64, error)
-	// queued returns waiting jobs, oldest first.
-	queued(ctx context.Context, limit int) ([]agentJob, error)
+	// queued returns one oldest job per eligible space, ordered by space ID.
+	// after is an exclusive space cursor; exclusions apply before the limit.
+	queued(ctx context.Context, after string, excluded []string, limit int) ([]agentJob, error)
 	// claim moves a queued job to running; false when another took it.
 	claim(ctx context.Context, id string, at time.Time) (bool, error)
 	finish(ctx context.Context, j agentJob) error
@@ -134,6 +136,10 @@ func (s dbJobStore) tokensSince(ctx context.Context, agentID string, since time.
 
 func (s dbJobStore) list(ctx context.Context, query string, args ...any) ([]agentJob, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+agentJobColumns+" FROM metatrash_agent_jobs "+query, args...)
+	return scanAgentJobs(rows, err)
+}
+
+func scanAgentJobs(rows *sql.Rows, err error) ([]agentJob, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read agent jobs")
 	}
@@ -163,8 +169,34 @@ func (s dbJobStore) list(ctx context.Context, query string, args ...any) ([]agen
 	return jobs, nil
 }
 
-func (s dbJobStore) queued(ctx context.Context, limit int) ([]agentJob, error) {
-	return s.list(ctx, "WHERE status = 'queued' ORDER BY queued_at, job_id LIMIT ?", limit)
+func queuedJobQuery(after string, excluded []string, limit int) (string, []any, error) {
+	if limit < 1 || limit > jobDiscoveryPage || len(excluded) > jobDiscoveryPage*jobDiscoveryPages+maxParallelJobs {
+		return "", nil, fmt.Errorf("invalid job discovery budget")
+	}
+	query := "SELECT j." + strings.ReplaceAll(agentJobColumns, ", ", ", j.") +
+		" FROM metatrash_agent_jobs j WHERE j.status = 'queued' AND j.space_id > ?"
+	args := []any{after}
+	if len(excluded) != 0 {
+		query += " AND j.space_id NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(excluded)), ",") + ")"
+		for _, space := range excluded {
+			args = append(args, space)
+		}
+	}
+	// The anti-join chooses the oldest job BEFORE limiting spaces. The additive
+	// queue-space index supports both the space cursor and each predecessor probe.
+	query += " AND NOT EXISTS (SELECT 1 FROM metatrash_agent_jobs older WHERE older.status = 'queued'" +
+		" AND older.space_id = j.space_id AND (older.queued_at < j.queued_at" +
+		" OR (older.queued_at = j.queued_at AND older.job_id < j.job_id))) ORDER BY j.space_id LIMIT ?"
+	return query, append(args, limit), nil
+}
+
+func (s dbJobStore) queued(ctx context.Context, after string, excluded []string, limit int) ([]agentJob, error) {
+	query, args, err := queuedJobQuery(after, excluded, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	return scanAgentJobs(rows, err)
 }
 
 func (s dbJobStore) recent(ctx context.Context, spaceID string, since time.Time) ([]agentJob, error) {

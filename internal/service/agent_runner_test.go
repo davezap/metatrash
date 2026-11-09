@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -127,12 +128,29 @@ func (m *memoryJobStore) list(status string) []agentJob {
 	return out
 }
 
-func (m *memoryJobStore) queued(_ context.Context, limit int) ([]agentJob, error) {
-	jobs := m.list(jobQueued)
-	if len(jobs) > limit {
-		jobs = jobs[:limit]
+func (m *memoryJobStore) queued(ctx context.Context, after string, excluded []string, limit int) ([]agentJob, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	return jobs, nil
+	jobs := m.list(jobQueued)
+	heads := map[string]agentJob{}
+	for _, j := range jobs {
+		if j.SpaceID <= after || slices.Contains(excluded, j.SpaceID) {
+			continue
+		}
+		if _, ok := heads[j.SpaceID]; !ok {
+			heads[j.SpaceID] = j
+		}
+	}
+	var out []agentJob
+	for _, j := range heads {
+		out = append(out, j)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SpaceID < out[j].SpaceID })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (m *memoryJobStore) recent(_ context.Context, space string, since time.Time) ([]agentJob, error) {

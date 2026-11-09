@@ -35,6 +35,8 @@ import (
 
 const (
 	maxParallelJobs      = 2
+	jobDiscoveryPage     = 8
+	jobDiscoveryPages    = 2
 	stepsWarning         = 3 // tool calls left when the runner says to finish
 	maxJobsPerFolderHour = 20
 	maxJobInputTokens    = 400000
@@ -93,6 +95,10 @@ type agentRunner struct {
 	wake      chan struct{}
 	mu        sync.Mutex
 	running   map[string]bool
+	// discoveryAfter is owned by the scheduling loop, never by job goroutines.
+	discoveryAfter string
+	// runAdmitted replaces execution in admission/lifecycle tests; nil uses run.
+	runAdmitted func(agentJob)
 	// owner returns a user's username (empty when none) and email: a space
 	// owner's, or another payer's.
 	owner func(ctx context.Context, userID string) (username, email string)
@@ -407,55 +413,101 @@ func (a *agentRunner) loop() {
 		}
 		a.runSchedules()
 		a.runRefreshes()
-		a.startReady()
+		var resume <-chan time.Time
+		var resumeTimer *time.Timer
+		if a.startReady() {
+			resumeTimer = time.NewTimer(time.Second)
+			resume = resumeTimer.C
+		}
 		select {
 		case <-a.ctx.Done():
+			if resumeTimer != nil {
+				resumeTimer.Stop()
+			}
 			return
 		case <-a.wake:
 		case <-tick.C:
+		case <-resume:
+		}
+		if resumeTimer != nil {
+			resumeTimer.Stop()
 		}
 	}
 }
 
 // startReady starts queued jobs whose space has none running.
-func (a *agentRunner) startReady() {
+func (a *agentRunner) startReady() bool {
 	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
 	defer cancel()
-	jobs, err := a.store.queued(ctx, 100)
-	if err != nil {
-		log.Printf("agent runner: %v", err)
-		return
-	}
-	for _, j := range jobs {
+	visited := make(map[string]bool, jobDiscoveryPage*jobDiscoveryPages)
+	for page := 0; page < jobDiscoveryPages; page++ {
 		a.mu.Lock()
-		if len(a.running) >= maxParallelJobs || a.running[j.SpaceID] {
+		if ctx.Err() != nil || len(a.running) >= maxParallelJobs {
 			a.mu.Unlock()
-			continue
+			return false
 		}
-		now := a.clock()
-		ok, err := a.store.claim(ctx, j.ID, now)
-		if err != nil || !ok {
-			a.mu.Unlock()
-			if err != nil {
-				log.Printf("agent runner: %v", err)
-			}
-			continue
+		excluded := make([]string, 0, len(a.running)+len(visited))
+		for space := range a.running {
+			excluded = append(excluded, space)
 		}
-		a.running[j.SpaceID] = true
 		a.mu.Unlock()
-		j.Status, j.StartedAt = jobRunning, now
-		a.wg.Add(1)
-		go func(j agentJob) {
-			defer func() {
-				a.mu.Lock()
-				delete(a.running, j.SpaceID)
+		for space := range visited {
+			excluded = append(excluded, space)
+		}
+		jobs, err := a.store.queued(ctx, a.discoveryAfter, excluded, jobDiscoveryPage)
+		if err != nil {
+			log.Printf("agent runner: %v", err)
+			return false
+		}
+		if len(jobs) == 0 {
+			if a.discoveryAfter == "" {
+				return false
+			}
+			a.discoveryAfter = ""
+			continue // Wrap once within this bounded pass; deleted cursor rows are harmless.
+		}
+		for _, j := range jobs {
+			a.mu.Lock()
+			if ctx.Err() != nil || len(a.running) >= maxParallelJobs {
 				a.mu.Unlock()
-				a.poke()
-				a.wg.Done()
-			}()
-			a.run(j)
-		}(j)
+				return false // Do not advance past a candidate we have not inspected.
+			}
+			a.discoveryAfter = j.SpaceID
+			visited[j.SpaceID] = true
+			if a.running[j.SpaceID] {
+				a.mu.Unlock()
+				continue
+			}
+			now := a.clock()
+			ok, err := a.store.claim(ctx, j.ID, now)
+			if err != nil || !ok {
+				a.mu.Unlock()
+				if err != nil {
+					log.Printf("agent runner: %v", err)
+				}
+				continue
+			}
+			a.running[j.SpaceID] = true
+			a.mu.Unlock()
+			j.Status, j.StartedAt = jobRunning, now
+			a.wg.Add(1)
+			go func(j agentJob) {
+				defer func() {
+					a.mu.Lock()
+					delete(a.running, j.SpaceID)
+					a.mu.Unlock()
+					a.poke()
+					a.wg.Done()
+				}()
+				if a.runAdmitted != nil {
+					a.runAdmitted(j)
+				} else {
+					a.run(j)
+				}
+			}(j)
+		}
 	}
+	return ctx.Err() == nil // Continue after one second, rather than spin or await a job finishing.
 }
 
 // githubPullKey marks a GitHub pull's commit, whose files nobody in

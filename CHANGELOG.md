@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.95.17 - Bounded discovery of independent action jobs (2026-11-09)
+
+- Discover one oldest queued job per eligible space before limiting results. Traverse immutable space IDs with a bounded cursor, two eight-space pages per pass, the existing ten-second pass deadline and a one-second continuation. Preserve per-space `(queued_at, job_id)` ordering; cross-space scheduling rotates instead of prioritising the oldest global job rows. Keep two action jobs globally and one per space.
+- Add an additive `(status, space_id, queued_at, job_id)` index, repeatable operator SQL and race/MariaDB regressions for busy backlogs, cursor/wrap, lost claims, errors, cancellation and actual query plans. Existing atomic job claims and single-process lifecycle remain; this is not account-wide fairness, durable leases or multi-process execution. See docs/release-0.95.17.md. David runs tests/builds; none run by Codex.
+
 ## 0.95.16 - Docling pairing regression fixture recovery (2026-11-09)
 
 - Let the pairing regression observe the existing two-minute background pairing budget plus five seconds of grace, and the configured conversion budget plus its existing 30-second backstop and five seconds of grace. Real Git work must still finish successfully; callback errors fail on the test goroutine instead of appearing as teardown cancellation noise.
