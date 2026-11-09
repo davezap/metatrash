@@ -28,6 +28,12 @@ import (
 //
 // Only the OAuth REST resource offers them, and only a person (Metatrash Sync)
 // can acknowledge.
+//
+// The same answer carries what forms ask of the caller (0.95.20): toReview,
+// the filed copies in this space still waiting for a reviewer (for someone
+// who can write to the space, as reviewing needs), and toFix, the forms in
+// this space whose last copy the caller sent was sent back for more
+// information. Slate Viewer marks both with the same dot as a file to read.
 
 // maxAcknowledgementRows bounds rows read for one answer.
 const maxAcknowledgementRows = 20000
@@ -190,6 +196,9 @@ type policiesResult struct {
 	State       string         `json:"state"`
 	Folders     []policyFolder `json:"folders"`
 	Outstanding int            `json:"outstanding"`
+	// ToReview and ToFix (0.95.20) are paths, sorted; see the top of the file.
+	ToReview []string `json:"toReview"`
+	ToFix    []string `json:"toFix"`
 }
 
 // publishedFolders lists every folder with a publishedVersion at state and
@@ -331,8 +340,9 @@ func (idx ackIndex) status(userID string, f policyFile) *policyAck {
 	return ack
 }
 
-// policies answers GET .../acknowledgements for one person.
-func (s *Service) policies(ctx context.Context, r *repository, space, userID string) (policiesResult, error) {
+// policies answers GET .../acknowledgements for one person; reviewer is set
+// when they can write to the space, so review its filed copies.
+func (s *Service) policies(ctx context.Context, r *repository, space, userID string, reviewer bool) (policiesResult, error) {
 	state, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return policiesResult{}, err
@@ -341,7 +351,10 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 	if err != nil {
 		return policiesResult{}, err
 	}
-	result := policiesResult{Space: space, State: state, Folders: folders}
+	result := policiesResult{Space: space, State: state, Folders: folders, ToReview: []string{}, ToFix: []string{}}
+	if result.ToReview, result.ToFix, err = s.formsToDo(ctx, r.id, userID, reviewer, files); err != nil {
+		return policiesResult{}, err
+	}
 	var idx ackIndex
 	var quizzes []quizRow
 	for _, f := range folders {
@@ -390,6 +403,86 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 		}
 	}
 	return result, nil
+}
+
+// formsToDo lists the copies filed in the space that wait for a review (when
+// reviewer is set) and the forms in it whose caller's last copy was sent back
+// for more information, as paths in files.
+func (s *Service) formsToDo(ctx context.Context, spaceID, userID string, reviewer bool, files map[string]record) (toReview, toFix []string, err error) {
+	toReview, toFix = []string{}, []string{}
+	pathOf := make(map[string]string, len(files))
+	for p, f := range files {
+		pathOf[f.ID] = p
+	}
+	waiting, sentBack, err := s.ownedDB.formsToDo(ctx, spaceID, userID, reviewer)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, id := range waiting {
+		if p, ok := pathOf[id]; ok {
+			toReview = append(toReview, p)
+		}
+	}
+	for _, id := range sentBack {
+		if p, ok := pathOf[id]; ok {
+			toFix = append(toFix, p)
+		}
+	}
+	sort.Strings(toReview)
+	sort.Strings(toFix)
+	return toReview, toFix, nil
+}
+
+// formsToDo reads the file IDs behind formsToDo: copies filed in the space
+// with status submitted (a quiz's too, while written answers wait for a tick),
+// and the template of each form whose newest copy the person sent from this
+// space is needs-info.
+func (db *accountDatabase) formsToDo(ctx context.Context, spaceID, userID string, reviewer bool) (waiting, sentBack []string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if reviewer {
+		rows, err := db.db.QueryContext(ctx, fmt.Sprintf("SELECT target_file_id FROM metatrash_form_submissions WHERE target_space_id = ? AND status = 'submitted' AND target_file_id <> '' LIMIT %d", maxAcknowledgementRows), spaceID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cannot read submissions")
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, nil, fmt.Errorf("cannot read submissions")
+			}
+			waiting = append(waiting, id)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, nil, fmt.Errorf("cannot read submissions")
+		}
+	}
+	rows, err := db.db.QueryContext(ctx, fmt.Sprintf("SELECT template_file_id, status FROM metatrash_form_submissions WHERE space_id = ? AND user_id = ? AND quiz = 0 ORDER BY submitted_at, submission_id LIMIT %d", maxAcknowledgementRows), spaceID, userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot read submissions")
+	}
+	defer rows.Close()
+	newest := map[string]string{}
+	order := []string{}
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, nil, fmt.Errorf("cannot read submissions")
+		}
+		if _, seen := newest[id]; !seen {
+			order = append(order, id)
+		}
+		newest[id] = status
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("cannot read submissions")
+	}
+	for _, id := range order {
+		if newest[id] == "needs-info" {
+			sentBack = append(sentBack, id)
+		}
+	}
+	return waiting, sentBack, nil
 }
 
 type reportFile struct {
@@ -544,7 +637,9 @@ func (h *httpAdapter) serveAcknowledgements(w http.ResponseWriter, r *http.Reque
 		var err error
 		switch r.URL.RawQuery {
 		case "":
-			value, err = h.service.policies(r.Context(), repo, space, userID)
+			// Only someone who can write to the space reviews its copies.
+			_, _, denied := access(true)
+			value, err = h.service.policies(r.Context(), repo, space, userID, denied == nil)
 		case "report=true":
 			if _, _, err = access(true); err == nil {
 				value, err = h.service.policyReport(r.Context(), repo, space)

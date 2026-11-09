@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.20 - Forms waiting for you: copies to review and forms sent back (2026-11-09)
+
+- `GET …/acknowledgements` also answers `toReview` and `toFix` (sorted space paths, always present). `toReview` lists the filed copies in the space whose status is still `submitted` (a quiz's too, while written answers wait for a tick), for a caller who can write to the space, as reviewing needs; others get an empty list. It is shared: once anyone approves, declines or asks for more, the copy leaves everyone's list, and a fixed copy sent again arrives as a new one. `toFix` lists the forms in the space whose newest copy the caller sent was sent back for more information (`needs-info`); sending it again clears it. Both come from `metatrash_form_submissions` on existing indexes; copies moved or deleted from the space drop out. Slate Viewer 0.35.1 marks them with the red dot it gives files to read.
+- mtsync `policies` passes both through, relative to the synced folder (`-json`), and lists them in its text answer. Older servers answer neither, which mtsync and Slate Viewer treat as none.
+- `TestQuizzesAgainstDatabase` checks both lists through submit, needs-info, resend and approve, and that a read-only member reviews nothing; mtsync `TestPoliciesAndAck` checks the folder cut. No schema, grants, configuration or dependency changes. See docs/release-0.95.20.md.
+
 ## 0.95.19 - Guided forms: default answers, show-if, auto flow and photo fields (2026-11-09)
 
 - Form fields take `default=`: text, or `@name`, `@email`, `@today` and `@now` (the sender's username, email address, local date and local time). Slate fills defaults in before the person starts; an answer left out of a submission (mtsync, REST, agents' `submit`) takes the default too, so a sent blank stays blank. A multiple choice's default lists its options with `|`. Defaults are checked when the template is read (a choice's default must be one of its options; `@name` only on text fields, `@today` on dates and text, and so on) and again like any answer when the form is sent.

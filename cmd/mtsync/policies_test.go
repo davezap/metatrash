@@ -25,7 +25,7 @@ func TestPoliciesAndAck(t *testing.T) {
 			_, _ = io.WriteString(w, `{"id":"f1","path":"hr/policies/leave.md","publishedPath":"hr/policies/leave.md","tracked":true}`)
 			return
 		}
-		_, _ = io.WriteString(w, `{"space":"dave/work","state":"s","outstanding":2,"folders":[
+		_, _ = io.WriteString(w, `{"space":"dave/work","state":"s","outstanding":2,"toReview":["hr/inbound/a.md","it/b.md"],"toFix":["hr/forms/leave.md"],"folders":[
 			{"folder":"hr/policies/","version":3,"revision":"r","timestamp":"2026-10-22T10:00:00Z","acknowledge":true,"files":[
 				{"id":"f1","path":"hr/policies/leave.md","publishedPath":"hr/policies/leave.md","tracked":true,"outstanding":true}]},
 			{"folder":"it/","version":1,"revision":"r2","timestamp":"2026-10-22T10:00:00Z","acknowledge":true,"files":[
@@ -39,6 +39,9 @@ func TestPoliciesAndAck(t *testing.T) {
 	}
 	if got.Outstanding != 1 || len(got.Folders) != 1 || got.Folders[0].Folder != "policies/" || got.Folders[0].Files[0].Path != "policies/leave.md" {
 		t.Fatalf("policies: %+v", got)
+	}
+	if len(got.ToReview) != 1 || got.ToReview[0] != "inbound/a.md" || len(got.ToFix) != 1 || got.ToFix[0] != "forms/leave.md" {
+		t.Fatalf("forms to do: %+v %+v", got.ToReview, got.ToFix)
 	}
 	f, err := c.acknowledge(context.Background(), "policies/leave.md", 3)
 	if err != nil || f.Path != "policies/leave.md" || posted["path"] != "hr/policies/leave.md" || posted["version"] != float64(3) {

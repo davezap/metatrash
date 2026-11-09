@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -334,14 +335,40 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 		t.Fatalf("list: %v", got)
 	}
 
+	// What forms ask of each person (0.95.20): toReview for someone who can
+	// write to the review space, toFix for the sender of a copy sent back.
+	todo := func(token, at, key string) []string {
+		t.Helper()
+		out := []string{}
+		for _, p := range call(token, "GET", at+"acknowledgements", "", 200)[key].([]any) {
+			out = append(out, p.(string))
+		}
+		return out
+	}
+	has := func(list []string, p string) bool { return slices.Contains(list, p) }
 	// needs-info (0.95.10): the reviewer asks for more with a note; the
 	// person sends the form again naming the copy, which becomes resent.
 	clock = clock.Add(time.Minute)
 	asked := call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "P"}}), 201)
 	askedPath := strings.TrimPrefix(asked["target"].(string), w.member.Username+"/"+review.Slug+"/")
+	if !has(todo(reviewer, reviewBase, "toReview"), askedPath) || has(todo(reviewer, reviewBase, "toReview"), leavePath) {
+		t.Fatalf("toReview: %v", todo(reviewer, reviewBase, "toReview"))
+	}
+	if got := todo(person, base, "toReview"); len(got) != 0 {
+		t.Fatalf("a read-only member reviews nothing: %v", got)
+	}
 	call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": askedPath, "status": "needs-info"}), 400)
 	if got := call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": askedPath, "status": "needs-info", "note": "Your full name, please."}), 200); got["status"] != "needs-info" || !strings.Contains(got["text"].(string), "status: needs-info\n") {
 		t.Fatalf("needs-info: %v", got)
+	}
+	if has(todo(reviewer, reviewBase, "toReview"), askedPath) {
+		t.Fatal("a copy sent back still waits for review")
+	}
+	if got := todo(person, base, "toFix"); mustJSON(got) != `["forms/leave.md"]` {
+		t.Fatalf("toFix: %v", got)
+	}
+	if got := todo(author, base, "toFix"); len(got) != 0 {
+		t.Fatalf("someone else's form to fix: %v", got)
 	}
 	// Not for quizzes, not someone else's copy, not an approved one.
 	call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": copyPath, "status": "needs-info", "note": "x"}), 400)
@@ -356,6 +383,9 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	again := call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "Pat Smith"}, "resends": asked["id"]}), 201)
 	if again["resends"] != asked["id"] || again["status"] != "submitted" || !strings.Contains(again["text"].(string), "resends: "+asked["id"].(string)+"\n") {
 		t.Fatalf("again: %v", again)
+	}
+	if got := todo(person, base, "toFix"); len(got) != 0 {
+		t.Fatalf("sent again, nothing to fix: %v", got)
 	}
 	reviewRepo := w.s.ownedRepository(review.ID)
 	_, reviewFiles, err := reviewRepo.snapshot(ctx, "")
@@ -377,8 +407,14 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	}
 	// Reviewing the new copy keeps its link to the old one.
 	againPath := strings.TrimPrefix(again["target"].(string), w.member.Username+"/"+review.Slug+"/")
+	if !has(todo(reviewer, reviewBase, "toReview"), againPath) || has(todo(reviewer, reviewBase, "toReview"), askedPath) {
+		t.Fatalf("fixed copy to review: %v", todo(reviewer, reviewBase, "toReview"))
+	}
 	if got := call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": againPath, "status": "approved"}), 200); !strings.Contains(got["text"].(string), "resends: "+asked["id"].(string)+"\n") {
 		t.Fatalf("approved again: %v", got)
+	}
+	if has(todo(reviewer, reviewBase, "toReview"), againPath) {
+		t.Fatal("an approved copy still waits for review")
 	}
 }
 

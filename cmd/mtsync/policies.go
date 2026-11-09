@@ -71,6 +71,11 @@ type policiesAnswer struct {
 	State       string         `json:"state"`
 	Folders     []policyFolder `json:"folders"`
 	Outstanding int            `json:"outstanding"`
+	// ToReview and ToFix (metatrash 0.95.20): filed copies waiting for a
+	// review, and forms whose last copy you sent was sent back for more
+	// information, in the synced folder. Absent from older servers.
+	ToReview []string `json:"toReview"`
+	ToFix    []string `json:"toFix"`
 }
 
 type reportAnswer struct {
@@ -126,7 +131,20 @@ func (c *client) policies(ctx context.Context) (policiesAnswer, error) {
 		}
 	}
 	out.Folders = folders
+	out.ToReview = inFolder(out.ToReview, c.prefix)
+	out.ToFix = inFolder(out.ToFix, c.prefix)
 	return out, nil
+}
+
+// inFolder keeps the paths under prefix, relative to it.
+func inFolder(paths []string, prefix string) []string {
+	kept := []string{}
+	for _, p := range paths {
+		if strings.HasPrefix(p, prefix) {
+			kept = append(kept, strings.TrimPrefix(p, prefix))
+		}
+	}
+	return kept
 }
 
 // acknowledge confirms that the person read path's published text, version.
@@ -197,6 +215,12 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 	}
 	if asJSON {
 		return printJSON(out, answer)
+	}
+	for _, p := range answer.ToReview {
+		fmt.Fprintf(out, "To review: %s\n", p)
+	}
+	for _, p := range answer.ToFix {
+		fmt.Fprintf(out, "Sent back for more information: %s (send it again with mtsync submit -resends)\n", p)
 	}
 	if len(answer.Folders) == 0 {
 		fmt.Fprintln(out, "No published folders.")
