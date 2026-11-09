@@ -369,7 +369,7 @@ type agentSubmitArgs struct {
 
 // decodeAgentSubmit reads submit's arguments.
 func decodeAgentSubmit(raw []byte, args *agentSubmitArgs) error {
-	if len(raw) > maxFormAnswerBytes+4096 || !validUnicodeJSON(raw) || noDuplicateKeys(raw) != nil || strictJSON(raw, args) != nil || args.Path == "" || args.Answers == nil || args.Resends != "" && !receiptIDPattern.MatchString(args.Resends) {
+	if len(raw) > maxSubmitBodyBytes || !validUnicodeJSON(raw) || noDuplicateKeys(raw) != nil || strictJSON(raw, args) != nil || args.Path == "" || args.Answers == nil || args.Resends != "" && !receiptIDPattern.MatchString(args.Resends) {
 		return invalid(`submit takes path (the form) and answers ({"field": answer, ...}), and optionally resends (a copy sent back for more information) and today (YYYY-MM-DD).`)
 	}
 	return nil

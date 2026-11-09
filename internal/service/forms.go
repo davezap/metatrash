@@ -75,6 +75,7 @@ var fieldAttributes = map[string]map[string]bool{
 	"select":   {},
 	"yesno":    {},
 	"sign":     {},
+	"photo":    {"max": true},
 }
 
 type formField struct {
@@ -84,11 +85,19 @@ type formField struct {
 	Required bool     `json:"required,omitempty"`
 	Multi    bool     `json:"multi,omitempty"`
 	Options  []string `json:"options,omitempty"`
-	attrs    map[string]string
-	pattern  *regexp.Regexp
+	// Default is the default= text and ShowIf the field's condition as
+	// written (0.95.19, forms_flow.go).
+	Default string `json:"default,omitempty"`
+	ShowIf  string `json:"showIf,omitempty"`
+	attrs   map[string]string
+	pattern *regexp.Regexp
 	// line is the field's line in the template body (0-based), and
 	// optionLines the lines holding its options.
 	line, firstOption, lastOption int
+	// showIf is the condition of the field's block, hideFrom..hideTo the
+	// body lines it hides when not met.
+	showIf           *showIf
+	hideFrom, hideTo int
 }
 
 type formTemplate struct {
@@ -286,6 +295,11 @@ func parseFormTemplate(text string) (formTemplate, error) {
 	if err := t.readQuizKeys(keys); err != nil {
 		return t, err
 	}
+	// autoFlow (0.95.19) shows the form a step (heading) at a time in Slate;
+	// the server checks the whole form as usual.
+	if v, ok := keys["autoFlow"]; ok && v != "true" && v != "false" {
+		return t, formError("autoFlow is true or false.")
+	}
 	names := map[string]bool{}
 	optionsUsed := map[int]bool{}
 	var problemText string
@@ -299,7 +313,7 @@ func parseFormTemplate(text string) (formTemplate, error) {
 		kind = strings.ToLower(kind)
 		allowed, known := fieldAttributes[kind]
 		if !known {
-			fail("{{%s}} is not a field type; use text, textarea, number, date, time, email, phone, choice, select, yesno or sign.", kind)
+			fail("{{%s}} is not a field type; use text, textarea, number, date, time, email, phone, choice, select, yesno, sign or photo.", kind)
 			return
 		}
 		attrs, err := parseAttributes(attrText)
@@ -310,7 +324,9 @@ func parseFormTemplate(text string) (formTemplate, error) {
 		f := formField{Type: kind, Name: attrs["name"], Label: attrs["label"], attrs: attrs, line: line, firstOption: -1, lastOption: -1}
 		for key, value := range attrs {
 			switch key {
-			case "name", "label", "placeholder":
+			case "name", "label", "placeholder", "show-if":
+			case "default":
+				f.Default = value
 			case "required":
 				f.Required = value == "true"
 				if value != "true" {
@@ -382,6 +398,21 @@ func parseFormTemplate(text string) (formTemplate, error) {
 	}
 	if len(t.Fields) == 0 {
 		return t, formError("it has no fields; add one such as {{text name=full_name required}}.")
+	}
+	if err := t.readShowIf(); err != nil {
+		return t, err
+	}
+	photos := 0
+	for _, f := range t.Fields {
+		if f.Type == "photo" {
+			photos += photoLimit(f)
+		}
+	}
+	if photos > 0 && t.Quiz {
+		return t, formError("a quiz can't ask for photos.")
+	}
+	if photos > maxFormPhotos {
+		return t, formError(fmt.Sprintf("a form can ask for at most %d photos in all (the max of its photo fields added up).", maxFormPhotos))
 	}
 	for name := range t.Unmarked {
 		if !names[name] {
@@ -456,6 +487,10 @@ func checkFieldAttributes(f *formField) error {
 				return fmt.Errorf("%s must be a time such as 09:30", key)
 			}
 		}
+	case "photo":
+		if err := whole("max", 1, maxPhotosPerField); err != nil {
+			return err
+		}
 	case "choice":
 		f.Multi = a["multi"] == "true"
 		if v, ok := a["multi"]; ok && v != "true" {
@@ -513,6 +548,14 @@ type formAnswers map[string]any
 // the submitter's date for date limits given as today. Every problem is
 // returned, one per field.
 func (t formTemplate) checkAnswers(raw map[string]json.RawMessage, today string) (formAnswers, []FieldError) {
+	return t.checkAnswersFor(raw, formContext{Today: today})
+}
+
+// checkAnswersFor checks raw answers for the sender c (0.95.19): an answer
+// left out takes the field's default, and a question its show-if does not
+// ask is left out, whatever was sent for it.
+func (t formTemplate) checkAnswersFor(raw map[string]json.RawMessage, c formContext) (formAnswers, []FieldError) {
+	today := c.Today
 	var problems []FieldError
 	out := formAnswers{}
 	known := map[string]bool{}
@@ -524,9 +567,36 @@ func (t formTemplate) checkAnswers(raw map[string]json.RawMessage, today string)
 			problems = append(problems, FieldError{name, "This form has no field of that name; the template may have changed."})
 		}
 	}
+	asked := map[string]bool{}
+	byName := map[string]formField{}
 	for _, f := range t.Fields {
+		byName[f.Name] = f
+		if f.showIf != nil {
+			on := byName[f.showIf.Field]
+			var answer any
+			if asked[on.Name] {
+				answer = out[on.Name]
+			}
+			if !f.showIf.holds(on, answer, today) {
+				continue
+			}
+		}
+		asked[f.Name] = true
 		fail := func(message string) { problems = append(problems, FieldError{f.Name, message}) }
 		value, present := raw[f.Name]
+		if !present && f.Default != "" {
+			value, _ = json.Marshal(f.resolveDefault(c))
+			present = true
+		}
+		if f.Type == "photo" {
+			photos, message := readPhotoAnswer(f, value, present)
+			if message != "" {
+				fail(message)
+				continue
+			}
+			out[f.Name] = photos
+			continue
+		}
 		if f.Multi {
 			var picked []string
 			if present && string(value) != "null" && json.Unmarshal(value, &picked) != nil {
@@ -783,8 +853,13 @@ func (t formTemplate) render(answers formAnswers, sub submission) string {
 			line("note", sub.Note)
 		}
 	}
+	asked := t.asked(answers, sub.At.UTC().Format("2006-01-02"))
 	out.WriteString("answers:\n")
 	for _, f := range t.Fields {
+		// A question its show-if did not ask is left out (0.95.19).
+		if !asked[f.Name] {
+			continue
+		}
 		value, ok := answers[f.Name]
 		if !ok {
 			value = ""
@@ -806,9 +881,10 @@ func (t formTemplate) render(answers formAnswers, sub submission) string {
 		}
 	}
 	body := stripComments(t.body)
+	hidden := t.hiddenLines(asked)
 	blank := true
 	for i, text := range body {
-		if text == commentOnly || text == "" && blank {
+		if hidden[i] || text == commentOnly || text == "" && blank {
 			continue
 		}
 		blank = text == ""
@@ -857,6 +933,12 @@ func (t formTemplate) render(answers formAnswers, sub submission) string {
 				// The list below shows the choice.
 			case "textarea":
 				after = append(after, quoteBlock(value))
+			case "photo":
+				if paths := photoPaths(answers[field.Name]); len(paths) > 0 {
+					after = append(after, photoMarkdown(*field, paths))
+				} else {
+					b.WriteString("_(no photo)_")
+				}
 			case "sign":
 				if value == "true" {
 					b.WriteString("**Signed by " + escapeInline(sub.By) + ", " + sub.At.UTC().Format("2006-01-02 15:04") + " UTC**")

@@ -152,10 +152,20 @@ func (h *httpAdapter) serveAccountREST(w http.ResponseWriter, r *http.Request, c
 			sendError(w, err)
 			return
 		}
+		// Metatrash Sync, the person's own tool, also gets their address,
+		// for forms' @email defaults in Slate Viewer (0.95.19).
+		email := ""
+		if id.ClientID == syncClient(h.oauth.issuer).ID {
+			if _, email, err = h.service.personDetails(r.Context(), id.UserID); err != nil {
+				sendError(w, err)
+				return
+			}
+		}
 		sendJSON(w, 200, struct {
 			Account string `json:"account"`
+			Email   string `json:"email,omitempty"`
 			connectedSpaces
-		}{account, value})
+		}{account, email, value})
 		return
 	}
 	space, resource := parts[1], parts[2]

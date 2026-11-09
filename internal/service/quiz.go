@@ -274,7 +274,9 @@ func (t formTemplate) mark(answers formAnswers, key map[string]any) map[string]*
 	marks := map[string]*bool{}
 	for _, f := range t.Fields {
 		want, ok := key[f.Name]
-		if !ok || f.Type == "sign" || t.Unmarked[f.Name] || isBlankAnswer(want) {
+		// A question show-if didn't ask the person isn't marked (0.95.19).
+		_, asked := answers[f.Name]
+		if !ok || !asked || f.Type == "sign" || t.Unmarked[f.Name] || isBlankAnswer(want) {
 			continue
 		}
 		if freeText[f.Type] {
@@ -376,7 +378,7 @@ func (s *Service) quizKey(ctx context.Context, target submitTarget, slug string,
 	if !ok || c.keys["form"] != t.Form || c.keys["templateBlob"] != blob {
 		return nil, nil
 	}
-	if len(t.mark(formAnswers{}, c.answers)) == 0 {
+	if len(t.mark(c.answers, c.answers)) == 0 {
 		return nil, nil
 	}
 	return c.answers, nil

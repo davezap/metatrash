@@ -42,7 +42,7 @@ var runnerArgText = map[string]map[string]string{
 	"history":    {"id": "File ID from read or list.", "limit": "", "cursor": "nextCursor from the previous page."},
 	"web_search": {"query": "", "count": "Results, 1 to 20 (default 5)."},
 	"web_fetch":  {"url": "A full http or https address."},
-	"submit":     {"path": "The form, a .md file in this folder.", "answers": "Answers by field name.", "resends": "A copy of yours sent back for more information.", "today": "Today's date, YYYY-MM-DD."},
+	"submit":     {"path": "The form, a .md file in this folder.", "answers": "Answers by field name; a photo field takes a list of paths of .jpg or .png pictures in this space.", "resends": "A copy of yours sent back for more information.", "today": "Today's date, YYYY-MM-DD."},
 }
 
 // runnerToolNames are the tools an action may list in "tools".

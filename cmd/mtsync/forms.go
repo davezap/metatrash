@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -66,7 +68,7 @@ func (c *client) submit(ctx context.Context, path, blob string, version int, res
 	if !c.account {
 		return out, fmt.Errorf("forms need a signed-in space (mtsync login), not a space key")
 	}
-	body := map[string]any{"path": c.prefix + path, "answers": answers, "today": time.Now().Format("2006-01-02")}
+	body := map[string]any{"path": c.prefix + path, "answers": answers, "today": time.Now().Format("2006-01-02"), "now": time.Now().Format("15:04")}
 	if version > 0 {
 		body["version"] = version
 	} else {
@@ -117,12 +119,57 @@ func (c *client) review(ctx context.Context, path string, review json.RawMessage
 	return out, err
 }
 
+// photoFlags are -photo FIELD=PICTURE flags (metatrash 0.95.19).
+type photoFlags []string
+
+func (p *photoFlags) String() string { return strings.Join(*p, ",") }
+
+func (p *photoFlags) Set(v string) error {
+	field, file, ok := strings.Cut(v, "=")
+	if !ok || field == "" || file == "" {
+		return fmt.Errorf("give -photo as FIELD=PICTURE, such as -photo damage=crack.jpg")
+	}
+	*p = append(*p, v)
+	return nil
+}
+
+// addPhotos adds each -photo picture to its field's answer, as a data URL
+// after any the answers already give.
+func addPhotos(answers json.RawMessage, photos photoFlags) (json.RawMessage, error) {
+	if len(photos) == 0 {
+		return answers, nil
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(answers, &all); err != nil {
+		return nil, err
+	}
+	for _, p := range photos {
+		field, file, _ := strings.Cut(p, "=")
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		media := http.DetectContentType(b)
+		if media != "image/jpeg" && media != "image/png" {
+			return nil, fmt.Errorf("%s is not a JPEG or PNG picture", file)
+		}
+		var list []string
+		if raw, ok := all[field]; ok && json.Unmarshal(raw, &list) != nil {
+			return nil, fmt.Errorf("the answers give %s, a photo field, something other than a list", field)
+		}
+		list = append(list, "data:"+media+";base64,"+base64.StdEncoding.EncodeToString(b))
+		all[field], _ = json.Marshal(list)
+	}
+	return json.Marshal(all)
+}
+
 // readAnswers reads the answers JSON object from a file, or stdin for "-".
+// Photos may be in it as data URLs, so it may be large.
 func readAnswers(name string, stdin io.Reader) (json.RawMessage, error) {
 	var b []byte
 	var err error
 	if name == "-" {
-		b, err = io.ReadAll(io.LimitReader(stdin, 1<<20))
+		b, err = io.ReadAll(io.LimitReader(stdin, 64<<20))
 	} else {
 		b, err = os.ReadFile(name)
 	}
@@ -140,7 +187,7 @@ func readAnswers(name string, stdin io.Reader) (json.RawMessage, error) {
 // set, to that published version of it, as Slate Viewer shows it. With
 // asJSON the receipt is printed as JSON, and so is a refusal (with each
 // field's problem), for Slate Viewer.
-func submitForm(ctx context.Context, file, answersFile string, version int, resends string, asJSON bool, stdin io.Reader, out io.Writer) error {
+func submitForm(ctx context.Context, file, answersFile string, version int, resends string, photos photoFlags, asJSON bool, stdin io.Reader, out io.Writer) error {
 	e, rel, err := syncedFile(file)
 	if err != nil {
 		return err
@@ -153,7 +200,14 @@ func submitForm(ctx context.Context, file, answersFile string, version int, rese
 	if err != nil {
 		return err
 	}
+	if answers, err = addPhotos(answers, photos); err != nil {
+		return err
+	}
 	c := folderClient(e, tokenSource(e.Server))
+	if len(answers) > 1<<20 {
+		// Photos take longer to send than the usual minute.
+		c.http = &http.Client{Timeout: 10 * time.Minute, Transport: c.http.Transport}
+	}
 	r, err := c.submit(ctx, rel, gitBlobHash(text), version, resends, answers)
 	if err != nil {
 		return printRefusal(err, asJSON, out)

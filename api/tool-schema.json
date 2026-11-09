@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.18.0",
+  "schemaVersion": "0.18.1",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.94.2"},
@@ -2306,7 +2306,7 @@
           },
           "answers": {
             "type": "object",
-            "description": "Answers by field name: text, a number, true/false, or a list for a multiple choice."
+            "description": "Answers by field name: text, a number, true/false, or a list for a multiple choice. A photo field takes a list of pictures: paths of .jpg or .png pictures in this space (upload one first), or data:image/jpeg;base64 URLs. A field left out takes its default; a question its show-if does not ask is ignored."
           },
           "resends": {
             "type": "string",

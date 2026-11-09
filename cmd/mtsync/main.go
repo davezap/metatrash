@@ -76,7 +76,9 @@ Forms (a form template is a .md file whose front matter has form:):
   submit FILE ANSWERS      send answers to the form FILE; ANSWERS is a JSON file of
                            field name to answer, or - to read it from stdin (-json;
                            -published N to answer version N of a published folder;
-                           -resends ID to send again a copy a reviewer sent back)
+                           -resends ID to send again a copy a reviewer sent back;
+                           -photo FIELD=PICTURE, repeated, adds a .jpg or .png to
+                           a photo field)
   submissions PLACE        the forms you sent from this space, and their reviews (-json)
   submission PLACE ID      print the filed copy of one of them (-json)
   review FILE REVIEW       review a copy filed in your space: REVIEW is a JSON file,
@@ -114,6 +116,8 @@ func run(args []string) error {
 	message := flags.String("m", "", "push: the commit message")
 	published := flags.Int("published", 0, "submit: answer this published version of the form's folder, as Slate Viewer shows it")
 	resends := flags.String("resends", "", "submit: the ID of your copy a reviewer marked needs-info, which these answers replace")
+	var photos photoFlags
+	flags.Var(&photos, "photo", "submit: FIELD=PICTURE adds the .jpg or .png PICTURE to the photo field FIELD; repeat it for more")
 	keyEnv := flags.String("key-env", "", "one-off sync and export: name of an environment variable holding a space key, for spaces configured with keys instead of sign-in")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), usage, metatrash.Version)
@@ -208,7 +212,7 @@ func run(args []string) error {
 	case cmd == "readers" && len(rest) == 2:
 		return showReport(ctx, rest[1], *asJSON, os.Stdout)
 	case cmd == "submit" && len(rest) == 3:
-		return submitForm(ctx, rest[1], rest[2], *published, *resends, *asJSON, os.Stdin, os.Stdout)
+		return submitForm(ctx, rest[1], rest[2], *published, *resends, photos, *asJSON, os.Stdin, os.Stdout)
 	case cmd == "review" && len(rest) == 3:
 		return reviewCopy(ctx, rest[1], rest[2], *asJSON, os.Stdin, os.Stdout)
 	case cmd == "submissions" && len(rest) == 2:
@@ -317,6 +321,7 @@ func whoami(ctx context.Context, server string, token func(context.Context, bool
 	c.base = strings.TrimSuffix(c.base, "/")
 	var answer struct {
 		Account string `json:"account"`
+		Email   string `json:"email"`
 	}
 	err := c.do(ctx, "GET", "", nil, nil, &answer)
 	signedIn := err == nil
@@ -327,7 +332,7 @@ func whoami(ctx context.Context, server string, token func(context.Context, bool
 		return err
 	}
 	if asJSON {
-		return printJSON(out, map[string]any{"server": server, "signedIn": signedIn, "account": answer.Account})
+		return printJSON(out, map[string]any{"server": server, "signedIn": signedIn, "account": answer.Account, "email": answer.Email})
 	}
 	switch {
 	case !signedIn:

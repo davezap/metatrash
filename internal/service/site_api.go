@@ -69,10 +69,13 @@ type siteSpace struct {
 }
 
 type siteSession struct {
-	SignedIn bool        `json:"signedIn"`
-	Account  string      `json:"account,omitempty"`
-	CSRF     string      `json:"csrf,omitempty"`
-	Spaces   []siteSpace `json:"spaces"`
+	SignedIn bool   `json:"signedIn"`
+	Account  string `json:"account,omitempty"`
+	// Email is the person's own address, for forms' @email defaults
+	// (0.95.19).
+	Email  string      `json:"email,omitempty"`
+	CSRF   string      `json:"csrf,omitempty"`
+	Spaces []siteSpace `json:"spaces"`
 	// Waiting counts the invitations and ownership offers waiting for the
 	// person, for the space picker; 0 when they can't be read just now.
 	Waiting int `json:"waiting,omitempty"`
@@ -240,7 +243,7 @@ func (h *httpAdapter) siteSession(ctx context.Context, user userAccount, signedI
 	if !signedIn {
 		return out, nil
 	}
-	out.SignedIn, out.Account, out.CSRF = true, accountName(user), h.siteCSRF(token)
+	out.SignedIn, out.Account, out.Email, out.CSRF = true, accountName(user), user.Email, h.siteCSRF(token)
 	spaces, err := h.service.ownedDB.accessibleSpaces(ctx, user)
 	if err != nil {
 		return siteSession{}, problem(503, "unavailable", "Your spaces are temporarily unavailable.")

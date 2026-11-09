@@ -27,7 +27,7 @@ import (
 // space only reviewers belong to. The account database keeps a receipt with
 // the copy, so people can see what they sent.
 //
-// POST .../submissions          {"path", "answers", "revision"?, "blob"?, "today"?}: send a form
+// POST .../submissions          {"path", "answers", "revision"?, "blob"?, "today"?, "now"?}: send a form
 // GET  .../submissions          the caller's submissions of this space's forms
 // GET  .../submissions?id=ID    one of them, with the copy that was filed
 //
@@ -238,20 +238,26 @@ func (s *Service) resolveSubmitTo(ctx context.Context, submitTo, ownerID string)
 // personName is the name a submission is filed under: the username, or the
 // email address before the @, reduced to a file-safe word.
 func (s *Service) personName(ctx context.Context, userID string) (string, error) {
+	name, _, err := s.personDetails(ctx, userID)
+	return name, err
+}
+
+// personDetails is the person's name, as personName, and email address.
+func (s *Service) personDetails(ctx context.Context, userID string) (string, string, error) {
 	lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var username, email string
 	if err := s.ownedDB.db.QueryRowContext(lookup, "SELECT COALESCE(username, ''), email FROM metatrash_users WHERE user_id = ?", userID).Scan(&username, &email); err != nil {
-		return "", fmt.Errorf("cannot read the account")
+		return "", "", fmt.Errorf("cannot read the account")
 	}
 	if username != "" {
-		return username, nil
+		return username, email, nil
 	}
 	slug, err := deriveSpaceSlug(emailName(email))
 	if err != nil {
-		return "person", nil
+		return "person", email, nil
 	}
-	return slug, nil
+	return slug, email, nil
 }
 
 type submitRequest struct {
@@ -268,6 +274,9 @@ type submitRequest struct {
 	// Today is the person's local date, for date limits given as today; the
 	// server's UTC date is used when it is missing or more than a day away.
 	Today string `json:"today,omitempty"`
+	// Now is the person's local time, HH:MM, for answers left out whose
+	// default is @now (0.95.19); the space's time zone is used without it.
+	Now string `json:"now,omitempty"`
 	// Resends is the receipt ID of the person's copy of this form that a
 	// reviewer marked needs-info (0.95.10). The new copy names it, and it
 	// becomes resent.
@@ -353,6 +362,20 @@ func markResent(text, newID string) string {
 		}
 	}
 	return ""
+}
+
+// formNow is the sender's local time for @now defaults: the one they sent,
+// or the time in the space's zone (UTC when it has none).
+func (s *Service) formNow(ctx context.Context, spaceID, sent string, now time.Time) string {
+	if timePattern.MatchString(sent) {
+		return sent
+	}
+	if name := s.dbSpaceZone(ctx, spaceID); name != "" {
+		if zone, err := time.LoadLocation(name); err == nil {
+			return now.In(zone).Format("15:04")
+		}
+	}
+	return now.UTC().Format("15:04")
 }
 
 // submitForm checks a submission of the form at in.Path and files it.
@@ -448,17 +471,31 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	if d, err := time.Parse("2006-01-02", in.Today); err == nil && validDate(in.Today) && d.Sub(now.Truncate(24*time.Hour)).Abs() <= 24*time.Hour {
 		today = in.Today
 	}
-	answers, problems := t.checkAnswers(in.Answers, today)
+	// Photos may be large; the other answers keep the old limit.
+	answerBytes := 0
+	for _, field := range t.Fields {
+		if field.Type != "photo" {
+			answerBytes += len(in.Answers[field.Name])
+		}
+	}
+	if answerBytes > maxFormAnswerBytes {
+		return Receipt{}, problem(413, "payload_too_large", "The answers are larger than a form allows.")
+	}
+	who, email, err := s.personDetails(ctx, userID)
+	if err != nil {
+		return Receipt{}, err
+	}
+	answers, problems := t.checkAnswersFor(in.Answers, formContext{Today: today, Now: s.formNow(ctx, repo.id, in.Now, now), Name: who, Email: email})
+	if len(problems) == 0 {
+		// Photos given as paths of pictures in this space (0.95.19).
+		problems = s.readSpacePhotos(ctx, repo, files, t, answers)
+	}
 	if len(problems) > 0 {
 		e := invalid("Some answers need fixing.")
 		e.Code, e.Fields = "invalid_answers", problems
 		return Receipt{}, e
 	}
 	target, err := s.resolveSubmitTo(ctx, t.SubmitTo, s.repositoryOwner(repo))
-	if err != nil {
-		return Receipt{}, err
-	}
-	who, err := s.personName(ctx, userID)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -489,6 +526,10 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 		return Receipt{}, err
 	}
 	sub.Resends = in.Resends
+	photos, err := s.storeFormPhotos(ctx, target, t, answers, sub.ID)
+	if err != nil {
+		return Receipt{}, err
+	}
 	text := t.render(answers, sub)
 	if int64(len(text)) > target.repo.limits.MaxFileBytes {
 		return Receipt{}, problem(413, "payload_too_large", "The filled-in form is larger than a file can be.")
@@ -514,7 +555,7 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	}
 	base := target.folder + slug + "-" + who + "-" + t.Form + "-" + now.Format("2006-01-02T1504Z")
 	value, err := s.queued(ctx, target.repo, func() (any, error) {
-		return fileSubmission(ctx, target.repo, base, t.Form, text, old)
+		return fileSubmission(ctx, target.repo, base, t.Form, text, old, photos)
 	})
 	if err != nil {
 		if in.Resends != "" {
@@ -654,8 +695,9 @@ type filedFile struct {
 }
 
 // fileSubmission writes the copy as a new file named base.md, or base-2.md
-// and so on when that name is taken. Runs on the write queue.
-func fileSubmission(ctx context.Context, r *repository, base, form, text string, old *resentCopy) (filedFile, error) {
+// and so on when that name is taken, with its photos' pointers. Runs on the
+// write queue.
+func fileSubmission(ctx context.Context, r *repository, base, form, text string, old *resentCopy, photos []formPhoto) (filedFile, error) {
 	head, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return filedFile{}, err
@@ -698,11 +740,45 @@ func fileSubmission(ctx context.Context, r *repository, base, form, text string,
 	}
 	files[path] = record{File: File{ID: id, Path: path, Bytes: int64(len(text)), Deletable: true}}
 	texts := map[string]string{path: text}
-	added, err := addFolderFiles(files, texts, github, r.rootAgents, path)
+	changes := []commitChange{{id, "create", path}}
+	paths := []string{path}
+	if len(photos) > 0 {
+		var size int64
+		for _, p := range photos {
+			size += p.info.Size
+		}
+		if virtualSpaceBytes(files, "")+size > maxVirtualPerSpace {
+			return filedFile{}, problem(507, "storage_limit", fmt.Sprintf("The photos would take the review space's virtual files over %d GB.", maxVirtualPerSpace>>30))
+		}
+	}
+	for _, p := range photos {
+		if _, taken := files[p.path]; taken || !validPath(p.path) {
+			return filedFile{}, problem(409, "conflict", "A photo's file name is taken; send the form again.")
+		}
+		if level := fileLock(readOnly, p.path); blocks(level, writerPerson) {
+			return filedFile{}, readOnlyFile(p.path, level)
+		}
+		for q := range files {
+			if strings.HasPrefix(p.path, q+"/") {
+				return filedFile{}, formError("submitTo names a folder where " + q + " is a file, so its photos have nowhere to go.")
+			}
+		}
+		pid, err := randomHex(16)
+		if err != nil {
+			return filedFile{}, err
+		}
+		info := p.info
+		pointer := info.pointer()
+		files[p.path] = record{File: File{ID: pid, Path: p.path, Bytes: int64(len(pointer)), Deletable: true, Virtual: &info}}
+		texts[p.path] = pointer
+		changes = append(changes, commitChange{pid, "create", p.path})
+		paths = append(paths, p.path)
+	}
+	added, err := addFolderFiles(files, texts, github, r.rootAgents, paths...)
 	if err != nil {
 		return filedFile{}, err
 	}
-	changes := append([]commitChange{{id, "create", path}}, added...)
+	changes = append(changes, added...)
 	message := "Form submission: " + form
 	if old != nil {
 		old.text = ""
@@ -781,7 +857,7 @@ func (h *httpAdapter) serveSubmissions(w http.ResponseWriter, r *http.Request, r
 		sendError(w, problem(415, "invalid_request", "Use application/json."))
 		return
 	}
-	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxFormAnswerBytes+4096))
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSubmitBodyBytes))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
