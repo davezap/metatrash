@@ -18,12 +18,13 @@ func TestDoclingPairing(t *testing.T) {
 	}
 	converted := make(chan error, 10)
 	q.done = func(_ string, err error) { converted <- err }
-	paired := make(chan int, 10)
+	type pairResult struct {
+		count int
+		err   error
+	}
+	paired := make(chan pairResult, 10)
 	q.paired = func(n int, err error) {
-		if err != nil {
-			t.Errorf("pairing: %v", err)
-		}
-		paired <- n
+		paired <- pairResult{count: n, err: err}
 	}
 	w.runner.docling = q
 	qctx, cancel := context.WithCancel(ctx)
@@ -33,20 +34,29 @@ func TestDoclingPairing(t *testing.T) {
 		t.Helper()
 		switch ch := c.(type) {
 		case chan error:
+			// Match convertFile's configured budget plus teardown/scheduling grace.
+			// The converter is stubbed, but persisting its result still uses real Git.
+			budget := q.settings.timeout + 35*time.Second
 			select {
 			case err := <-ch:
 				if err != nil {
 					t.Fatalf("%s: %v", what, err)
 				}
-			case <-time.After(10 * time.Second):
-				t.Fatalf("%s did not finish", what)
+			case <-time.After(budget):
+				t.Fatalf("%s did not finish within %s", what, budget)
 			}
-		case chan int:
+		case chan pairResult:
+			// pairLater permits two minutes for its snapshot, move and write.
+			// Observe that actual result rather than cancel real Git after ten seconds.
+			const budget = 2*time.Minute + 5*time.Second
 			select {
-			case n := <-ch:
-				return n
-			case <-time.After(10 * time.Second):
-				t.Fatalf("%s did not finish", what)
+			case result := <-ch:
+				if result.err != nil {
+					t.Fatalf("%s: %v", what, result.err)
+				}
+				return result.count
+			case <-time.After(budget):
+				t.Fatalf("%s did not finish within %s", what, budget)
 			}
 		}
 		return 0
@@ -133,8 +143,8 @@ func TestDoclingPairing(t *testing.T) {
 		t.Fatalf("old read: %+v", got)
 	}
 	select {
-	case n := <-paired:
-		t.Errorf("old PDF paired on read (%d)", n)
+	case result := <-paired:
+		t.Errorf("old PDF paired on read (%+v)", result)
 	case <-time.After(200 * time.Millisecond):
 	}
 	if _, ok := files()["old/report.pdf"]; !ok {
@@ -153,7 +163,9 @@ func TestDoclingPairing(t *testing.T) {
 	if !q.wants(w.repo, docx) {
 		t.Fatal("converter with formats does not want a Word file")
 	}
-	put("minutes/Board 2026.docx", "PK word", "")
+	// The normal Word extraction path also reads this upload before Docling.
+	// Use the existing valid DOCX fixture instead of a malformed ZIP placeholder.
+	put("minutes/Board 2026.docx", string(testDocx(t)), "")
 	waitFor("conversion docx", converted)
 	if n := waitFor("pairing docx", paired); n != 1 {
 		t.Fatalf("docx paired %d", n)
@@ -168,8 +180,8 @@ func TestDoclingPairing(t *testing.T) {
 	waitFor("conversion c", converted)
 	w.do(ctx, "read", Input{Path: "off/c.pdf"}, "")
 	select {
-	case n := <-paired:
-		t.Errorf("paired %d with pair off", n)
+	case result := <-paired:
+		t.Errorf("paired %+v with pair off", result)
 	case <-time.After(200 * time.Millisecond):
 	}
 }

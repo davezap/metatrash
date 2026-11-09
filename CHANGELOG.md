@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.95.16 - Docling pairing regression fixture recovery (2026-11-09)
+
+- Let the pairing regression observe the existing two-minute background pairing budget plus five seconds of grace, and the configured conversion budget plus its existing 30-second backstop and five seconds of grace. Real Git work must still finish successfully; callback errors fail on the test goroutine instead of appearing as teardown cancellation noise.
+- Use the existing valid Word fixture for the DOCX pairing case instead of the invalid `PK word` placeholder. All move, identity, content and keep-in-place assertions remain. No runtime, timeout policy, configuration, schema, dependency or mtsync behavior change. David runs checks; see docs/release-0.95.16.md.
+
 ## 0.95.15 - Resilient pinned Jsign download for release signing (2026-11-08)
 
 - Fetch Jsign 7.5 from Maven Central first, with GitHub release assets as a fallback. Both use the existing SHA-256 pin. Bound connection/transfer time and retries, verify before using the JAR, fail immediately on a checksum mismatch, and stop publication if neither source works. This addresses repeated GitHub HTTP 504 failures before signing in v0.95.14.
