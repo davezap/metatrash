@@ -148,29 +148,59 @@ func receiptJSON(answers map[string]any, marks map[string]*bool) (string, any, e
 // submissions reads a person's receipts for one space, newest first, or the
 // one with id (and its text).
 func (db *accountDatabase) submissions(ctx context.Context, spaceID, userID, id string) ([]Receipt, error) {
+	rows, err := db.submissionRows(ctx, spaceID, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Receipt, len(rows))
+	for i, r := range rows {
+		out[i] = r.Receipt
+	}
+	return out, nil
+}
+
+// submissionRow is a receipt with what the account-wide list needs: the
+// template's space (space, its owner/slug in spaceName) and the template
+// file and text it was filled in from.
+type submissionRow struct {
+	Receipt
+	spaceID, spaceName, fileID, blob string
+}
+
+// submissionRows reads receipts as submissions does; with no spaceID, from
+// every space (0.95.22).
+func (db *accountDatabase) submissionRows(ctx context.Context, spaceID, userID, id string) ([]submissionRow, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	text, answers := "''", "NULL"
-	query := " WHERE f.space_id = ? AND f.user_id = ?"
-	args := []any{spaceID, userID}
+	query := " WHERE f.user_id = ?"
+	args := []any{userID}
+	if spaceID != "" {
+		query += " AND f.space_id = ?"
+		args = append(args, spaceID)
+	}
 	if id != "" {
 		text, answers = "f.text", "f.answers"
 		query += " AND f.submission_id = ?"
 		args = append(args, id)
 	}
-	rows, err := db.db.QueryContext(ctx, "SELECT f.submission_id, f.form, f.title, f.template_path, f.template_revision, COALESCE(u.username, ''), s.slug, f.target_path, f.submitted_at, "+text+", f.quiz, f.status, f.score, f.marks, COALESCE(f.reviewed_at, 0), COALESCE(f.note, ''), "+answers+" FROM metatrash_form_submissions f JOIN metatrash_spaces s ON s.space_id = f.target_space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id"+query+fmt.Sprintf(" ORDER BY f.submitted_at DESC, f.submission_id LIMIT %d", maxSubmissionRows), args...)
+	rows, err := db.db.QueryContext(ctx, "SELECT f.submission_id, f.form, f.title, f.template_path, f.template_revision, COALESCE(u.username, ''), s.slug, f.target_path, f.submitted_at, "+text+", f.quiz, f.status, f.score, f.marks, COALESCE(f.reviewed_at, 0), COALESCE(f.note, ''), "+answers+", f.space_id, COALESCE(tu.username, ''), COALESCE(ts.slug, ''), f.template_file_id, f.template_blob FROM metatrash_form_submissions f JOIN metatrash_spaces s ON s.space_id = f.target_space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id LEFT JOIN metatrash_spaces ts ON ts.space_id = f.space_id LEFT JOIN metatrash_users tu ON tu.user_id = ts.owner_user_id"+query+fmt.Sprintf(" ORDER BY f.submitted_at DESC, f.submission_id LIMIT %d", maxSubmissionRows), args...)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read submissions")
 	}
 	defer rows.Close()
-	out := []Receipt{}
+	out := []submissionRow{}
 	for rows.Next() {
-		var r Receipt
-		var owner, slug, path string
+		var row submissionRow
+		r := &row.Receipt
+		var owner, slug, path, templateOwner, templateSlug string
 		var at, reviewedAt int64
 		var marks, answers sql.NullString
-		if err := rows.Scan(&r.ID, &r.Form, &r.Title, &r.Template, &r.Revision, &owner, &slug, &path, &at, &r.Text, &r.Quiz, &r.Status, &r.Score, &marks, &reviewedAt, &r.Note, &answers); err != nil {
+		if err := rows.Scan(&r.ID, &r.Form, &r.Title, &r.Template, &r.Revision, &owner, &slug, &path, &at, &r.Text, &r.Quiz, &r.Status, &r.Score, &marks, &reviewedAt, &r.Note, &answers, &row.spaceID, &templateOwner, &templateSlug, &row.fileID, &row.blob); err != nil {
 			return nil, fmt.Errorf("cannot read submissions")
+		}
+		if templateOwner != "" && templateSlug != "" {
+			row.spaceName = templateOwner + "/" + templateSlug
 		}
 		r.Target = owner + "/" + slug + "/" + path
 		r.SubmittedAt = time.Unix(at, 0).UTC().Format(time.RFC3339)
@@ -188,7 +218,7 @@ func (db *accountDatabase) submissions(ctx context.Context, spaceID, userID, id 
 				r.PassMark = intAttr(keys["passMark"])
 			}
 		}
-		out = append(out, r)
+		out = append(out, row)
 	}
 	if rows.Err() != nil {
 		return nil, fmt.Errorf("cannot read submissions")

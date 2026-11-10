@@ -18,6 +18,8 @@ import (
 //	GET  /api/v1/site/session                           who is signed in, the CSRF token, their spaces
 //	POST /api/v1/site/logout                            sign this browser out (0.78.0)
 //	*    /api/v1/site/account[/...]                     the Settings dialog (0.79.0, site_account.go)
+//	GET  /api/v1/site/submissions[?id=ID]               forms sent from all spaces (0.95.22, forms_account.go)
+//	GET  /api/v1/site/todo                              what waits in each space (0.95.22)
 //	*    /api/v1/site/spaces/public/{resource}          the public space
 //	*    /api/v1/site/spaces/{owner}/{slug}/{resource}  an owned space
 //
@@ -79,6 +81,9 @@ type siteSession struct {
 	// Waiting counts the invitations and ownership offers waiting for the
 	// person, for the space picker; 0 when they can't be read just now.
 	Waiting int `json:"waiting,omitempty"`
+	// Docs is the address of the site's documentation (docsSpace in
+	// accounts.json), for the space picker, whoever asks (0.95.22).
+	Docs string `json:"docs,omitempty"`
 }
 
 func (h *httpAdapter) siteCSRF(token string) string {
@@ -181,6 +186,10 @@ func (h *httpAdapter) serveSiteAPI(w http.ResponseWriter, r *http.Request, clien
 		h.serveSiteAccount(w, r, user, signedIn, token, client, strings.TrimPrefix(rest, "account"))
 		return
 	}
+	if rest == "submissions" || rest == "todo" {
+		h.serveSiteForms(w, r, user, signedIn, client, rest)
+		return
+	}
 	parts := strings.Split(rest, "/")
 	if parts[0] != "spaces" || len(parts) < 3 || len(parts) > 4 {
 		sendError(w, missing())
@@ -225,6 +234,9 @@ func (h *httpAdapter) serveSiteAPI(w http.ResponseWriter, r *http.Request, clien
 // siteSession answers GET /api/v1/site/session.
 func (h *httpAdapter) siteSession(ctx context.Context, user userAccount, signedIn bool, token string) (siteSession, error) {
 	out := siteSession{Spaces: []siteSpace{}}
+	if h.docsSpace() != "" {
+		out.Docs = "/docs/"
+	}
 	// Anyone may change the public space, but the site asks them to sign in first.
 	public := "read_only"
 	if signedIn {

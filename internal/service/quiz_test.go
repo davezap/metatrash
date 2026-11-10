@@ -357,6 +357,27 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	if got := todo(person, base, "toReview"); len(got) != 0 {
 		t.Fatalf("a read-only member reviews nothing: %v", got)
 	}
+	// The account-wide count (0.95.22) names the space with the copy.
+	inSpace := func(user userAccount, space string, check func(todoSpace) bool) bool {
+		t.Helper()
+		got, err := w.s.accountTodo(ctx, user, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sp := range got.Spaces {
+			if sp.Space == space {
+				return check(sp)
+			}
+		}
+		return false
+	}
+	reviewName := w.member.Username + "/" + review.Slug
+	if !inSpace(w.member, reviewName, func(sp todoSpace) bool { return sp.ToReview >= 1 && sp.Name == "HR review" }) {
+		t.Fatal("account todo: nothing to review")
+	}
+	if inSpace(w.owner, reviewName, func(todoSpace) bool { return true }) {
+		t.Fatal("account todo: a space the person cannot open")
+	}
 	call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": askedPath, "status": "needs-info"}), 400)
 	if got := call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": askedPath, "status": "needs-info", "note": "Your full name, please."}), 200); got["status"] != "needs-info" || !strings.Contains(got["text"].(string), "status: needs-info\n") {
 		t.Fatalf("needs-info: %v", got)
@@ -369,6 +390,9 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	}
 	if got := todo(author, base, "toFix"); len(got) != 0 {
 		t.Fatalf("someone else's form to fix: %v", got)
+	}
+	if !inSpace(w.owner, w.joinName, func(sp todoSpace) bool { return sp.SentBack == 1 && sp.ToReview == 0 }) {
+		t.Fatal("account todo: nothing sent back")
 	}
 	// Not for quizzes, not someone else's copy, not an approved one.
 	call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": copyPath, "status": "needs-info", "note": "x"}), 400)
@@ -419,6 +443,40 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	// approved (0.95.21): the copies a reviewer approved, ticked in the tree.
 	if got := todo(reviewer, reviewBase, "approved"); !has(got, againPath) || !has(got, leavePath) || has(got, askedPath) {
 		t.Fatalf("approved: %v", got)
+	}
+
+	// My Submissions across spaces (0.95.22): each receipt names the form's
+	// space and whether that form is still the text it was filled in from.
+	myReceipt := func(id string) accountReceipt {
+		t.Helper()
+		got, err := w.s.accountSubmissions(ctx, w.owner, "test", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range got {
+			if r.ID == id {
+				return r
+			}
+		}
+		t.Fatalf("receipt %s missing: %v", id, mustJSON(got))
+		return accountReceipt{}
+	}
+	if r := myReceipt(again["id"].(string)); r.Space != w.joinName || r.Current != "forms/leave.md" || !r.SameForm || r.Status != "approved" || r.Answers != nil {
+		t.Fatalf("account receipt: %v", mustJSON(r))
+	}
+	if got, err := w.s.accountSubmissions(ctx, w.owner, "test", again["id"].(string)); err != nil || len(got) != 1 || got[0].Answers["name"] != "Pat Smith" {
+		t.Fatalf("one account receipt: %v %v", mustJSON(got), err)
+	}
+	if got, err := w.s.accountSubmissions(ctx, w.member, "test", again["id"].(string)); err != nil || len(got) != 0 {
+		t.Fatalf("someone else's receipt: %v %v", mustJSON(got), err)
+	}
+	put(author, base, "forms/leave.md", "---\nform: leave\nsubmitTo: "+w.member.Username+"/"+review.Slug+"/leave/\n---\nFull name: {{text name=name required}}\n")
+	if r := myReceipt(again["id"].(string)); r.Current != "forms/leave.md" || r.SameForm {
+		t.Fatalf("changed form: %v", mustJSON(r))
+	}
+	// The quiz in a published folder compares with its published text.
+	if r := myReceipt(second["id"].(string)); r.Current != "policies/wfh-quiz.md" {
+		t.Fatalf("quiz receipt: %v", mustJSON(r))
 	}
 }
 

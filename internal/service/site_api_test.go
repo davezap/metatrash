@@ -63,6 +63,15 @@ func TestSiteAPIAgainstDatabase(t *testing.T) {
 	if out["signedIn"] != false || out["csrf"] != nil || len(out["spaces"].([]any)) != 1 {
 		t.Fatalf("signed-out session: %v", out)
 	}
+	// The docs address, when the site has a docs space (0.95.22).
+	if out["docs"] != nil {
+		t.Fatalf("docs without a docs space: %v", out)
+	}
+	w.s.accounts.config.DocsSpace = w.ownedName
+	if got := siteJSON(t, siteCall(w, "GET", "/api/v1/site/session", "", nil, "")); got["docs"] != "/docs/" {
+		t.Fatalf("docs: %v", got)
+	}
+	w.s.accounts.config.DocsSpace = ""
 	out = siteJSON(t, siteCall(w, "GET", "/api/v1/site/session", "", ownerSession, ""))
 	csrf, _ := out["csrf"].(string)
 	if out["signedIn"] != true || out["account"] != w.owner.Username || csrf != w.s.accounts.mac("site-api:"+ownerSession.Value) {
@@ -177,6 +186,18 @@ func TestSiteAPIAgainstDatabase(t *testing.T) {
 	}
 	if res := siteCall(w, "GET", owned+"/submissions", "", ownerSession, ""); res.Code != 200 {
 		t.Fatalf("submissions: %d %s", res.Code, res.Body)
+	}
+	// And across all their spaces (0.95.22); signed out there is nothing.
+	for _, path := range []string{"/api/v1/site/submissions", "/api/v1/site/todo"} {
+		if res := siteCall(w, "GET", path, "", ownerSession, ""); res.Code != 200 {
+			t.Fatalf("%s: %d %s", path, res.Code, res.Body)
+		}
+		if res := siteCall(w, "GET", path, "", nil, ""); res.Code != 401 {
+			t.Fatalf("%s signed out: %d", path, res.Code)
+		}
+		if res := siteCall(w, "GET", path+"?x=1", "", ownerSession, ""); res.Code != 400 {
+			t.Fatalf("%s query: %d", path, res.Code)
+		}
 	}
 
 	// Routes the site does not offer, and wrong methods.
