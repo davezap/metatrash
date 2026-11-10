@@ -200,6 +200,17 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	if err == nil && !member && signedIn {
 		member = h.service.ownedDB.actsFor(ctx, user.ID, space.OwnerID)
 	}
+	if err == nil && member && signedIn {
+		// An extension may hold the space back (SpaceGate). Readable on the
+		// web, it is shown as to anyone; otherwise the person is told why.
+		if gateErr := h.service.ownedDB.gateFor(ctx, user.ID, space.OwnerID); gateErr != nil {
+			member = false
+			if space.Visibility != spaceWeb {
+				sendError(w, gateErr)
+				return
+			}
+		}
+	}
 	if err == sql.ErrNoRows || (!member && space.Visibility != spaceWeb) {
 		// Signed out: always the sign-in page, so a private space's existence
 		// is not revealed. The docs pages never ask anyone to sign in.

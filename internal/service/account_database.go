@@ -40,6 +40,9 @@ type accountDatabase struct {
 	// actingFor lists the owner accounts an account may act for as owner
 	// (extension.Hooks.ActsFor); nil when no extension offers any.
 	actingFor func(context.Context, string) []string
+	// gate asks the extensions whether an account may use an owner's
+	// spaces now (extension.Hooks.SpaceGate); nil when none asks.
+	gate func(context.Context, string, string) error
 }
 
 func readLimitedFile(path string, limit int64) ([]byte, error) {

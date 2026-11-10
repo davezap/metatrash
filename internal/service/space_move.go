@@ -33,6 +33,11 @@ func (db *accountDatabase) moveSpace(ctx context.Context, actorID, spaceID, toUs
 		if !db.actsFor(ctx, actorID, space.OwnerID) {
 			return missing()
 		}
+		// Moving a space out is how files would leave a gated owner
+		// (SpaceGate, 0.95.24), so it needs what opening it needs.
+		if err := db.gateFor(ctx, actorID, space.OwnerID); err != nil {
+			return err
+		}
 		to, err := scanAccount(tx.QueryRowContext(ctx, "SELECT user_id, email, created_at, max_private_spaces, username FROM metatrash_users WHERE username = ? FOR UPDATE", toUsername), true)
 		if err == sql.ErrNoRows {
 			return invalid("You can move a space only to your own account or one you manage.")
@@ -42,6 +47,9 @@ func (db *accountDatabase) moveSpace(ctx context.Context, actorID, spaceID, toUs
 		}
 		if !db.actsFor(ctx, actorID, to.ID) {
 			return invalid("You can move a space only to your own account or one you manage.")
+		}
+		if err := db.gateFor(ctx, actorID, to.ID); err != nil {
+			return err
 		}
 		if to.ID == space.OwnerID {
 			return invalid("The space is already there.")

@@ -119,7 +119,8 @@ func (s *Service) accountSubmissions(ctx context.Context, user userAccount, clie
 	}
 	open := map[string]bool{}
 	for _, sp := range spaces {
-		open[sp.ID] = true
+		// A space an extension holds back (SpaceGate) isn't open now.
+		open[sp.ID] = s.ownedDB.gateFor(ctx, user.ID, sp.OwnerID) == nil
 	}
 	// The forms' files now, per space the person can still open.
 	type formFile struct{ path, blob, published string }
@@ -183,7 +184,7 @@ func (s *Service) accountTodo(ctx context.Context, user userAccount, client stri
 	slots := make(chan struct{}, 4)
 	for i, sp := range spaces {
 		repo := s.ownedRepository(sp.ID)
-		if repo == nil || sp.Owner == "" {
+		if repo == nil || sp.Owner == "" || s.ownedDB.gateFor(ctx, user.ID, sp.OwnerID) != nil {
 			continue
 		}
 		if s.reserveOwnedOperation(sp.ID, client, false) != nil {

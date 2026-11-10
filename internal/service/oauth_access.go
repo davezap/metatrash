@@ -126,6 +126,9 @@ func (s *Service) agentSpaceAccess(ctx context.Context, id oauthIdentity, space,
 	if access == "" {
 		return nil, "", notConnected
 	}
+	if err := s.ownedDB.gateFor(lookup, id.UserID, ownerID); err != nil {
+		return nil, "", err
+	}
 	if write && access != "read_write" {
 		return nil, "", problem(403, "insufficient_scope", "This app has read-only access to this space.")
 	}
@@ -162,6 +165,9 @@ func (s *Service) listConnectedSpaces(ctx context.Context, id oauthIdentity) (co
 		}
 		if item.Access = effectiveAccess(id, consent, s.ownedDB.actsFor(ctx, id.UserID, ownerID), status, permission); item.Access == "" || s.ownedRepository(item.ID) == nil {
 			continue
+		}
+		if s.ownedDB.gateFor(ctx, id.UserID, ownerID) != nil {
+			continue // held back by an extension (SpaceGate); opening it says why
 		}
 		item.Space = item.ID
 		if item.Owner != "" {

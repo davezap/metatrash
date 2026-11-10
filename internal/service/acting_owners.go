@@ -120,6 +120,11 @@ func (s *Service) spaceOwnerFor(ctx context.Context, user userAccount, spaceID s
 	if err != nil || ownerID == user.ID || !db.actsFor(ctx, user.ID, ownerID) {
 		return user, nil
 	}
+	// Managing the space needs the same as opening it (SpaceGate, 0.95.24),
+	// or someone shut out could make it readable on the web.
+	if err := db.gateFor(ctx, user.ID, ownerID); err != nil {
+		return user, err
+	}
 	owner, ok, err := s.accounts.store.ByID(ctx, ownerID)
 	if err != nil {
 		return user, err

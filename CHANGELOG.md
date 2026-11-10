@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.95.24 - Space gates: an extension can hold an owner's spaces back (2026-11-11)
+
+- Extensions can refuse an account the spaces of an owner it isn't itself: `extension.Hooks.SpaceGate(ctx, userID, ownerID) error`. Core asks before a signed-in person or their app opens such a space: the site API (`siteSpaceAccess`), the space's pages, files and `?export` (`serveOwnedSpace`), apps and Sync (`agentSpaceAccess`). A `*server.Error` refusal is answered as it is, so it can say what to do (Company answers 403 `microsoft_sign_in_needed`); any other error refuses as 503 and isn't cached. Owners, acting for an owner (`ActsFor`), membership and web visibility still decide everything else: a gate only takes access away. A space readable on the web stays readable by anyone, read-only for a held-back member. Answers are cached per account and owner for 10 seconds. `internal/service/space_gate.go`.
+- Held-back spaces are left out of the `spaces` tool and of the account-wide My Submissions and to-do count (`GET /api/v1/site/submissions`, `GET /api/v1/site/todo`). They stay in the website's space lists, where opening one says why.
+- Managing a space as the owner you act for (the sharing page and every action on it) and moving it out (`…/move`) need what opening it needs, so someone held back can't make it readable on the web or take it away. Moving a space into an owner you are held back from is refused too.
+- Company organisations (0.96.33) use it so an organisation pinned to Microsoft tenants opens its spaces only to people with a Microsoft sign-in from them in the last 7 days.
+- New tests `TestSpaceGateFunc` and `TestSpaceGateAgainstDatabase`. The account-wide lists now read each joined space's owner ID. No schema, grants, configuration or dependency changes; without an extension that sets `SpaceGate`, nothing changes. See docs/release-0.95.24.md.
+
 ## 0.95.23 - Acting for an owner account, and moving spaces to it (2026-11-10)
 
 - Extensions can name the owner accounts an account may act for: `extension.Hooks.ActsFor(ctx, userID)` returns user IDs. Core treats that account as the owner of those accounts' spaces wherever it asks "is this the owner?": the website (reading, writing, the space page, `GET /api/v1/site/session`), apps (consent with write access, `spaces`, every tool call), forms reviewing, and Settings → Spaces. Company organisations (0.96.32) use it so an organisation's admins run its spaces. Answers are combined across extensions and cached per account for 10 seconds, so a change reaches open sessions and connected apps within that time; an error grants nothing and is not cached. `internal/service/acting_owners.go`.

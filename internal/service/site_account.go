@@ -487,6 +487,10 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 func (h *httpAdapter) siteSharingState(ctx context.Context, actor userAccount, session, spaceID string) (siteSharing, error) {
 	user, err := h.service.spaceOwnerFor(ctx, actor, spaceID)
 	if err != nil {
+		var refused *Error
+		if errors.As(err, &refused) {
+			return siteSharing{}, refused
+		}
 		return siteSharing{}, problem(503, "unavailable", "Sharing is temporarily unavailable.")
 	}
 	page, err := h.humanSharing(ctx, user, spaceID)
@@ -569,6 +573,10 @@ func (h *httpAdapter) siteSpaceAction(ctx context.Context, actor userAccount, se
 	db := h.service.ownedDB
 	user, err := h.service.spaceOwnerFor(ctx, actor, spaceID)
 	if err != nil {
+		var refused *Error
+		if errors.As(err, &refused) {
+			return siteNotice{}, refused
+		}
 		return siteNotice{}, problem(503, "unavailable", "Your account is temporarily unavailable.")
 	}
 	switch action {

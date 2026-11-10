@@ -255,6 +255,7 @@ func (s *Service) startExtensions() (err error) {
 		return nil
 	}
 	s.ownedDB.actingFor = s.actingOwnersFunc()
+	s.ownedDB.gate = s.spaceGateFunc()
 	return nil
 }
 

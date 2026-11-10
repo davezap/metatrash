@@ -25,7 +25,7 @@ type accessibleSpace struct {
 	ID, Name, Slug, Owner string
 	Owned                 bool
 	ActingFor             bool   // owned by an owner account this user acts for (0.95.23)
-	OwnerID               string // set with ActingFor
+	OwnerID               string // set with ActingFor and for joined spaces (0.95.24)
 	CanWrite              bool   // owner, or member with read_write agent permission
 	Web                   bool   // readable on the web by anyone
 }
@@ -84,7 +84,7 @@ func (db *accountDatabase) accessibleSpaces(ctx context.Context, user userAccoun
 	for _, space := range acting {
 		listed[space.ID] = true
 	}
-	rows, err = db.db.QueryContext(ctx, `SELECT s.space_id, s.name, s.slug, COALESCE(u.username, ''), m.agent_permission, s.visibility FROM metatrash_memberships m JOIN metatrash_spaces s ON s.space_id = m.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE m.user_id = ? AND m.status = 'active' AND s.provisioning_state = 'ready' ORDER BY m.joined_at, s.space_id LIMIT 200`, user.ID)
+	rows, err = db.db.QueryContext(ctx, `SELECT s.space_id, s.name, s.slug, COALESCE(u.username, ''), m.agent_permission, s.visibility, s.owner_user_id FROM metatrash_memberships m JOIN metatrash_spaces s ON s.space_id = m.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE m.user_id = ? AND m.status = 'active' AND s.provisioning_state = 'ready' ORDER BY m.joined_at, s.space_id LIMIT 200`, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list joined spaces")
 	}
@@ -92,7 +92,7 @@ func (db *accountDatabase) accessibleSpaces(ctx context.Context, user userAccoun
 	for rows.Next() {
 		var item accessibleSpace
 		var permission, visibility string
-		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Owner, &permission, &visibility); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Owner, &permission, &visibility, &item.OwnerID); err != nil {
 			return nil, fmt.Errorf("cannot list joined spaces")
 		}
 		if listed[item.ID] {

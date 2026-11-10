@@ -76,5 +76,13 @@ type Hooks struct {
 	// account as the owner of those accounts' spaces: it reads, writes and
 	// manages them as their owner would. An error grants nothing.
 	ActsFor func(ctx context.Context, userID string) ([]string, error)
+	// SpaceGate is asked before an account opens a space it doesn't own
+	// itself, by the website, apps (OAuth) or Sync: may userID use spaces
+	// owned by ownerID right now? nil lets Core's own checks decide. An
+	// error refuses: a *server.Error is shown as it is (say what to do),
+	// anything else refuses as "unavailable". Spaces readable on the web
+	// stay readable by everyone. Company organisations use it to require a
+	// recent Microsoft sign-in from their tenants.
+	SpaceGate func(ctx context.Context, userID, ownerID string) error
 }
 type Module func(Host) (Hooks, error)

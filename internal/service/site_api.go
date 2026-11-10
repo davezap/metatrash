@@ -352,6 +352,16 @@ func (s *Service) siteSpaceAccess(ctx context.Context, user userAccount, signedI
 	default:
 		return nil, "", notFound
 	}
+	if signedIn {
+		// An extension may hold the space back (SpaceGate); a space
+		// readable on the web stays readable.
+		if err := s.ownedDB.gateFor(lookup, user.ID, ownerID); err != nil {
+			if visibility != spaceWeb {
+				return nil, "", err
+			}
+			access = "read_only"
+		}
+	}
 	repo := s.ownedRepository(spaceID)
 	if repo == nil {
 		return nil, "", notFound
