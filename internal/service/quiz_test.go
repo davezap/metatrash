@@ -416,6 +416,10 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	if has(todo(reviewer, reviewBase, "toReview"), againPath) {
 		t.Fatal("an approved copy still waits for review")
 	}
+	// approved (0.95.21): the copies a reviewer approved, ticked in the tree.
+	if got := todo(reviewer, reviewBase, "approved"); !has(got, againPath) || !has(got, leavePath) || has(got, askedPath) {
+		t.Fatalf("approved: %v", got)
+	}
 }
 
 func TestMarkResent(t *testing.T) {

@@ -76,6 +76,8 @@ type policiesAnswer struct {
 	// information, in the synced folder. Absent from older servers.
 	ToReview []string `json:"toReview"`
 	ToFix    []string `json:"toFix"`
+	// Approved (metatrash 0.95.21): filed copies a reviewer approved.
+	Approved []string `json:"approved"`
 }
 
 type reportAnswer struct {
@@ -133,6 +135,7 @@ func (c *client) policies(ctx context.Context) (policiesAnswer, error) {
 	out.Folders = folders
 	out.ToReview = inFolder(out.ToReview, c.prefix)
 	out.ToFix = inFolder(out.ToFix, c.prefix)
+	out.Approved = inFolder(out.Approved, c.prefix)
 	return out, nil
 }
 

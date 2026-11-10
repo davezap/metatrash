@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.95.21 - Approved copies listed for a green tick (2026-11-09)
+
+- `GET …/acknowledgements` also answers `approved` (sorted space paths, always present): the filed copies in the space a reviewer approved (a quiz's: passed), for anyone who can read the space. Slate Viewer 0.35.2 ticks them in the file tree. Read with the same query as `toReview` (`status IN ('submitted', 'approved')` on the `target_space_id` index); copies moved or deleted drop out. mtsync `policies` passes it on, relative to the synced folder.
+- `TestQuizzesAgainstDatabase` checks it after approvals; mtsync `TestPoliciesAndAck` checks the folder cut. No schema, grants, configuration or dependency changes. See docs/release-0.95.21.md.
+
 ## 0.95.20 - Forms waiting for you: copies to review and forms sent back (2026-11-09)
 
 - `GET …/acknowledgements` also answers `toReview` and `toFix` (sorted space paths, always present). `toReview` lists the filed copies in the space whose status is still `submitted` (a quiz's too, while written answers wait for a tick), for a caller who can write to the space, as reviewing needs; others get an empty list. It is shared: once anyone approves, declines or asks for more, the copy leaves everyone's list, and a fixed copy sent again arrives as a new one. `toFix` lists the forms in the space whose newest copy the caller sent was sent back for more information (`needs-info`); sending it again clears it. Both come from `metatrash_form_submissions` on existing indexes; copies moved or deleted from the space drop out. Slate Viewer 0.35.1 marks them with the red dot it gives files to read.
