@@ -82,7 +82,7 @@ func (h *httpAdapter) connectedApps(ctx context.Context, user userAccount) ([]co
 			continue
 		}
 		access := "suspended by owner"
-		if effective := effectiveAccess(oauthIdentity{UserID: user.ID, Scope: scopeReadWrite}, consent, ownerID, status, permission); effective == "read_write" {
+		if effective := effectiveAccess(oauthIdentity{UserID: user.ID, Scope: scopeReadWrite}, consent, db.actsFor(ctx, user.ID, ownerID), status, permission); effective == "read_write" {
 			access = "read and write"
 		} else if effective == "read_only" {
 			access = "read only"

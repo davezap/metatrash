@@ -166,6 +166,45 @@ func TestExtensionLoginGuards(t *testing.T) {
 	}
 }
 
+// A provider whose sign-in is waiting to be linked isn't offered again: the
+// page asks for an emailed code to its address instead (0.95.23).
+func TestExtensionLoginWaitingPage(t *testing.T) {
+	s, _, _ := testAccounts(t)
+	waiting := false
+	s.extensions = []extension.Hooks{{Name: "enterprise", Login: &extension.LoginProvider{
+		Path: "/login/enterprise", Label: "Enterprise", Hint: "Work account.", Start: func(http.ResponseWriter, *http.Request, extension.HTTP) {},
+		Waiting: func(*http.Request, extension.HTTP) (string, string, string) {
+			if !waiting {
+				return "", "", ""
+			}
+			return "person@work.example", "person@work.example", "/spaces/#settings/security/enterprise"
+		},
+	}}}
+	h := &httpAdapter{service: s, publicHost: "metatrash.com", publicOrigin: "https://metatrash.com"}
+	page := func() string {
+		r := httptest.NewRequest("GET", "https://metatrash.com/login", nil)
+		w := httptest.NewRecorder()
+		if !h.serveAccounts(w, r, "127.0.0.1") || w.Code != 200 {
+			t.Fatalf("login page %d: %s", w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	body := page()
+	if !strings.Contains(body, ">Sign in with Enterprise</button>") || strings.Contains(body, "Finish signing in") {
+		t.Fatal("provider not offered on the usual page")
+	}
+	waiting = true
+	body = page()
+	for _, want := range []string{"<h1>Finish signing in with Enterprise</h1>", "Enterprise says you are", `value="person@work.example"`, "it creates your account", "Not you? Use another Enterprise account"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("waiting page lacks %q", want)
+		}
+	}
+	if strings.Contains(body, ">Sign in with Enterprise</button>") || strings.Contains(body, "Work account.") {
+		t.Fatal("waiting page offers the same provider again")
+	}
+}
+
 func TestExtensionSessionIssuance(t *testing.T) {
 	s, _, store := testAccounts(t)
 	host := extensionHost{s}

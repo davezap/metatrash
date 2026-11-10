@@ -37,6 +37,9 @@ type accountDatabaseConfig struct {
 type accountDatabase struct {
 	db             *sql.DB
 	extensionPurge func(context.Context, *sql.Tx, string) error
+	// actingFor lists the owner accounts an account may act for as owner
+	// (extension.Hooks.ActsFor); nil when no extension offers any.
+	actingFor func(context.Context, string) []string
 }
 
 func readLimitedFile(path string, limit int64) ([]byte, error) {

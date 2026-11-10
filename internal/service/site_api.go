@@ -338,7 +338,7 @@ func (s *Service) siteSpaceAccess(ctx context.Context, user userAccount, signedI
 	}
 	access := ""
 	switch {
-	case signedIn && ownerID == user.ID:
+	case signedIn && s.ownedDB.actsFor(lookup, user.ID, ownerID):
 		access = "read_write"
 	case status.Valid && status.String == "suspended":
 		return nil, "", problem(403, "forbidden", "Your access to this space is suspended by its owner.")

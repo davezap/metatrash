@@ -31,9 +31,9 @@ type connectedSpaces struct {
 
 // effectiveAccess combines consent, current ownership or membership, the
 // owner's member permission and the token scope. Empty means no access.
-func effectiveAccess(id oauthIdentity, consent, ownerID string, status, memberPermission sql.NullString) string {
+func effectiveAccess(id oauthIdentity, consent string, owner bool, status, memberPermission sql.NullString) string {
 	access := consent
-	if ownerID != id.UserID {
+	if !owner {
 		if !status.Valid || status.String != "active" {
 			return ""
 		}
@@ -118,10 +118,11 @@ func (s *Service) agentSpaceAccess(ctx context.Context, id oauthIdentity, space,
 	if repo == nil {
 		return nil, "", notConnected
 	}
-	if ownerID != id.UserID && status.Valid && status.String == "suspended" {
+	owner := s.ownedDB.actsFor(lookup, id.UserID, ownerID)
+	if !owner && status.Valid && status.String == "suspended" {
 		return nil, "", problem(403, "forbidden", "Your access to this space is suspended by its owner.")
 	}
-	access := effectiveAccess(id, consent, ownerID, status, permission)
+	access := effectiveAccess(id, consent, owner, status, permission)
 	if access == "" {
 		return nil, "", notConnected
 	}
@@ -159,7 +160,7 @@ func (s *Service) listConnectedSpaces(ctx context.Context, id oauthIdentity) (co
 		if err := rows.Scan(&item.ID, &slug, &item.Name, &item.Owner, &consent, &ownerID, &status, &permission); err != nil {
 			return result, fmt.Errorf("cannot list connected spaces")
 		}
-		if item.Access = effectiveAccess(id, consent, ownerID, status, permission); item.Access == "" || s.ownedRepository(item.ID) == nil {
+		if item.Access = effectiveAccess(id, consent, s.ownedDB.actsFor(ctx, id.UserID, ownerID), status, permission); item.Access == "" || s.ownedRepository(item.ID) == nil {
 			continue
 		}
 		item.Space = item.ID

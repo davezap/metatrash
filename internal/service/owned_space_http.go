@@ -197,6 +197,9 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, problem(503, "unavailable", "Your space is temporarily unavailable."))
 		return
 	}
+	if err == nil && !member && signedIn {
+		member = h.service.ownedDB.actsFor(ctx, user.ID, space.OwnerID)
+	}
 	if err == sql.ErrNoRows || (!member && space.Visibility != spaceWeb) {
 		// Signed out: always the sign-in page, so a private space's existence
 		// is not revealed. The docs pages never ask anyone to sign in.

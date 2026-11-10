@@ -139,6 +139,15 @@ func transferAcceptedMail(origin, to, name, address, newAddress string, when tim
 		"See your spaces in Settings → Spaces at " + origin + "/spaces/#settings/spaces.\n"
 }
 
+// spaceMovedMail tells the person who moved a space between their own
+// account and one they manage (0.95.23) where it is now.
+func spaceMovedMail(origin, name, address, newAddress string, when time.Time) string {
+	return "You moved the Metatrash space \"" + mailText(name) + "\" from " + mailText(address) + " to " + mailText(newAddress) + ".\n" +
+		"When: " + when.UTC().Format("2 January 2006 15:04 UTC") + "\n\n" +
+		"Links and agents that use " + mailText(address) + " still reach it, so that address stays reserved for it. Its members, invitations and app connections stay as they were.\n" +
+		"If this was not you, end the other devices in Settings → Security at " + origin + "/spaces/#settings/security.\n"
+}
+
 // invitationMail is the invitation email. The subject is fixed ASCII; owner
 // and space names go only in the quoted-printable body, stripped of controls.
 type invitationMail struct {
@@ -171,11 +180,21 @@ func mailText(value string) string {
 	}, value)
 }
 
+// undeliverable reports an address in the reserved .invalid domain (RFC 2606).
+func undeliverable(email string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(email)), ".invalid")
+}
+
 // Always require STARTTLS and verify the server certificate before sending credentials.
 // subject must be fixed ASCII text; body is UTF-8 and sent quoted-printable.
 func sendMail(ctx context.Context, cfg accountConfig, password, email, subject, body string) error {
 	if strings.ContainsAny(subject, "\r\n") || strings.ContainsAny(email, "\r\n<>") {
 		return fmt.Errorf("invalid mail header")
+	}
+	if undeliverable(email) {
+		// Owner accounts nobody signs in as, such as Company organisations,
+		// carry a reserved .invalid address (0.95.23): never try to send.
+		return fmt.Errorf("address cannot receive mail")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

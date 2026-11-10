@@ -254,6 +254,7 @@ func (s *Service) startExtensions() (err error) {
 		}
 		return nil
 	}
+	s.ownedDB.actingFor = s.actingOwnersFunc()
 	return nil
 }
 
@@ -271,6 +272,7 @@ func (s *Service) closeExtensions() {
 	s.extensions = nil
 	if s.ownedDB != nil {
 		s.ownedDB.extensionPurge = nil
+		s.ownedDB.actingFor = nil
 	}
 }
 

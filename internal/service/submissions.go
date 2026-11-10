@@ -680,11 +680,12 @@ func (db *accountDatabase) canWriteSpace(ctx context.Context, spaceID, userID st
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var n int
-	err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_spaces s LEFT JOIN metatrash_memberships m ON m.space_id = s.space_id AND m.user_id = ? WHERE s.space_id = ? AND (s.owner_user_id = ? OR m.status = 'active' AND m.agent_permission = 'read_write')", userID, spaceID, userID).Scan(&n)
+	var ownerID sql.NullString
+	err := db.db.QueryRowContext(ctx, "SELECT COUNT(m.user_id), MAX(s.owner_user_id) FROM metatrash_spaces s LEFT JOIN metatrash_memberships m ON m.space_id = s.space_id AND m.user_id = ? AND m.status = 'active' AND m.agent_permission = 'read_write' WHERE s.space_id = ?", userID, spaceID).Scan(&n, &ownerID)
 	if err != nil {
 		return false, fmt.Errorf("cannot read space members")
 	}
-	return n > 0, nil
+	return n > 0 || ownerID.Valid && db.actsFor(ctx, userID, ownerID.String), nil
 }
 
 // acknowledgeSent records path as read at its folder's published version

@@ -478,7 +478,7 @@ func (h *httpAdapter) renderConsentPage(w http.ResponseWriter, r *http.Request, 
 				}
 			}
 		}
-		if space.Owned {
+		if space.Owned && !space.ActingFor {
 			owned++
 		}
 		page.Spaces = append(page.Spaces, item)

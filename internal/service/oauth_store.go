@@ -24,8 +24,10 @@ type oauthSpaceChoice struct {
 type accessibleSpace struct {
 	ID, Name, Slug, Owner string
 	Owned                 bool
-	CanWrite              bool // owner, or member with read_write agent permission
-	Web                   bool // readable on the web by anyone
+	ActingFor             bool   // owned by an owner account this user acts for (0.95.23)
+	OwnerID               string // set with ActingFor
+	CanWrite              bool   // owner, or member with read_write agent permission
+	Web                   bool   // readable on the web by anyone
 }
 
 // oauthTokenPair is returned to the client once; only digests are stored.
@@ -73,6 +75,15 @@ func (db *accountDatabase) accessibleSpaces(ctx context.Context, user userAccoun
 	if err != nil {
 		return nil, fmt.Errorf("cannot list spaces")
 	}
+	acting, err := db.actingSpaces(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	spaces = append(spaces, acting...)
+	listed := map[string]bool{}
+	for _, space := range acting {
+		listed[space.ID] = true
+	}
 	rows, err = db.db.QueryContext(ctx, `SELECT s.space_id, s.name, s.slug, COALESCE(u.username, ''), m.agent_permission, s.visibility FROM metatrash_memberships m JOIN metatrash_spaces s ON s.space_id = m.space_id JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE m.user_id = ? AND m.status = 'active' AND s.provisioning_state = 'ready' ORDER BY m.joined_at, s.space_id LIMIT 200`, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list joined spaces")
@@ -84,12 +95,50 @@ func (db *accountDatabase) accessibleSpaces(ctx context.Context, user userAccoun
 		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Owner, &permission, &visibility); err != nil {
 			return nil, fmt.Errorf("cannot list joined spaces")
 		}
+		if listed[item.ID] {
+			continue // also an organisation's space this user acts for
+		}
 		item.CanWrite = permission == "read_write"
 		item.Web = visibility == spaceWeb
 		spaces = append(spaces, item)
 	}
 	if rows.Err() != nil {
 		return nil, fmt.Errorf("cannot list joined spaces")
+	}
+	return spaces, nil
+}
+
+// actingSpaces lists the ready spaces of the owner accounts userID acts for
+// (0.95.23), as owned spaces under their owner's name.
+func (db *accountDatabase) actingSpaces(ctx context.Context, userID string) ([]accessibleSpace, error) {
+	owners := db.actingOwners(ctx, userID)
+	if len(owners) == 0 {
+		return nil, nil
+	}
+	if len(owners) > 100 {
+		owners = owners[:100]
+	}
+	args := make([]any, len(owners))
+	for i, id := range owners {
+		args[i] = id
+	}
+	rows, err := db.db.QueryContext(ctx, `SELECT s.space_id, s.name, s.slug, COALESCE(u.username, ''), s.visibility, s.owner_user_id FROM metatrash_spaces s JOIN metatrash_users u ON u.user_id = s.owner_user_id WHERE s.owner_user_id IN (?`+strings.Repeat(", ?", len(owners)-1)+`) AND s.provisioning_state = 'ready' ORDER BY u.username, s.created_at, s.space_id LIMIT 400`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("cannot list organisation spaces")
+	}
+	defer rows.Close()
+	spaces := []accessibleSpace{}
+	for rows.Next() {
+		item := accessibleSpace{Owned: true, ActingFor: true, CanWrite: true}
+		var visibility string
+		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Owner, &visibility, &item.OwnerID); err != nil {
+			return nil, fmt.Errorf("cannot list organisation spaces")
+		}
+		item.Web = visibility == spaceWeb
+		spaces = append(spaces, item)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("cannot list organisation spaces")
 	}
 	return spaces, nil
 }
@@ -146,7 +195,7 @@ func (db *accountDatabase) saveGrant(ctx context.Context, userID string, client 
 	defer tx.Rollback()
 	members := make([]sql.NullString, len(selected))
 	for i, choice := range selected {
-		if members[i], err = checkGrantChoice(ctx, tx, userID, choice); err != nil {
+		if members[i], err = db.checkGrantChoice(ctx, tx, userID, choice); err != nil {
 			return "", "", err
 		}
 	}
@@ -185,7 +234,7 @@ func (db *accountDatabase) saveGrant(ctx context.Context, userID string, client 
 // transaction, that the user owns it or is an active member, and that write
 // access is allowed. It returns the member_user_id value for the consent row
 // (NULL for the owner, so owner rows survive membership changes).
-func checkGrantChoice(ctx context.Context, tx *sql.Tx, userID string, choice oauthSpaceChoice) (sql.NullString, error) {
+func (db *accountDatabase) checkGrantChoice(ctx context.Context, tx *sql.Tx, userID string, choice oauthSpaceChoice) (sql.NullString, error) {
 	space, err := scanOwnedSpace(tx.QueryRowContext(ctx, "SELECT "+ownedSpaceColumns+" FROM metatrash_spaces WHERE space_id = ? FOR UPDATE", choice.SpaceID))
 	if err == sql.ErrNoRows || (err == nil && space.State != "ready") {
 		return sql.NullString{}, problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
@@ -193,7 +242,7 @@ func checkGrantChoice(ctx context.Context, tx *sql.Tx, userID string, choice oau
 	if err != nil {
 		return sql.NullString{}, fmt.Errorf("cannot check selected space")
 	}
-	if space.OwnerID == userID {
+	if space.OwnerID == userID || db.actsFor(ctx, userID, space.OwnerID) {
 		return sql.NullString{}, nil
 	}
 	var status, permission string
@@ -245,7 +294,7 @@ func (db *accountDatabase) changeGrantSpaces(ctx context.Context, userID, grantI
 		if choice.Permission == "none" {
 			continue
 		}
-		if members[i], err = checkGrantChoice(ctx, tx, userID, choice); err != nil {
+		if members[i], err = db.checkGrantChoice(ctx, tx, userID, choice); err != nil {
 			return err
 		}
 	}

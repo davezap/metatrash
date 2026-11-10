@@ -150,6 +150,7 @@ var accountNotices = map[string]string{
 	"transfer-offered":           "Ownership offered. We’ve emailed them; they accept it in Settings within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-offered-unsent":    "Ownership offered, but the email could not be sent, so let them know: they accept it in Settings within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-cancelled":         "Ownership offer cancelled. You still own the space.",
+	"space-moved":                "Space moved. Its address uses its new owner's name; old links and agents that use the previous address still reach it. Members, invitations and apps are as they were.",
 	"transfer-declined":          "Ownership offer declined. Nothing changed.",
 	"transfer-accepted":          "You own the space now. Its address uses your username; old links and agents that use the previous address still reach it. Its GitHub folders, if any, now use your GitHub connection in Services.",
 	"signin-confirmed":           "Confirmed. For the next 10 minutes you can change your email address and sign-in methods.",

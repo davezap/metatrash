@@ -71,5 +71,10 @@ type Hooks struct {
 	Start         func(context.Context) error
 	Close         func()
 	Purge         func(context.Context, *sql.Tx, string) error
+	// ActsFor lists the owner accounts (user IDs) an account may act for as
+	// their owner, for example organisations it administers. Core treats the
+	// account as the owner of those accounts' spaces: it reads, writes and
+	// manages them as their owner would. An error grants nothing.
+	ActsFor func(ctx context.Context, userID string) ([]string, error)
 }
 type Module func(Host) (Hooks, error)

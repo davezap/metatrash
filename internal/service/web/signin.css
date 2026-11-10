@@ -132,6 +132,9 @@ a:hover { text-decoration: underline; }
   margin: 0 0 14px; padding: 9px 12px; border-radius: 8px; font-size: 13px;
 }
 .note { background: var(--side-accent-soft); }
+.note p { margin: 0 0 6px; }
+.note p:last-child { margin-bottom: 0; }
+.email-form + .try-another { margin: 10px 0 0; font-size: 13px; text-align: center; }
 .problem { color: var(--problem-fg); background: var(--problem-bg); }
 .field-error { margin: -4px 0 10px; color: var(--problem-fg); font-size: 12.5px; }
 

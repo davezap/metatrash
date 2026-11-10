@@ -30,7 +30,7 @@ var loginHTML string
 var loginTemplate = template.Must(template.New("login").Parse(loginHTML))
 
 type loginProviderView struct{ Path, Label, Hint string }
-type loginWaitingView struct{ Provider, Label string }
+type loginWaitingView struct{ Provider, Label, Path string }
 type loginView struct {
 	Providers []loginProviderView
 	Waiting   []loginWaitingView
@@ -187,16 +187,20 @@ func (h *httpAdapter) renderLogin(w http.ResponseWriter, r *http.Request, status
 	page.BasePath = h.basePath
 	for _, hooks := range h.service.extensions {
 		if provider := hooks.Login; provider != nil {
-			page.Providers = append(page.Providers, loginProviderView{provider.Path, provider.Label, provider.Hint})
 			if provider.Waiting != nil && page.ContinueURL == "" {
 				label, email, _ := provider.Waiting(r, h.extensionContext(userAccount{}, ""))
 				if label != "" {
-					page.Waiting = append(page.Waiting, loginWaitingView{provider.Label, label})
+					// The provider's sign-in worked but no account has
+					// linked it: the page asks for another way (an emailed
+					// code), so it doesn't offer that provider's button again.
+					page.Waiting = append(page.Waiting, loginWaitingView{provider.Label, label, provider.Path})
 					if !page.Verify && page.Email == "" {
 						page.Email = email
 					}
+					continue
 				}
 			}
+			page.Providers = append(page.Providers, loginProviderView{provider.Path, provider.Label, provider.Hint})
 		}
 	}
 	page.Legal = h.docsSpace() != ""
@@ -599,10 +603,11 @@ func (h *httpAdapter) deriveNewSpaceSlug(ctx context.Context, user userAccount, 
 // changeSpaceVisibility makes an owner's space readable on the web or private
 // again and returns the notice. Opening a space to everyone needs a recent
 // sign-in or confirmation (0.79.0), like handing it to someone else: a
-// script that got into the page can't publish a space on its own.
-func (h *httpAdapter) changeSpaceVisibility(ctx context.Context, user userAccount, session, spaceID, visibility string) (string, error) {
+// script that got into the page can't publish a space on its own. user owns
+// the space; actor is the person changing it, who hears about it.
+func (h *httpAdapter) changeSpaceVisibility(ctx context.Context, user, actor userAccount, session, spaceID, visibility string) (string, error) {
 	a := h.service.accounts
-	if err := h.service.rates.take(allowance{"space-visibility:user:" + user.ID, 30, 600}); err != nil {
+	if err := h.service.rates.take(allowance{"space-visibility:user:" + actor.ID, 30, 600}); err != nil {
 		return "", err
 	}
 	if visibility == spaceWeb {
@@ -623,10 +628,13 @@ func (h *httpAdapter) changeSpaceVisibility(ctx context.Context, user userAccoun
 		for _, s := range spaces {
 			if s.ID == spaceID {
 				name = "Your space \"" + mailText(s.Name) + "\" (" + user.Username + "/" + s.Slug + ")"
+				if actor.ID != user.ID {
+					name = "The space \"" + mailText(s.Name) + "\" (" + user.Username + "/" + s.Slug + "), which you manage,"
+				}
 			}
 		}
 	}
-	h.sendSecurityNotice(user, "A Metatrash space is now readable on the web", spaceWebMail(a.config.Origin, name, time.Now()))
+	h.sendSecurityNotice(actor, "A Metatrash space is now readable on the web", spaceWebMail(a.config.Origin, name, time.Now()))
 	return "space-web", nil
 }
 

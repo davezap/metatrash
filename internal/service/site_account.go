@@ -52,6 +52,9 @@ type siteAccountSpace struct {
 	Timezone string `json:"timezone,omitempty"`
 	// Usage is what the space takes up, once it was measured (0.89.0).
 	Usage *siteUsage `json:"usage,omitempty"`
+	// Owner is set on a space of an owner account this user acts for, such
+	// as an organisation they administer (0.95.23); "" for their own.
+	Owner string `json:"owner,omitempty"`
 }
 
 // siteUsage is storage in bytes: Git is the space's repository (every
@@ -114,6 +117,9 @@ type siteAccount struct {
 	Joined          []siteJoinedSpace  `json:"joined"`
 	Invitations     []siteInvitation   `json:"invitations"`
 	Offers          []siteOffer        `json:"offers"`
+	// Manages lists the usernames of the owner accounts this person acts
+	// for, such as organisations they administer (0.95.23).
+	Manages []string `json:"manages,omitempty"`
 	// Storage is the account's storage (0.89.0); absent when it could not
 	// be read.
 	Storage *siteStorage `json:"storage,omitempty"`
@@ -145,8 +151,11 @@ type siteSharing struct {
 	Members     []siteMember     `json:"members"`
 	Transfer    *siteTransfer    `json:"transfer,omitempty"`
 	Candidates  []siteMember     `json:"candidates"`
-	Fresh       bool             `json:"fresh,omitempty"`
-	Apps        bool             `json:"apps,omitempty"`
+	// MoveTo lists where this person can move the space (POST …/move):
+	// their own account and those they act for, but not its owner (0.95.23).
+	MoveTo []string `json:"moveTo,omitempty"`
+	Fresh  bool     `json:"fresh,omitempty"`
+	Apps   bool     `json:"apps,omitempty"`
 }
 
 type siteConfirm struct {
@@ -176,6 +185,7 @@ type siteAccountBody struct {
 	Invitation        string  `json:"invitation"`
 	Member            string  `json:"member"`
 	Permission        string  `json:"permission"`
+	Owner             string  `json:"owner"`
 	Code              string  `json:"code"`
 	Credential        string  `json:"credential"`
 	ClientData        string  `json:"client_data"`
@@ -214,6 +224,7 @@ type siteNotice struct {
 var siteSpaceActions = map[string]bool{
 	"visibility": true, "timezone": true, "invite": true, "cancel": true, "suspend": true, "restore": true,
 	"remove": true, "agent": true, "transfer-offer": true, "transfer-cancel": true, "delete": true,
+	"move": true,
 }
 
 // stepUpMessages say why a route needed a recent confirmation.
@@ -221,6 +232,7 @@ var stepUpMessages = map[string]string{
 	"visibility":     "Making a space readable on the web needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"transfer-offer": "Offering a space to someone needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"delete":         "Deleting a space needs a sign-in within the last 10 minutes. Confirm it’s you first.",
+	"move":           "Moving a space needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"account-delete": "Deleting your account needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"app-spaces":     "Giving an app more of your spaces needs a sign-in within the last 10 minutes. Confirm it’s you first.",
 	"security":       "Changing how you sign in needs a sign-in within the last 10 minutes. Confirm it’s you first.",
@@ -349,7 +361,7 @@ func (h *httpAdapter) serveSiteAccount(w http.ResponseWriter, r *http.Request, u
 			err = h.service.ownedDB.acceptHumanInvitation(ctx, user.ID, body.Space, body.Invitation)
 		}
 	case route == "offers/accept" || route == "offers/decline":
-		value, err = h.siteTransfer(ctx, user, session, strings.TrimPrefix(route, "offers/"), body.Space, "")
+		value, err = h.siteTransfer(ctx, user, user, session, strings.TrimPrefix(route, "offers/"), body.Space, "")
 	case route == "delete":
 		value, err = h.siteDeleteAccount(w, ctx, user, session, body.Email)
 		route = "account-delete"
@@ -425,6 +437,33 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 		}
 		out.CanCreate = user.Username != "" && len(spaces) < user.MaxPrivateSpaces
 	}
+	if names, err := h.service.ownedDB.actingOwnerNames(ctx, user.ID); err == nil && len(names) > 0 {
+		out.Manages = names
+	}
+	if acting, err := h.service.ownedDB.actingSpaces(ctx, user.ID); err != nil {
+		out.Unavailable = append(out.Unavailable, "spaces")
+	} else {
+		zones := map[string]map[string]string{}
+		usages := map[string]accountStorage{}
+		for _, s := range acting {
+			if s.Owner == "" {
+				continue
+			}
+			item := siteAccountSpace{ID: s.ID, Name: s.Name, Slug: s.Slug, Ready: h.service.ownedRepository(s.ID) != nil, Web: s.Web, Owner: s.Owner, Space: s.Owner + "/" + s.Slug}
+			owner := s.OwnerID
+			if _, ok := zones[owner]; !ok {
+				zones[owner], _ = h.service.ownedDB.spaceTimezones(ctx, owner)
+				if usage, err := h.service.accountStorage(ctx, owner); err == nil {
+					usages[owner] = usage
+				}
+			}
+			item.Timezone = zones[owner][s.ID]
+			if u, ok := usages[owner].Spaces[s.ID]; ok {
+				item.Usage = &siteUsage{Bytes: u.Total(), Git: u.GitBytes, Files: u.FileBytes, Measured: siteTime(u.oldest())}
+			}
+			out.Spaces = append(out.Spaces, item)
+		}
+	}
 	if invitations, joined, err := h.accountMemberships(ctx, user); err != nil {
 		out.Unavailable = append(out.Unavailable, "memberships")
 	} else {
@@ -445,7 +484,11 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 	return out
 }
 
-func (h *httpAdapter) siteSharingState(ctx context.Context, user userAccount, session, spaceID string) (siteSharing, error) {
+func (h *httpAdapter) siteSharingState(ctx context.Context, actor userAccount, session, spaceID string) (siteSharing, error) {
+	user, err := h.service.spaceOwnerFor(ctx, actor, spaceID)
+	if err != nil {
+		return siteSharing{}, problem(503, "unavailable", "Sharing is temporarily unavailable.")
+	}
 	page, err := h.humanSharing(ctx, user, spaceID)
 	if err != nil {
 		return siteSharing{}, err
@@ -467,6 +510,16 @@ func (h *httpAdapter) siteSharingState(ctx context.Context, user userAccount, se
 	}
 	if t := page.Transfer; t != nil {
 		out.Transfer = &siteTransfer{ToEmail: t.ToEmail, ToUsername: t.ToUsername, Expires: t.Expires, Expired: t.Expired}
+	}
+	if names, err := h.service.ownedDB.actingOwnerNames(ctx, actor.ID); err == nil && len(names) > 0 {
+		if actor.Username != "" && actor.ID != user.ID {
+			out.MoveTo = append(out.MoveTo, actor.Username)
+		}
+		for _, name := range names {
+			if name != user.Username {
+				out.MoveTo = append(out.MoveTo, name)
+			}
+		}
 	}
 	return out, nil
 }
@@ -508,15 +561,23 @@ func (h *httpAdapter) siteCreateSpace(ctx context.Context, user userAccount, bod
 
 // siteSpaceAction is POST /account/spaces/{id}/{action}, on a space the
 // session's user owns (the database calls check that).
-func (h *httpAdapter) siteSpaceAction(ctx context.Context, user userAccount, session, spaceID, action string, body siteAccountBody) (siteNotice, error) {
+//
+// Someone who acts for the space's owner (an organisation's admin, 0.95.23)
+// manages it as that owner: the database calls get the owner, while rate
+// limits, confirmation and notices stay with the person doing it.
+func (h *httpAdapter) siteSpaceAction(ctx context.Context, actor userAccount, session, spaceID, action string, body siteAccountBody) (siteNotice, error) {
 	db := h.service.ownedDB
+	user, err := h.service.spaceOwnerFor(ctx, actor, spaceID)
+	if err != nil {
+		return siteNotice{}, problem(503, "unavailable", "Your account is temporarily unavailable.")
+	}
 	switch action {
 	case "visibility":
-		notice, err := h.changeSpaceVisibility(ctx, user, session, spaceID, body.Visibility)
+		notice, err := h.changeSpaceVisibility(ctx, user, actor, session, spaceID, body.Visibility)
 		return siteNotice{Notice: notice}, err
 	case "timezone":
 		zone := strings.TrimSpace(body.Timezone)
-		err := h.service.rates.take(allowance{"space-timezone:user:" + user.ID, 30, 600})
+		err := h.service.rates.take(allowance{"space-timezone:user:" + actor.ID, 30, 600})
 		if err == nil && zone != "" && !validTimezone(zone) {
 			err = invalid(zone + " is not a time zone. Use a name such as Pacific/Auckland or Australia/Sydney, or leave it empty for the server's (" + defaultAgentTimezone + ").")
 		}
@@ -528,10 +589,27 @@ func (h *httpAdapter) siteSpaceAction(ctx context.Context, user userAccount, ses
 		}
 		h.service.spaceZoneChanged(spaceID)
 		return siteNotice{Notice: "space-timezone"}, nil
+	case "move":
+		err := h.service.rates.take(allowance{"space-move:user:" + actor.ID, 10, 600})
+		if err == nil {
+			if fresh, _ := h.service.accounts.sessionFresh(session, time.Now()); !fresh {
+				err = errConfirmFirst
+			}
+		}
+		if err != nil {
+			return siteNotice{}, err
+		}
+		moved, err := h.service.moveSpace(ctx, actor.ID, spaceID, body.Owner)
+		if err != nil {
+			return siteNotice{}, err
+		}
+		body := spaceMovedMail(h.service.accounts.config.Origin, moved.Name, moved.From.Username+"/"+moved.Slug, moved.To.Username+"/"+moved.Slug, time.Now())
+		h.sendSecurityNotice(actor, "A Metatrash space was moved", body)
+		return siteNotice{Notice: "space-moved", Space: moved.To.Username + "/" + moved.Slug}, nil
 	case "transfer-offer", "transfer-cancel":
-		return h.siteTransfer(ctx, user, session, strings.TrimPrefix(action, "transfer-"), spaceID, body.Member)
+		return h.siteTransfer(ctx, user, actor, session, strings.TrimPrefix(action, "transfer-"), spaceID, body.Member)
 	case "delete":
-		err := h.service.rates.take(allowance{"space-delete:user:" + user.ID, 10, 600})
+		err := h.service.rates.take(allowance{"space-delete:user:" + actor.ID, 10, 600})
 		if err == nil {
 			if fresh, _ := h.service.accounts.sessionFresh(session, time.Now()); !fresh {
 				err = errConfirmFirst
@@ -543,7 +621,7 @@ func (h *httpAdapter) siteSpaceAction(ctx context.Context, user userAccount, ses
 		return siteNotice{Notice: "space-deleted"}, err
 	}
 	// Sharing: invite, cancel, suspend, restore, remove, agent.
-	if err := h.service.rates.take(allowance{"membership:user:" + user.ID, 30, 600}); err != nil {
+	if err := h.service.rates.take(allowance{"membership:user:" + actor.ID, 30, 600}); err != nil {
 		return siteNotice{}, err
 	}
 	switch action {
@@ -564,16 +642,24 @@ func (h *httpAdapter) siteSpaceAction(ctx context.Context, user userAccount, ses
 
 // siteTransfer offers a space (owner, step-up), cancels the offer (owner),
 // or accepts or declines it (the member offered it).
-func (h *httpAdapter) siteTransfer(ctx context.Context, user userAccount, session, action, spaceID, member string) (siteNotice, error) {
+//
+// user is the account the space moves from or to; actor is the person doing
+// it, the same account unless they act for user (siteSpaceAction).
+func (h *httpAdapter) siteTransfer(ctx context.Context, user, actor userAccount, session, action, spaceID, member string) (siteNotice, error) {
 	db, now := h.service.ownedDB, time.Now().UTC()
 	if !idPattern.MatchString(spaceID) {
 		return siteNotice{}, missing()
 	}
-	if err := h.service.rates.take(allowance{"transfer:user:" + user.ID, 20, 600}); err != nil {
+	if err := h.service.rates.take(allowance{"transfer:user:" + actor.ID, 20, 600}); err != nil {
 		return siteNotice{}, err
 	}
 	switch action {
 	case "offer":
+		if user.ID != actor.ID {
+			// The previous owner becomes a member after a transfer, which an
+			// account nobody signs in as shouldn't. Move it first.
+			return siteNotice{}, problem(409, "conflict", "Move the space to your own account first, then offer it.")
+		}
 		if fresh, _ := h.service.accounts.sessionFresh(session, now); !fresh {
 			return siteNotice{}, errConfirmFirst
 		}
