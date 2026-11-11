@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -206,7 +207,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		if gateErr := h.service.ownedDB.gateFor(ctx, user.ID, space.OwnerID); gateErr != nil {
 			member = false
 			if space.Visibility != spaceWeb {
-				sendError(w, gateErr)
+				h.sendGateRefusal(w, r, user, gateErr, markdown || raw || export)
 				return
 			}
 		}
@@ -438,4 +439,32 @@ func (h *httpAdapter) serveRawImage(w http.ResponseWriter, r *http.Request, repo
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(content)
 	}
+}
+
+// sendGateRefusal answers a space an extension holds back (SpaceGate, 0.95.25).
+// A person opening it in the browser gets a page saying why, with the way to
+// fix it (sign-in settings, or signing out to sign in another way); programs
+// and file requests get the JSON error as before.
+func (h *httpAdapter) sendGateRefusal(w http.ResponseWriter, r *http.Request, user userAccount, gateErr error, file bool) {
+	var p *Error
+	if file || !errors.As(gateErr, &p) || !wantsPage(r) {
+		sendError(w, gateErr)
+		return
+	}
+	title := "This space needs another sign-in"
+	session := cookieToken(r, h.sessionCookieName())
+	page := oauthPage{Mode: "notice", Title: title, Message: p.Message, Email: user.Email}
+	if session != "" {
+		page.LogoutCSRF = h.service.accounts.mac("logout:" + session)
+	}
+	h.renderOAuth(w, p.Status, page, "")
+}
+
+// wantsPage reports whether a request is a person's browser opening a page,
+// as opposed to a program or a script fetching data.
+func wantsPage(r *http.Request) bool {
+	if mode := r.Header.Get("Sec-Fetch-Mode"); mode != "" {
+		return mode == "navigate"
+	}
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }

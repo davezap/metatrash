@@ -47,6 +47,14 @@ type oauthPending struct {
 	NewSpaceID string
 }
 
+type oauthAnswered struct {
+	ID, Location string
+	Expires      time.Time
+}
+
+// answeredLifetime is how long a repeated decision still finds its answer.
+const answeredLifetime = time.Minute
+
 // oauthCode is a single-use authorization code, kept in memory until expiry so
 // that a second use can be detected and the connection's tokens revoked.
 type oauthCode struct {
@@ -65,15 +73,19 @@ type oauthServer struct {
 	clients      *oauthClients
 	mu           sync.Mutex
 	pending      map[string]*oauthPending
-	codes        map[string]*oauthCode
-	lastPurge    time.Time
-	now          func() time.Time
+	// answered remembers, for a minute, where each browser's last decision
+	// sent it, so a second press of Connect or Cancel (a double click, or a
+	// slow page) goes to the same place instead of "expired" (0.95.25).
+	answered  map[string]oauthAnswered
+	codes     map[string]*oauthCode
+	lastPurge time.Time
+	now       func() time.Time
 }
 
 func newOAuthServer(settings oauthSettings, publicURL string) *oauthServer {
 	issuer := strings.TrimSuffix(publicURL, "/")
 	return &oauthServer{settings: settings, issuer: issuer, mcpResource: issuer + "/mcp/account", restResource: issuer + "/api/v1/account",
-		clients: newOAuthClients(settings.clientHosts), pending: map[string]*oauthPending{}, codes: map[string]*oauthCode{}, now: time.Now}
+		clients: newOAuthClients(settings.clientHosts), pending: map[string]*oauthPending{}, answered: map[string]oauthAnswered{}, codes: map[string]*oauthCode{}, now: time.Now}
 }
 
 // client returns this site's own sync client without fetching anything, and
@@ -116,6 +128,30 @@ func (o *oauthServer) cleanup(now time.Time) {
 			delete(o.codes, key)
 		}
 	}
+	for key, a := range o.answered {
+		if !now.Before(a.Expires) {
+			delete(o.answered, key)
+		}
+	}
+}
+
+// answer records where a browser's decision on pending request id sent it.
+func (o *oauthServer) answer(browser, id, location string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.answered[secretDigest(browser)] = oauthAnswered{ID: id, Location: location, Expires: o.now().Add(answeredLifetime)}
+}
+
+// answeredFor returns the request a browser decided on in the last minute.
+func (o *oauthServer) answeredFor(browser string) (oauthAnswered, bool) {
+	if browser == "" {
+		return oauthAnswered{}, false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.cleanup(o.now())
+	a, ok := o.answered[secretDigest(browser)]
+	return a, ok
 }
 
 func (o *oauthServer) pendingFor(browser string) *oauthPending {
@@ -131,6 +167,29 @@ func (o *oauthServer) pendingFor(browser string) *oauthPending {
 	}
 	copy := *p
 	return &copy
+}
+
+// expiredRequestMessage explains a connection request that is gone. Pending
+// requests live in this process's memory, so a restart ends them too.
+const expiredRequestMessage = "Connection requests last ten minutes, work only in the browser where they started, and end if Metatrash restarts."
+
+// renewPending restarts a pending request's ten minutes, after the person
+// signed in to continue it (signing in can take a while: an emailed code, or
+// a Microsoft sign-in). It reports whether there was one to renew.
+func (o *oauthServer) renewPending(browser string) bool {
+	if browser == "" {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	now := o.now()
+	o.cleanup(now)
+	p := o.pending[secretDigest(browser)]
+	if p == nil {
+		return false
+	}
+	p.Expires = now.Add(pendingLifetime)
+	return true
 }
 
 func (h *httpAdapter) oauthCookieName() string {
@@ -285,10 +344,20 @@ func (h *httpAdapter) oauthMetadata(w http.ResponseWriter, r *http.Request) {
 // oauthRedirect sends an authorization response to the client's validated
 // redirect URI, preserving any registered query and adding iss (RFC 9207).
 func (h *httpAdapter) oauthRedirect(w http.ResponseWriter, r *http.Request, redirectURI string, params url.Values) {
-	u, err := url.Parse(redirectURI)
-	if err != nil {
+	location, ok := h.oauthLocation(redirectURI, params)
+	if !ok {
 		h.oauthErrorPage(w, 400, "This request cannot continue", "The app's return address is invalid.")
 		return
+	}
+	w.Header().Set("Location", location)
+	w.WriteHeader(http.StatusSeeOther)
+}
+
+// oauthLocation is the app's return address with the answer's parameters.
+func (h *httpAdapter) oauthLocation(redirectURI string, params url.Values) (string, bool) {
+	u, err := url.Parse(redirectURI)
+	if err != nil {
+		return "", false
 	}
 	query := u.Query()
 	for key, values := range params {
@@ -296,8 +365,21 @@ func (h *httpAdapter) oauthRedirect(w http.ResponseWriter, r *http.Request, redi
 	}
 	query.Set("iss", h.oauth.issuer)
 	u.RawQuery = query.Encode()
-	w.Header().Set("Location", u.String())
+	return u.String(), true
+}
+
+// repeatDecision sends a second press of Connect or Cancel where the first
+// one went, when this browser and session decided in the last minute. The
+// form's token proves it is the same consent page.
+func (h *httpAdapter) repeatDecision(w http.ResponseWriter, r *http.Request, browser string) bool {
+	a, ok := h.oauth.answeredFor(browser)
+	session := cookieToken(r, h.sessionCookieName())
+	if !ok || session == "" || subtle.ConstantTimeCompare([]byte(h.consentCSRF(session, &oauthPending{ID: a.ID})), []byte(r.PostForm.Get("csrf"))) != 1 {
+		return false
+	}
+	w.Header().Set("Location", a.Location)
 	w.WriteHeader(http.StatusSeeOther)
+	return true
 }
 
 func (h *httpAdapter) oauthAuthorize(w http.ResponseWriter, r *http.Request, client string) {
@@ -416,7 +498,7 @@ func (h *httpAdapter) oauthConsentPage(w http.ResponseWriter, r *http.Request) {
 	}
 	pending := h.oauth.pendingFor(cookieToken(r, h.oauthCookieName()))
 	if pending == nil {
-		h.oauthErrorPage(w, 400, "This connection request expired", "Connection requests last ten minutes and work only in the browser where they started.")
+		h.oauthErrorPage(w, 400, "This connection request expired", expiredRequestMessage)
 		return
 	}
 	session := cookieToken(r, h.sessionCookieName())
@@ -520,7 +602,10 @@ func (h *httpAdapter) oauthConsentSubmit(w http.ResponseWriter, r *http.Request)
 	browser := cookieToken(r, h.oauthCookieName())
 	pending := o.pendingFor(browser)
 	if pending == nil {
-		h.oauthErrorPage(w, 400, "This connection request expired", "Connection requests last ten minutes and work only in the browser where they started.")
+		if h.repeatDecision(w, r, browser) {
+			return
+		}
+		h.oauthErrorPage(w, 400, "This connection request expired", expiredRequestMessage)
 		return
 	}
 	session := cookieToken(r, h.sessionCookieName())
@@ -558,12 +643,18 @@ func (h *httpAdapter) oauthConsentSubmit(w http.ResponseWriter, r *http.Request)
 	switch r.PostForm.Get("decision") {
 	case "deny":
 		if !consume() {
+			if h.repeatDecision(w, r, browser) {
+				return
+			}
 			h.oauthErrorPage(w, 400, "This connection request expired", "Return to your app and connect again.")
 			return
 		}
 		clearCookie()
 		stateParams.Set("error", "access_denied")
 		stateParams.Set("error_description", "The user declined to connect.")
+		if location, ok := h.oauthLocation(pending.RedirectURI, stateParams); ok {
+			o.answer(browser, pending.ID, location)
+		}
 		h.oauthRedirect(w, r, pending.RedirectURI, stateParams)
 		return
 	case "approve":
@@ -629,11 +720,17 @@ func (h *httpAdapter) oauthConsentSubmit(w http.ResponseWriter, r *http.Request)
 		o.mu.Lock()
 		delete(o.codes, secretDigest(code))
 		o.mu.Unlock()
+		if h.repeatDecision(w, r, browser) {
+			return
+		}
 		h.oauthErrorPage(w, 400, "This connection request expired", "Your choices were saved. Return to your app and connect again.")
 		return
 	}
 	clearCookie()
 	stateParams.Set("code", code)
+	if location, ok := h.oauthLocation(pending.RedirectURI, stateParams); ok {
+		o.answer(browser, pending.ID, location)
+	}
 	h.oauthRedirect(w, r, pending.RedirectURI, stateParams)
 }
 
@@ -877,7 +974,7 @@ func (h *httpAdapter) oauthSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	browser := cookieToken(r, h.oauthCookieName())
 	pending := o.pendingFor(browser)
 	if pending == nil {
-		h.oauthErrorPage(w, 400, "This connection request expired", "Connection requests last ten minutes and work only in the browser where they started. Anything you created was saved.")
+		h.oauthErrorPage(w, 400, "This connection request expired", expiredRequestMessage+" Anything you created was saved.")
 		return
 	}
 	session := cookieToken(r, h.sessionCookieName())

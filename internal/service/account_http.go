@@ -559,7 +559,10 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 	// Continue an app connection that sent this browser to sign in. The pending
 	// request lives server-side; the browser only holds its random cookie.
-	if h.oauth != nil && h.oauth.pendingFor(cookieToken(r, h.oauthCookieName())) != nil {
+	if browser := cookieToken(r, h.oauthCookieName()); h.oauth != nil && h.oauth.renewPending(browser) {
+		// Signing in may have taken a while: the request gets its ten
+		// minutes again from here, and so does the browser's cookie.
+		http.SetCookie(w, &http.Cookie{Name: h.oauthCookieName(), Value: browser, Path: "/", MaxAge: int(pendingLifetime / time.Second), Expires: h.oauth.now().Add(pendingLifetime), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 		http.Redirect(w, r, h.basePath+"/oauth/consent", http.StatusSeeOther)
 		return
 	}

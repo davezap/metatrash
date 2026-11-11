@@ -340,9 +340,22 @@ func TestOAuthFlowAgainstDatabase(t *testing.T) {
 	if loc, _ := url.Parse(res.Header().Get("Location")); res.Code != 303 || loc.Query().Get("error") != "access_denied" {
 		t.Fatal("deny")
 	}
+	denied := res.Header().Get("Location")
+	// A second press within the minute goes where the first went (0.95.25):
+	// still declined, never approved.
+	if res := oauthCall(w.h, "POST", "/oauth/consent", url.Values{"csrf": {match[1]}, "decision": {"approve"}}, browser, session); res.Code != 303 || res.Header().Get("Location") != denied {
+		t.Fatalf("repeated decision: %d %s", res.Code, res.Header().Get("Location"))
+	}
+	// Another session's token doesn't count, and after the minute it's gone.
+	if res := oauthCall(w.h, "POST", "/oauth/consent", url.Values{"csrf": {match[1]}, "decision": {"approve"}}, browser, w.session(w.member)); res.Code != 400 {
+		t.Fatalf("repeat from another session: %d", res.Code)
+	}
+	realNow := w.h.oauth.now
+	w.h.oauth.now = func() time.Time { return realNow().Add(answeredLifetime + time.Second) }
 	if res := oauthCall(w.h, "POST", "/oauth/consent", url.Values{"csrf": {match[1]}, "decision": {"approve"}}, browser, session); res.Code != 400 {
 		t.Fatal("consumed request approved")
 	}
+	w.h.oauth.now = realNow
 	// Login continuation: an unauthenticated browser signs in and returns to consent.
 	res = oauthCall(w.h, "GET", authorizeURL(nil), nil)
 	browser = responseCookie(res, oauthCookie)
@@ -357,5 +370,30 @@ func TestOAuthFlowAgainstDatabase(t *testing.T) {
 	res = oauthCall(w.h, "POST", "/login/verify", url.Values{"code": {sent}, "csrf": {login.Value}}, login, browser)
 	if res.Code != 303 || res.Header().Get("Location") != "/oauth/consent" {
 		t.Fatalf("login did not continue to consent: %d %s", res.Code, res.Header().Get("Location"))
+	}
+}
+
+// Pressing Connect twice (a double click, or a slow page) sends the second
+// press to the app with the same answer, not to "expired" (0.95.25).
+func TestOAuthRepeatedConnectAgainstDatabase(t *testing.T) {
+	w := newOAuthWorld(t)
+	_, challenge := pkcePair(t)
+	res := oauthCall(w.h, "GET", authorizeURL(map[string]string{"code_challenge": challenge}), nil)
+	browser := responseCookie(res, oauthCookie)
+	session := w.session(w.owner)
+	page := oauthCall(w.h, "GET", "/oauth/consent", nil, browser, session)
+	match := csrfPattern.FindStringSubmatch(page.Body.String())
+	if match == nil {
+		t.Fatalf("consent page: %d %s", page.Code, page.Body)
+	}
+	form := url.Values{"csrf": {match[1]}, "decision": {"approve"}, "s-" + w.ownedID: {"read_only"}}
+	first := oauthCall(w.h, "POST", "/oauth/consent", form, browser, session)
+	second := oauthCall(w.h, "POST", "/oauth/consent", form, browser, session)
+	if first.Code != 303 || second.Code != 303 || first.Header().Get("Location") == "" || second.Header().Get("Location") != first.Header().Get("Location") {
+		t.Fatalf("repeated Connect: %d %q, then %d %q", first.Code, first.Header().Get("Location"), second.Code, second.Header().Get("Location"))
+	}
+	// Opening the consent page again still says the request is over.
+	if page := oauthCall(w.h, "GET", "/oauth/consent", nil, browser, session); page.Code != 400 || !strings.Contains(page.Body.String(), "end if Metatrash restarts") {
+		t.Fatalf("consent page after connecting: %d", page.Code)
 	}
 }

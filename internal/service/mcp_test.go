@@ -154,8 +154,18 @@ func TestMCPSmoke(t *testing.T) {
 	call("append", "", map[string]any{"space": "public", "path": "moved.txt", "text": "first", "line": 1}, "")
 	call("append", "", map[string]any{"space": "public", "path": "moved.txt", "text": "x", "line": 9}, "invalid_request")
 	call("append", "", map[string]any{"space": "public", "path": "absent.txt", "text": "x", "line": 1}, "not_found")
-	if made := call("append", "", map[string]any{"space": "public", "path": "log.txt", "text": "one\n"}, ""); made["created"] != true {
+	made := call("append", "", map[string]any{"space": "public", "path": "log.txt", "text": "one\n"}, "")
+	if made["created"] != true {
 		t.Fatal(made)
+	}
+	// A guarded append (ifBlob, 0.95.25) adds once; resending it is refused.
+	guard := map[string]any{"space": "public", "path": "log.txt", "text": "two\n", "ifBlob": made["file"].(map[string]any)["blob"]}
+	call("append", "", guard, "")
+	call("append", "", guard, "conflict")
+	call("append", "", map[string]any{"space": "public", "path": "absent.txt", "text": "x", "ifBlob": blob}, "conflict")
+	call("append", "", map[string]any{"space": "public", "path": "log.txt", "text": "x", "ifBlob": "nope"}, "invalid_request")
+	if log := call("read", "", map[string]any{"space": "public", "path": "log.txt"}, ""); log["file"].(map[string]any)["text"] != "one\ntwo\n" {
+		t.Fatal(log)
 	}
 	changed := call("read", "", map[string]any{"space": "public", "path": "moved.txt", "ifBlob": blob}, "")
 	if changed["unchanged"] != nil || changed["file"].(map[string]any)["text"] != "first\nhi\nlast" {

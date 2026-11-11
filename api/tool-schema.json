@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.18.1",
+  "schemaVersion": "0.19.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.94.2"},
@@ -652,7 +652,7 @@
     },
     {
       "name": "append",
-      "description": "Add text to a file without reading it: at the end (creating the file if absent), or before a line with line (1 = top), e.g. a log entry, a note, or the newest entry under a changelog's title. The text starts on a line of its own. No ifInState needed. Same rules as write otherwise.",
+      "description": "Add text to a file without reading it: at the end (creating the file if absent), or before a line with line (1 = top), e.g. a log entry, a note, or the newest entry under a changelog's title. The text starts on a line of its own. No ifInState needed. To retry safely, pass ifBlob (the file's blob from your last result): nothing is added if the file changed since. Same rules as write otherwise.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -683,6 +683,11 @@
             "type": "integer",
             "minimum": 1,
             "description": "Insert before this line (1 = top); leave out to add at the end."
+          },
+          "ifBlob": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Add only if the file still has this blob (conflict otherwise), so a resent append can't add twice."
           }
         },
         "required": [
@@ -1546,7 +1551,8 @@
       "body": [
         "path",
         "text",
-        "line"
+        "line",
+        "ifBlob"
       ]
     },
     "list": {

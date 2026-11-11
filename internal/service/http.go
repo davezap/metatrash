@@ -731,7 +731,7 @@ func parseBody(b []byte, op string, in *Input) error {
 	if op == "edit" {
 		allowed["path"], allowed["edits"] = true, true
 	} else if op == "append" {
-		allowed = map[string]bool{"path": true, "text": true, "line": true}
+		allowed = map[string]bool{"path": true, "text": true, "line": true, "ifBlob": true}
 	} else if op == "write" {
 		allowed["text"], allowed["createOnly"] = true, true
 	} else if op == "move" {
@@ -776,14 +776,15 @@ func parseBody(b []byte, op string, in *Input) error {
 	}
 	if op == "append" {
 		var body struct {
-			Path string  `json:"path"`
-			Text *string `json:"text"`
-			Line int     `json:"line"`
+			Path   string  `json:"path"`
+			Text   *string `json:"text"`
+			Line   int     `json:"line"`
+			IfBlob string  `json:"ifBlob"`
 		}
 		if err := strictJSON(b, &body); err != nil {
-			return invalid(`Send {"path", "text", "line"?}.`)
+			return invalid(`Send {"path", "text", "line"?, "ifBlob"?}.`)
 		}
-		in.Path, in.Text, in.Line, in.Strict = body.Path, body.Text, body.Line, false
+		in.Path, in.Text, in.Line, in.IfBlob, in.Strict = body.Path, body.Text, body.Line, body.IfBlob, false
 		return nil
 	}
 	if err := strictJSON(b, in); err != nil {

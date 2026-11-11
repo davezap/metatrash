@@ -169,11 +169,22 @@ func checkAppendInput(in Input) error {
 
 // appendText adds text to a file without the agent reading it: at the end,
 // or before in.Line. Without a line it creates a missing file. It runs on
-// the write queue against the head, so it needs no ifInState.
+// the write queue against the head, so it needs no ifInState; ifBlob makes
+// it add only to the file version the caller last saw.
 func (s *Service) appendText(ctx context.Context, r *repository, space string, in Input) (any, error) {
 	head, files, err := r.snapshot(ctx, "")
 	if err != nil {
 		return nil, err
+	}
+	if in.IfBlob != "" {
+		// A guarded append (0.95.25) adds only to the version the caller
+		// last saw, so resending one after a lost answer can't add twice.
+		if !hashPattern.MatchString(in.IfBlob) {
+			return nil, invalid("ifBlob must be a blob hash from an earlier result.")
+		}
+		if f, ok := files[in.Path]; !ok || f.Blob != in.IfBlob {
+			return nil, &Error{Status: 409, Code: "conflict", CurrentState: head, Message: fmt.Sprintf("%s changed since blob %s, so nothing was added. Read it again: if your text is already there, don't append it twice.", in.Path, in.IfBlob)}
+		}
 	}
 	text := ""
 	if f, ok := files[in.Path]; ok {

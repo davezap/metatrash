@@ -130,6 +130,15 @@ func TestSpaceGateAgainstDatabase(t *testing.T) {
 	wantCode(t, siteCall(w, "GET", site+"/file?path=AGENTS.md", "", adminSession, ""), 403, "microsoft_sign_in_needed")
 	wantCode(t, siteCall(w, "GET", "/spaces/"+name+"/AGENTS.md", "", memberSession, ""), 403, "microsoft_sign_in_needed")
 	wantCode(t, siteCall(w, "GET", "/spaces/"+name+"/?export", "", memberSession, ""), 403, "microsoft_sign_in_needed")
+	// A person opening the space in the browser gets a page saying why, with
+	// the way to fix it (0.95.25); the file itself still answers JSON.
+	page := siteCall(w, "GET", "/spaces/"+name+"/AGENTS.md", "", memberSession, "", "Sec-Fetch-Mode", "navigate", "Accept", "text/html")
+	if body := page.Body.String(); page.Code != 403 || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") ||
+		!strings.Contains(body, "Sign in with Microsoft first.") || !strings.Contains(body, "/spaces/#settings/security") ||
+		!strings.Contains(body, `action="/logout"`) || strings.Contains(body, `"error"`) {
+		t.Fatalf("held-back page for a person: %d %s", page.Code, body)
+	}
+	wantCode(t, siteCall(w, "GET", "/spaces/"+name+"/AGENTS.md?raw", "", memberSession, "", "Sec-Fetch-Mode", "navigate"), 403, "microsoft_sign_in_needed")
 	w.tool(memberToken, "read", map[string]any{"space": name, "path": "AGENTS.md"}, "microsoft_sign_in_needed")
 	w.tool(adminToken, "read", map[string]any{"space": name, "path": "AGENTS.md"}, "microsoft_sign_in_needed")
 	if strings.Contains(jsonOf(w.tool(memberToken, "spaces", map[string]any{}, "")), name) {

@@ -373,3 +373,24 @@ func TestOAuthSyncClient(t *testing.T) {
 		t.Fatalf("foreign sync path accepted: %d", w.Code)
 	}
 }
+
+// Signing in to continue a connection gives the request its ten minutes
+// again (0.95.25), so a slow sign-in doesn't end it.
+func TestOAuthRenewPendingAfterSignIn(t *testing.T) {
+	o := newOAuthServer(oauthSettings{}, "https://metatrash.com")
+	now := time.Unix(1_800_000_000, 0)
+	o.now = func() time.Time { return now }
+	o.pending[secretDigest("browser")] = &oauthPending{ID: "p1", Expires: now.Add(pendingLifetime)}
+	now = now.Add(9 * time.Minute)
+	if !o.renewPending("browser") {
+		t.Fatal("pending request not renewed")
+	}
+	now = now.Add(9 * time.Minute)
+	if o.pendingFor("browser") == nil {
+		t.Fatal("renewed request expired early")
+	}
+	now = now.Add(2 * time.Minute)
+	if o.pendingFor("browser") != nil || o.renewPending("browser") || o.renewPending("") {
+		t.Fatal("expired or missing request renewed")
+	}
+}

@@ -20,14 +20,7 @@
 <div class="client"><span class="client-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><g class="icon-line"><path d="M9 7V3M15 7V3"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></g></svg></span><p><strong>{{.ClientName}}</strong> <span class="hint">({{.ClientHost}})</span> is asking to use Metatrash as <strong class="account-email">{{.Email}}</strong>.</p></div>
 {{if .Message}}<p class="problem" role="alert">{{.Message}}</p>{{end}}
 {{if .NewSpaceName}}<p class="note" role="status">Your space <strong>{{.NewSpaceName}}</strong> ({{.NewSpaceRef}}) is ready and selected below. Choose <strong>Connect</strong> to finish.</p>{{end}}
-{{if .Setup}}<section class="section"><h2>Create your first space</h2>
-<p class="hint">A private space is where {{.ClientName}} can keep notes and files for you. Only you can see it unless you invite someone.{{if .NeedUsername}} First choose a public username: it appears in your space addresses and cannot be changed.{{end}}</p>
-<form method="post" action="{{.BasePath}}/oauth/setup"><input type="hidden" name="csrf" value="{{.SetupCSRF}}">
-{{if .NeedUsername}}<label for="setup-username">Public username</label><input id="setup-username" name="username" type="text" minlength="3" maxlength="32" autocapitalize="none" spellcheck="false" autocomplete="username" value="{{.Username}}" required aria-describedby="{{if .UsernameError}}setup-username-error {{end}}setup-username-help"{{if .UsernameError}} aria-invalid="true" autofocus{{end}}>{{if .UsernameError}}<p id="setup-username-error" class="field-error" role="alert">{{.UsernameError}}</p>{{end}}<p id="setup-username-help" class="hint">3–32 letters or numbers, with single hyphens between them.</p>{{end}}
-<label for="setup-name">Space name</label><input id="setup-name" name="name" type="text" maxlength="120" value="{{.SpaceName}}" required aria-describedby="{{if .SpaceNameError}}setup-name-error {{end}}setup-name-help"{{if .SpaceNameError}} aria-invalid="true" autofocus{{end}}>{{if .SpaceNameError}}<p id="setup-name-error" class="field-error" role="alert">{{.SpaceNameError}}</p>{{end}}<p id="setup-name-help" class="hint">The address is made from the name, so “Project notes” becomes {{.AddressBase}}/project-notes. The address is permanent.</p>
-<div class="buttons"><button class="btn primary" type="submit">Create space</button></div></form>
-<p class="hint">Or skip this and connect below with just the public space{{if .Spaces}} and the spaces you have joined{{end}}. You can create a space later in Settings and add it with Change spaces.</p></section>{{end}}
-<form method="post" action="{{.BasePath}}/oauth/consent">
+<form id="consent-form" method="post" action="{{.BasePath}}/oauth/consent">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <section class="section"><h2>Choose spaces</h2>
 <p class="hint">The app can always use the public space, as anyone can. Choose which private spaces it may also use. Nothing is shared unless you choose it here.{{if not .WantWrite}} This app asked for read-only access.{{end}}</p>
@@ -35,13 +28,25 @@
 <select id="s-{{.ID}}" name="s-{{.ID}}"><option value="none"{{if eq .Choice "none"}} selected{{end}}>Not connected</option><option value="read_only"{{if eq .Choice "read_only"}} selected{{end}}>Read only</option>{{if .WriteAllowed}}<option value="read_write"{{if eq .Choice "read_write"}} selected{{end}}>Read and write</option>{{end}}</select>
 {{if not .WriteAllowed}}<p class="hint">{{if .Owned}}Read only because the app asked for read-only access.{{else}}Read only: set by the space owner{{if not $.WantWrite}} or requested by the app{{end}}.{{end}}</p>{{end}}</li>{{else}}<li class="empty">You have no private spaces yet. You can still connect the public space.</li>{{end}}</ul>
 <p class="hint">You can add or remove spaces later with Change spaces in Settings → Services, without reconnecting, or revoke this connection there. A space owner can reduce or remove access, which applies immediately.</p></section>
-<div class="buttons decision"><button class="btn primary" type="submit" name="decision" value="approve">Connect</button><button class="btn" type="submit" name="decision" value="deny">Cancel</button></div>
 </form>
+{{if .Setup}}<section class="section"><h2>Create your first space</h2>
+<p class="hint">A private space is where {{.ClientName}} can keep notes and files for you. Only you can see it unless you invite someone.{{if .NeedUsername}} First choose a public username: it appears in your space addresses and cannot be changed.{{end}}</p>
+<form method="post" action="{{.BasePath}}/oauth/setup"><input type="hidden" name="csrf" value="{{.SetupCSRF}}">
+{{if .NeedUsername}}<label for="setup-username">Public username</label><input id="setup-username" name="username" type="text" minlength="3" maxlength="32" autocapitalize="none" spellcheck="false" autocomplete="username" value="{{.Username}}" required aria-describedby="{{if .UsernameError}}setup-username-error {{end}}setup-username-help"{{if .UsernameError}} aria-invalid="true" autofocus{{end}}>{{if .UsernameError}}<p id="setup-username-error" class="field-error" role="alert">{{.UsernameError}}</p>{{end}}<p id="setup-username-help" class="hint">3–32 letters or numbers, with single hyphens between them.</p>{{end}}
+<label for="setup-name">Space name</label><input id="setup-name" name="name" type="text" maxlength="120" value="{{.SpaceName}}" required aria-describedby="{{if .SpaceNameError}}setup-name-error {{end}}setup-name-help"{{if .SpaceNameError}} aria-invalid="true" autofocus{{end}}>{{if .SpaceNameError}}<p id="setup-name-error" class="field-error" role="alert">{{.SpaceNameError}}</p>{{end}}<p id="setup-name-help" class="hint">The address is made from the name, so “Project notes” becomes {{.AddressBase}}/project-notes. The address is permanent.</p>
+<div class="buttons"><button class="btn primary" type="submit">Create space</button></div></form>
+<p class="hint">Or skip this and choose Connect with just the public space{{if .Spaces}} and the spaces you have joined{{end}}. You can create a space later in Settings and add it with Change spaces.</p></section>{{end}}
+<div class="buttons decision"><button class="btn primary" type="submit" form="consent-form" name="decision" value="approve">Connect</button><button class="btn" type="submit" form="consent-form" name="decision" value="deny">Cancel</button></div>
 <form class="signed-in-as" method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.LogoutCSRF}}"><p class="hint">Not {{.Email}}? <button class="link-button" type="submit">Sign out</button> and sign in again to continue.</p></form>
+{{else if eq .Mode "notice"}}
+<div class="auth-head"><p class="section-label">Metatrash</p><h1>{{.Title}}</h1></div>
+<p class="problem" role="alert">{{.Message}}</p>
+<div class="buttons"><a class="btn primary" href="{{.BasePath}}/spaces/#settings/security">Sign-in settings</a><a class="btn" href="{{.BasePath}}/spaces/">Your spaces</a></div>
+{{if .LogoutCSRF}}<form class="signed-in-as" method="post" action="{{.BasePath}}/logout"><input type="hidden" name="csrf" value="{{.LogoutCSRF}}"><p class="hint">Signed in as <strong class="account-email">{{.Email}}</strong>. <button class="link-button" type="submit">Sign out</button> to sign in another way.</p></form>{{end}}
 {{else}}
 <div class="auth-head"><p class="section-label">Connect an app</p><h1>{{.Title}}</h1></div>
 <p class="problem" role="alert">{{.Message}}</p>
-<p class="hint">Return to the app you were connecting and try again.</p>
+<p class="hint">Nothing was connected. Go back to the app you were connecting (Claude, ChatGPT or another) and connect again from there: that starts a new request.</p>
 {{end}}
 </main>
 <footer class="auth-footer"><a href="{{.BasePath}}/spaces/#settings">Settings</a><a href="{{.BasePath}}/">Home</a><a href="{{.BasePath}}{{if .Legal}}/docs/about.md{{else}}/about{{end}}">About</a>{{if .Legal}}<a href="{{.BasePath}}/docs/legal/privacy.md">Privacy</a><a href="{{.BasePath}}/docs/legal/terms.md">Terms</a><a href="{{.BasePath}}/docs/legal/refunds.md">Refunds</a>{{end}}</footer>

@@ -35,7 +35,7 @@ var runnerArgText = map[string]map[string]string{
 	"search":     {"query": "", "prefix": "Subfolder ending in /; empty for the whole folder.", "regex": "", "ignoreCase": "", "context": "Lines around each match.", "limit": "", "path": "A web/… reference to search instead of the folder."},
 	"write":      {"path": "", "text": "", "ifInState": "State from a read, list or search.", "createOnly": "Fail if the file exists."},
 	"edit":       {"path": "", "edits": "", "ifInState": "Optional: refuse if the file changed since."},
-	"append":     {"path": "", "text": "", "line": "Insert before this line (1 = top); leave out for the end."},
+	"append":     {"path": "", "text": "", "line": "Insert before this line (1 = top); leave out for the end.", "ifBlob": "Add only if the file still has this blob."},
 	"list":       {"prefix": "Subfolder ending in /; empty for the whole folder.", "since": "An earlier state: list only what changed since.", "limit": "", "cursor": "nextCursor from the previous page."},
 	"move":       {"from": "", "to": "", "ifInState": "State from a read, list or search."},
 	"delete":     {"path": "", "ifInState": "State from a read, list or search."},

@@ -31,6 +31,10 @@ func TestOAuthFirstSpaceSetupAgainstDatabase(t *testing.T) {
 	if !strings.Contains(body, "Create your first space") || !strings.Contains(body, `name="username"`) || !strings.Contains(body, "/spaces/your-username/project-notes") {
 		t.Fatalf("setup step missing: %s", body)
 	}
+	// The setup step sits below the space list, above Connect (0.95.25).
+	if choose, create, connect := strings.Index(body, "Choose spaces"), strings.Index(body, "Create your first space"), strings.Index(body, `value="approve"`); !(choose < create && create < connect) {
+		t.Fatalf("consent page order: choose %d, create %d, connect %d", choose, create, connect)
+	}
 	setupCSRF := w.h.setupCSRF(session.Value, w.h.oauth.pendingFor(browser.Value))
 	setup := func(fields url.Values) *httptest.ResponseRecorder {
 		if !fields.Has("csrf") {
