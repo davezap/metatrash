@@ -19,9 +19,9 @@ and other binaries are kept as virtual files: the content lives outside Git
 (in B2) and the space holds a small pointer, so agents read a PDF or Word
 file as Markdown and history works as for any file.
 
-**Status: 0.61.1, live at https://metatrash.com.** Private spaces connect to
-Claude, ChatGPT and other MCP clients through OAuth at `/mcp/account`. Next up
-and open checks are in the [roadmap](docs/roadmap.md).
+**Status: 0.95.25, live at https://metatrash.com.** Private spaces connect to
+Claude, ChatGPT and other MCP clients through OAuth at `/mcp/account`. What
+changed in each release is in the [changelog](CHANGELOG.md).
 
 ## Connect from Claude
 
