@@ -5,6 +5,7 @@ package extension
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -27,6 +28,22 @@ type Host interface {
 	AccountUsage(context.Context, string) (int64, error)
 	Rate(string, int, int) error
 }
+
+// Mailer is implemented by the Host a module is given when the service can
+// send email (Core 0.95.27): a module type-asserts its Host to it. SendMail
+// sends one plain-text message through the service's own mail settings
+// (accounts.json smtp*), the ones sign-in codes use. subject must be
+// printable ASCII; body is UTF-8. An error wrapping ErrMailRejected means
+// the address or the message was refused for good (an invalid or reserved
+// address, or a 5xx answer from the mail server): don't retry it. Any other
+// error may be temporary.
+type Mailer interface {
+	SendMail(ctx context.Context, to, subject, body string) error
+}
+
+// ErrMailRejected marks a send that will never succeed (see Mailer).
+var ErrMailRejected = errors.New("mail rejected")
+
 type AssetEntry struct {
 	Entry string
 	CSS   []string

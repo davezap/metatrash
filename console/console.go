@@ -15,7 +15,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"metatrash.com/metatrash"
 	"metatrash.com/metatrash/internal/service"
 )
 
@@ -42,56 +41,17 @@ var commandUsage = map[string]string{
 	"spaces restore":    "spaces restore <owner/slug|id>",
 }
 
-const usage = `metatrash %s
-
-Usage:
-  metatrash [server flags]      start the REST/MCP service (metatrash -h lists the flags)
-  metatrash <command> [flags]
-
-Commands:
-  help                          show this help
-  version                       print the version
-  keygen                        print a new space key and its digest as JSON
-  accounts-migrate              create or import the account database (docs/deployment.md)
-  check                         run the service's startup checks without starting it:
-                                config files, database schema and grants, space repositories
-  users list                    list accounts with their spaces and sign-in methods
-  users show <who>              one account in full: passkeys, spaces, memberships,
-                                invitations, connected apps, GitHub
-  users email-login on <who>    turn sign-in by emailed code back on (or off) and email
-                                the account a notice (-no-notice to skip it)
-  users set-limit <who> <n>     set how many private spaces the account may own
-  users rename <who> <name>     change the account's username; addresses with the old
-                                name stop working (emails a notice; -no-notice skips it)
-  users usage [<who>]           storage per account, largest first: the spaces it owns
-                                (Git with history, plus virtual files), as last measured
-  spaces list                   list owned spaces with owner, visibility and members
-  spaces usage [<who>]          storage per owned space, largest first (one account's
-                                spaces with <who>)
-  spaces export <space> [FILE]  write the space as it is now to a zip (- for stdout;
-                                default <owner>-<slug>-<date>-<state>.zip here)
-  spaces export -all DIR        export every space into DIR, for backups
-  spaces restore <space>        bring back a space its owner deleted in the last 30
-                                days (restart the service afterwards)
-
-<who> is an email address, username or user ID. list, show and usage take -json.
-<space> is owner/slug or a space ID, or a spaces.json name such as public.
-
-Account commands read the same accounts.json and account database as the
-service: -accounts-config, else METATRASH_ACCOUNTS_CONFIG, else
-` + defaultAccountsConfig + `. check also reads -config (/etc/metatrash/spaces.json),
--keys (/etc/metatrash/keys.json) and -data (/var/lib/metatrash); spaces export
-reads -data. Run them as
-the service user, which the mt shortcut does: mt users list
-`
-
-func printUsage(w io.Writer) { fmt.Fprintf(w, usage, metatrash.Version) }
-
 // runCommand runs a console command; the service starts only when the first
 // argument is a flag or absent.
 func Run(name string, args []string) error {
+	if name != "help" && len(args) > 0 && IsHelp(args[0]) && HasHelp(name) {
+		return printCommandHelp(os.Stdout, name)
+	}
 	switch name {
 	case "help":
+		if len(args) > 0 {
+			return printCommandHelp(os.Stdout, args[0])
+		}
 		printUsage(os.Stdout)
 		return nil
 	case "version":
@@ -157,8 +117,8 @@ func parseArgs(flags *flag.FlagSet, args []string) ([]string, error) {
 
 func usersCommand(args []string) error {
 	if len(args) == 0 {
-		printUsage(os.Stderr)
-		return fmt.Errorf("users needs a subcommand: list, show, usage, email-login, set-limit, rename, comp or uncomp")
+		printCommandHelp(os.Stderr, "users")
+		return fmt.Errorf("users needs a subcommand")
 	}
 	name := "users " + args[0]
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -184,7 +144,7 @@ func usersCommand(args []string) error {
 		noNotice = flags.Bool("no-notice", false, "Do not email the account a notice")
 		want = 2
 	default:
-		printUsage(os.Stderr)
+		printCommandHelp(os.Stderr, "users")
 		return fmt.Errorf("unknown command %q", name)
 	}
 	rest, err := parseArgs(flags, args[1:])
@@ -315,8 +275,8 @@ func spacesCommand(args []string) error {
 		return spacesUsage(args[1:])
 	}
 	if len(args) == 0 || args[0] != "list" {
-		printUsage(os.Stderr)
-		return fmt.Errorf("spaces needs a subcommand: spaces list, spaces usage, spaces export or spaces restore")
+		printCommandHelp(os.Stderr, "spaces")
+		return fmt.Errorf("spaces needs a subcommand")
 	}
 	flags := flag.NewFlagSet("spaces list", flag.ContinueOnError)
 	accountsConfig := accountsConfigFlag(flags)

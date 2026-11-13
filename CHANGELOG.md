@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.95.27 - Extensions can send email; shorter console help (2026-11-13)
+
+- A module's `extension.Host` now also implements `extension.Mailer`: `SendMail(ctx, to, subject, body)` sends one plain-text message through the service's own mail settings (accounts.json `smtp*`), the ones sign-in codes use. A module type-asserts its Host to `extension.Mailer`. The subject must be printable ASCII (at most 200 characters); the address is normalised as sign-in addresses are. An error wrapping the new `extension.ErrMailRejected` means the send will never succeed (an invalid or reserved `.invalid` address, a bad subject, or a 5xx answer from the mail server), so an outbox can stop retrying it; any other error may be temporary. Company's launch emails (Company 0.96.38) use it. `internal/service/extensions.go`.
+- **Console help is shorter and complete.** `mt help` now lists each top-level command on one line with its subcommands (`users  accounts: list, show, usage, …`), and `mt <command> help` (or `mt help <command>`, `-h`, `--help`) prints that command in full with its arguments; `mt help all` prints every command in full. `mt users` or `mt spaces` without a subcommand shows that command's help instead of everything. A build that adds its own commands registers them with the new `console.AddHelp(console.HelpGroup{…})` (a group with an existing name, such as `users`, adds its subcommands to it) and `console.AddHelpNote`, so Company's billing, launch, orgs and `users comp|uncomp` appear in the same list. `console/help.go`.
+- New tests `TestExtensionSendMail`, `TestHelpListsGroupsAndAddedCommands` and `TestEveryCommandHasHelp`. No schema, grants, configuration, tool schema or dependency changes. See docs/release-0.95.27.md.
+
 ## 0.95.26 - Billing gates: extensions can refuse writes, new spaces and new accounts (2026-11-13)
 
 - Three new extension hooks, for Company billing (release 1 of the seats and billing plan). Each is asked at the one place the thing happens, so every path is covered. A `*server.Error` refusal is answered as it is (say what to do); any other error is logged and refuses as 503 `unavailable`. Without an extension that sets them, nothing changes. `internal/service/billing_gates.go`.

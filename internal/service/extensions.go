@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"mime"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"regexp"
 	"strings"
@@ -40,6 +42,33 @@ func (h extensionHost) EndOtherSessions(id, token string) (int, error) {
 func (h extensionHost) AccountUsage(ctx context.Context, id string) (int64, error) {
 	u, e := h.s.accountStorage(ctx, id)
 	return u.Total, e
+}
+
+// SendMail is extension.Mailer (0.95.27): one plain-text message through the
+// service's mail settings, for extensions such as Company's launch emails.
+func (h extensionHost) SendMail(ctx context.Context, to, subject, body string) error {
+	a := h.s.accounts
+	if a == nil || a.sendNotice == nil {
+		return fmt.Errorf("mail is not configured")
+	}
+	if subject == "" || len(subject) > 200 {
+		return fmt.Errorf("%w: invalid subject", extension.ErrMailRejected)
+	}
+	for _, c := range subject {
+		if c < 32 || c > 126 {
+			return fmt.Errorf("%w: subject must be printable ASCII", extension.ErrMailRejected)
+		}
+	}
+	email, err := normalizeEmail(to)
+	if err != nil || undeliverable(email) {
+		return fmt.Errorf("%w: invalid address", extension.ErrMailRejected)
+	}
+	err = a.sendNotice(ctx, email, subject, body)
+	var answer *textproto.Error
+	if errors.As(err, &answer) && answer.Code >= 500 {
+		return fmt.Errorf("%w: the mail server answered %d", extension.ErrMailRejected, answer.Code)
+	}
+	return err
 }
 func (h extensionHost) Rate(key string, n, seconds int) error {
 	return h.s.rates.take(allowance{key, n, seconds})
