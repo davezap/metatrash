@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"metatrash.com/metatrash/extension"
@@ -381,6 +382,9 @@ func (a *accounts) verify(ctx context.Context, browser, code string) (token, ema
 	existed, lookupErr := a.store.Exists(ctx, email)
 	user, err := a.store.FindOrCreate(ctx, email)
 	created = err == nil && lookupErr == nil && !existed
+	if p := (*Error)(nil); errors.As(err, &p) {
+		return "", email, false, p // refused by an extension (AdmitAccount)
+	}
 	if err != nil {
 		return "", email, false, problem(503, "account_unavailable", "We could not load or save your account. Please request a new code later.")
 	}

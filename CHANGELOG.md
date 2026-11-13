@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.95.26 - Billing gates: extensions can refuse writes, new spaces and new accounts (2026-11-13)
+
+- Three new extension hooks, for Company billing (release 1 of the seats and billing plan). Each is asked at the one place the thing happens, so every path is covered. A `*server.Error` refusal is answered as it is (say what to do); any other error is logged and refuses as 503 `unavailable`. Without an extension that sets them, nothing changes. `internal/service/billing_gates.go`.
+  - `WriteGate(ctx, extension.Write)` before a change is committed to an account-owned space (`commitFilesLocked`, after the new objects are staged): the website, apps (MCP and REST), Sync, folder actions, GitHub folders and refreshed virtual files. `extension.Write` gives `ActorID` (the person, or the account a folder action runs for; empty for a space key or the service itself), `OwnerID`, `SpaceID`, `Bytes` (what the change's new Git objects take up) and `OnlyRemoves` (the change only deletes files). It runs with the space's write lock held, so it must answer quickly. Virtual file bytes (B2) are not included yet.
+  - `SpaceCreateGate(ctx, userID)` before a space is created (`createOwnedSpace`: the website and the Connect page).
+  - `AdmitAccount(ctx, userID, email)` before a new account is made at a first sign-in with an emailed code (`FindOrCreate`, under the registration lock, with the ID the account will have). A refusal makes no account and is shown on the sign-in page; existing accounts are never asked.
+- Folder actions (their `runner.md` entry and their tools), GitHub auto-pull and virtual file refreshes now record the account they act for (`withActor`), which `WriteGate` sees as `ActorID`; signed-in requests use their identity.
+- New tests `TestActorOf`, `TestOnlyRemoves`, `TestGateAnswer` and `TestBillingGatesAgainstDatabase`. No schema, grants, configuration, tool schema or dependency changes. See docs/release-0.95.26.md.
+
 ## 0.95.25 - A page for held-back spaces, a tidier Connect page, repeated Connect presses, and a guarded append (2026-11-11)
 
 - **Held-back spaces in the browser:** a person opening a space an extension holds back (`SpaceGate`, for example a Company organisation pinned to Microsoft tenants) now gets a page in the sign-in look instead of the JSON error: the extension's message, **Sign-in settings** (`/spaces/#settings/security`), **Your spaces**, and a Sign out link to sign in another way. Only page navigations get it (`Sec-Fetch-Mode: navigate`, or an HTML `Accept` without that header); `?raw`, `?format=md`, `?export`, scripts and apps still get the JSON with its code. Same status code (403). `sendGateRefusal` and `wantsPage` in `owned_space_http.go`; the page is the `notice` mode of `web/oauth.html`.

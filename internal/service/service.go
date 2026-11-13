@@ -33,6 +33,7 @@ type Service struct {
 	configurationFrozen bool
 	modules             []extension.Module
 	extensions          []extension.Hooks
+	gates               billingGates // extensions' billing hooks (billing_gates.go)
 	extensionCancel     context.CancelFunc
 	frontend            *frontendBundle
 	ownedMu             sync.RWMutex

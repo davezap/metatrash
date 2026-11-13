@@ -43,6 +43,9 @@ type accountDatabase struct {
 	// gate asks the extensions whether an account may use an owner's
 	// spaces now (extension.Hooks.SpaceGate); nil when none asks.
 	gate func(context.Context, string, string) error
+	// admit asks the extensions whether a new account may be made
+	// (extension.Hooks.AdmitAccount); nil when none asks.
+	admit func(ctx context.Context, userID, email string) error
 }
 
 func readLimitedFile(path string, limit int64) ([]byte, error) {
@@ -300,6 +303,11 @@ func (s *accountDatabase) FindOrCreate(ctx context.Context, email string) (userA
 	}
 	id, err := randomHex(16)
 	if err != nil {
+		return userAccount{}, err
+	}
+	// Asked under the registration lock, so extensions counting places
+	// see one new account at a time.
+	if err := s.checkAdmit(ctx, id, email); err != nil {
 		return userAccount{}, err
 	}
 	user = userAccount{ID: id, Email: email, CreatedAt: time.Now().UTC(), MaxPrivateSpaces: 1}

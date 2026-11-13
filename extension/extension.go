@@ -84,5 +84,34 @@ type Hooks struct {
 	// stay readable by everyone. Company organisations use it to require a
 	// recent Microsoft sign-in from their tenants.
 	SpaceGate func(ctx context.Context, userID, ownerID string) error
+	// WriteGate is asked before a change is committed to an account-owned
+	// space, whoever makes it: the website, apps and Sync, folder actions,
+	// GitHub folders and refreshed virtual files. nil lets the write go on;
+	// an error refuses it, shown as SpaceGate's are. Company billing uses it
+	// for memberships and storage allowances.
+	WriteGate func(ctx context.Context, w Write) error
+	// SpaceCreateGate is asked before userID creates a space of its own.
+	// An error refuses, shown as SpaceGate's are.
+	SpaceCreateGate func(ctx context.Context, userID string) error
+	// AdmitAccount is asked before a new account is made for email (the
+	// first sign-in with an emailed code), with the ID it will have. An
+	// error refuses the sign-in, shown as SpaceGate's are. Existing accounts
+	// never ask. Company billing uses it for the controlled launch.
+	AdmitAccount func(ctx context.Context, userID, email string) error
+}
+
+// Write describes a change about to be committed to an owned space.
+type Write struct {
+	// ActorID is the account making the change: the signed-in person, or
+	// the account a folder action runs for. Empty for a space key or the
+	// service itself.
+	ActorID string
+	OwnerID string
+	SpaceID string
+	// Bytes is what the change's new Git objects take up. Even a change
+	// that only removes files adds a few hundred bytes (its commit).
+	Bytes int64
+	// OnlyRemoves is true when the change deletes files and adds nothing.
+	OnlyRemoves bool
 }
 type Module func(Host) (Hooks, error)

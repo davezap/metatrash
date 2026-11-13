@@ -256,6 +256,8 @@ func (s *Service) startExtensions() (err error) {
 	}
 	s.ownedDB.actingFor = s.actingOwnersFunc()
 	s.ownedDB.gate = s.spaceGateFunc()
+	s.gates = s.collectBillingGates()
+	s.ownedDB.admit = s.admitAccountFunc()
 	return nil
 }
 

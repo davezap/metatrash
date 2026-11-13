@@ -349,6 +349,7 @@ func (a *agentRunner) refreshFile(ctx context.Context, r *repository, fileID str
 	}
 	owner := a.s.usernameOf(ctx, r.owner)
 	ctx = withAuthor(ctx, func() changeAuthor { return changeAuthor{Name: owner, App: refreshApp, Kind: "agent"} })
+	ctx = withActor(ctx, a.s.repositoryOwner(r))
 	_, err = a.s.putVirtual(ctx, r, r.id, path, state, body, media, f.Virtual.Source, f.Virtual.Refresh)
 	return err == nil, err
 }

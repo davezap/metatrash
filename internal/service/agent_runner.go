@@ -720,6 +720,7 @@ func (a *agentRunner) record(j agentJob, out jobOutcome) {
 	ctx = context.WithValue(ctx, runnerWriteKey{}, true)
 	name := a.ownerName(ctx, r)
 	ctx = withAuthor(ctx, func() changeAuthor { return changeAuthor{Name: name, App: runnerApp, Kind: "agent"} })
+	ctx = withActor(ctx, a.s.repositoryOwner(r))
 	text := runnerEntry(j, out, a.zoneOf(ctx, j.SpaceID), strings.TrimPrefix(j.File, j.Folder))
 	if _, err := a.s.dispatchRepository(ctx, r, j.SpaceID, "append", Input{Path: j.Folder + runnerLogName, Text: &text}); err != nil {
 		log.Printf("agent runner: job %s: %s not written: %v", j.ID, j.Folder+runnerLogName, err)
@@ -915,6 +916,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	toolCtx := context.WithValue(ctx, runnerWriteKey{}, true)
 	toolCtx = context.WithValue(toolCtx, runnerJobKey{}, &runnerJobContext{folder: j.Folder, action: j.Action, payerID: payer.userID, contributor: payer.agentID != "", submit: slices.Contains(action.Tools, "submit")})
 	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: payerName, App: m.app, Kind: "agent"} })
+	toolCtx = withActor(toolCtx, payer.userID)
 	cache := m.provider == "anthropic"
 	systemBlock := contentBlock{Type: "text", Text: system}
 	if cache {

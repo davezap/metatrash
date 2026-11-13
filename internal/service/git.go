@@ -49,6 +49,10 @@ type repository struct {
 	// committed, when set, hears of every commit (old and new state), so
 	// folder actions can queue jobs (Service.agentCommitted).
 	committed func(ctx context.Context, old, state string)
+	// writeGate, when set, may refuse a change before it is committed
+	// (owned spaces, billing_gates.go): what its new objects take up, and
+	// whether it only removes files.
+	writeGate func(ctx context.Context, bytes int64, onlyRemoves bool) error
 	// usage is what the space takes up (owned spaces, storage.go).
 	usage spaceUsage
 	quota repositoryBytes
@@ -412,6 +416,11 @@ func (r *repository) commitFilesLocked(ctx context.Context, old string, files ma
 	if err != nil {
 		return "", err
 	}
+	if r.writeGate != nil {
+		if err := r.writeGate(ctx, stageSize, onlyRemoves(texts, service, changes)); err != nil {
+			return "", err
+		}
+	}
 	repoSize, err := r.admitRepositoryBytes(stageSize)
 	if err != nil {
 		return "", err
@@ -599,4 +608,17 @@ func provision(ctx context.Context, path string, limits Storage, rootAgents []by
 		return nil, err
 	}
 	return r, nil
+}
+
+// onlyRemoves reports whether a change deletes files and adds nothing.
+func onlyRemoves(texts map[string]string, service map[string][]byte, changes []commitChange) bool {
+	if len(texts) != 0 || len(service) != 0 || len(changes) == 0 {
+		return false
+	}
+	for _, c := range changes {
+		if c.operation != "delete" {
+			return false
+		}
+	}
+	return true
 }

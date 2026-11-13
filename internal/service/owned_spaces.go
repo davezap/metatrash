@@ -220,6 +220,9 @@ func (s *Service) createOwnedSpace(ctx context.Context, ownerID, name, slug stri
 	if !idPattern.MatchString(ownerID) || s.ownedDB == nil {
 		return ownedSpace{}, fmt.Errorf("owned spaces unavailable")
 	}
+	if err := s.checkSpaceCreate(ctx, ownerID); err != nil {
+		return ownedSpace{}, err
+	}
 	id, err := randomHex(16)
 	if err != nil {
 		return ownedSpace{}, err
@@ -297,6 +300,9 @@ func (s *Service) prepareOwnedSpace(ctx context.Context, space ownedSpace) error
 		repo.committed = func(ctx context.Context, old, state string) {
 			s.storageChanged(repo)
 			s.agentCommitted(ctx, repo, old, state)
+		}
+		repo.writeGate = func(ctx context.Context, bytes int64, onlyRemoves bool) error {
+			return s.checkWrite(ctx, repo, bytes, onlyRemoves)
 		}
 		if space.State == "provisioning" {
 			result, err := s.ownedDB.db.ExecContext(ctx, "UPDATE metatrash_spaces SET provisioning_state = 'ready' WHERE space_id = ? AND owner_user_id = ? AND provisioning_state = 'provisioning'", space.ID, space.OwnerID)

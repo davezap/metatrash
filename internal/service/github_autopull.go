@@ -178,8 +178,10 @@ func (s *Service) runAutoPull(r *repository, folder string) {
 	if s.ownedRepository(r.id) != r {
 		return // the space was deleted meanwhile
 	}
-	owner := s.usernameOf(ctx, s.repositoryOwner(r))
+	ownerID := s.repositoryOwner(r)
+	owner := s.usernameOf(ctx, ownerID)
 	ctx = withAuthor(ctx, func() changeAuthor { return changeAuthor{Name: owner, App: autoPullApp, Kind: "agent"} })
+	ctx = withActor(ctx, ownerID)
 	value, err := s.pull(ctx, r, r.id, folder)
 	if err != nil {
 		log.Printf("github auto-pull: space %s %s: %v", r.id, folder, errorText(err))
