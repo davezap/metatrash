@@ -103,6 +103,79 @@
     });
   }
 
+  // The login email's link (0.95.28): /login#code=123456. The code stays
+  // after # so it never reaches the server's logs. On this browser's code
+  // page it is entered and sent; in any other browser (where the code can't
+  // work) the page says so. The code leaves the address bar either way.
+  // A tab opened from the link tells the other tabs of this browser, so a
+  // code page left waiting can say it's done once this browser is signed in
+  // as its address, and offer to close.
+  const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("login-code") : null;
+  const linked = /^#code=([0-9]{6})$/.exec(location.hash);
+  const verify = document.querySelector('form[action$="/login/verify"]');
+  if (linked) {
+    history.replaceState(null, "", location.pathname + location.search);
+    if (verify && verify.elements.code) {
+      verify.elements.code.value = linked[1];
+      // Signed in as someone else: the page asks first, so only fill it in.
+      if (!document.querySelector("[data-signed-in-as]")) {
+        verify.querySelector("button[type=submit]").disabled = true;
+        if (channel) channel.postMessage("code-sent");
+        verify.submit();
+      }
+    } else {
+      const note = document.createElement("p");
+      note.className = "note";
+      note.setAttribute("role", "status");
+      note.textContent = "This link only works in the browser where you asked for the code. Open it there, or enter the code " + linked[1] + " there yourself. To sign in here instead, ask for a new code below.";
+      const before = document.querySelector(".email-form") || document.querySelector("main form");
+      if (before) before.parentNode.insertBefore(note, before);
+    }
+  }
+
+  if (channel && verify && !linked) {
+    const base = verify.getAttribute("action").replace(/\/login\/verify$/, "");
+    const email = (document.querySelector(".auth-head .account-email") || {}).textContent || "";
+    let checking = false;
+    channel.addEventListener("message", (event) => {
+      if (event.data !== "code-sent" || checking) return;
+      checking = true;
+      let tries = 0;
+      const check = () => {
+        fetch(base + "/api/v1/site/session", { credentials: "same-origin", cache: "no-store" })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((session) => {
+            if (session && session.signedIn && session.email && session.email.toLowerCase() === email.trim().toLowerCase()) {
+              done();
+            } else if (++tries < 10) {
+              setTimeout(check, 1000);
+            } else {
+              checking = false;
+            }
+          })
+          .catch(() => { checking = false; });
+      };
+      setTimeout(check, 1000);
+    });
+    const done = () => {
+      const card = document.querySelector("main");
+      if (!card) return;
+      const head = document.createElement("div");
+      head.className = "auth-head";
+      const h1 = document.createElement("h1");
+      h1.textContent = "You’re signed in.";
+      const p = document.createElement("p");
+      p.textContent = "You signed in from the link in another tab. You can close this one.";
+      head.append(h1, p);
+      const go = document.createElement("a");
+      go.className = "btn block";
+      go.href = base + "/spaces/";
+      go.textContent = "Carry on here instead";
+      card.replaceChildren(head, go);
+      document.title = "Signed in" + ((/ — .*$/.exec(document.title) || [""])[0]);
+    };
+  }
+
   // A challenge works once. Coming back to this page from history would
   // reuse it, so fetch a fresh page instead.
   window.addEventListener("pageshow", (event) => {

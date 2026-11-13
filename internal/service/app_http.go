@@ -104,10 +104,19 @@ var appTemplate = template.Must(template.New("app").Parse(`<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{{if .Home}}<meta name="description" content="Where AI agents work together: shared folders that carry their own instructions, rules and actions, backed by Git.">{{end}}{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}
+{{if .Home}}<meta name="description" content="{{.Description}}">{{end}}{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}
 <meta name="metatrash-app" content="{{.Config}}">
 <title>{{.Title}}</title>
-<link rel="icon" href="{{.BasePath}}/favicon.ico" sizes="any">
+<meta property="og:site_name" content="{{.SiteName}}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{.Title}}">
+<meta property="og:description" content="{{.Description}}">
+{{if .ShareImage}}<meta property="og:image" content="{{.ShareImage}}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+{{else}}<meta name="twitter:card" content="summary">
+{{end}}<link rel="icon" href="{{.BasePath}}/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="{{.BasePath}}/apple-touch-icon.png">
 {{if .Markdown}}<link rel="alternate" type="text/markdown" href="{{.BasePath}}{{.Markdown}}">
 {{end}}
@@ -203,11 +212,18 @@ func (h *httpAdapter) writeAppPage(w http.ResponseWriter, build *appBuild, page 
 	}
 	w.Header().Set("Content-Security-Policy", appCSP(nonce))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Link previews (0.95.28): the page's title, the site's description, and
+	// the brand's picture when it has one. The title is the page's <title>
+	// already, so a preview shows nothing the page doesn't.
+	shareImage := ""
+	if b := h.service.brand; b != nil && len(b.ShareImage) > 0 {
+		shareImage = h.publicOrigin + h.basePath + "/assets/share.png"
+	}
 	_ = appTemplate.Execute(w, struct {
-		Config, Title, BasePath, Nonce, Markdown string
-		Home, NoIndex                            bool
-		Build                                    *appBuild
-	}{string(encoded), page.Title, h.basePath, nonce, page.Markdown, page.Home, page.NoIndex, build})
+		Config, Title, BasePath, Nonce, Markdown, Description, SiteName, ShareImage string
+		Home, NoIndex                                                               bool
+		Build                                                                       *appBuild
+	}{string(encoded), page.Title, h.basePath, nonce, page.Markdown, h.homeDescription(), h.service.brandName(), shareImage, page.Home, page.NoIndex, build})
 }
 
 // serveAppHome answers / with the app on the docs space's about.md (0.95.5;
@@ -236,7 +252,7 @@ func (h *httpAdapter) serveAppHome(w http.ResponseWriter, r *http.Request, clien
 		}
 	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	page := appPage{Space: name, File: file, Title: siteHomeTitle, Address: "/docs/", Home: true}
+	page := appPage{Space: name, File: file, Title: h.homeTitle(), Address: "/docs/", Home: true}
 	if file != "" {
 		page.Markdown = "/docs/" + file + "?format=md"
 	}
@@ -250,6 +266,22 @@ func (h *httpAdapter) serveAppHome(w http.ResponseWriter, r *http.Request, clien
 var homePages = []string{"about.md", "introduction.md"}
 
 const siteHomeTitle = "Metatrash — where AI agents work together"
+const siteHomeDescription = "Where AI agents work together: shared folders that carry their own instructions, rules and actions, backed by Git."
+
+// homeTitle and homeDescription are the home page's, the brand's when it
+// sets them (0.95.28).
+func (h *httpAdapter) homeTitle() string {
+	if b := h.service.brand; b != nil && b.HomeTitle != "" {
+		return b.HomeTitle
+	}
+	return brandText(h.service.brandName(), siteHomeTitle)
+}
+func (h *httpAdapter) homeDescription() string {
+	if b := h.service.brand; b != nil && b.Description != "" {
+		return b.Description
+	}
+	return siteHomeDescription
+}
 
 // serveAppAsset serves one file of the build. Their names carry a hash of
 // their content, so they never change.

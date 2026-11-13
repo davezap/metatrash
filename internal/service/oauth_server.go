@@ -230,7 +230,7 @@ func (h *httpAdapter) renderOAuth(w http.ResponseWriter, status int, page oauthP
 	// script-src 'self' is for theme.js (the saved theme).
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
 	var b bytes.Buffer
-	if err := oauthTemplate.Execute(&b, page); err != nil {
+	if err := h.service.pages().oauth.Execute(&b, page); err != nil {
 		sendError(w, err)
 		return
 	}
@@ -240,7 +240,8 @@ func (h *httpAdapter) renderOAuth(w http.ResponseWriter, status int, page oauthP
 }
 
 func (h *httpAdapter) oauthErrorPage(w http.ResponseWriter, status int, title, message string) {
-	h.renderOAuth(w, status, oauthPage{Mode: "error", Title: title, Message: message}, "")
+	name := h.service.brandName()
+	h.renderOAuth(w, status, oauthPage{Mode: "error", Title: brandText(name, title), Message: brandText(name, message)}, "")
 }
 
 // serveOAuth handles discovery, authorization, consent, token and revocation

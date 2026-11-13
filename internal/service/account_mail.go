@@ -5,16 +5,18 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"html/template"
 	"mime/quotedprintable"
 	"net"
 	"net/smtp"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func sendLoginMail(ctx context.Context, cfg accountConfig, password, email, code string) error {
-	body := "Your Metatrash login code is: " + code + "\n\nEnter it in the browser where you requested it at " + cfg.Origin + "/login.\nThis code expires in 10 minutes and can be used once.\nDo not share this code. If you did not request it, ignore this email.\n"
+	body := loginMailBody(cfg.Origin, code)
 	return sendMail(ctx, cfg, password, email, "Your Metatrash login code", body)
 }
 
@@ -188,6 +190,7 @@ func undeliverable(email string) bool {
 // Always require STARTTLS and verify the server certificate before sending credentials.
 // subject must be fixed ASCII text; body is UTF-8 and sent quoted-printable.
 func sendMail(ctx context.Context, cfg accountConfig, password, email, subject, body string) error {
+	subject, body = brandText(cfg.brand, subject), brandText(cfg.brand, body)
 	if strings.ContainsAny(subject, "\r\n") || strings.ContainsAny(email, "\r\n<>") {
 		return fmt.Errorf("invalid mail header")
 	}
@@ -262,8 +265,85 @@ func mailMessage(cfg accountConfig, email, subject, body string) ([]byte, error)
 	if err := qp.Close(); err != nil {
 		return nil, err
 	}
-	header := "From: Metatrash <" + cfg.SMTPFrom + ">\r\nTo: <" + email + ">\r\nSubject: " + subject + "\r\nDate: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + messageID + "@" + cfg.SMTPHost + ">\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
-	return append([]byte(header), encoded.Bytes()...), nil
+	from := coreBrandName
+	if cfg.brand != "" {
+		from = cfg.brand
+	}
+	header := "From: " + from + " <" + cfg.SMTPFrom + ">\r\nTo: <" + email + ">\r\nSubject: " + subject + "\r\nDate: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + messageID + "@" + cfg.SMTPHost + ">\r\nMIME-Version: 1.0\r\n"
+	const plain = "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
+	if cfg.mailLook == nil {
+		return append([]byte(header+plain), encoded.Bytes()...), nil
+	}
+	// A brand's look (0.95.28): the same text, also as a simple HTML page.
+	var html bytes.Buffer
+	qp = quotedprintable.NewWriter(&html)
+	if _, err := qp.Write([]byte(strings.ReplaceAll(mailHTML(cfg.mailLook, from, body), "\n", "\r\n"))); err != nil {
+		return nil, err
+	}
+	if err := qp.Close(); err != nil {
+		return nil, err
+	}
+	boundary := "=_" + messageID
+	var out bytes.Buffer
+	out.WriteString(header + "Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n\r\n")
+	out.WriteString("--" + boundary + "\r\n" + plain)
+	out.Write(encoded.Bytes())
+	out.WriteString("\r\n--" + boundary + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+	out.Write(html.Bytes())
+	out.WriteString("\r\n--" + boundary + "--\r\n")
+	return out.Bytes(), nil
+}
+
+// mailLook is a brand's HTML email look: trusted header markup and colours.
+type mailLook struct{ header, accent, background string }
+
+// mailURL finds the web addresses in an email's text, to make them links.
+var mailURL = regexp.MustCompile(`https://[^\s<>"]+[^\s<>".,;:!?)]`)
+
+// mailHTML is body as a small HTML page in look: the header, the text's
+// paragraphs with its addresses as links, and the name at the foot. The text
+// is escaped; only the header is markup.
+func mailHTML(look *mailLook, name, body string) string {
+	accent, background := look.accent, look.background
+	if accent == "" {
+		accent = "#1a73e8"
+	}
+	if background == "" {
+		background = "#f4f4f4"
+	}
+	var paras []string
+	for _, para := range strings.Split(strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n")), "\n\n") {
+		var lines []string
+		for _, line := range strings.Split(para, "\n") {
+			escaped := template.HTMLEscapeString(line)
+			escaped = mailURL.ReplaceAllStringFunc(escaped, func(u string) string {
+				return `<a href="` + u + `" style="color:` + accent + `;">` + u + `</a>`
+			})
+			lines = append(lines, escaped)
+		}
+		paras = append(paras, `<p style="margin:0 0 16px;">`+strings.Join(lines, "<br>")+`</p>`)
+	}
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>` +
+		`<body style="margin:0;padding:0;background:` + background + `;">` +
+		`<div style="padding:32px 16px;background:` + background + `;">` +
+		`<div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;padding:28px 32px;font-family:Inter,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#172b36;">` +
+		`<div style="margin:0 0 24px;">` + look.header + `</div>` +
+		strings.Join(paras, "\n") +
+		`</div>` +
+		`<p style="max-width:560px;margin:16px auto 0;font-family:Inter,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;color:#6b7a80;text-align:center;">` + template.HTMLEscapeString(name) + `</p>` +
+		`</div></body></html>`
+}
+
+// loginMailBody is the login code email: the code, and a link that enters
+// it for you (0.95.28). The code goes after # in the link, so it never
+// reaches a server, a log or a Referer; login.js reads it. The link works
+// only in the browser that asked for the code (the code is tied to it), so a
+// mail scanner that opens it signs nobody in and uses nothing up.
+func loginMailBody(origin, code string) string {
+	return "Your Metatrash login code is: " + code + "\n\n" +
+		"To sign in, open this link in the browser where you asked for the code:\n" + origin + "/login#code=" + code + "\n\n" +
+		"Or enter the code there yourself at " + origin + "/login.\n" +
+		"This code expires in 10 minutes and can be used once.\nDo not share this code or the link. If you did not request it, ignore this email.\n"
 }
 
 // accountDeletionRequestedMail confirms a request to delete the account.

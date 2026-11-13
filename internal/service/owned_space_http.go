@@ -233,7 +233,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
 				if r.Method == http.MethodGet {
-					_, _ = w.Write([]byte(reloadFromSitePage))
+					_, _ = w.Write([]byte(brandText(h.service.brandName(), reloadFromSitePage)))
 				}
 				return
 			}
@@ -310,7 +310,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 	}
 	title := space.Name
 	if docs {
-		title = "Metatrash docs"
+		title = brandText(h.service.brandName(), "Metatrash docs")
 	}
 	if isFolder {
 		serveFolder(w, r, repo, files, folder, title, h.publicOrigin, root, markdown)

@@ -114,7 +114,7 @@ func TestTOTPKeyFile(t *testing.T) {
 
 func TestTOTPURIAndSecret(t *testing.T) {
 	secret := []byte("12345678901234567890")
-	if got := totpURI("dave+x@example.com", secret); got != "otpauth://totp/Metatrash:dave+x@example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Metatrash" {
+	if got := totpURI("Metatrash", "dave+x@example.com", secret); got != "otpauth://totp/Metatrash:dave+x@example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Metatrash" {
 		t.Fatal(got)
 	}
 	if got := groupedSecret(secret); got != "GEZD GNBV GY3T QOJQ GEZD GNBV GY3T QOJQ" {

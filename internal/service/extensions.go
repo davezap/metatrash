@@ -236,6 +236,17 @@ func (s *Service) startExtensions() (err error) {
 			}
 			notices[name] = true
 		}
+		if hooks.Brand != nil {
+			if s.brand != nil {
+				cleanup()
+				return fmt.Errorf("two extensions brand the service")
+			}
+			if err := validBrand(*hooks.Brand); err != nil {
+				cleanup()
+				return fmt.Errorf("extension %s brand: %w", hooks.Name, err)
+			}
+			s.brand = hooks.Brand
+		}
 		valid = true
 		s.extensions = append(s.extensions, hooks)
 	}
@@ -432,5 +443,13 @@ func snapshotHooks(h extension.Hooks) extension.Hooks {
 		notices[k] = v
 	}
 	h.Notices = notices
+	if h.Brand != nil {
+		b := *h.Brand
+		b.CSS = append([]byte(nil), b.CSS...)
+		b.Favicon = append([]byte(nil), b.Favicon...)
+		b.TouchIcon = append([]byte(nil), b.TouchIcon...)
+		b.ShareImage = append([]byte(nil), b.ShareImage...)
+		h.Brand = &b
+	}
 	return h
 }

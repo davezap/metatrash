@@ -115,6 +115,9 @@ type Hooks struct {
 	// error refuses the sign-in, shown as SpaceGate's are. Existing accounts
 	// never ask. Company billing uses it for the controlled launch.
 	AdmitAccount func(ctx context.Context, userID, email string) error
+	// Brand names and dresses the service (Core 0.95.28; see Brand). At
+	// most one module may set it.
+	Brand *Brand
 }
 
 // Write describes a change about to be committed to an owned space.

@@ -59,9 +59,32 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	switch r.URL.Path {
 	case "/favicon.ico":
 		data, kind = faviconICO, "image/x-icon"
+		if b := h.service.brand; b != nil && len(b.Favicon) > 0 {
+			data = b.Favicon
+		}
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	case "/apple-touch-icon.png":
 		data, kind = appleTouchIconPNG, "image/png"
+		if b := h.service.brand; b != nil && len(b.TouchIcon) > 0 {
+			data = b.TouchIcon
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	case "/assets/brand.css":
+		// The brand's look for the sign-in pages (0.95.28); none in Core.
+		b := h.service.brand
+		if b == nil || len(b.CSS) == 0 {
+			sendError(w, missing())
+			return true
+		}
+		data, kind = b.CSS, "text/css; charset=utf-8"
+	case "/assets/share.png":
+		// The brand's link preview picture (0.95.28); none in Core.
+		b := h.service.brand
+		if b == nil || len(b.ShareImage) == 0 {
+			sendError(w, missing())
+			return true
+		}
+		data, kind = b.ShareImage, "image/png"
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	case "/assets/slate.js":
 		data, kind = h.editorAsset("slate.js", slateJS), "text/javascript; charset=utf-8"
@@ -301,11 +324,11 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 	}
 	markdown := asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))
 	if folder, ok := strings.CutSuffix(filePath, "/"); ok {
-		serveFolder(w, r, repo, files, folder, "Metatrash public space", h.publicOrigin, h.basePath+"/spaces/public/", markdown)
+		serveFolder(w, r, repo, files, folder, brandText(h.service.brandName(), "Metatrash public space"), h.publicOrigin, h.basePath+"/spaces/public/", markdown)
 		return true
 	}
 	if folder, name := splitFolder(filePath); name == "llms.txt" {
-		h.serveLLMS(w, r, repo, files, filePath, folder, "Metatrash public space", h.basePath+"/spaces/public/")
+		h.serveLLMS(w, r, repo, files, filePath, folder, brandText(h.service.brandName(), "Metatrash public space"), h.basePath+"/spaces/public/")
 		return true
 	}
 	file, exists := files[filePath]
@@ -340,7 +363,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		return true
 	}
-	page := appPage{Space: "public", File: filePath, Title: pathpkg.Base(filePath) + " — Metatrash public space", Address: "/spaces/public/", NoIndex: noIndex}
+	page := appPage{Space: "public", File: filePath, Title: pathpkg.Base(filePath) + " — " + brandText(h.service.brandName(), "Metatrash public space"), Address: "/spaces/public/", NoIndex: noIndex}
 	if utf8.Valid(content) {
 		page.Markdown = fileURL(filePath) + "?" + markdownQuery
 	}

@@ -93,7 +93,7 @@ func (h *httpAdapter) renderGitHub(w http.ResponseWriter, status int, page githu
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
 	var b bytes.Buffer
-	if err := githubTemplate.Execute(&b, page); err != nil {
+	if err := h.service.pages().github.Execute(&b, page); err != nil {
 		sendError(w, err)
 		return
 	}

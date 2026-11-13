@@ -125,9 +125,11 @@ func totpMatch(secret []byte, code string, now time.Time, after int64) (int64, b
 
 // totpURI is what the QR code holds. The label shows the account's email in
 // the app, so the user can tell accounts apart.
-func totpURI(email string, secret []byte) string {
-	label := url.PathEscape("Metatrash:" + email)
-	return "otpauth://totp/" + label + "?secret=" + totpEncoding.EncodeToString(secret) + "&issuer=Metatrash"
+// issuer is the service's name (its brand's, 0.95.28): app entries made
+// before a brand keep the name they were made with.
+func totpURI(issuer, email string, secret []byte) string {
+	label := url.PathEscape(issuer + ":" + email)
+	return "otpauth://totp/" + label + "?secret=" + totpEncoding.EncodeToString(secret) + "&issuer=" + url.PathEscape(issuer)
 }
 
 // groupedSecret shows the base32 secret in groups of four for typing.
@@ -391,7 +393,7 @@ func (h *httpAdapter) totpSection(ctx context.Context, user userAccount) (*totpV
 	if err != nil {
 		return nil, err
 	}
-	q, err := encodeQR([]byte(totpURI(user.Email, secret)))
+	q, err := encodeQR([]byte(totpURI(h.service.brandName(), user.Email, secret)))
 	if err != nil {
 		return nil, err
 	}

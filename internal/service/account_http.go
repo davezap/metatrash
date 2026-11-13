@@ -205,7 +205,7 @@ func (h *httpAdapter) renderLogin(w http.ResponseWriter, r *http.Request, status
 	}
 	page.Legal = h.docsSpace() != ""
 	var b bytes.Buffer
-	if err := loginTemplate.Execute(&b, page); err != nil {
+	if err := h.service.pages().login.Execute(&b, page); err != nil {
 		sendError(w, err)
 		return
 	}
@@ -248,7 +248,9 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	}
 	// script-src 'self' is for theme.js (the saved theme), login.js (the
 	// login form's proof of work) and passkey.js (the browser's passkey prompt).
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
+	// connect-src 'self' lets a waiting code page ask /api/v1/site/session
+	// whether another tab signed in with the email's link (0.95.28).
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action "+formAction)
 	// no-referrer makes browsers send Origin: null on HTML form POSTs.
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")

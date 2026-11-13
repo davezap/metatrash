@@ -42,6 +42,11 @@ type accountConfig struct {
 	// DocsSpace, when set, is the owner/slug of a space shown as the site's
 	// documentation under /docs/ while its owner keeps it readable on the web.
 	DocsSpace string `json:"docsSpace"`
+	// brand is the service's name for people (brand.go), set as mail is
+	// sent: sendMail puts it for "Metatrash". Empty is Metatrash.
+	brand string
+	// mailLook, when set, adds an HTML version to every email (brand.go).
+	mailLook *mailLook
 }
 
 type userAccount = extension.User
@@ -177,19 +182,19 @@ func (s *Service) EnableAccounts(configPath string) error {
 		return err
 	}
 	a.send = func(ctx context.Context, email, code string) error {
-		return sendLoginMail(ctx, cfg, passwordText, email, code)
+		return sendLoginMail(ctx, s.mailConfig(cfg), passwordText, email, code)
 	}
 	a.sendConfirm = func(ctx context.Context, email, code string) error {
-		return sendConfirmMail(ctx, cfg, passwordText, email, code)
+		return sendConfirmMail(ctx, s.mailConfig(cfg), passwordText, email, code)
 	}
 	a.sendEmailChange = func(ctx context.Context, email, code string) error {
-		return sendEmailChangeMail(ctx, cfg, passwordText, email, code)
+		return sendEmailChangeMail(ctx, s.mailConfig(cfg), passwordText, email, code)
 	}
 	a.sendNotice = func(ctx context.Context, email, subject, body string) error {
-		return sendMail(ctx, cfg, passwordText, email, subject, body)
+		return sendMail(ctx, s.mailConfig(cfg), passwordText, email, subject, body)
 	}
 	a.sendInvite = func(ctx context.Context, email string, m invitationMail) error {
-		return sendMail(ctx, cfg, passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
+		return sendMail(ctx, s.mailConfig(cfg), passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
 	}
 	s.accounts = a
 	if err := s.startExtensions(); err != nil {
