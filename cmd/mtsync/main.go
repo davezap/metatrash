@@ -23,7 +23,21 @@ import (
 	"metatrash.com/metatrash"
 )
 
-const defaultServer = "https://metatrash.com"
+const defaultServer = "https://collumii.com"
+
+// movedServers maps a site's old address to its new one. The hosted service
+// moved from metatrash.com to collumii.com (Core 0.95.29); folders added
+// before keep working: their server, the -server flag and saved sign-ins
+// follow the move.
+var movedServers = map[string]string{"https://metatrash.com": "https://collumii.com"}
+
+// currentServer is server, or its new address if it moved.
+func currentServer(server string) string {
+	if moved, ok := movedServers[strings.TrimSuffix(server, "/")]; ok {
+		return moved
+	}
+	return server
+}
 
 const usage = `mtsync %s keeps folders in sync with metatrash spaces.
 
@@ -130,7 +144,7 @@ func run(args []string) error {
 	if err != nil || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost"))) || u.Host == "" || u.RawQuery != "" {
 		return fmt.Errorf("-server must be an https URL")
 	}
-	base := strings.TrimSuffix(*server, "/")
+	base := currentServer(strings.TrimSuffix(*server, "/"))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	rest := flags.Args()

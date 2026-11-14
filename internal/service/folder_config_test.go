@@ -21,6 +21,7 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"print":{}}`,
 		`{"footer":":metatrash: is a ⚡[Zaptronics](https://zaptronics.co.nz/) product"}`,
 		`{"footer":"","locked":{"footer":"everyone"}}`,
+		`{"footer":"Collumii · Powered by :metatrash:\n[Terms](/docs/legal/terms.md) · [Privacy](/docs/legal/privacy.md)\nthird line"}`,
 		`{"footer":"**Bartco** · [About](/docs/about.md) · [Write to us](mailto:hello@example.com) · ` + "`v2`" + `"}`,
 	}
 	for _, text := range good {
@@ -54,8 +55,9 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"print":{"image":"https://a:b@example.com/x.png"}}`:                          "https address",
 		`{"print":{"image":"https://example.com/a b.png"}}`:                            "https address",
 		`{"print":{"image":"https://example.com/x","size":1}}`:                         "unknown",
-		`{"footer":"one\ntwo"}`:                                                        "one line",
-		`{"footer":"tab\there"}`:                                                       "one line",
+		`{"footer":"one\ntwo\nthree\nfour"}`:                                           "at most 3 lines",
+		`{"footer":"one\r\ntwo"}`:                                                      "control characters",
+		`{"footer":"tab\there"}`:                                                       "control characters",
 		`{"footer":"<b>bold</b>"}`:                                                     "without HTML",
 		`{"footer":"[x](http://example.com/)"}`:                                        "footer link",
 		`{"footer":"[x](javascript:alert(1))"}`:                                        "footer link",

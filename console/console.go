@@ -39,6 +39,7 @@ var commandUsage = map[string]string{
 	"spaces usage":      "spaces usage [<email|username|id>] [-json]",
 	"spaces export":     "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
 	"spaces restore":    "spaces restore <owner/slug|id>",
+	"spaces rename":     "spaces rename <owner/slug|id> <new name> [-slug NEW-SLUG]",
 }
 
 // runCommand runs a console command; the service starts only when the first
@@ -274,6 +275,9 @@ func spacesCommand(args []string) error {
 	if len(args) > 0 && args[0] == "usage" {
 		return spacesUsage(args[1:])
 	}
+	if len(args) > 0 && args[0] == "rename" {
+		return spacesRename(args[1:])
+	}
 	if len(args) == 0 || args[0] != "list" {
 		printCommandHelp(os.Stderr, "spaces")
 		return fmt.Errorf("spaces needs a subcommand")
@@ -343,6 +347,44 @@ func spacesRestore(args []string) error {
 		return err
 	}
 	fmt.Printf("Restored %s/%s (%s). Restart the service to open it: sudo systemctl restart metatrash\n", space.Owner, space.Slug, oneLine(space.Name))
+	return nil
+}
+
+// spacesRename gives an owned space a new name and, with -slug, a new
+// address under the same owner; the old address keeps leading to it.
+func spacesRename(args []string) error {
+	flags := flag.NewFlagSet("spaces rename", flag.ContinueOnError)
+	accountsConfig := accountsConfigFlag(flags)
+	slug := flags.String("slug", "", "New address (owner/NEW-SLUG); without it the address stays")
+	rest, err := parseArgs(flags, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 2 {
+		return fmt.Errorf("usage: metatrash %s", commandUsage["spaces rename"])
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	db, err := service.OpenAdminDB(ctx, *accountsConfig)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	space, err := db.FindSpace(ctx, rest[0])
+	if err != nil {
+		return err
+	}
+	renamed, err := db.RenameSpace(ctx, space, rest[1], *slug)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Renamed %s/%s: \"%s\" is now \"%s\".\n", renamed.Owner, renamed.OldSlug, oneLine(renamed.OldName), oneLine(renamed.Name))
+	if renamed.AddressChanged {
+		fmt.Printf("Its address is now %s/%s. %s/%s keeps leading to it.\n", renamed.Owner, renamed.Slug, renamed.Owner, renamed.OldSlug)
+		if db.DocsSpace() == renamed.Owner+"/"+renamed.OldSlug {
+			fmt.Printf("This is the docs space: set \"docsSpace\": \"%s/%s\" in the accounts configuration and restart the service.\n", renamed.Owner, renamed.Slug)
+		}
+	}
 	return nil
 }
 

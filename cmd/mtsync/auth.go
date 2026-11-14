@@ -57,6 +57,16 @@ func loadAllCredentials() (map[string]credentials, error) {
 	if err := json.Unmarshal(b, &all); err != nil {
 		return nil, fmt.Errorf("%s is damaged; delete it and run mtsync login", path)
 	}
+	// A sign-in saved for a site's old address is tried at its new one; if the
+	// site refuses it there, mtsync says to sign in again as for any expired one.
+	for old, moved := range movedServers {
+		if c, ok := all[old]; ok {
+			if _, have := all[moved]; !have {
+				all[moved] = c
+			}
+			delete(all, old)
+		}
+	}
 	return all, nil
 }
 

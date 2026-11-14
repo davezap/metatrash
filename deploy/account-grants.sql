@@ -55,6 +55,8 @@ GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_virtual_refresh TO 'metatras
 GRANT UPDATE (every, next_run_at, last_run_at, stale_since, stale_reason)
     ON metatrash.metatrash_virtual_refresh TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (deleted_at, slug) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
+-- 0.95.29: metatrash spaces rename.
+GRANT UPDATE (name) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (deletion_requested_at, deleted_at) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)

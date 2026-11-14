@@ -311,7 +311,7 @@ Flags go before the command:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-server` | `https://metatrash.com` | the metatrash site, for `login`, `logout`, `spaces`, `add`, `export` and a one-off sync |
+| `-server` | `https://collumii.com` (folders and sign-ins saved for `https://metatrash.com` move there by themselves) | the metatrash site, for `login`, `logout`, `spaces`, `add`, `export` and a one-off sync |
 | `-interval` | `2s` | time between scans of each folder (and between checks of an older server) |
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |

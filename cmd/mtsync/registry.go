@@ -63,6 +63,9 @@ func loadRegistry() (registry, error) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		return r, fmt.Errorf("%s is damaged: %v", path, err)
 	}
+	for i := range r.Folders {
+		r.Folders[i].Server = currentServer(r.Folders[i].Server)
+	}
 	return r, nil
 }
 

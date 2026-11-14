@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.95.29 - After the move to collumii.com: footer lines, mtsync's new address, renaming spaces (2026-11-14)
+
+- **Page footers can have up to three lines** (`footer` in `.metatrash.json`): lines are separated by `\n`; tabs, carriage returns and other control characters are still refused, as is a fourth line (`maxFooterLines`). Slate Viewer 0.39.0 shows each line centred and edits them in a three-line box; older Viewers refuse to save a footer with a line break. Tool schema 0.19.1 says so. `internal/service/folder_config.go`.
+- **mtsync talks to https://collumii.com by default**, where the hosted service moved (Company 0.96.44). Folders added for `https://metatrash.com`, a saved sign-in for it and `-server https://metatrash.com` all follow the move (`movedServers`), so existing synced folders keep working without a redirect (a 301 can turn an upload into a read). If the site refuses the old sign-in at the new address, mtsync says to run `mtsync login`, as for an expired one. `cmd/mtsync/main.go`, `registry.go`, `auth.go`.
+- **`metatrash spaces rename <owner/slug|id> <new name> [-slug NEW-SLUG]`**: an administrator gives an owned space a new name and, with `-slug`, a new address under the same owner. The space keeps its ID, files, history, members, invitations and app connections. Like a move, the old address keeps leading to it (`metatrash_space_aliases`), so links, synced folders and agents using it still work, and the owner can't create a new space there while it does; renaming back drops that alias. For the docs space it prints the `docsSpace` setting to change. Needs a new grant: run `deploy/account-grants.sql` (`UPDATE (name)` on `metatrash_spaces`) before installing. `internal/service/space_rename.go`, `console/console.go`.
+- Folder actions' web requests name the project, not a site, in their User-Agent: `(folder actions; +https://github.com/davezap/metatrash)`.
+- New tests `TestRenameSpaceAgainstDatabase` (MariaDB) and `TestCurrentServer`; footer rules in `TestFolderConfigRules`. No schema change; one new grant; tool schema 0.19.1. See docs/release-0.95.29.md.
+
 ## 0.95.28 - Brands: an edition can name and dress the service (2026-11-13)
 
 - **`extension.Brand`** (new `extension/brand.go`, `Hooks.Brand`): one module may give the service its own name, home page title and description, a wordmark for the sign-in pages, a stylesheet for them and the site's icons. Company uses it for Collumii (Company 0.96.43). Without a brand nothing changes: the service is Metatrash. Two modules that both set one, or a brand with an invalid name or an unsafe wordmark, stop startup. `internal/service/brand.go`.

@@ -32,6 +32,7 @@ const (
 	maxAcknowledgeFiles  = 50
 	maxPrintImage        = 2000
 	maxFooter            = 500
+	maxFooterLines       = 3
 	githubDefaultBranch  = "main"
 	githubDefaultPush    = "agent"
 	githubDefaultPull    = "auto"
@@ -65,7 +66,8 @@ type folderConfig struct {
 	// the https address of an image put centred above the title of the
 	// first page. Never in the files themselves. Inherited like purpose.
 	Print *folderPrint `json:"print,omitempty"`
-	// Footer is one line of Markdown the website shows below every page in
+	// Footer is up to three lines of Markdown (maxFooterLines, split at \n)
+	// the website shows below every page in
 	// the folder and the folders under it (Slate Viewer's site app): the
 	// nearest folder that sets one wins, whether or not folders inherit, and
 	// "" turns it off. Links, emphasis and code only, no HTML; :metatrash:
@@ -247,17 +249,20 @@ func printImageAddress(image string) bool {
 	return err == nil && len(image) <= maxPrintImage && u.Scheme == "https" && u.Host != "" && u.User == nil && !strings.ContainsAny(image, " \t\r\n")
 }
 
-// checkFooter checks a footer line: one line of at most maxFooter
-// characters, no HTML, and links only to https or mailto: addresses or to
+// checkFooter checks a footer: at most maxFooterLines lines (split at \n,
+// no \r) of at most maxFooter characters in all, no HTML, and links only to https or mailto: addresses or to
 // pages of this site (/docs/about.md), which read the same from every folder.
 func checkFooter(footer string) error {
 	if utf8.RuneCountInString(footer) > maxFooter {
 		return folderConfigError(fmt.Sprintf("footer is limited to %d characters.", maxFooter))
 	}
 	for _, r := range footer {
-		if r < ' ' || r == 0x7f || r == 0x2028 || r == 0x2029 {
-			return folderConfigError("footer is one line of text: no line breaks, tabs or control characters.")
+		if r != '\n' && (r < ' ' || r == 0x7f || r == 0x2028 || r == 0x2029) {
+			return folderConfigError("footer is plain text in lines: no tabs, carriage returns or other control characters.")
 		}
+	}
+	if strings.Count(footer, "\n") >= maxFooterLines {
+		return folderConfigError(fmt.Sprintf("footer is at most %d lines.", maxFooterLines))
 	}
 	if strings.ContainsAny(footer, "<>") {
 		return folderConfigError("footer is Markdown without HTML: no < or >. Use [text](https://...) for links and :metatrash: for the Metatrash wordmark.")

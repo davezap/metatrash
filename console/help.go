@@ -63,7 +63,7 @@ var helpGroups = []HelpGroup{
                                 old name stop working (emails a notice)
   <who> is an email address, username or user ID.`},
 	{Name: "spaces", Summary: "spaces", AccountConfig: true,
-		Subcommands: []string{"list", "usage", "export", "restore"},
+		Subcommands: []string{"list", "usage", "export", "restore", "rename"},
 		Detail: `  spaces list [-json]           list owned spaces with owner, visibility and members
   spaces usage [<who>] [-json]  storage per owned space, largest first (one
                                 account's spaces with <who>)
@@ -74,6 +74,10 @@ var helpGroups = []HelpGroup{
                                 export every space into DIR, for backups
   spaces restore <space>        bring back a space its owner deleted in the last
                                 30 days (restart the service afterwards)
+  spaces rename <space> <name> [-slug NEW-SLUG]
+                                give a space a new name; -slug also moves it to
+                                owner/NEW-SLUG, and the old address keeps leading
+                                to it
   <space> is owner/slug or a space ID, or a spaces.json name such as public.
   <who> is an email address, username or user ID. -data defaults to
   /var/lib/metatrash.`},
