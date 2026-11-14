@@ -180,6 +180,9 @@ func openSyncer(c *client, root, server, space string, logf func(string, ...any)
 		if err := json.Unmarshal(b, st); err != nil {
 			return nil, fmt.Errorf("%s is damaged: %v", s.statePath, err)
 		}
+		// A folder first synced against a server that has since moved
+		// (metatrash.com to collumii.com) keeps syncing at the new address.
+		st.Server = currentServer(strings.TrimSuffix(st.Server, "/"))
 		if st.Server != server || st.Space != space {
 			return nil, fmt.Errorf("%s already syncs %s on %s; use another folder", root, st.Space, st.Server)
 		}

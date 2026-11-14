@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.95.30 - mtsync: synced folders follow the move too (2026-11-14)
+
+- 0.95.29 moved mtsync's folder list and saved sign-ins from https://metatrash.com to https://collumii.com, but each synced folder also records its server in `.mtsync/state.json`; the service then refused the folder ("already syncs … on https://metatrash.com; use another folder"). `openSyncer` now reads a moved server as its new address (`currentServer`) and saves it back. `cmd/mtsync/sync.go`; test `TestOpenSyncerMovedServer`. No server change. See docs/release-0.95.30.md.
+
 ## 0.95.29 - After the move to collumii.com: footer lines, mtsync's new address, renaming spaces (2026-11-14)
 
 - **Page footers can have up to three lines** (`footer` in `.metatrash.json`): lines are separated by `\n`; tabs, carriage returns and other control characters are still refused, as is a fourth line (`maxFooterLines`). Slate Viewer 0.39.0 shows each line centred and edits them in a three-line box; older Viewers refuse to save a footer with a line break. Tool schema 0.19.1 says so. `internal/service/folder_config.go`.
