@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 )
 
@@ -44,6 +45,8 @@ type Global struct {
 	// MaxListWaiters bounds held HTTP long polls, independently of write workers.
 	// Omitted or zero retains the historical 256-request default.
 	MaxListWaiters int `json:"maxListWaiters,omitempty"`
+	// SearchIndex turns on the search index (0.96.0, search_index.go).
+	SearchIndex *searchIndexConfig `json:"searchIndex,omitempty"`
 }
 
 type SpaceConfig struct {
@@ -105,6 +108,12 @@ func loadConfig(path, keyPath string) (Config, map[string]Keys, error) {
 	}
 	if c.Global.MaxListWaiters, err = listWaiterLimit(c.Global.MaxListWaiters); err != nil {
 		return c, nil, err
+	}
+	if si := c.Global.SearchIndex; si != nil {
+		probe := *si
+		if err = probe.check(string(filepath.Separator)); err != nil {
+			return c, nil, err
+		}
 	}
 	keys := map[string]Keys{}
 	if keyPath != "" {

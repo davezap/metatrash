@@ -50,7 +50,7 @@ func TestHelpListsGroupsAndAddedCommands(t *testing.T) {
 }
 
 func TestEveryCommandHasHelp(t *testing.T) {
-	for _, name := range []string{"help", "version", "keygen", "accounts-migrate", "check", "users", "spaces"} {
+	for _, name := range []string{"help", "version", "keygen", "accounts-migrate", "check", "users", "spaces", "search-index"} {
 		if !HasHelp(name) {
 			t.Errorf("no help for %s", name)
 		}

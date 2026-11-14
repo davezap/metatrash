@@ -24,22 +24,24 @@ const defaultAccountsConfig = "/etc/metatrash/accounts.json"
 
 // commandUsage is each command's synopsis, in the order help lists them.
 var commandUsage = map[string]string{
-	"help":              "help",
-	"version":           "version [-all] [-core]",
-	"keygen":            "keygen",
-	"accounts-migrate":  "accounts-migrate -database-config FILE -data DIR [-empty]",
-	"check":             "check [-config FILE] [-keys FILE] [-data DIR]",
-	"users list":        "users list [-json]",
-	"users show":        "users show <email|username|id> [-json]",
-	"users email-login": "users email-login <on|off> <email|username|id> [-no-notice]",
-	"users set-limit":   "users set-limit <email|username|id> <spaces>",
-	"users rename":      "users rename <email|username|id> <new-username> [-no-notice]",
-	"users usage":       "users usage [<email|username|id>] [-json]",
-	"spaces list":       "spaces list [-json]",
-	"spaces usage":      "spaces usage [<email|username|id>] [-json]",
-	"spaces export":     "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
-	"spaces restore":    "spaces restore <owner/slug|id>",
-	"spaces rename":     "spaces rename <owner/slug|id> <new name> [-slug NEW-SLUG]",
+	"help":                 "help",
+	"version":              "version [-all] [-core]",
+	"keygen":               "keygen",
+	"accounts-migrate":     "accounts-migrate -database-config FILE -data DIR [-empty]",
+	"check":                "check [-config FILE] [-keys FILE] [-data DIR]",
+	"users list":           "users list [-json]",
+	"users show":           "users show <email|username|id> [-json]",
+	"users email-login":    "users email-login <on|off> <email|username|id> [-no-notice]",
+	"users set-limit":      "users set-limit <email|username|id> <spaces>",
+	"users rename":         "users rename <email|username|id> <new-username> [-no-notice]",
+	"users usage":          "users usage [<email|username|id>] [-json]",
+	"spaces list":          "spaces list [-json]",
+	"spaces usage":         "spaces usage [<email|username|id>] [-json]",
+	"spaces export":        "spaces export <owner/slug|id|name> [FILE|-] [-data DIR] | spaces export -all DIR [-data DIR]",
+	"spaces restore":       "spaces restore <owner/slug|id>",
+	"spaces rename":        "spaces rename <owner/slug|id> <new name> [-slug NEW-SLUG]",
+	"search-index status":  "search-index status [<space>] [-json] [-config FILE] [-data DIR]",
+	"search-index rebuild": "search-index rebuild <space>|-all [-config FILE] [-data DIR]",
 }
 
 // runCommand runs a console command; the service starts only when the first
@@ -74,6 +76,8 @@ func Run(name string, args []string) error {
 		return spacesCommand(args)
 	case "check":
 		return checkCommand(args)
+	case "search-index":
+		return searchIndexCommand(args)
 	}
 	printUsage(os.Stderr)
 	return fmt.Errorf("unknown command %q", name)
@@ -750,4 +754,95 @@ func signInMethods(u service.AdminUser) string {
 		methods = append(methods, "deletion pending")
 	}
 	return strings.Join(methods, ", ")
+}
+
+// searchIndexCommand is `metatrash search-index` (0.96.0): what each space's
+// search index holds, and asking the running server to build one again.
+func searchIndexCommand(args []string) error {
+	if len(args) == 0 {
+		printCommandHelp(os.Stderr, "search-index")
+		return fmt.Errorf("search-index needs a subcommand")
+	}
+	name := "search-index " + args[0]
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	config := flags.String("config", "/etc/metatrash/spaces.json", "Space configuration")
+	data := flags.String("data", "/var/lib/metatrash", "Persistent data directory")
+	var asJSON, all *bool
+	switch args[0] {
+	case "status":
+		asJSON = flags.Bool("json", false, "Print JSON instead of a table")
+	case "rebuild":
+		all = flags.Bool("all", false, "Rebuild every space's index")
+	default:
+		printCommandHelp(os.Stderr, "search-index")
+		return fmt.Errorf("unknown command %q", name)
+	}
+	rest, err := parseArgs(flags, args[1:])
+	if err != nil {
+		return err
+	}
+	dir, err := service.SearchIndexDir(*config, *data)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "status":
+		if len(rest) > 1 {
+			return fmt.Errorf("usage: metatrash %s", commandUsage[name])
+		}
+		statuses, err := service.SearchIndexStatuses(dir)
+		if err != nil {
+			return err
+		}
+		if len(rest) == 1 {
+			folder, err := service.SearchIndexFolder(rest[0])
+			if err != nil {
+				return err
+			}
+			kept := statuses[:0]
+			for _, st := range statuses {
+				if st.Name == folder {
+					kept = append(kept, st)
+				}
+			}
+			if len(kept) == 0 {
+				return fmt.Errorf("no index %s in %s (it is built on the space's first search)", folder, dir)
+			}
+			statuses = kept
+		}
+		if *asJSON {
+			return printJSON(statuses)
+		}
+		t := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(t, "INDEX\tFILES\tWAITING\tSIZE\tUPDATED\tNOTE")
+		for _, st := range statuses {
+			updated := "-"
+			if !st.UpdatedAt.IsZero() {
+				updated = st.UpdatedAt.Format("2006-01-02 15:04Z")
+			}
+			fmt.Fprintf(t, "%s\t%d\t%d\t%.1f MB\t%s\t%s\n", st.Name, st.Files, st.Waiting, float64(st.Bytes)/1e6, updated, st.Error)
+		}
+		t.Flush()
+		fmt.Printf("%s in %s\n", count(len(statuses), "index", "indexes"), dir)
+		return nil
+	default: // rebuild
+		if *all == (len(rest) == 1) || len(rest) > 1 {
+			return fmt.Errorf("usage: metatrash %s", commandUsage[name])
+		}
+		folder := ""
+		if !*all {
+			if folder, err = service.SearchIndexFolder(rest[0]); err != nil {
+				return err
+			}
+		}
+		if err := service.RequestSearchIndexRebuild(dir, folder); err != nil {
+			return err
+		}
+		what := folder
+		if *all {
+			what = "every index"
+		}
+		fmt.Printf("Asked the server to rebuild %s. Within a minute it removes the index; the space's next search builds it again (searches scan everything meanwhile).\n", what)
+		return nil
+	}
 }

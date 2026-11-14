@@ -46,6 +46,18 @@ var helpGroups = []HelpGroup{
                                 repositories. -config defaults to
                                 /etc/metatrash/spaces.json, -keys to
                                 /etc/metatrash/keys.json, -data to /var/lib/metatrash`},
+	{Name: "search-index", Summary: "the search index (docs/search-index.md)",
+		Subcommands: []string{"status", "rebuild"},
+		Detail: `  search-index status [<space>] [-json]
+                                files indexed, files waiting, size and last
+                                update of each space's index (c-<name> for a
+                                configured space, o-<id> for an owned one)
+  search-index rebuild <space>|-all
+                                ask the running server to build an index again
+                                (it scans meanwhile). Both take -config FILE
+                                (default /etc/metatrash/spaces.json) and -data
+                                DIR (default /var/lib/metatrash); run them as
+                                root or the service account`},
 	{Name: "users", Summary: "accounts", AccountConfig: true,
 		Subcommands: []string{"list", "show", "usage", "email-login", "set-limit", "rename"},
 		Detail: `  users list [-json]            list accounts with their spaces and sign-in methods

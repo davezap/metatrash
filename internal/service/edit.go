@@ -300,6 +300,20 @@ func (s *Service) search(ctx context.Context, r *repository, space string, in In
 		}
 	}
 	sort.Strings(paths)
+	// The search index (0.96.0) narrows the files to read when it can; the
+	// line scan below still decides every match.
+	if !in.Regex && in.Revision == "" {
+		if si := s.searchIdx.acquire(r); si != nil {
+			keys := make(map[string]string, len(paths))
+			for _, p := range paths {
+				keys[p] = s.searchKey(r, files[p])
+			}
+			if narrowed, ok := s.searchIdx.candidates(r, si, in.Query, paths, keys); ok {
+				paths = narrowed
+			}
+			s.searchIdx.release(si)
+		}
+	}
 	hashes := make([]string, 0, len(paths))
 	for _, p := range paths {
 		if files[p].Virtual == nil {

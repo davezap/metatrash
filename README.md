@@ -110,6 +110,9 @@ see [Virtual files](docs/api-contract.md#virtual-files). PDFs read as
 `pdftotext`'s plain text, or, with the optional [Docling conversion](docs/docling.md),
 as Markdown with headings, tables and OCR for scanned pages.
 
+An optional [search index](docs/search-index.md) makes `search` fast in
+large spaces without changing what it finds.
+
 ## Connect from ChatGPT
 
 1. Open **Settings → Security and login** and enable **Developer mode**

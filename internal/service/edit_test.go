@@ -28,6 +28,18 @@ func openPublicTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// METATRASH_TEST_SEARCH_INDEX=1 runs these tests with the search index
+	// on, brought up to date before every search (0.96.0).
+	if os.Getenv("METATRASH_TEST_SEARCH_INDEX") == "1" {
+		cfg := searchIndexConfig{Enabled: true}
+		if err = cfg.check(filepath.Join(dir, "data")); err != nil {
+			t.Fatal(err)
+		}
+		if s.searchIdx, err = newSearchIndexes(s, cfg); err != nil {
+			t.Fatal(err)
+		}
+		s.searchIdx.testSync = true
+	}
 	t.Cleanup(s.Close)
 	return s
 }

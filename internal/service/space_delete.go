@@ -160,6 +160,7 @@ func (s *Service) purgeSpace(ctx context.Context, id string) error {
 	if err := os.RemoveAll(filepath.Join(s.ownedRoot, id+".git")); err != nil {
 		return err
 	}
+	s.searchIdx.removeName("o-" + id)
 	tx, err := s.ownedDB.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return fmt.Errorf("database unavailable")

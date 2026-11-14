@@ -28,6 +28,9 @@ type outcome struct {
 }
 
 type Service struct {
+	// searchIdx is the search index manager, nil when it is off
+	// (search_index.go).
+	searchIdx *searchIndexes
 	// presence is who has each space open on the site (activity.go).
 	presence            presenceBoard
 	configurationFrozen bool
@@ -150,6 +153,15 @@ func OpenWithWriteScheduler(ctx context.Context, configPath, keysPath, dataDir s
 		}
 		s.repos[name] = r
 	}
+	if si := c.Global.SearchIndex; si != nil && si.Enabled {
+		cfg := *si
+		if err = cfg.check(dataDir); err != nil {
+			return nil, err
+		}
+		if s.searchIdx, err = newSearchIndexes(s, cfg); err != nil {
+			return nil, err
+		}
+	}
 	success = true
 	return s, nil
 }
@@ -164,6 +176,8 @@ func (s *Service) Close() {
 	// Reject pending work and join every executing write before closing the
 	// database or releasing the data-directory lock.
 	s.writes.Close()
+	// The search index worker stops between batches.
+	s.searchIdx.close()
 	// Automatic pulls see the stop and give up.
 	s.autoPull.wg.Wait()
 	// The storage meter writes what changed before the database closes.

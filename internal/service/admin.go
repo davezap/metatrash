@@ -590,6 +590,18 @@ func Check(ctx context.Context, o CheckOptions) []CheckResult {
 	}
 	c, _, err := loadConfig(o.SpacesConfig, o.Keys)
 	add("spaces config", err, fmt.Sprintf("%s: %d configured spaces", o.SpacesConfig, len(c.Spaces)))
+	if si := c.Global.SearchIndex; err == nil && si != nil && si.Enabled {
+		cfg := *si
+		if err := cfg.check(o.Data); err != nil {
+			add("search index", err, "")
+		} else if statuses, err := SearchIndexStatuses(cfg.Dir); err != nil && !os.IsNotExist(err) {
+			add("search index", err, "")
+		} else {
+			add("search index", nil, fmt.Sprintf("on: %s, %d indexes, at most %d open, closed after %d idle minutes", cfg.Dir, len(statuses), cfg.MaxOpen, cfg.IdleMinutes))
+		}
+	} else if err == nil {
+		results = append(results, CheckResult{"search index", true, "off: search reads every file (global.searchIndex)"})
+	}
 	if pid, err := os.ReadFile(filepath.Join(o.Data, ".service-lock", "pid")); err == nil {
 		results = append(results, CheckResult{"service", true, "running (pid " + strings.TrimSpace(string(pid)) + "), or its lock was left behind"})
 	} else {
