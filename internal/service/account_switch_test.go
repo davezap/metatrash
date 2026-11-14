@@ -63,7 +63,9 @@ func TestCrossSiteLinkAndSwitchingAccounts(t *testing.T) {
 	for _, path := range []string{"/account", "/account/shared", "/login"} {
 		w := call("GET", path, "cross-site", nil)
 		body := w.Body.String()
-		if w.Code != 200 || !strings.Contains(body, `http-equiv="refresh"`) || !strings.Contains(body, `href="`+path+`">Continue`) {
+		// login.js carries the address's #fragment over (the login email's
+		// #code=); the <noscript> refresh covers browsers without scripts.
+		if w.Code != 200 || !strings.Contains(body, `<noscript><meta http-equiv="refresh"`) || !strings.Contains(body, `href="`+path+`" data-continue>Continue`) || !strings.Contains(body, "/assets/login.js") {
 			t.Fatalf("cross-site %s: %d\n%s", path, w.Code, body)
 		}
 	}

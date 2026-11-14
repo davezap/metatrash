@@ -5,6 +5,18 @@
 // data-pow zero bits (about a second). The server checks it in microseconds
 // and only then emails a code. Without JavaScript the server refuses to send.
 (() => {
+  // A link from another site (the login email open in webmail) arrives
+  // without the SameSite=Strict cookies, so the server answers with a
+  // Continue page that reloads from this site. Carry the address's
+  // fragment over (0.95.31): it holds the login email's #code=, which a
+  // plain reload to the bare address would drop, leaving the code page
+  // empty. Without JavaScript, the page's <noscript> refresh does the reload.
+  const onward = document.querySelector("a[data-continue]");
+  if (onward) {
+    location.replace(onward.getAttribute("href") + location.hash);
+    return;
+  }
+
   const K = new Uint32Array([
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,

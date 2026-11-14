@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Sign in — Metatrash</title>{{if .ContinueURL}}<meta http-equiv="refresh" content="0;url={{.ContinueURL}}">{{end}}<link rel="icon" href="{{.BasePath}}/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="{{.BasePath}}/apple-touch-icon.png"><script src="{{.BasePath}}/assets/theme.js"></script><link rel="stylesheet" href="{{.BasePath}}/assets/signin.css">{{if .Pow}}<script src="{{.BasePath}}/assets/login.js" defer></script>{{end}}{{if .LoginPasskey}}<script src="{{.BasePath}}/assets/passkey.js" defer></script>{{end}}</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Sign in — Metatrash</title>{{if .ContinueURL}}<noscript><meta http-equiv="refresh" content="0;url={{.ContinueURL}}"></noscript>{{end}}<link rel="icon" href="{{.BasePath}}/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="{{.BasePath}}/apple-touch-icon.png"><script src="{{.BasePath}}/assets/theme.js"></script><link rel="stylesheet" href="{{.BasePath}}/assets/signin.css">{{if or .Pow .ContinueURL}}<script src="{{.BasePath}}/assets/login.js" defer></script>{{end}}{{if .LoginPasskey}}<script src="{{.BasePath}}/assets/passkey.js" defer></script>{{end}}</head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <div class="auth-page">
@@ -8,7 +8,7 @@
 <main id="main" class="auth-card">
 {{if .ContinueURL}}
 <div class="auth-head"><h1>Continue to Metatrash</h1><p>Opening your account…</p></div>
-<a class="btn primary block" href="{{.ContinueURL}}">Continue</a>
+<a class="btn primary block" href="{{.ContinueURL}}" data-continue>Continue</a>
 {{else if .Disabled}}
 <div class="auth-head"><h1>Sign-in is not available yet</h1><p>The public space is open to explore while email sign-in is being configured.</p></div>
 <a class="btn primary block" href="{{.BasePath}}/spaces/public/">Explore the public space</a>

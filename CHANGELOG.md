@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.95.31 - The login email's link signs in from webmail (2026-11-14)
+
+- The link in the login email (`/login#code=123456`, 0.95.28) opened from webmail arrives without the SameSite=Strict cookies, so the sign-in page answers with its Continue page, which reloads from this site. That reload went to the bare `/login` and dropped the `#code=` fragment, so the page flashed "Continue" and then showed an empty code card. The Continue page now loads `login.js`, which reloads with the address's fragment kept (`location.replace`); its `<meta refresh>` moved into `<noscript>` so the two can't race. `internal/service/web/login.html`, `web/login.js`; test `TestCrossSiteLinkAndSwitchingAccounts` checks the new page. No server, schema or grant change. See docs/release-0.95.31.md.
+
 ## 0.95.30 - mtsync: synced folders follow the move too (2026-11-14)
 
 - 0.95.29 moved mtsync's folder list and saved sign-ins from https://metatrash.com to https://collumii.com, but each synced folder also records its server in `.mtsync/state.json`; the service then refused the folder ("already syncs … on https://metatrash.com; use another folder"). `openSyncer` now reads a moved server as its new address (`currentServer`) and saves it back. `cmd/mtsync/sync.go`; test `TestOpenSyncerMovedServer`. No server change. See docs/release-0.95.30.md.
