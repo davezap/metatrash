@@ -164,7 +164,10 @@ func (s *Service) putVirtualUpload(ctx context.Context, r *repository, space, pa
 		return WriteResult{}, err
 	}
 	s.docling().enqueueUpload(r, path, info)
-	return value.(WriteResult), nil
+	result := value.(WriteResult)
+	// A large picture gets a smaller copy beside it (0.97.1, virtual_preview.go).
+	result.Preview = s.storePreview(ctx, r, space, path, result.NewState, info, u)
+	return result, nil
 }
 
 // virtualUploadReady refuses an upload before its body is read, for what

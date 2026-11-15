@@ -112,6 +112,9 @@ type WriteResult struct {
 	Mutation
 	Created bool `json:"created"`
 	Changed bool `json:"changed"`
+	// Preview is the smaller copy an uploaded picture got beside it
+	// (0.97.1, virtual_preview.go), in a commit after this one.
+	Preview string `json:"preview,omitempty"`
 }
 
 type HistoryEntry struct {
