@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.19.1",
+  "schemaVersion": "0.20.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.94.2"},
@@ -204,7 +204,7 @@
     },
     {
       "name": "search",
-      "description": "Find lines in a space's files, like grep: each match with path, file ID, line number and optional context. Use it to locate text for edit or choose lines to read instead of reading whole files. Virtual files are searched in their text. Plain text, or RE2 with regex.",
+      "description": "Find lines in a space's files, like grep: each match with path, file ID, line number and optional context. Use it to locate text for edit or choose lines to read instead of reading whole files. Virtual files are searched in their text. Plain text, or RE2 with regex. With rank, finds the files that best match the query's words (in any order, each matching the start of a word, any case) instead, best first, each with its best lines; use it when you don't know the exact wording. On an account connection, space \"*\" with rank searches every connected space.",
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
@@ -214,8 +214,8 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
-            "description": "owner/slug from spaces, or public."
+            "pattern": "^(\\*|[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?)$",
+            "description": "owner/slug from spaces, or public; * (with rank, account connection) for every connected space."
           },
           "query": {
             "type": "string",
@@ -251,7 +251,12 @@
             "minimum": 1,
             "maximum": 200,
             "default": 50,
-            "description": "Most matching lines to return."
+            "description": "Most matching lines to return; with rank, most files (1 to 50, default 10)."
+          },
+          "rank": {
+            "type": "boolean",
+            "default": false,
+            "description": "Best matching files by word instead of exact lines. Not with regex, context or revision."
           },
           "revision": {
             "type": "string",
@@ -269,12 +274,49 @@
         "properties": {
           "space": {
             "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$"
+            "pattern": "^(\\*|[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?)$"
           },
           "state": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
-            "description": "Snapshot commit hash."
+            "description": "Snapshot commit hash (not with space *)."
+          },
+          "states": {
+            "type": "object",
+            "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "description": "With space *: each searched space's snapshot."
+          },
+          "skipped": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "With space *: spaces not searched (over 50, or not readable now)."
+          },
+          "files": {
+            "type": "array",
+            "description": "With rank: best matching files, best first.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "space": {"type": "string", "description": "With space *."},
+                "path": {"type": "string", "minLength": 1, "maxLength": 240},
+                "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                "score": {"type": "number"},
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "line": {"type": "integer", "minimum": 1},
+                      "text": {"type": "string"}
+                    },
+                    "required": ["line", "text"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["path", "id", "score", "lines"],
+              "additionalProperties": false
+            }
           },
           "matches": {
             "type": "array",
@@ -329,8 +371,6 @@
         },
         "required": [
           "space",
-          "state",
-          "matches",
           "truncated"
         ],
         "additionalProperties": false
@@ -338,7 +378,7 @@
     },
     {
       "name": "write",
-      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": level}), locked ({\"key\": level}: settings only people may change; also \"fillForms\" and \"takeQuizzes\": who may send the folder's forms and quizzes; levels: \"folderAgents\" stops the agents of folder actions, \"connectedAgents\" other agents, \"agents\" both, \"everyone\" people too), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (up to 3 lines of Markdown, separated by \\n, the website shows centred below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}]) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
+      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": level}), locked ({\"key\": level}: settings only people may change; also \"fillForms\" and \"takeQuizzes\": who may send the folder's forms and quizzes; levels: \"folderAgents\" stops the agents of folder actions, \"connectedAgents\" other agents, \"agents\" both, \"everyone\" people too), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (up to 3 lines of Markdown, separated by \\n, the website shows centred below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}] or [{\"type\":\"email\",\"allow\":[\"example.com\"]}]: messages to the folder's address arrive as .md files; allow/block senders, keep the -<id>.md ending when renaming; only when asked) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,

@@ -7,15 +7,32 @@
 (() => {
   // A link from another site (the login email open in webmail) arrives
   // without the SameSite=Strict cookies, so the server answers with a
-  // Continue page that reloads from this site. Carry the address's
-  // fragment over (0.95.31): it holds the login email's #code=, which a
-  // plain reload to the bare address would drop, leaving the code page
-  // empty. Without JavaScript, the page's <noscript> refresh does the reload.
+  // Continue page that reloads from this site. The address's fragment holds
+  // the login email's #code=, and must reach the reloaded page. It can't
+  // ride along in the address: going to the same address with the same
+  // #fragment is a jump within the page, not a load (0.95.31 did that, so
+  // the page stayed on "Continue"). So this tab keeps the fragment in
+  // sessionStorage for a moment and loads the bare address, which the next
+  // page puts back (0.97.0). Without JavaScript, the page's <noscript>
+  // refresh does the reload.
+  const carryKey = "login-continue";
   const onward = document.querySelector("a[data-continue]");
   if (onward) {
-    location.replace(onward.getAttribute("href") + location.hash);
+    if (location.hash) {
+      try {
+        sessionStorage.setItem(carryKey, JSON.stringify({ hash: location.hash, at: Date.now() }));
+      } catch (e) { /* storage off: the code is entered by hand */ }
+    }
+    location.replace(onward.getAttribute("href"));
     return;
   }
+  try {
+    const carried = JSON.parse(sessionStorage.getItem(carryKey) || "null");
+    sessionStorage.removeItem(carryKey);
+    if (carried && !location.hash && typeof carried.hash === "string" && Date.now() - carried.at < 60000) {
+      history.replaceState(null, "", location.pathname + location.search + carried.hash);
+    }
+  } catch (e) { /* storage off or a bad value: nothing carried */ }
 
   const K = new Uint32Array([
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -193,4 +210,16 @@
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) location.reload();
   });
+
+  // The page's forms stop working when its sign-in cookie runs out (20
+  // minutes; each load of the page starts it again). Coming back to a tab
+  // left open longer than 15 minutes loads a fresh page first, so the form
+  // works when sent (0.97.0). A form sent from an old page anyway gets a
+  // fresh page with a note from the server, not an error.
+  const loaded = Date.now();
+  const freshen = () => {
+    if (document.visibilityState === "visible" && Date.now() - loaded > 15 * 60000) location.reload();
+  };
+  document.addEventListener("visibilitychange", freshen);
+  window.addEventListener("focus", freshen);
 })();

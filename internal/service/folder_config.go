@@ -91,6 +91,14 @@ type folderService struct {
 	// like readOnly entries; by default every .md file in the folder and its
 	// subfolders other than AGENTS.md.
 	Files []string `json:"files,omitempty"`
+	// Allow, Block, Address and History are an email service's (0.97.0,
+	// email_in.go): which senders it takes or refuses (addresses or domains),
+	// which version of the folder's address is current, and whether quoted
+	// history is cut from replies ("strip", the default) or kept ("keep").
+	Allow   []string `json:"allow,omitempty"`
+	Block   []string `json:"block,omitempty"`
+	Address int      `json:"address,omitempty"`
+	History string   `json:"history,omitempty"`
 }
 
 // serviceKind describes one service type: check validates its settings,
@@ -106,6 +114,12 @@ type serviceKind struct {
 var serviceKinds = map[string]serviceKind{
 	"github":      {check: checkGitHubService},
 	"acknowledge": {check: checkAcknowledgeService, root: true, nest: true},
+	"email":       {check: checkEmailService, root: true, nest: true},
+}
+
+// emailFields reports whether svc sets any of an email service's fields.
+func (svc folderService) emailFields() bool {
+	return svc.Allow != nil || svc.Block != nil || svc.Address != 0 || svc.History != ""
 }
 
 func checkGitHubService(svc folderService) error {
@@ -124,11 +138,14 @@ func checkGitHubService(svc folderService) error {
 	if svc.Files != nil {
 		return folderConfigError("github takes no files.")
 	}
+	if svc.emailFields() {
+		return folderConfigError("allow, block, address and history belong to an email service, not github.")
+	}
 	return nil
 }
 
 func checkAcknowledgeService(svc folderService) error {
-	if svc.Repo != "" || svc.Branch != "" || svc.Push != "" || svc.Pull != "" {
+	if svc.Repo != "" || svc.Branch != "" || svc.Push != "" || svc.Pull != "" || svc.emailFields() {
 		return folderConfigError("acknowledge takes only files (which files people must read; by default every .md file).")
 	}
 	if len(svc.Files) > maxAcknowledgeFiles {
@@ -229,7 +246,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 		case svc.Type == "":
 			return c, folderConfigError("each service needs a type.")
 		case !known:
-			return c, folderConfigError(fmt.Sprintf("unknown service type %q; supported: acknowledge, github.", svc.Type))
+			return c, folderConfigError(fmt.Sprintf("unknown service type %q; supported: acknowledge, email, github.", svc.Type))
 		}
 		if err := kind.check(*svc); err != nil {
 			return c, err
@@ -307,7 +324,8 @@ func (svc folderService) withDefaults() folderService {
 }
 
 func (svc folderService) equal(other folderService) bool {
-	return svc.Type == other.Type && svc.Repo == other.Repo && svc.Branch == other.Branch && svc.Push == other.Push && svc.Pull == other.Pull && slices.Equal(svc.Files, other.Files)
+	return svc.Type == other.Type && svc.Repo == other.Repo && svc.Branch == other.Branch && svc.Push == other.Push && svc.Pull == other.Pull && slices.Equal(svc.Files, other.Files) &&
+		slices.Equal(svc.Allow, other.Allow) && slices.Equal(svc.Block, other.Block) && svc.Address == other.Address && svc.History == other.History
 }
 
 func (c folderConfig) has(kind string) bool {
@@ -355,6 +373,17 @@ func (r *repository) checkFolderConfig(ctx context.Context, files map[string]rec
 	}
 	if !r.owned {
 		return folderConfigError("services are available only in your own spaces (connected through /mcp/account).")
+	}
+	if c.has("email") && !c.has("github") {
+		github, err := r.githubFolders(ctx, files, nil)
+		if err != nil {
+			return err
+		}
+		if around := githubFolderAround(github, folder); around != "" {
+			return folderConfigError(fmt.Sprintf("%s mirrors a GitHub repository, so emails cannot be filed in it; give an ordinary folder the email service.", around))
+		}
+	} else if c.has("email") {
+		return folderConfigError("a folder with a github service cannot also receive email; give an ordinary folder the email service.")
 	}
 	for other, f := range files {
 		if other == path || !isFolderConfig(other) {

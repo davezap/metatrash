@@ -394,13 +394,24 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	session := cookieToken(r, sessionCookie)
 	if path == "/logout" {
 		if session == "" {
-			sendError(w, problem(403, "forbidden", "Please sign in again."))
+			// Already signed out (the session ended while the page sat
+			// open): go to sign in rather than show an error (0.97.0).
+			http.Redirect(w, r, h.basePath+"/login", http.StatusSeeOther)
 			return true
 		}
 		csrf = a.mac("logout:" + session)
 	}
 	if csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(r.PostForm.Get("csrf"))) != 1 {
-		sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
+		if path == "/logout" {
+			sendError(w, problem(403, "forbidden", "This form expired. Reload the page and try again."))
+			return true
+		}
+		// A sign-in page left open past its cookie (20 minutes), or one
+		// from before another tab started over: show this browser's sign-in
+		// page again, with a note, instead of an error (0.97.0). The Origin
+		// check above already passed, so only this site's own pages get here,
+		// and nothing is sent or signed in.
+		h.renderExpiredLogin(w, r, path, loginCookie, browser)
 		return true
 	}
 	if provider := h.extensionLogin(path); provider != nil {
@@ -554,6 +565,44 @@ func (h *httpAdapter) serveAccounts(w http.ResponseWriter, r *http.Request, clie
 	accountCookie(w, loginCookie, "", -1)
 	h.afterSignIn(w, r)
 	return true
+}
+
+// renderExpiredLogin answers a sign-in form whose csrf no longer matches
+// this browser's login cookie: the cookie ran out while the page sat open,
+// or another tab replaced it. It renders this browser's sign-in page (a new
+// login cookie if it has none) with a note, keeping the email address typed
+// and the form that was open, so sending again works.
+func (h *httpAdapter) renderExpiredLogin(w http.ResponseWriter, r *http.Request, path, loginCookie, browser string) {
+	a := h.service.accounts
+	if browser == "" {
+		var err error
+		if browser, err = randomHex(32); err != nil {
+			sendError(w, err)
+			return
+		}
+	}
+	accountCookie(w, loginCookie, browser, 1200)
+	page := a.loginPage(browser)
+	email := r.PostForm.Get("email")
+	if len(email) > 254 {
+		email = ""
+	}
+	page.Message = "This page had been open a while, so it expired. We’ve refreshed it: please try again."
+	switch path {
+	case "/login/send":
+		if !page.Verify {
+			page.Email = email
+		}
+	case "/login/verify":
+		if !page.Verify {
+			page.Message = "This page had been open a while, so it expired and its code no longer works. Ask for a new code below."
+		}
+	case "/login/totp":
+		page.TOTPOpen, page.TOTPEmail = true, email
+	case "/login/recovery":
+		page.RecoveryOpen, page.RecoveryEmail = true, email
+	}
+	h.renderLogin(w, r, http.StatusForbidden, page)
 }
 
 // afterSignIn sends a browser that just signed in (or came back to /login

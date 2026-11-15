@@ -167,6 +167,8 @@ type Input struct {
 	Regex      bool   `json:"-"`
 	IgnoreCase bool   `json:"-"`
 	Context    int    `json:"-"`
+	// Rank asks search for best matches by word (0.97.0) instead of lines.
+	Rank bool `json:"-"`
 	// Virtual is set only by Metatrash itself (putVirtual): the write is a
 	// virtual file's pointer, and this describes its content.
 	Virtual *VirtualInfo `json:"-"`

@@ -44,6 +44,41 @@ type Mailer interface {
 // ErrMailRejected marks a send that will never succeed (see Mailer).
 var ErrMailRejected = errors.New("mail rejected")
 
+// EmailReceiver is implemented by the Host when the service receives email
+// (Core 0.97.0, accounts.json email): a module that takes mail in, such as
+// an Amazon SES receiver, type-asserts its Host to it. ReceiveEmail files
+// one raw RFC 5322 message sent to recipient (the envelope recipient, a
+// folder's address) in that folder. checks are the verdicts the module's
+// mail service found, which Core trusts. Errors are *server.Error values:
+// not_found for an address no folder has (drop the message), sender_refused
+// or refused for one the folder won't take, payload_too_large; any other,
+// such as rate_limited or unavailable, may succeed later. EmailDomain is the
+// domain addresses use, or "" when receiving is off.
+type EmailReceiver interface {
+	ReceiveEmail(ctx context.Context, recipient string, raw []byte, checks EmailChecks) (EmailReceipt, error)
+	EmailDomain() string
+}
+
+// EmailChecks are a relay's verdicts on a message, each "pass", "fail",
+// "gray", "none" (and SPF's "softfail", "neutral", ...) or "" when it did not
+// check. A Virus or Spam "fail" is refused; a DMARC "fail" counts as forged
+// for folders that allow only some senders.
+type EmailChecks struct {
+	SPF   string `json:"spf,omitempty"`
+	DKIM  string `json:"dkim,omitempty"`
+	DMARC string `json:"dmarc,omitempty"`
+	Spam  string `json:"spam,omitempty"`
+	Virus string `json:"virus,omitempty"`
+}
+
+// EmailReceipt says where a message was filed. Duplicate is true when the
+// space already had it (the same Message-ID): nothing new was filed.
+type EmailReceipt struct {
+	SpaceID   string `json:"spaceID"`
+	Path      string `json:"path"`
+	Duplicate bool   `json:"duplicate,omitempty"`
+}
+
 type AssetEntry struct {
 	Entry string
 	CSS   []string

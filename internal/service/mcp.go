@@ -45,6 +45,7 @@ type mcpInput struct {
 	Regex      bool    `json:"regex"`
 	IgnoreCase bool    `json:"ignoreCase"`
 	Context    int     `json:"context"`
+	Rank       bool    `json:"rank"`
 	IfBlob     string  `json:"ifBlob"`
 	Line       int     `json:"line"`
 	Since      string  `json:"since"`
@@ -150,6 +151,36 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 				return mcpFailure(err), nil
 			}
 			write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "configure"
+			if op == "search" && args.Rank {
+				// limit counts files with rank, and defaults to fewer.
+				var given map[string]json.RawMessage
+				if json.Unmarshal(raw, &given) == nil && given["limit"] == nil {
+					args.Limit = 0
+				}
+			}
+			if op == "search" && args.Space == "*" {
+				// Every space this connection may read (0.97.0).
+				if !account || identity.oauth == nil {
+					return mcpFailure(invalid("space \"*\" searches every space of an account connection (/mcp/account); here, name one space.")), nil
+				}
+				if !args.Rank {
+					return mcpFailure(invalid("space \"*\" needs rank: true; exact lines are searched one space at a time.")), nil
+				}
+				var instance any
+				if err := json.Unmarshal(raw, &instance); err != nil || resolved.Validate(instance) != nil {
+					return mcpFailure(invalid("Arguments do not match the tool input schema.")), nil
+				}
+				in := Input{Prefix: args.Prefix, Limit: args.Limit, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context, Revision: args.Revision, Rank: true}
+				value, err := h.service.rankedSearchAll(ctx, *identity.oauth, identity.client, in)
+				if err != nil {
+					return mcpFailure(err), nil
+				}
+				b, err := json.Marshal(value)
+				if err != nil {
+					return mcpFailure(err), nil
+				}
+				return &mcp.CallToolResult{StructuredContent: value, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
+			}
 			var repo *repository
 			var err error
 			space := args.Space
@@ -177,7 +208,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			}
 			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
 				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, Strict: args.Strict, From: args.From, To: args.To,
-				StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context,
+				StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context, Rank: args.Rank,
 				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true, Source: args.Source, Refresh: args.Refresh}
 			var value any
 			if op == "configure" {

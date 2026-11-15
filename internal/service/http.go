@@ -205,7 +205,7 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveMCPAccount(w, r)
 		return
 	}
-	if h.serveExtensionRoute(w, r, "public", r.URL.Path, userAccount{}, "") || h.serveOAuth(w, r, client) || h.serveGitHub(w, r, client) || h.serveAsset(w, r) || h.serveApp(w, r, client) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveDocs(w, r, client) || h.serveOwnedBrowser(w, r, client) {
+	if h.serveExtensionRoute(w, r, "public", r.URL.Path, userAccount{}, "") || h.serveOAuth(w, r, client) || h.serveGitHub(w, r, client) || h.serveEmailInbound(w, r, client) || h.serveAsset(w, r) || h.serveApp(w, r, client) || h.serveAccounts(w, r, client) || h.serveBrowser(w, r, client) || h.serveDocs(w, r, client) || h.serveOwnedBrowser(w, r, client) {
 		return
 	}
 	if r.URL.Path == "/api/v1/spaces/public/recent" {
@@ -352,6 +352,15 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "GET" {
 			op = "activity"
 		}
+	case "email":
+		// A folder's email address (0.97.0), for the space's owner.
+		if !accountResource {
+			sendError(w, missing())
+			return
+		}
+		if r.Method == "GET" {
+			op = "email"
+		}
 	case "configure":
 		// A virtual file's source and refresh (0.60.2).
 		if !accountResource {
@@ -422,6 +431,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	case "activity":
 		h.serveActivity(w, r, repo, space)
+		return
+	case "email":
+		h.serveEmailAddress(w, r, repo)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)
@@ -642,7 +654,7 @@ func parseQuery(raw, op string) (Input, error) {
 	case "read":
 		allowed["path"], allowed["revision"], allowed["startLine"], allowed["lineCount"], allowed["ifBlob"] = true, true, true, true, true
 	case "search":
-		for _, k := range []string{"query", "prefix", "regex", "ignoreCase", "context", "limit", "revision"} {
+		for _, k := range []string{"query", "prefix", "regex", "ignoreCase", "context", "limit", "revision", "rank"} {
 			allowed[k] = true
 		}
 	case "write", "delete":
@@ -674,7 +686,7 @@ func parseQuery(raw, op string) (Input, error) {
 		in.Since = value[0]
 	}
 	in.Query = q.Get("query")
-	for name, target := range map[string]*bool{"regex": &in.Regex, "ignoreCase": &in.IgnoreCase} {
+	for name, target := range map[string]*bool{"regex": &in.Regex, "ignoreCase": &in.IgnoreCase, "rank": &in.Rank} {
 		if value, ok := q[name]; ok {
 			if value[0] != "true" && value[0] != "false" {
 				return in, invalid(name + " must be true or false.")
@@ -715,6 +727,8 @@ func parseQuery(raw, op string) (Input, error) {
 		if err != nil || in.Limit < 1 || in.Limit > top {
 			return in, invalid(fmt.Sprintf("limit must be 1..%d.", top))
 		}
+	} else if in.Rank {
+		in.Limit = 0 // rank counts files, with its own default
 	}
 	return in, nil
 }

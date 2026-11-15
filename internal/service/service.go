@@ -80,6 +80,9 @@ type Service struct {
 	rootAgents []byte
 	// clock replaces time.Now in tests.
 	clock func() time.Time
+	// emailIn receives email into folders (email_in.go); nil unless
+	// accounts.json enables email.
+	emailIn *emailSettings
 	// agents runs folder actions; nil unless accounts.json enables agents.
 	agents atomic.Pointer[agentRunner]
 	// usernameHook and userIDHook replace the account lookups in tests.
@@ -330,6 +333,9 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 	case "list", "history":
 		return s.page(ctx, r, space, op, in)
 	case "search":
+		if in.Rank {
+			return s.rankedSearch(ctx, r, space, in)
+		}
 		return s.search(ctx, r, space, in)
 	case "edit", "append":
 		check, run := checkEditInput, s.edit

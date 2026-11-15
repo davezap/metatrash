@@ -39,6 +39,9 @@ type accountConfig struct {
 	GitHub             *githubConfig `json:"github"`
 	// Agents is the model provider that runs folder actions (agent_config.go).
 	Agents *agentsConfig `json:"agents"`
+	// Email receives messages into folders with an email service (0.97.0,
+	// email_in.go).
+	Email *emailConfig `json:"email"`
 	// DocsSpace, when set, is the owner/slug of a space shown as the site's
 	// documentation under /docs/ while its owner keeps it readable on the web.
 	DocsSpace string `json:"docsSpace"`
@@ -112,6 +115,8 @@ type accounts struct {
 	github *githubSettings
 	// agents is nil unless the account configuration enables folder actions.
 	agents *agentSettings
+	// email is nil unless the account configuration enables receiving email.
+	email *emailSettings
 	// totpKey seals authenticator-app secrets; nil without totpKeyFile.
 	totpKey cipher.AEAD
 	// recoveryReveals holds new recovery codes until their page shows them
@@ -197,6 +202,7 @@ func (s *Service) EnableAccounts(configPath string) error {
 		return sendMail(ctx, s.mailConfig(cfg), passwordText, email, "You're invited to a Metatrash space", m.body(cfg.Origin))
 	}
 	s.accounts = a
+	s.emailIn = a.email
 	if err := s.startExtensions(); err != nil {
 		return err
 	}
@@ -263,6 +269,11 @@ func loadAccountSettings(configPath string) (*accounts, string, error) {
 	}
 	if cfg.Agents != nil && cfg.Agents.Enabled {
 		if a.agents, err = cfg.Agents.settings(); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.Email != nil && cfg.Email.Enabled {
+		if a.email, err = cfg.Email.settings(); err != nil {
 			return nil, "", err
 		}
 	}

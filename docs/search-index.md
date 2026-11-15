@@ -79,8 +79,15 @@ A folder whose index will not open, or was made by an older version of the
 index, is built again automatically. A deleted space's index is removed with
 it.
 
+## Best matches (0.97.0)
+
+`search` with `rank: true` (HTTP `rank=true`) answers with the files that best
+match the query's words, best first, each with its best lines. It works with
+the index on or off and gives the same answer either way; with the index on
+it reads only the files holding one of the words (or named after one). On an
+account connection, `space: "*"` with `rank` searches every connected space.
+
 ## What it doesn't do (yet)
 
 - Regex searches and searches of an older `revision` read every file.
-- Ranked "best matches" search and search on the website come later.
 - One server process per index folder: two services must not share `dir`.
