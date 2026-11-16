@@ -249,8 +249,9 @@ func (a folderAction) allows(tool string) bool {
 	if len(a.Tools) == 0 {
 		return true
 	}
+	group, module := registeredModuleTool(tool)
 	for _, name := range a.Tools {
-		if name == tool {
+		if name == tool || module && group != "" && name == group {
 			return true
 		}
 	}

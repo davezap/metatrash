@@ -153,6 +153,9 @@ func checkActionTools(tools []string) string {
 		for _, n := range runnerToolNames {
 			known = known || n == name
 		}
+		if _, module := registeredModuleTool(name); module || registeredToolGroup(name) {
+			known = true
+		}
 		if !known {
 			return fmt.Sprintf("tools: %q is not a tool; the tools are %s.", name, strings.Join(runnerToolNames, ", "))
 		}

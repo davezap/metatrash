@@ -153,6 +153,8 @@ type Hooks struct {
 	// Brand names and dresses the service (Core 0.95.28; see Brand). At
 	// most one module may set it.
 	Brand *Brand
+	// Tools are agent tools the module adds (Core 0.98.0; see Tool).
+	Tools []Tool
 }
 
 // Write describes a change about to be committed to an owned space.

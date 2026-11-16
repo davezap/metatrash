@@ -36,6 +36,8 @@ type Service struct {
 	configurationFrozen bool
 	modules             []extension.Module
 	extensions          []extension.Hooks
+	// moduleTools are the extensions' agent tools by name (0.98.0).
+	moduleTools map[string]*moduleTool
 	// brand is the one extension's Brand, nil for Metatrash (brand.go).
 	brand           *extension.Brand
 	brandOnce       sync.Once

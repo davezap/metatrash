@@ -116,6 +116,9 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			})
 		}
 	}
+	if account {
+		h.addModuleMCPTools(server)
+	}
 	for _, tool := range catalog.Tools {
 		op := tool.Name
 		switch op {

@@ -885,7 +885,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 			system += webPreamble(web.search, web.fetch)
 		}
 	}
-	tools = toolsFor(tools, action.Tools)
+	tools = append(toolsFor(tools, action.Tools), a.s.moduleToolsFor(*action)...)
 	if f, ok := files[j.Folder+agentsFileName]; ok && action.AgentsMd {
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
@@ -996,7 +996,17 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 			}
 			var result json.RawMessage
 			var change string
-			if web != nil && web.handles(use.Name, use.Input) {
+			if mt := a.s.moduleTools[use.Name]; mt != nil {
+				// Module tools (0.98.0) are offered only to actions that list them.
+				text, isError := `{"error":{"code":"invalid_request","message":"This action doesn't list `+use.Name+` in its tools."}}`, true
+				if action.listsModuleTool(mt.Name, mt.Group) {
+					text, isError = a.callJobModuleTool(toolCtx, mt, r, j.SpaceID, j.ID, pin, use.Input)
+				}
+				if web != nil {
+					web.see(text)
+				}
+				result = rawBlock(contentBlock{Type: "tool_result", ToolUseID: use.ID, Content: text, IsError: isError})
+			} else if web != nil && web.handles(use.Name, use.Input) {
 				result, change = web.call(toolCtx, r, j.SpaceID, pin, use)
 			} else {
 				var text string

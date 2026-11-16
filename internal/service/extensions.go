@@ -250,6 +250,9 @@ func (s *Service) startExtensions() (err error) {
 		valid = true
 		s.extensions = append(s.extensions, hooks)
 	}
+	if err := s.registerModuleTools(); err != nil {
+		return err
+	}
 	if s.ownedDB != nil && s.ownedDB.db != nil {
 		rows, e := s.ownedDB.db.Query("SELECT component FROM metatrash_schema_components WHERE component <> 'core'")
 		if e != nil {
