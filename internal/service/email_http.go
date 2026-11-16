@@ -123,8 +123,14 @@ func parseChecks(header string) extension.EmailChecks {
 // since anyone who has it can file messages there.
 func (h *httpAdapter) serveEmailAddress(w http.ResponseWriter, r *http.Request, repo *repository) {
 	q, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil || len(q) > 1 || len(q) == 1 && len(q["folder"]) != 1 {
-		sendError(w, invalid("Only ?folder=<folder/> is accepted (empty for the space root)."))
+	extra := 0
+	for k, v := range q {
+		if k != "folder" && k != "name" || len(v) != 1 {
+			extra++
+		}
+	}
+	if err != nil || extra > 0 {
+		sendError(w, invalid("Only ?folder=<folder/> (empty for the space root) and &name=<the email service's name> are accepted."))
 		return
 	}
 	identity, _ := r.Context().Value(mcpIdentityKey{}).(mcpIdentity)
@@ -134,11 +140,11 @@ func (h *httpAdapter) serveEmailAddress(w http.ResponseWriter, r *http.Request, 
 		sendError(w, problem(403, "forbidden", "Only the space's owner sees its email addresses."))
 		return
 	}
-	folder := q.Get("folder")
-	address, err := h.service.folderEmailAddress(r.Context(), repo, folder)
+	folder, name := q.Get("folder"), q.Get("name")
+	address, err := h.service.folderEmailAddress(r.Context(), repo, folder, name)
 	if err != nil {
 		sendError(w, err)
 		return
 	}
-	sendJSON(w, 200, map[string]string{"folder": folder, "address": address})
+	sendJSON(w, 200, map[string]string{"folder": folder, "name": name, "address": address})
 }

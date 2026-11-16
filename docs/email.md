@@ -48,6 +48,7 @@ under **Attachments** in the file. Without a virtual-file bucket
 | `block` | Senders to refuse, in the same forms. Block wins over allow. |
 | `address` | The address's version, 1 by default. Raise it to retire the address and get a new one. |
 | `history` | `strip` (the default) or `keep`. |
+| `name` | Core 0.97.2. Tells a folder's email services apart: a folder may have several, each with its own address and settings, as long as each has its own name (lowercase letters, digits and hyphens, up to 40). The unnamed one keeps the address it had before names. |
 
 With no `allow`, anyone may send. The random part of the address is the
 protection, so share it only where it's needed. Mail marked as a virus or
@@ -60,12 +61,13 @@ it needs (`tools`), and it can't send mail.
 ## The address
 
 `<space id>-<tag>@<domain>`. The tag is an HMAC of the space, the folder and
-the address version, made with the server's email key, so it can't be
+the address version (and the service's `name`, when it has one), made with the server's email key, so it can't be
 guessed. Renaming or moving the folder gives it a new address. Anything after
 a `+` is ignored (`…+cve@…`). The space's owner reads the address from:
 
 ```
-GET /api/v1/account/spaces/{space}/email?folder=inbox/      → {"folder", "address"}
+GET /api/v1/account/spaces/{space}/email?folder=inbox/      → {"folder", "name", "address"}
+GET /api/v1/account/spaces/{space}/email?folder=inbox/&name=alerts
 GET /api/v1/site/spaces/{owner}/{slug}/email?folder=inbox/
 ```
 

@@ -99,6 +99,10 @@ type folderService struct {
 	Block   []string `json:"block,omitempty"`
 	Address int      `json:"address,omitempty"`
 	History string   `json:"history,omitempty"`
+	// Name tells a folder's email services apart (0.97.2): a folder may
+	// have several, each with its own address, as long as each has its own
+	// name. The unnamed one keeps the address it had before names existed.
+	Name string `json:"name,omitempty"`
 }
 
 // serviceKind describes one service type: check validates its settings,
@@ -119,7 +123,7 @@ var serviceKinds = map[string]serviceKind{
 
 // emailFields reports whether svc sets any of an email service's fields.
 func (svc folderService) emailFields() bool {
-	return svc.Allow != nil || svc.Block != nil || svc.Address != 0 || svc.History != ""
+	return svc.Allow != nil || svc.Block != nil || svc.Address != 0 || svc.History != "" || svc.Name != ""
 }
 
 func checkGitHubService(svc folderService) error {
@@ -251,10 +255,18 @@ func parseFolderConfig(text string) (folderConfig, error) {
 		if err := kind.check(*svc); err != nil {
 			return c, err
 		}
-		if kinds[svc.Type] {
+		key := svc.Type
+		if svc.Type == "email" {
+			// Several email services, one per name (0.97.2).
+			key += "\x00" + svc.Name
+		}
+		if kinds[key] {
+			if svc.Type == "email" {
+				return c, folderConfigError("each email service in a folder needs its own name.")
+			}
 			return c, folderConfigError(fmt.Sprintf("only one %s service per folder.", svc.Type))
 		}
-		kinds[svc.Type] = true
+		kinds[key] = true
 	}
 	return c, nil
 }
@@ -325,7 +337,7 @@ func (svc folderService) withDefaults() folderService {
 
 func (svc folderService) equal(other folderService) bool {
 	return svc.Type == other.Type && svc.Repo == other.Repo && svc.Branch == other.Branch && svc.Push == other.Push && svc.Pull == other.Pull && slices.Equal(svc.Files, other.Files) &&
-		slices.Equal(svc.Allow, other.Allow) && slices.Equal(svc.Block, other.Block) && svc.Address == other.Address && svc.History == other.History
+		slices.Equal(svc.Allow, other.Allow) && slices.Equal(svc.Block, other.Block) && svc.Address == other.Address && svc.History == other.History && svc.Name == other.Name
 }
 
 func (c folderConfig) has(kind string) bool {

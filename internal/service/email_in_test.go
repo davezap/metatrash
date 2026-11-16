@@ -34,7 +34,7 @@ func TestEmailServiceConfig(t *testing.T) {
 		`{"services":[{"type":"email","history":"drop"}]}`:                `"strip"`,
 		`{"services":[{"type":"github","repo":"a/b","allow":["x.com"]}]}`: "belong to an email service",
 		`{"services":[{"type":"acknowledge","history":"keep"}]}`:          "acknowledge takes only files",
-		`{"services":[{"type":"email"},{"type":"email"}]}`:                "only one email service",
+		`{"services":[{"type":"email"},{"type":"email"}]}`:                "its own name",
 	}
 	for text, want := range bad {
 		if _, err := parseFolderConfig(text); err == nil || !strings.Contains(err.Error(), want) {
@@ -148,14 +148,14 @@ func TestReceiveEmail(t *testing.T) {
 	w, objects := emailWorld(t)
 	ctx := context.Background()
 	w.write("inbox/.metatrash.json", `{"services":[{"type":"email","block":["spam@example.com"]}],"actions":[{"name":"triage","on":"*.md","do":"Triage this finding."}]}`)
-	address, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/")
+	address, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(address, w.repo.id+"-") || !strings.HasSuffix(address, "@in.example.com") || len(address) != 32+1+16+len("@in.example.com") {
 		t.Fatalf("address %q", address)
 	}
-	if _, err := w.s.folderEmailAddress(ctx, w.repo, "hr/"); err == nil {
+	if _, err := w.s.folderEmailAddress(ctx, w.repo, "hr/", ""); err == nil {
 		t.Error("a folder without the service has an address")
 	}
 
@@ -226,7 +226,7 @@ func TestReceiveEmail(t *testing.T) {
 	if _, err := w.s.receiveEmail(ctx, address, testEmail("four@example.com", "", "x", "x"), checks); errorCode(err) != "not_found" {
 		t.Errorf("retired address: %v", err)
 	}
-	address2, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/")
+	address2, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/", "")
 	if err != nil || address2 == address {
 		t.Fatalf("new address %q %v", address2, err)
 	}
@@ -262,7 +262,7 @@ func errorCode(err error) string {
 func TestEmailInboundHTTP(t *testing.T) {
 	w, _ := emailWorld(t)
 	w.write("inbox/.metatrash.json", `{"services":[{"type":"email"}]}`)
-	address, err := w.s.folderEmailAddress(context.Background(), w.repo, "inbox/")
+	address, err := w.s.folderEmailAddress(context.Background(), w.repo, "inbox/", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,5 +326,46 @@ func TestEmailConfigSettings(t *testing.T) {
 	}
 	if _, err := (&emailConfig{Domain: "in.example.com", KeyFile: secret}).settings(); err == nil {
 		t.Error("bad key")
+	}
+}
+
+// TestSeveralEmailAddresses: a folder may have several email services, one
+// per name, each with its own address; the unnamed one keeps its address.
+func TestSeveralEmailAddresses(t *testing.T) {
+	w, _ := emailWorld(t)
+	ctx := context.Background()
+	w.write("inbox/.metatrash.json", `{"services":[{"type":"email"}]}`)
+	before, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.write("inbox/.metatrash.json", `{"services":[{"type":"email"},{"type":"email","name":"alerts","allow":["sns.amazonaws.com"]}]}`)
+	plain, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/", "")
+	if err != nil || plain != before {
+		t.Fatalf("unnamed address changed: %q %q %v", before, plain, err)
+	}
+	alerts, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/", "alerts")
+	if err != nil || alerts == plain {
+		t.Fatalf("named address %q %v", alerts, err)
+	}
+	if _, err := w.s.folderEmailAddress(ctx, w.repo, "inbox/", "nope"); errorCode(err) != "not_found" {
+		t.Errorf("unknown name: %v", err)
+	}
+	checks := extension.EmailChecks{DMARC: "pass"}
+	if _, err := w.s.receiveEmail(ctx, alerts, testEmail("a1@example.com", "", "x", "x"), checks); err != nil {
+		t.Errorf("named address: %v", err)
+	}
+	if _, err := w.s.receiveEmail(ctx, plain, testEmail("a2@example.com", "", "y", "y"), checks); err != nil {
+		t.Errorf("unnamed address: %v", err)
+	}
+	for _, bad := range []string{
+		`{"services":[{"type":"email","name":"a"},{"type":"email","name":"a"}]}`,
+		`{"services":[{"type":"email"},{"type":"email"}]}`,
+		`{"services":[{"type":"email","name":"Bad Name"}]}`,
+		`{"services":[{"type":"acknowledge","name":"x"}]}`,
+	} {
+		if _, err := parseFolderConfig(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
 	}
 }

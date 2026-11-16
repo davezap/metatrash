@@ -115,7 +115,10 @@ func (c *emailConfig) settings() (*emailSettings, error) {
 // checkEmailService checks an email service's settings (parseFolderConfig).
 func checkEmailService(svc folderService) error {
 	if svc.Repo != "" || svc.Branch != "" || svc.Push != "" || svc.Pull != "" || svc.Files != nil {
-		return folderConfigError("email takes allow, block, address and history only.")
+		return folderConfigError("email takes name, allow, block, address and history only.")
+	}
+	if svc.Name != "" && !actionNamePattern.MatchString(svc.Name) {
+		return folderConfigError("email name is up to 40 lowercase letters, digits and hyphens, starting with a letter or digit; it tells a folder's email services apart.")
 	}
 	for name, rules := range map[string][]string{"allow": svc.Allow, "block": svc.Block} {
 		if len(rules) > maxEmailSenderRules {
@@ -174,15 +177,20 @@ func (svc folderService) addressVersion() int {
 	return svc.Address
 }
 
-func (e *emailSettings) tag(spaceID, folder string, version int) string {
+func (e *emailSettings) tag(spaceID, folder, name string, version int) string {
 	h := hmac.New(sha256.New, e.key)
-	fmt.Fprintf(h, "metatrash email address\x00%s\x00%s\x00%d", spaceID, folder, version)
+	if name == "" {
+		// The unnamed service keeps the address it had before names (0.97.2).
+		fmt.Fprintf(h, "metatrash email address\x00%s\x00%s\x00%d", spaceID, folder, version)
+	} else {
+		fmt.Fprintf(h, "metatrash email address\x00%s\x00%s\x00%d\x00%s", spaceID, folder, version, name)
+	}
 	return strings.ToLower(emailTagEncoding.EncodeToString(h.Sum(nil)))[:emailTagLength]
 }
 
 // address is folder's current address.
 func (e *emailSettings) address(spaceID, folder string, svc folderService) string {
-	return spaceID + "-" + e.tag(spaceID, folder, svc.addressVersion()) + "@" + e.domain
+	return spaceID + "-" + e.tag(spaceID, folder, svc.Name, svc.addressVersion()) + "@" + e.domain
 }
 
 // emailTarget is where a message to an address goes.
@@ -230,7 +238,7 @@ func (s *Service) resolveEmail(ctx context.Context, recipient string) (emailTarg
 			if svc.Type != "email" {
 				continue
 			}
-			if subtle.ConstantTimeCompare([]byte(e.tag(repo.id, folder, svc.addressVersion())), []byte(m[2])) == 1 {
+			if subtle.ConstantTimeCompare([]byte(e.tag(repo.id, folder, svc.Name, svc.addressVersion())), []byte(m[2])) == 1 {
 				return emailTarget{repo: repo, folder: folder, service: svc}, nil
 			}
 		}
@@ -238,9 +246,10 @@ func (s *Service) resolveEmail(ctx context.Context, recipient string) (emailTarg
 	return emailTarget{}, emailNotFound()
 }
 
-// folderEmailAddress is the address of folder ("" for the root, else ending
-// in /) in repo, for its owner to see.
-func (s *Service) folderEmailAddress(ctx context.Context, repo *repository, folder string) (string, error) {
+// folderEmailAddress is the address of folder's email service called name
+// ("" for the unnamed one, or the folder's first when it has no unnamed one)
+// in repo, folder being "" for the root, else ending in /, for its owner to see.
+func (s *Service) folderEmailAddress(ctx context.Context, repo *repository, folder, name string) (string, error) {
 	if s.emailIn == nil {
 		return "", problem(404, "not_found", "This server does not receive email (accounts.json email).")
 	}
@@ -255,10 +264,23 @@ func (s *Service) folderEmailAddress(ctx context.Context, repo *repository, fold
 	if err != nil {
 		return "", err
 	}
-	for _, svc := range configs[folder].Services {
-		if svc.Type == "email" {
+	var first *folderService
+	for i, svc := range configs[folder].Services {
+		if svc.Type != "email" {
+			continue
+		}
+		if svc.Name == name {
 			return s.emailIn.address(repo.id, folder, svc), nil
 		}
+		if first == nil {
+			first = &configs[folder].Services[i]
+		}
+	}
+	if name == "" && first != nil {
+		return s.emailIn.address(repo.id, folder, *first), nil
+	}
+	if name != "" {
+		return "", problem(404, "not_found", "This folder has no email service named "+name+".")
 	}
 	return "", problem(404, "not_found", "This folder has no email service: add {\"type\": \"email\"} to services in its "+folderConfigName+".")
 }
