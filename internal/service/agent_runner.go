@@ -160,9 +160,10 @@ func agentTools(schema []byte) ([]json.RawMessage, map[string]*jsonschema.Resolv
 	schemas := map[string]*jsonschema.Resolved{}
 	inputs := map[string]json.RawMessage{}
 	for _, tool := range catalog.Tools {
-		if tool.Name == "configure" {
+		if tool.Name == "configure" || tool.Name == "query" {
 			// A job's agent saves downloads with web_fetch's path, which
 			// fetches only URLs it has seen; configure would fetch any.
+			// query is for writing dashboards with a person (0.99.0).
 			continue
 		}
 		input := tool.InputSchema

@@ -73,6 +73,10 @@ type folderConfig struct {
 	// "" turns it off. Links, emphasis and code only, no HTML; :metatrash:
 	// stands for the Metatrash wordmark.
 	Footer *string `json:"footer,omitempty"`
+	// Home is the file the folder opens on (0.99.0): a .md file in the
+	// folder itself. Without it a space opens on its root dashboard.md, then
+	// README.md. Never inherited.
+	Home *string `json:"home,omitempty"`
 }
 
 type folderPrint struct {
@@ -238,6 +242,9 @@ func parseFolderConfig(text string) (folderConfig, error) {
 		if err := checkFooter(*c.Footer); err != nil {
 			return c, err
 		}
+	}
+	if c.Home != nil && (!validPath(*c.Home) || strings.Contains(*c.Home, "/") || !strings.HasSuffix(strings.ToLower(*c.Home), ".md") || isAgentsFile(*c.Home)) {
+		return c, folderConfigError("home is the name of a Markdown file in this folder, such as dashboard.md.")
 	}
 	if len(c.Services) > maxFolderServices {
 		return c, folderConfigError(fmt.Sprintf("services is limited to %d entries.", maxFolderServices))
@@ -510,7 +517,7 @@ func (r *repository) folderConfigs(ctx context.Context, files map[string]record)
 
 // lockableKeys are the names locked may hold: keys of the file, and the
 // form locks fillForms and takeQuizzes.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "locked": true, lockFillForms: true, lockTakeQuizzes: true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "home": true, "locked": true, lockFillForms: true, lockTakeQuizzes: true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.
@@ -584,7 +591,7 @@ func (r *repository) effectiveSettings(ctx context.Context, files map[string]rec
 		return nil, err
 	}
 	for k, v := range parent {
-		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "publishedVersion" && k != "actions" && k != "inherit" {
+		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "publishedVersion" && k != "actions" && k != "inherit" && k != "home" {
 			keys[k] = v
 		}
 	}

@@ -31,6 +31,8 @@ type Service struct {
 	// searchIdx is the search index manager, nil when it is off
 	// (search_index.go).
 	searchIdx *searchIndexes
+	// queryCache keeps the parsed rows of dashboard sources (0.99.0).
+	queryCache queryCache
 	// presence is who has each space open on the site (activity.go).
 	presence            presenceBoard
 	configurationFrozen bool

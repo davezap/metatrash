@@ -534,6 +534,9 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 	if in.Resends != "" && t.Quiz {
 		return Receipt{}, invalid("A quiz is never sent back for more information; send it again without resends.")
 	}
+	if t.NoReview {
+		sub.Status = "complete"
+	}
 	if t.Quiz {
 		if err := s.quizAllowed(ctx, repo.id, userID, f.ID, blob, t, now); err != nil {
 			return Receipt{}, err

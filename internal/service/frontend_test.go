@@ -75,6 +75,18 @@ func TestFrontendEditorIsolation(t *testing.T) {
 	if got := string(baseline.editorAsset("slate.js", []byte("public"))); got != "public" {
 		t.Fatalf("baseline %q", got)
 	}
+	// Charts (0.99.0) are optional: the bundle's when it has them.
+	if _, ok := s.frontend.editor["charts/charts.js"]; ok {
+		t.Fatal("charts without a charts file")
+	}
+	source["slate/charts/charts.js"] = &fstest.MapFile{Data: []byte("company charts")}
+	withCharts := &Service{}
+	if err := withCharts.SetFrontend(source); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(withCharts.frontend.editor["charts/charts.js"]); got != "company charts" {
+		t.Fatalf("charts %q", got)
+	}
 	delete(source, "slate/slate.css")
 	if err := (&Service{}).SetFrontend(source); err == nil {
 		t.Fatal("accepted incomplete editor bundle")

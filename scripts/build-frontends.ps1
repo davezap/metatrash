@@ -5,7 +5,7 @@
 .DESCRIPTION
   Metatrash ships two front ends that live in their own repositories:
 
-    Slate         slate.js, slate.css and mermaid/  ->  internal/service/web/
+    Slate         slate.js, slate.css, mermaid/ and charts/  ->  internal/service/web/
                   (and the same files into Slate Viewer's public/slate/)
     Slate Viewer  npm run build:web (dist-web/)     ->  internal/service/web/app/
 
@@ -24,7 +24,7 @@
   The Slate Viewer checkout. Default: ..\..\Slate_Viewer from this script.
 
 .PARAMETER SkipSlate
-  Don't rebuild Slate: copy its committed slate.js, slate.css and mermaid/.
+  Don't rebuild Slate: copy its committed slate.js, slate.css, mermaid/ and charts/.
 
 .PARAMETER Install
   Run npm ci in both repositories first (after pulling new dependencies).
@@ -127,10 +127,12 @@ $viewerSlate = Join-Path $Viewer 'public\slate'
 Copy-Files $Slate $viewerSlate @('slate.js', 'slate.css', 'slate-editor.d.ts', 'CHANGELOG.md')
 Replace-Folder (Join-Path $Slate 'mermaid') (Join-Path $viewerSlate 'mermaid')
 Replace-Folder (Join-Path $Slate 'themes') (Join-Path $viewerSlate 'themes')
+Replace-Folder (Join-Path $Slate 'charts') (Join-Path $viewerSlate 'charts')
 
 Step 'Slate -> Metatrash internal\service\web'
 Copy-Files $Slate $Web @('slate.js', 'slate.css')
 Replace-Folder (Join-Path $Slate 'mermaid') (Join-Path $Web 'mermaid')
+Replace-Folder (Join-Path $Slate 'charts') (Join-Path $Web 'charts')
 
 Step 'Slate Viewer: npm run build:web'
 if (-not (Test-Path (Join-Path $Viewer 'node_modules'))) { Run $Viewer 'npm' @('ci') }

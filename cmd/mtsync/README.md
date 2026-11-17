@@ -304,6 +304,9 @@ All commands:
 | `submissions PLACE` | the forms you sent from that space, and their reviews (`-json`) |
 | `submission PLACE ID` | print the copy of one that was filed (`-json`) |
 | `review FILE REVIEW` | approve, decline or mark a copy filed in your space (`-json`; metatrash 0.50.0) |
+| `query DASHBOARD QUERY` | answer one card of a dashboard; QUERY is a JSON file or `-` (`-json`; metatrash 0.99.0) |
+| `notices FILE...` | whether you acknowledged each notice or sent each form a dashboard shows (`-json`) |
+| `notice FILE BLOB` | acknowledge a notice with that text (`-json`) |
 | `version` | the version |
 | `SPACE[/PATH] FOLDER` | sync one folder in this window without registering it; `-once` for one pass |
 
@@ -316,7 +319,7 @@ Flags go before the command:
 | `-once` | off | one-off sync: one pass, then exit |
 | `-limit N` | `10` | `history`: how many changes to list (1–100) |
 | `-offset N` | `0` | `history`: skip the N newest changes (needs metatrash 0.41.0) |
-| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `whoami`, `virtual`, `spaces`, `list`, `pull`, `pending`, `push`: answer in JSON |
+| `-json` | off | `history`, `policies`, `readers`, `submit`, `submissions`, `review`, `query`, `notices`, `notice`, `whoami`, `virtual`, `spaces`, `list`, `pull`, `pending`, `push`: answer in JSON |
 | `-m MESSAGE` | | `push`: the commit message |
 | `-published` | `0` | `submit`: answer this published version of the form's folder, as Slate Viewer shows it |
 | `-key-env VAR` | | one-off sync and `export`: use the space key in environment variable `VAR` instead of sign-in (administrator key spaces) |

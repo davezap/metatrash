@@ -34,6 +34,9 @@ func TestSlateAndMermaidAssets(t *testing.T) {
 	if w := get("/assets/slate.js"); w.Code != 200 || !strings.Contains(w.Body.String(), "SlateMarkdownEditor") {
 		t.Fatalf("slate.js: %d", w.Code)
 	}
+	if w := get("/assets/charts/charts.js"); w.Code != 200 || w.Header().Get("Content-Type") != "text/javascript; charset=utf-8" || !strings.Contains(w.Body.String(), "drawChart") {
+		t.Fatalf("charts.js: %d %s", w.Code, w.Header().Get("Content-Type"))
+	}
 	entry := get("/assets/mermaid/mermaid.js")
 	if entry.Code != 200 || entry.Header().Get("Content-Type") != "text/javascript; charset=utf-8" || !strings.Contains(entry.Body.String(), "./chunks/") {
 		t.Fatalf("mermaid.js: %d %s", entry.Code, entry.Header().Get("Content-Type"))

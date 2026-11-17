@@ -43,6 +43,12 @@ var slateJS []byte
 //go:embed web/slate.css
 var slateCSS []byte
 
+// Chart.js for dashboard cards (0.99.0), which Slate loads on its own the
+// first time a page has a pie, bar or line card.
+//
+//go:embed web/charts/charts.js
+var chartsJS []byte
+
 // Mermaid, which Slate loads on its own the first time a document has a
 // ```mermaid block: an entry file and the chunks it imports.
 //
@@ -90,6 +96,11 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 		data, kind = h.editorAsset("slate.js", slateJS), "text/javascript; charset=utf-8"
 	case "/assets/slate.css":
 		data, kind = h.editorAsset("slate.css", slateCSS), "text/css; charset=utf-8"
+	case "/assets/charts/charts.js":
+		data, kind = chartsJS, "text/javascript; charset=utf-8"
+		if bundle := h.service.frontend; bundle != nil && len(bundle.editor["charts/charts.js"]) != 0 {
+			data = bundle.editor["charts/charts.js"]
+		}
 	case "/assets/login.js":
 		data, kind = loginJS, "text/javascript; charset=utf-8"
 	case "/assets/passkey.js":

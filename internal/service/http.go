@@ -310,6 +310,16 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "POST" {
 			op = resource
 		}
+	case "notices":
+		// Dashboard notices (0.99.0), kept with acknowledgements.
+		if !accountResource {
+			sendError(w, missing())
+			return
+		}
+		allow = "GET, POST"
+		if r.Method == "GET" || r.Method == "POST" {
+			op = resource
+		}
 	case "acknowledgements", "submissions":
 		// Kept in the account database, so only the OAuth resource offers them.
 		if !accountResource {
@@ -318,6 +328,12 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		}
 		allow = "GET, POST"
 		if r.Method == "GET" || r.Method == "POST" {
+			op = resource
+		}
+	case "query":
+		// A dashboard card's query (0.99.0): a read, sent as JSON.
+		allow = "POST"
+		if r.Method == "POST" {
 			op = resource
 		}
 	case "reviews":
@@ -405,6 +421,12 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	switch op {
+	case "query":
+		h.serveQuery(w, r, repo, space)
+		return
+	case "notices":
+		h.serveNotices(w, r, repo, space)
+		return
 	case "acknowledgements":
 		h.serveAcknowledgements(w, r, repo, space, access)
 		return

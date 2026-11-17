@@ -115,6 +115,9 @@ func (s *Service) reviewCopy(ctx context.Context, repo *repository, userID strin
 	if !found || row.targetFileID != f.ID {
 		return Receipt{}, notCopy
 	}
+	if row.status == "complete" {
+		return Receipt{}, problem(409, "no_review", "This form is filed without review (review: none), so its copies are complete as sent.")
+	}
 	if row.status == "resent" {
 		return Receipt{}, problem(409, "resent", "This copy was sent again after you asked for more information; review the new copy, which names this one as resends.")
 	}

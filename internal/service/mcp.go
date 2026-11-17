@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -51,6 +52,14 @@ type mcpInput struct {
 	Since      string  `json:"since"`
 	Source     *string `json:"source"`
 	Refresh    *string `json:"refresh"`
+	// The query tool's (0.99.0); source is shared with configure.
+	Base    string `json:"base"`
+	Where   string `json:"where"`
+	Group   string `json:"group"`
+	Measure string `json:"measure"`
+	Sort    string `json:"sort"`
+	Columns string `json:"columns"`
+	Today   string `json:"today"`
 }
 
 const accountInstructions = "Metatrash spaces for this signed-in connection. Call spaces first: it lists the public space and the private spaces the user connected, with read_only or read_write access; pass a returned space value as the space argument of the other tools. Start in a space by reading its root AGENTS.md. Every folder has its own AGENTS.md (what it holds, how to work in it; read it before working there and keep it current) and a .metatrash.json (its settings); neither can be deleted or moved. To save tokens: find text with search, read long files by line range, re-check a file you hold with read ifBlob, see what changed with list since, change part of a file with edit and add to one with append, instead of reading and rewriting whole files. Write, move and delete need ifInState from a read, list or search; it goes stale only when the files the change touches changed since. A folder whose .metatrash.json has a github service mirrors a GitHub repository: pull at the start of each session, change its files, check pending, then push with a message."
@@ -122,7 +131,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 	for _, tool := range catalog.Tools {
 		op := tool.Name
 		switch op {
-		case "read", "write", "edit", "append", "search", "list", "move", "delete", "history":
+		case "read", "write", "edit", "append", "search", "list", "move", "delete", "history", "query":
 		case "configure":
 			// Virtual files are kept in account spaces only.
 			if !account {
@@ -214,7 +223,15 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 				StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context, Rank: args.Rank,
 				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true, Source: args.Source, Refresh: args.Refresh}
 			var value any
-			if op == "configure" {
+			if op == "query" {
+				q := QueryInput{Base: args.Base, Where: args.Where, Group: args.Group, Measure: args.Measure, Sort: args.Sort, Limit: args.Limit, Columns: args.Columns, Today: args.Today}
+				if args.Source != nil {
+					q.Source = *args.Source
+				}
+				qctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				value, err = h.service.query(qctx, repo, space, h.requestUsername(qctx), q)
+				cancel()
+			} else if op == "configure" {
 				// configure may fetch, so it runs outside the write queue.
 				value, err = h.service.configureVirtual(ctx, repo, space, in)
 			} else {

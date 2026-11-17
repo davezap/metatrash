@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.20.0",
+  "schemaVersion": "0.21.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.94.2"},
@@ -378,7 +378,7 @@
     },
     {
       "name": "write",
-      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": level}), locked ({\"key\": level}: settings only people may change; also \"fillForms\" and \"takeQuizzes\": who may send the folder's forms and quizzes; levels: \"folderAgents\" stops the agents of folder actions, \"connectedAgents\" other agents, \"agents\" both, \"everyone\" people too), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (up to 3 lines of Markdown, separated by \\n, the website shows centred below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}] or [{\"type\":\"email\",\"allow\":[\"example.com\"]}]: messages to the folder's address arrive as .md files; allow/block senders, keep the -<id>.md ending when renaming; only when asked) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
+      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": level}), locked ({\"key\": level}: settings only people may change; also \"fillForms\" and \"takeQuizzes\": who may send the folder's forms and quizzes; levels: \"folderAgents\" stops the agents of folder actions, \"connectedAgents\" other agents, \"agents\" both, \"everyone\" people too), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (up to 3 lines of Markdown, separated by \\n, the website shows centred below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), home (the name of a .md file in the folder that opens first, such as dashboard.md; only when asked), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}] or [{\"type\":\"email\",\"allow\":[\"example.com\"]}]: messages to the folder's address arrive as .md files; allow/block senders, keep the -<id>.md ending when renaming; only when asked) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1390,6 +1390,159 @@
       }
     },
     {
+      "name": "query",
+      "description": "Answer a dashboard card's query, to check one before writing it into a dashboard (a ```card fence in a .md file). A source is a folder of Markdown files (each a row; its front matter keys are the fields, and a filed form copy's answers too) or a .csv file (its first line names the fields). where filters (all must hold, separated by ;): field, !field, field=A|B, field!=A, field>N (also >=, <, <=, for numbers, YYYY-MM-DD dates with today, HH:MM times); @me is the signed-in person. group gives one entry per value; measure is count, or sum, avg, min or max of a field. Returns the fields, the rows (or groups), count and value.",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}(/[a-z0-9][a-z0-9-]{0,47})?$",
+            "description": "owner/slug from spaces, or public."
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 241,
+            "description": "A folder ending in / (jobs/) or a .csv file; from the space root with a leading /, else from base's folder."
+          },
+          "base": {
+            "type": "string",
+            "maxLength": 240,
+            "description": "The dashboard file the card is in; relative sources start from its folder."
+          },
+          "where": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Filters separated by ;, such as state!=done; assignee=@me; due<today."
+          },
+          "group": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "A field: one entry per value."
+          },
+          "measure": {
+            "type": "string",
+            "maxLength": 80,
+            "default": "count",
+            "description": "count, or sum, avg, min or max followed by a field."
+          },
+          "sort": {
+            "type": "string",
+            "maxLength": 65,
+            "description": "A field, -field for largest first; with group, value, -value or group."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 50,
+            "description": "Most rows or groups."
+          },
+          "columns": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Fields to return for each row, separated by commas; empty returns all."
+          },
+          "today": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "The date today means; the server's by default."
+          }
+        },
+        "required": [
+          "space",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "space": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "folder or csv."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "group": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "value": {
+            "type": "number"
+          },
+          "measure": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "space",
+          "state",
+          "source",
+          "fields",
+          "count",
+          "value"
+        ]
+      }
+    },
+    {
       "name": "configure",
       "description": "Set where a virtual file comes from and how often it is fetched again, or make one from a URL. source: an http or https URL, fetched now when new or changed (a new version); \"\" removes the source and refresh. refresh: an every schedule (hour, day 06:00, weekday 08:00, monday 08:00, month 1 09:00, in the space's time zone); \"\" keeps the current version. A failed refresh keeps the content and read says it is stale.",
       "annotations": {
@@ -1636,6 +1789,22 @@
         "limit",
         "cursor"
       ]
+    },
+    "query": {
+      "method": "POST",
+      "path": "/api/v1/spaces/{space}/query",
+      "body": [
+        "source",
+        "base",
+        "where",
+        "group",
+        "measure",
+        "sort",
+        "limit",
+        "columns",
+        "today"
+      ],
+      "note": "A read sent as JSON (0.99.0). Also on /api/v1/account/spaces/{space}/query and the website's site API."
     },
     "configure": {
       "method": "POST",

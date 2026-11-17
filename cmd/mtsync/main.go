@@ -98,6 +98,11 @@ Forms (a form template is a .md file whose front matter has form:):
   review FILE REVIEW       review a copy filed in your space: REVIEW is a JSON file,
                            or - for stdin: {"status": "approved"|"declined"|"needs-info",
                            "note": ...} for a form (needs-info needs a note), {"marks": {"field": true|false}} for a quiz (-json)
+  query DASHBOARD QUERY    answer one card of a dashboard: QUERY is a JSON file, or -
+                           for stdin, such as {"source": "jobs/", "group": "type"} (-json)
+  notices FILE...          whether you have acknowledged each notice or sent each form
+                           a dashboard shows (-json)
+  notice FILE BLOB         acknowledge a notice with that text (blob from notices)
 
 One-off:
   SPACE[/PATH] FOLDER      sync one folder in this window, without registering it
@@ -227,6 +232,12 @@ func run(args []string) error {
 		return showReport(ctx, rest[1], *asJSON, os.Stdout)
 	case cmd == "submit" && len(rest) == 3:
 		return submitForm(ctx, rest[1], rest[2], *published, *resends, photos, *asJSON, os.Stdin, os.Stdout)
+	case cmd == "query" && len(rest) == 3:
+		return runQuery(ctx, rest[1], rest[2], *asJSON, os.Stdin, os.Stdout)
+	case cmd == "notices" && len(rest) >= 2:
+		return showNotices(ctx, rest[1:], *asJSON, os.Stdout)
+	case cmd == "notice" && len(rest) == 3:
+		return acknowledgeNoticeFile(ctx, rest[1], rest[2], *asJSON, os.Stdout)
 	case cmd == "review" && len(rest) == 3:
 		return reviewCopy(ctx, rest[1], rest[2], *asJSON, os.Stdin, os.Stdout)
 	case cmd == "submissions" && len(rest) == 2:

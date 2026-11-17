@@ -84,6 +84,17 @@ func (s *Service) SetFrontend(source fs.FS) error {
 	if len(editor) == 1 {
 		return fmt.Errorf("frontend editor requires both slate.js and slate.css")
 	}
+	// Slate's charts (0.99.0) go with its slate.js when the bundle has them;
+	// otherwise the embedded ones serve.
+	if len(editor) == 2 {
+		content, err := fs.ReadFile(source, "slate/charts/charts.js")
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("frontend editor charts: %w", err)
+		}
+		if len(content) != 0 {
+			editor["charts/charts.js"] = append([]byte{}, content...)
+		}
+	}
 	s.frontend = &frontendBundle{manifest: manifest, files: files, editor: editor}
 	return nil
 }

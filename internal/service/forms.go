@@ -115,6 +115,9 @@ type formTemplate struct {
 	RetryAfter time.Duration
 	// Unmarked names fields that are not questions, such as a name.
 	Unmarked map[string]bool
+	// NoReview (review: none, 0.99.0) files copies as complete: nobody
+	// reviews them, as for jobs moved to a "Task complete" folder.
+	NoReview bool
 }
 
 // FieldError is one field's problem in a refused submission.
@@ -299,6 +302,18 @@ func parseFormTemplate(text string) (formTemplate, error) {
 	// the server checks the whole form as usual.
 	if v, ok := keys["autoFlow"]; ok && v != "true" && v != "false" {
 		return t, formError("autoFlow is true or false.")
+	}
+	// review (0.99.0): required (the default) or none, which files copies as
+	// complete with nothing to review. A quiz is always marked.
+	switch keys["review"] {
+	case "", "required":
+	case "none":
+		if t.Quiz {
+			return t, formError("a quiz is always marked, so it takes no review: none.")
+		}
+		t.NoReview = true
+	default:
+		return t, formError("review is required or none.")
 	}
 	names := map[string]bool{}
 	optionsUsed := map[int]bool{}
