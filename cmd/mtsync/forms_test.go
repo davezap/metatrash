@@ -80,16 +80,16 @@ func TestWhoami(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"account":"bartco","spaces":[]}`)
+		_, _ = io.WriteString(w, `{"account":"acme","spaces":[]}`)
 	}))
 	defer server.Close()
 	ok := func(context.Context, bool) (string, error) { return "t", nil }
 	out := &strings.Builder{}
-	if err := whoami(context.Background(), server.URL, ok, false, out); err != nil || !strings.Contains(out.String(), "as bartco.") {
+	if err := whoami(context.Background(), server.URL, ok, false, out); err != nil || !strings.Contains(out.String(), "as acme.") {
 		t.Fatalf("whoami: %q %v", out, err)
 	}
 	out.Reset()
-	if err := whoami(context.Background(), server.URL, ok, true, out); err != nil || !strings.Contains(out.String(), `"account": "bartco"`) || !strings.Contains(out.String(), `"signedIn": true`) {
+	if err := whoami(context.Background(), server.URL, ok, true, out); err != nil || !strings.Contains(out.String(), `"account": "acme"`) || !strings.Contains(out.String(), `"signedIn": true`) {
 		t.Fatalf("whoami -json: %q %v", out, err)
 	}
 	out.Reset()

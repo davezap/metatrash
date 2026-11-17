@@ -106,10 +106,15 @@ type siteOffer struct {
 }
 
 type siteAccount struct {
-	Email           string             `json:"email"`
-	Username        string             `json:"username,omitempty"`
-	MaxSpaces       int                `json:"maxSpaces"`
-	CanCreate       bool               `json:"canCreate"`
+	Email     string `json:"email"`
+	Username  string `json:"username,omitempty"`
+	MaxSpaces int    `json:"maxSpaces"`
+	CanCreate bool   `json:"canCreate"`
+	// CreateNeeds is the billing gate's refusal when the account may not
+	// create a space of its own just now (0.98.1), such as "Creating a space
+	// needs a membership."; CanCreate is then false. Absent when the gate
+	// allows it, there is none, or it can't be asked just now.
+	CreateNeeds     string             `json:"createNeeds,omitempty"`
 	DefaultTimezone string             `json:"defaultTimezone"`
 	Apps            bool               `json:"apps,omitempty"`
 	Fresh           bool               `json:"fresh,omitempty"`
@@ -436,6 +441,16 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 			out.Spaces = append(out.Spaces, item)
 		}
 		out.CanCreate = user.Username != "" && len(spaces) < user.MaxPrivateSpaces
+		// Ask the billing gate now, so the Spaces page offers a membership
+		// instead of a form that is refused (0.98.1). Only its own refusal
+		// counts: an unreadable billing state leaves the form as it was.
+		if len(spaces) < user.MaxPrivateSpaces {
+			var refused *Error
+			if err := h.service.checkSpaceCreate(ctx, user.ID); errors.As(err, &refused) && refused.Code == "subscription_required" {
+				out.CanCreate = false
+				out.CreateNeeds = refused.Message
+			}
+		}
 	}
 	if names, err := h.service.ownedDB.actingOwnerNames(ctx, user.ID); err == nil && len(names) > 0 {
 		out.Manages = names

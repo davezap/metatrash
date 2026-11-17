@@ -2,7 +2,7 @@ package metatrash
 
 import _ "embed"
 
-const Version = "0.98.0"
+const Version = "0.98.1"
 
 //go:embed api/tool-schema.json
 var ToolSchema []byte

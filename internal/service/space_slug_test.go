@@ -8,9 +8,9 @@ import (
 
 func TestDeriveSpaceSlug(t *testing.T) {
 	for name, want := range map[string]string{
-		"bartco":                    "bartco",
-		"Bartco Notes":              "bartco-notes",
-		"  Bartco   Notes!  ":       "bartco-notes",
+		"acme":                      "acme",
+		"Acme Notes":                "acme-notes",
+		"  Acme   Notes!  ":         "acme-notes",
 		"Dave's notes":              "daves-notes",
 		"Dave’s notes":              "daves-notes",
 		"Ōtautahi Māori Wānanga":    "otautahi-maori-wananga",
@@ -62,24 +62,24 @@ func TestCreateSpaceAgainstDatabase(t *testing.T) {
 		}
 	}
 	// One field: the slug is derived, and the answer names the new space.
-	code, out, body := create(map[string]string{"name": "Bartco Notes!"})
-	if code != 200 || out["space"] != maker.Username+"/bartco-notes" {
+	code, out, body := create(map[string]string{"name": "Acme Notes!"})
+	if code != 200 || out["space"] != maker.Username+"/acme-notes" {
 		t.Fatalf("create: %d %s", code, body)
 	}
 	spaces, err := w.h.accountSpaces(t.Context(), maker)
-	if err != nil || len(spaces) != 1 || spaces[0].Name != "Bartco Notes!" || spaces[0].Slug != "bartco-notes" {
+	if err != nil || len(spaces) != 1 || spaces[0].Name != "Acme Notes!" || spaces[0].Slug != "acme-notes" {
 		t.Fatalf("stored space: %v %v", spaces, err)
 	}
 	// A name that gives an address already in use is refused, even an identical
 	// name (which a retry would otherwise reuse).
-	for _, name := range []string{"Bartco Notes!", "bartco notes"} {
+	for _, name := range []string{"Acme Notes!", "acme notes"} {
 		code, _, body := create(map[string]string{"name": name})
-		if code != 409 || !strings.Contains(body, "You already have a space at "+maker.Username+"/bartco-notes. Choose a different name.") {
+		if code != 409 || !strings.Contains(body, "You already have a space at "+maker.Username+"/acme-notes. Choose a different name.") {
 			t.Fatalf("duplicate %q: %d %s", name, code, body)
 		}
 	}
 	// Retry sends the stored slug and finishes idempotently.
-	if code, out, body := create(map[string]string{"name": "Bartco Notes!", "slug": "bartco-notes"}); code != 200 || out["space"] != maker.Username+"/bartco-notes" {
+	if code, out, body := create(map[string]string{"name": "Acme Notes!", "slug": "acme-notes"}); code != 200 || out["space"] != maker.Username+"/acme-notes" {
 		t.Fatalf("retry: %d %s", code, body)
 	}
 	if spaces, _ := w.h.accountSpaces(t.Context(), maker); len(spaces) != 1 {

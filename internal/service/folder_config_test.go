@@ -22,7 +22,7 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"footer":":metatrash: is a ⚡[Zaptronics](https://zaptronics.co.nz/) product"}`,
 		`{"footer":"","locked":{"footer":"everyone"}}`,
 		`{"footer":"Collumii · Powered by :metatrash:\n[Terms](/docs/legal/terms.md) · [Privacy](/docs/legal/privacy.md)\nthird line"}`,
-		`{"footer":"**Bartco** · [About](/docs/about.md) · [Write to us](mailto:hello@example.com) · ` + "`v2`" + `"}`,
+		`{"footer":"**Acme** · [About](/docs/about.md) · [Write to us](mailto:hello@example.com) · ` + "`v2`" + `"}`,
 	}
 	for _, text := range good {
 		if _, err := parseFolderConfig(text); err != nil {
@@ -175,7 +175,7 @@ func TestFolderConfigRules(t *testing.T) {
 		t.Fatalf("reopen changed the space: %v", err)
 	}
 
-	do(owned, "write", Input{Path: ".metatrash.json", Text: text(`{"purpose":"Bartco work","children":{"site/":"the website"}}`)}, "")
+	do(owned, "write", Input{Path: ".metatrash.json", Text: text(`{"purpose":"Acme work","children":{"site/":"the website"}}`)}, "")
 	do(owned, "write", Input{Path: ".metatrash.json", Text: github("dave-zap/site")}, "invalid_request")
 	do(owned, "write", Input{Path: ".metatrash.json", Text: text(`{"purpose":"x","extra":1}`)}, "invalid_request")
 	do(owned, "write", Input{Path: "site/.metatrash.json", Text: github("dave-zap/site")}, "")

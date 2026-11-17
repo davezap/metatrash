@@ -14,9 +14,9 @@ func TestSplitTarget(t *testing.T) {
 		account       bool
 		space, prefix string
 	}{
-		{"dave-zap/bartco", true, "dave-zap/bartco", ""},
-		{"dave-zap/bartco/site", true, "dave-zap/bartco", "site/"},
-		{"dave-zap/bartco/site/docs/", true, "dave-zap/bartco", "site/docs/"},
+		{"dave-zap/acme", true, "dave-zap/acme", ""},
+		{"dave-zap/acme/site", true, "dave-zap/acme", "site/"},
+		{"dave-zap/acme/site/docs/", true, "dave-zap/acme", "site/docs/"},
 		{"public", true, "public", ""},
 		{"public/inbox/dave", true, "public", "inbox/dave/"},
 		{"0123456789abcdef0123456789abcdef/notes", true, "0123456789abcdef0123456789abcdef", "notes/"},

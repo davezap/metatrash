@@ -82,7 +82,7 @@ func TestCrossSiteLinkAndSwitchingAccounts(t *testing.T) {
 		t.Fatal("reload with the session cookie present")
 	}
 	// Without a code waiting, a signed-in browser goes from sign-in to its account.
-	if w := call("GET", "/login", "", nil, browser, owner); w.Code != 303 || w.Header().Get("Location") != "/spaces/#settings/spaces" {
+	if w := call("GET", "/login", "", nil, browser, owner); w.Code != 303 || w.Header().Get("Location") != "/spaces/" {
 		t.Fatalf("signed-in /login: %d", w.Code)
 	}
 
@@ -166,17 +166,17 @@ func TestSignInReturnsToTheLinkedPage(t *testing.T) {
 	if c := cookie(w, returnCookie); c == nil || c.MaxAge >= 0 {
 		t.Fatal("the page to go back to is not forgotten")
 	}
-	if w := signIn(nil); w.Header().Get("Location") != "/spaces/#settings/spaces" {
+	if w := signIn(nil); w.Header().Get("Location") != "/spaces/" {
 		t.Fatalf("plain sign-in: %q", w.Header().Get("Location"))
 	}
 	// Only space and account pages of this site, whatever the cookie says.
 	for _, target := range []string{"https://evil.example/", "//evil.example/", "/login", "/account\\..\\x"} {
 		forged := &http.Cookie{Name: returnCookie, Value: base64.RawURLEncoding.EncodeToString([]byte(target))}
-		if w := signIn(forged); w.Header().Get("Location") != "/spaces/#settings/spaces" {
+		if w := signIn(forged); w.Header().Get("Location") != "/spaces/" {
 			t.Fatalf("forged %q: %q", target, w.Header().Get("Location"))
 		}
 	}
-	if !returnTarget("/spaces/bartco/r-d/policies/README.md?x=1") {
+	if !returnTarget("/spaces/acme/notes/policies/README.md?x=1") {
 		t.Fatal("space page refused")
 	}
 }

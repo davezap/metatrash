@@ -164,7 +164,28 @@ func TestBillingGatesAgainstDatabase(t *testing.T) {
 	if _, err := w.s.createOwnedSpace(ctx, w.owner.ID, "Refused", randomName(t, "refused-")); !errors.As(err, &p) || p.Code != "subscription_required" {
 		t.Fatalf("create refused: %v", err)
 	}
+	// The Spaces page knows before anyone fills in the form (0.98.1): the
+	// gate's refusal comes with the account, and the form isn't offered.
+	// A new account has room for a space, so its gate is asked.
+	newcomer, err := w.db.FindOrCreate(ctx, randomName(t, "newcomer")+"@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSession := w.session(newcomer)
+	overview := func() map[string]any {
+		return siteJSON(t, siteCall(w, "GET", "/api/v1/site/account", "", newSession, ""))
+	}
+	if acct := overview(); acct["canCreate"] != false || acct["createNeeds"] != refused.Message {
+		t.Fatalf("account with create refused: canCreate %v, createNeeds %v", acct["canCreate"], acct["createNeeds"])
+	}
+	set(&createRefusal, errors.New("billing database down"))
+	if acct := overview(); acct["createNeeds"] != nil {
+		t.Fatalf("an unreadable billing state became createNeeds %v", acct["createNeeds"])
+	}
 	set(&createRefusal, nil)
+	if acct := overview(); acct["createNeeds"] != nil {
+		t.Fatalf("createNeeds without a refusal: %v", acct["createNeeds"])
+	}
 
 	// New accounts: refused sign-ins make no account and say why; existing
 	// accounts are never asked.

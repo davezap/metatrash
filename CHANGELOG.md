@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.98.1 - The Spaces page knows when a space needs a plan; signing in goes back to your work (2026-11-17)
+
+- **`createNeeds`** on the site API's account (`GET /api/v1/site/account`, `site_account.go`): when the account has room for a space but the billing gate (`extension.Hooks.SpaceCreateGate`) refuses one with `subscription_required`, `canCreate` is false and `createNeeds` carries the gate's message, so the website offers a plan instead of a Create space form that fails. Only that refusal counts: an unreadable billing state leaves `canCreate` as before. Without a gate nothing changes. Slate Viewer 0.43.0 uses it.
+- **After signing in** (`account_http.go` `signedInHome`), a browser that wasn't sent to sign in by a page goes to the site's home (`/`), where the site app reopens the space and document it had open last, or to `/spaces/` on a site without a docs space, instead of Settings → Spaces. Pages that sent the browser to sign in still get it back, and the old `/account` addresses still open Settings. Tests updated (`account_switch_test.go`, `accounts_test.go`, `signin_test.go`, `totp_test.go`; `site_api_test.go` checks both homes).
+- `TestBillingGatesAgainstDatabase` checks it with a new account (refused, unreadable billing state, allowed). Example names in README.md, cmd/mtsync/README.md and tests now use `acme` (no behaviour change). No schema, grant, configuration, dependency or tool schema change. See docs/release-0.98.1.md.
+
 ## 0.98.0 - Modules can add agent tools (2026-11-16)
 
 - **`extension.Hooks.Tools`** (new `extension/tools.go`): a module adds agent tools (name, optional group, description, a shorter description for jobs, JSON Schema, `Call`). Core offers them on the account MCP endpoint (`/mcp/account`; not the anonymous `/mcp`) and to folder actions whose `"tools"` list names them or their group (always opt-in: an action without a `tools` list gets none of them). Core checks each call's arguments against the schema. Names must not clash with Core's tools. `internal/service/extension_tools.go` (new), `extensions.go`, `mcp.go`, `agent_runner.go`, `actions.go`, `runner_tools.go`.
@@ -1593,7 +1599,7 @@ First step of the folders roadmap (design session 2026-10-03): a folder can be d
 
 ### Space names for agents
 
-- On `/mcp/account` and `/api/v1/account/`, the `space` argument accepts `owner/slug` (e.g. `dave-zap/bartco`, matching `/spaces/{owner}/{slug}/`), the 32-hex ID, or `public`. A bare slug returns `not_found` with a hint to use `owner/slug`; bare slugs are not accepted because their meaning would change as spaces are connected. Only the connection's consented spaces are matched, so unconnected spaces still look missing.
+- On `/mcp/account` and `/api/v1/account/`, the `space` argument accepts `owner/slug` (e.g. `dave-zap/acme`, matching `/spaces/{owner}/{slug}/`), the 32-hex ID, or `public`. A bare slug returns `not_found` with a hint to use `owner/slug`; bare slugs are not accepted because their meaning would change as spaces are connected. Only the connection's consented spaces are matched, so unconnected spaces still look missing.
 - `spaces` returns `space` as `owner/slug` and adds `id`. Results and list/history cursors name private spaces by `owner/slug` whichever form was passed.
 - `not_found` now tells agents to call `spaces`. Account REST accepts `{owner}/{slug}` as two path segments.
 - Tool schema 0.4.0: the space pattern allows one `/` (the anonymous `/mcp` still only reaches configured spaces). Server instructions updated.

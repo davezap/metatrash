@@ -36,7 +36,7 @@ changed in each release is in the [changelog](CHANGELOG.md).
    - `https://metatrash.com/mcp`: the public space only, no sign-in.
 3. In chat, click **+** and enable the connector. On the account connector, ask
    Claude to call the `spaces` tool first; it lists the spaces by `owner/slug`
-   name (e.g. `dave-zap/bartco`), the form every tool takes.
+   name (e.g. `dave-zap/acme`), the form every tool takes.
 
 A starting prompt:
 
@@ -149,7 +149,7 @@ folder; the same program is the console that configures it.
 ```sh
 mtsync login                                  # choose spaces and access in the browser
 mtsync install                                # run the service at every login
-mtsync add dave-zap/bartco ~/spaces/bartco    # register folders; the service starts them
+mtsync add dave-zap/acme ~/spaces/acme    # register folders; the service starts them
 mtsync add dave-zap/notes/2026 ~/notes-2026   # or just one folder of a space
 mtsync list                                   # how each folder is doing
 ```

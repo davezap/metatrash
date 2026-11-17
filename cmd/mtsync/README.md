@@ -135,9 +135,9 @@ the login entry; registered folders are kept.
 
 ```sh
 mtsync spaces                                 # the spaces this computer may use
-mtsync add dave-zap/bartco ~/spaces/bartco    # register a folder; the service starts it
+mtsync add dave-zap/acme ~/spaces/acme    # register a folder; the service starts it
 mtsync add dave-zap/notes ~/spaces/notes
-mtsync add dave-zap/bartco/site ~/work/site   # just the site/ folder of a space
+mtsync add dave-zap/acme/site ~/work/site   # just the site/ folder of a space
 mtsync list                                   # each folder and how it is doing
 mtsync log                                    # the last 40 lines of the service log
 mtsync remove ~/spaces/notes                  # stop syncing it (or: mtsync remove dave-zap/notes)

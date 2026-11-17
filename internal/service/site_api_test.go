@@ -67,9 +67,17 @@ func TestSiteAPIAgainstDatabase(t *testing.T) {
 	if out["docs"] != nil {
 		t.Fatalf("docs without a docs space: %v", out)
 	}
+	// Signing in goes home, where the site app reopens the last document
+	// (0.98.1); without a docs space there is no home page, so to /spaces/.
+	if home := w.h.signedInHome(); home != "/spaces/" {
+		t.Fatalf("signed-in home without a docs space: %q", home)
+	}
 	w.s.accounts.config.DocsSpace = w.ownedName
 	if got := siteJSON(t, siteCall(w, "GET", "/api/v1/site/session", "", nil, "")); got["docs"] != "/docs/" {
 		t.Fatalf("docs: %v", got)
+	}
+	if home := w.h.signedInHome(); home != "/" {
+		t.Fatalf("signed-in home with a docs space: %q", home)
 	}
 	w.s.accounts.config.DocsSpace = ""
 	out = siteJSON(t, siteCall(w, "GET", "/api/v1/site/session", "", ownerSession, ""))

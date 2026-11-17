@@ -631,7 +631,19 @@ func (h *httpAdapter) afterSignIn(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.basePath+target, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, h.basePath+"/spaces/#settings/spaces", http.StatusSeeOther)
+	http.Redirect(w, r, h.basePath+h.signedInHome(), http.StatusSeeOther)
+}
+
+// signedInHome is where signing in goes when nothing asked for a page
+// (0.98.1): the site's home, which reopens the space and document this
+// browser had open last (the site app remembers it), or the spaces page
+// on a site without a docs space. Settings opened here before, which read
+// as a detour for anyone coming back to their work.
+func (h *httpAdapter) signedInHome() string {
+	if h.docsSpace() != "" {
+		return "/"
+	}
+	return "/spaces/"
 }
 
 // deriveNewSpaceSlug derives the slug for a new space's name and refuses a name

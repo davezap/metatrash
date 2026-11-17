@@ -242,7 +242,7 @@ func TestAccountsHTTP(t *testing.T) {
 		t.Fatal("rejected resend consumed shared mail budget")
 	}
 	w = call("POST", "/login/verify", "https://metatrash.com", url.Values{"code": {*code}, "csrf": {browser.Value}}, browser)
-	if w.Code != 303 || w.Header().Get("Location") != "/spaces/#settings/spaces" {
+	if w.Code != 303 || w.Header().Get("Location") != "/spaces/" {
 		t.Fatal("login failed")
 	}
 	var session *http.Cookie
