@@ -48,7 +48,7 @@ func TestFormSubmissionsAgainstDatabase(t *testing.T) {
 	template := func(submitTo string) string {
 		return "---\nform: leave\ntitle: Leave\nsubmitTo: " + submitTo + "\n---\n<!-- Two weeks ahead. -->\nName: {{text name=name required}}\nType: {{choice name=type required}}\n- ( ) Annual\n- ( ) Sick\n{{sign name=sig required}}\n"
 	}
-	put("hr/leave.md", template(w.member.Username+"/"+review.Slug+"/leave/"))
+	put("hr/leave.md", template("/"+w.member.Username+"/"+review.Slug+"/leave/"))
 	started := head()
 	send := func(token, path string, answers map[string]any, revision string, want int) map[string]any {
 		t.Helper()
@@ -127,18 +127,18 @@ func TestFormSubmissionsAgainstDatabase(t *testing.T) {
 	call(person, "GET", "submissions?id=nope", "", 400)
 
 	// A changed template refuses answers given to the old one.
-	put("hr/leave.md", template(w.member.Username+"/"+review.Slug+"/leave/")+"Extra: {{text name=extra}}\n")
+	put("hr/leave.md", template("/"+w.member.Username+"/"+review.Slug+"/leave/")+"Extra: {{text name=extra}}\n")
 	if code := send(person, "hr/leave.md", good, started, 409)["error"].(map[string]any)["code"]; code != "template_changed" {
 		t.Fatalf("changed: %v", code)
 	}
 	stale := strings.Repeat("0", 40)
 	call(person, "POST", "submissions", mustJSON(map[string]any{"path": "hr/leave.md", "answers": good, "blob": stale}), 409)
 	// submitTo must name a space of the same owner, outside GitHub folders.
-	put("hr/leave.md", template(w.ownedName+"/inbox/"))
+	put("hr/leave.md", template("/"+w.ownedName+"/inbox/"))
 	send(person, "hr/leave.md", good, "", 400)
-	put("hr/leave.md", template(w.member.Username+"/no-such-space/"))
+	put("hr/leave.md", template("/"+w.member.Username+"/no-such-space/"))
 	send(person, "hr/leave.md", good, "", 400)
-	put("hr/leave.md", template(w.member.Username+"/"+review.Slug))
+	put("hr/leave.md", template("/"+w.member.Username+"/"+review.Slug))
 	if target := send(person, "hr/leave.md", good, "", 201)["target"].(string); target != w.member.Username+"/"+review.Slug+"/"+slug+"-"+w.owner.Username+"-leave-2026-10-23T0914Z.md" {
 		t.Fatalf("root target: %s", target)
 	}

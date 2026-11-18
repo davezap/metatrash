@@ -34,7 +34,7 @@ func TestAgentSubmitsForms(t *testing.T) {
 			t.Fatalf("write %s: %d %s", path, res.Code, res.Body)
 		}
 	}
-	leave := "---\nform: leave\ntitle: Leave\nsubmitTo: " + w.member.Username + "/" + review.Slug + "/leave/\n---\nName: {{text name=name required}}\n"
+	leave := "---\nform: leave\ntitle: Leave\nsubmitTo: /" + w.member.Username + "/" + review.Slug + "/leave/\n---\nName: {{text name=name required}}\n"
 	put("forms/leave.md", leave)
 
 	// The submit tool: the copy names the agent.
@@ -64,7 +64,7 @@ func TestAgentSubmitsForms(t *testing.T) {
 	}
 
 	// Quizzes are locked for agents by default.
-	quiz := strings.Replace(wfhQuiz, "%s", w.member.Username+"/"+review.Slug+"/quizzes/", 1)
+	quiz := strings.Replace(wfhQuiz, "%s", "/"+w.member.Username+"/"+review.Slug+"/quizzes/", 1)
 	put("policies/wfh.md", "# Working from home\n")
 	put("policies/wfh-quiz.md", quiz)
 	put("policies/.metatrash.json", `{"inherit":true,"services":[{"type":"acknowledge"}],"publishedVersion":1}`)

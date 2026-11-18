@@ -25,7 +25,7 @@ import (
 //	---
 //	form: wfh-quiz
 //	title: Working from home quiz
-//	submitTo: dave/hr-review/quizzes/
+//	submitTo: /dave/hr-review/quizzes/
 //	quiz: true
 //	covers: wfh-policy.md, TG-ISG-*.md, firmware/, /hr/leave.md
 //	readFirst: true

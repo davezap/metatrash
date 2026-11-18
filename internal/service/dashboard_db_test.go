@@ -38,8 +38,8 @@ func TestDashboardNoticesAgainstDatabase(t *testing.T) {
 		}
 	}
 	put("team/lunch.md", "**Nearly time to eat.**\n")
-	put("team/lock-up.md", "---\nform: lock-up\ntitle: Locking up\nsubmitTo: "+w.joinName+"/team/done/\nreview: none\n---\nLocked? {{yesno name=locked required}}\n")
-	put("team/quiz-none.md", "---\nform: q\nquiz: true\nreview: none\nsubmitTo: "+w.joinName+"/team/done/\n---\nA? {{text name=a}}\n")
+	put("team/lock-up.md", "---\nform: lock-up\ntitle: Locking up\nsubmitTo: done/\nreview: none\n---\nLocked? {{yesno name=locked required}}\n")
+	put("team/quiz-none.md", "---\nform: q\nquiz: true\nreview: none\nsubmitTo: done/\n---\nA? {{text name=a}}\n")
 	notices := func(token string) map[string]map[string]any {
 		t.Helper()
 		out := map[string]map[string]any{}
@@ -107,5 +107,75 @@ func TestDashboardNoticesAgainstDatabase(t *testing.T) {
 	if q := call(person, "POST", "query", `{"source": "/team/jobs/", "where": "assignee=@me"}`, 200); q["count"] != float64(1) {
 		t.Fatalf("query: %v", q)
 	}
-	_ = ctx
+
+	// submitTo (0.99.1): /owner/space/folder/ is a space; anything else is from
+	// the form's folder, owner/space/folder/ without the / included.
+	put("team/beside.md", "---\nform: beside\nsubmitTo: done/\nreview: none\n---\nOk? {{yesno name=ok required}}\n")
+	put("team/up.md", "---\nform: up\nsubmitTo: ../archive/\nreview: none\n---\nOk? {{yesno name=ok required}}\n")
+	put("team/top.md", "---\nform: top\nsubmitTo: /"+w.joinName+"/finished/\nreview: none\n---\nOk? {{yesno name=ok required}}\n")
+	put("team/old.md", "---\nform: old\nsubmitTo: "+w.joinName+"/old/\nreview: none\n---\nOk? {{yesno name=ok required}}\n")
+	put("team/deep.md", "---\nform: deep\nsubmitTo: reports/done/\nreview: none\n---\nOk? {{yesno name=ok required}}\n")
+	for form, folder := range map[string]string{"team/beside.md": "team/done/", "team/top.md": "finished/", "team/up.md": "archive/", "team/old.md": "team/" + w.joinName + "/old/", "team/deep.md": "team/reports/done/"} {
+		receipt := call(person, "POST", "submissions", mustJSON(map[string]any{"path": form, "answers": map[string]any{"ok": "Yes"}}), 201)
+		if !strings.HasPrefix(receipt["target"].(string), w.joinName+"/"+folder) {
+			t.Fatalf("%s filed in %v", form, receipt["target"])
+		}
+	}
+
+	// The space's address opens on its home setting, else dashboard.md, else README.md (0.99.1).
+	repo := w.s.ownedRepository(w.joinID)
+	home := func() string {
+		t.Helper()
+		_, files, err := repo.snapshot(ctx, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return repo.homePage(ctx, files)
+	}
+	put("README.md", "# Team\n")
+	if got := home(); got != "README.md" {
+		t.Fatalf("before: %s", got)
+	}
+	put("Dashboard.md", "# Dashboard\n")
+	if got := home(); got != "Dashboard.md" {
+		t.Fatalf("dashboard: %s", got)
+	}
+	settings := call(author, "GET", "file?path=.metatrash.json", "", 200)
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(settings["file"].(map[string]any)["text"].(string)), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg["home"] = "readme.md"
+	text, _ := json.MarshalIndent(cfg, "", "  ")
+	put(".metatrash.json", string(text)+"\n")
+	if got := home(); got != "README.md" {
+		t.Fatalf("home setting: %s", got)
+	}
+	cfg["home"] = "gone.md"
+	text, _ = json.MarshalIndent(cfg, "", "  ")
+	put(".metatrash.json", string(text)+"\n")
+	if got := home(); got != "Dashboard.md" {
+		t.Fatalf("missing home file: %s", got)
+	}
+}
+
+func TestRelativeSubmitTo(t *testing.T) {
+	for _, c := range [][4]string{
+		{"done/", "dave/team", "lock-up.md", "dave/team/done/"},
+		{"done/", "dave/team", "site/lock-up.md", "dave/team/site/done/"},
+		{"./reports/done/", "dave/team", "site/x.md", "dave/team/site/reports/done/"},
+		{"reports/done/", "dave/team", "site/x.md", "dave/team/site/reports/done/"},
+		{"dave/hr/leave/", "dave/team", "x.md", "dave/team/dave/hr/leave/"},
+		{"../done/", "dave/team", "site/x.md", "dave/team/done/"},
+		{"../", "dave/team", "site/x.md", "dave/team/"},
+		{"./", "dave/team", "x.md", "dave/team/"},
+		{"../../done/", "dave/team", "site/x.md", ""},
+		{"../done/", "dave/team", "x.md", ""},
+		{"done", "dave/team", "x.md", ""},
+		{"/done/", "dave/team", "x.md", ""},
+	} {
+		if got := relativeSubmitTo(c[0], c[1], c[2]); got != c[3] {
+			t.Errorf("%q in %s from %s: %q, want %q", c[0], c[1], c[2], got, c[3])
+		}
+	}
 }

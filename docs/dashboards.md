@@ -1,6 +1,7 @@
 # Dashboards
 
-Core 0.99.0, Slate 0.24.0, Slate Viewer 0.44.0, mtsync 0.99.0.
+Core 0.99.0 (0.99.1 for the website home page and same-space `submitTo`), Slate 0.24.0,
+Slate Viewer 0.44.0 (0.44.1), mtsync 0.99.0.
 
 A dashboard is an ordinary Markdown file with **cards** in it: headline
 numbers, lists, tables, pie, bar and line charts, Markdown notices and forms.
@@ -14,8 +15,74 @@ folder of Markdown files, or a CSV file) and a small query over it. People,
 agents and forms keep the sources up to date; every dashboard that reads a
 source shows a saved change the next time it refreshes.
 
-A space whose root has `dashboard.md` opens on it. A folder's `home` setting
-(`.metatrash.json`, Properties → General) picks another file.
+A space whose root has `dashboard.md` opens on it, in Slate Viewer and on the
+website. The top folder's `home` setting (`.metatrash.json`, Properties →
+General → Opens on) picks another file; without either a space opens on its
+README.md.
+
+## A whole dashboard
+
+Three files at the top of a space. **dashboard.md**:
+
+````markdown
+# Team dashboard
+
+```card
+title: Open jobs
+show: count
+source: jobs.csv
+where: state!=done
+```
+
+```card
+title: Jobs by type
+show: pie
+source: jobs.csv
+group: type
+```
+
+```card
+title: Open jobs
+size: wide
+show: table
+source: jobs.csv
+where: state!=done
+columns: job, type, assignee, due
+sort: due
+```
+
+```card
+title: Site notice
+show: form
+source: notice.md
+```
+````
+
+**jobs.csv**:
+
+```text
+job,type,state,assignee,due,hours
+Replace gutter,Repair,open,dave,2026-11-20,3
+Paint fence,Maintenance,open,dave,2026-11-22,5
+Fix door lock,Repair,done,dave,2026-11-15,1
+Service heat pump,Service,open,dave,2026-11-25,2
+Clean windows,Maintenance,new,,2026-11-28,4
+Inspect roof,Inspection,open,dave,2026-11-19,2
+Replace tap washer,Repair,new,,2026-11-21,1
+Test smoke alarms,Inspection,done,dave,2026-11-14,1
+```
+
+**notice.md**:
+
+```markdown
+# Site safety notice
+
+Please wear hi-vis on site from Monday 24 November. Press Acknowledge once you have read this.
+```
+
+The count shows 6, the pie four slices (Repair 3, Maintenance 2, Inspection
+2, Service 1), the table the six open jobs soonest first, and the notice an
+Acknowledge button. In Slate Viewer, New File keeps the extension you type, such as `.csv` (0.44.1).
 
 ## A card
 
@@ -111,7 +178,25 @@ space.
 A form whose copies need no review says `review: none` in its front matter:
 copies are filed with `status: complete`, nothing waits for a reviewer, and a
 folder of them (a "Task complete" folder, in the same space if you like) is
-a source like any other.
+a source like any other. `review` and `submitTo` go in the form file, not in
+the card:
+
+```markdown
+---
+form: lock-up
+title: Locking up
+submitTo: done/
+review: none
+---
+Locked? {{yesno name=locked required}}
+```
+
+`submitTo` (0.99.1): `/owner/space/folder/`, with the leading `/`, is a
+space with the same owner (this one or another). Any other path is a folder
+of the form's own space, from the form's folder: `done/`, `reports/done/`,
+`../done/`. Before 0.99.1 a space was written `owner/space/folder/`; that
+now means a folder of that name beside the form, so such forms need the `/`
+added.
 
 ## For agents and programs
 

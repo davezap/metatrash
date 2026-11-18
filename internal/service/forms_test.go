@@ -10,7 +10,7 @@ import (
 const leaveTemplate = `---
 form: leave-request
 title: "Leave request"
-submitTo: dave/hr-review/leave/
+submitTo: /dave/hr-review/leave/
 ---
 
 <!-- Fill this in at least two weeks ahead.
@@ -60,7 +60,7 @@ func TestParseFormTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tpl.Form != "leave-request" || tpl.Title != "Leave request" || tpl.SubmitTo != "dave/hr-review/leave/" {
+	if tpl.Form != "leave-request" || tpl.Title != "Leave request" || tpl.SubmitTo != "/dave/hr-review/leave/" {
 		t.Fatalf("front matter: %+v", tpl)
 	}
 	var names []string

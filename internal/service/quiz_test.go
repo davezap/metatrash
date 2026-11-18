@@ -37,7 +37,7 @@ Why lock it? {{text name=why required}}
 `
 
 func TestQuizKeys(t *testing.T) {
-	quiz := strings.Replace(wfhQuiz, "%s", "dave/hr-review/quizzes/", 1)
+	quiz := strings.Replace(wfhQuiz, "%s", "/dave/hr-review/quizzes/", 1)
 	tpl, err := parseFormTemplate(quiz)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 		}
 	}
 	code := func(out map[string]any) string { return out["error"].(map[string]any)["code"].(string) }
-	quiz := strings.Replace(wfhQuiz, "%s", w.member.Username+"/"+review.Slug+"/quizzes/", 1)
+	quiz := strings.Replace(wfhQuiz, "%s", "/"+w.member.Username+"/"+review.Slug+"/quizzes/", 1)
 	put(author, base, "policies/wfh.md", "# Working from home\n")
 	put(author, base, "policies/wfh-quiz.md", quiz)
 	put(author, base, "policies/.metatrash.json", `{"services":[{"type":"acknowledge"}],"publishedVersion":1}`)
@@ -322,7 +322,7 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 
 	// A plain form is approved or declined by a reviewer.
 	clock = clock.Add(time.Minute)
-	put(author, base, "forms/leave.md", "---\nform: leave\nsubmitTo: "+w.member.Username+"/"+review.Slug+"/leave/\n---\nName: {{text name=name required}}\n")
+	put(author, base, "forms/leave.md", "---\nform: leave\nsubmitTo: /"+w.member.Username+"/"+review.Slug+"/leave/\n---\nName: {{text name=name required}}\n")
 	leave := call(person, "POST", base+"submissions", mustJSON(map[string]any{"path": "forms/leave.md", "answers": map[string]any{"name": "Pat"}}), 201)
 	leavePath := strings.TrimPrefix(leave["target"].(string), w.member.Username+"/"+review.Slug+"/")
 	call(reviewer, "POST", reviewBase+"reviews", mustJSON(map[string]any{"path": leavePath, "marks": map[string]any{"name": true}}), 400)
@@ -470,7 +470,7 @@ func TestQuizzesAgainstDatabase(t *testing.T) {
 	if got, err := w.s.accountSubmissions(ctx, w.member, "test", again["id"].(string)); err != nil || len(got) != 0 {
 		t.Fatalf("someone else's receipt: %v %v", mustJSON(got), err)
 	}
-	put(author, base, "forms/leave.md", "---\nform: leave\nsubmitTo: "+w.member.Username+"/"+review.Slug+"/leave/\n---\nFull name: {{text name=name required}}\n")
+	put(author, base, "forms/leave.md", "---\nform: leave\nsubmitTo: /"+w.member.Username+"/"+review.Slug+"/leave/\n---\nFull name: {{text name=name required}}\n")
 	if r := myReceipt(again["id"].(string)); r.Current != "forms/leave.md" || r.SameForm {
 		t.Fatalf("changed form: %v", mustJSON(r))
 	}

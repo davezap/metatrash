@@ -20,7 +20,7 @@ import (
 const photoTemplate = `---
 form: site-visit
 title: Site visit
-submitTo: dave/reports/visits/
+submitTo: /dave/reports/visits/
 ---
 
 Site: {{text name=site required}}

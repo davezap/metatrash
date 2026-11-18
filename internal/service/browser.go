@@ -331,7 +331,7 @@ func (h *httpAdapter) serveBrowser(w http.ResponseWriter, r *http.Request, clien
 		return true
 	}
 	if defaulted {
-		filePath = defaultPage(files)
+		filePath = repo.homePage(ctx, files)
 	}
 	markdown := asked || r.URL.RawQuery == "" && prefersMarkdown(r.Header.Get("Accept"))
 	if folder, ok := strings.CutSuffix(filePath, "/"); ok {
@@ -393,6 +393,38 @@ func (h *httpAdapter) publicRecent(files []recentFile) []recentFile {
 // README.md, else its first top-level Markdown file, else the root AGENTS.md.
 func defaultPage(files map[string]record) string {
 	return defaultPageIn(files, "")
+}
+
+// homePage is the file a space's address shows when it names none (0.99.1):
+// the top folder's home setting when that file is there, else dashboard.md,
+// else defaultPage. Names match without regard to case, like Slate Viewer.
+func (r *repository) homePage(ctx context.Context, files map[string]record) string {
+	top := func(name string) string {
+		name = strings.TrimSpace(name)
+		if name == "" || strings.Contains(name, "/") {
+			return ""
+		}
+		if _, ok := files[name]; ok {
+			return name
+		}
+		for p := range files {
+			if !strings.Contains(p, "/") && strings.EqualFold(p, name) {
+				return p
+			}
+		}
+		return ""
+	}
+	if f, ok := files[folderConfigName]; ok {
+		if c, err := r.cachedConfig(ctx, f.Blob); err == nil && c.Home != nil {
+			if home := top(*c.Home); home != "" {
+				return home
+			}
+		}
+	}
+	if home := top("dashboard.md"); home != "" {
+		return home
+	}
+	return defaultPage(files)
 }
 
 // defaultPageIn is the page a folder's address opens on, by the same rule

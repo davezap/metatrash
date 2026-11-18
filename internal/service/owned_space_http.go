@@ -306,7 +306,7 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		return
 	}
 	if defaulted {
-		path = defaultPage(files)
+		path = repo.homePage(ctx, files)
 	}
 	title := space.Name
 	if docs {

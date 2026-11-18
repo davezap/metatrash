@@ -11,7 +11,7 @@ import (
 const guidedTemplate = `---
 form: damage-report
 title: Damage report
-submitTo: dave/reports/
+submitTo: /dave/reports/
 ---
 
 # Report

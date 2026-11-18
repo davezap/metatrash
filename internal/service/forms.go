@@ -293,7 +293,7 @@ func parseFormTemplate(text string) (formTemplate, error) {
 		return t, formError(fmt.Sprintf("title is limited to %d characters.", maxFormTitle))
 	}
 	if t.SubmitTo == "" {
-		return t, formError("submitTo is missing: name the space and folder that receive the answers, such as owner/hr-review/leave/.")
+		return t, formError("submitTo is missing: name the folder that receives the answers, such as done/ in this space or /owner/hr-review/leave/ in another.")
 	}
 	if err := t.readQuizKeys(keys); err != nil {
 		return t, err

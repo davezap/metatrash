@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.99.1 - A space's web address opens on its dashboard; forms file in their own space (2026-11-18)
+
+- **The website opens a space on its home page**: a space's address (`/spaces/owner/space/`, and the public space's) now opens the top folder's `home` setting when that file is there, else `dashboard.md`, else README.md as before (`browser.go` `homePage`, `owned_space_http.go`). 0.99.0 taught only Slate Viewer, so on the website the setting and dashboard.md were ignored. Names match without regard to case.
+- **`submitTo` paths, breaking** (Dave's rule): `/owner/space/folder/`, with the leading `/`, is a space (with the same owner, as before); any other path is a folder of the form's own space from the form's folder (`done/`, `reports/done/`, `../done/`), and a path above the top of the space is refused. A form written the old way, `owner/space/folder/`, now files into a folder `owner/space/folder/` beside it: add the leading `/`. `submissions.go` (`formTarget`, `relativeSubmitTo`), `forms.go`; tests' forms updated.
+- **docs/dashboards.md** gains a whole example dashboard (a count, a pie, a table and a notice over a CSV file) and the `submitTo` forms.
+- Tests: `TestRelativeSubmitTo`; `TestDashboardNoticesAgainstDatabase` also files copies beside the form, in a subfolder, up a folder, in a space by `/owner/space/`, and the old way (now a folder), and checks the home page. No schema, grant, configuration, dependency or tool schema change. See docs/release-0.99.1.md.
+
 ## 0.99.0 - Dashboards: cards over folders and CSV files, notices, forms without review (2026-11-18)
 
 - **Dashboard queries** (`internal/service/dashboard_query.go`, new): a dashboard card (a ```` ```card ```` fence that Slate 0.24.0 draws) names a source, a folder of Markdown files (each a row, its front matter keys the fields, a filed form copy's answers too) or a CSV file (first line names the fields), and a query: `where` (conditions separated by `;`, the operators of forms' `show-if`, `today` and `@me`), `group`, `measure` (`count`, `sum|avg|min|max FIELD`), `sort`, `limit` (1 to 500), `columns`. Answered from the files at head, so a saved change shows on the next refresh; a source's parsed rows are cached by its files' blobs. Up to 5000 rows per source. Guide: `docs/dashboards.md`.

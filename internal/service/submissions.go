@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -233,10 +234,59 @@ type submitTarget struct {
 	folder         string
 }
 
+// relativeSubmitTo writes a submitTo in the form's own space (0.99.1) as
+// owner/space/folder/: done/, reports/done/, ./done/ and ../done/ are
+// from the form's folder. It is "" when the path climbs above the top of the space or does
+// not end in /.
+func relativeSubmitTo(submitTo, space, formPath string) string {
+	if !strings.HasSuffix(submitTo, "/") || strings.HasPrefix(submitTo, "/") {
+		return ""
+	}
+	p := "/" + path.Dir(formPath) + "/" + submitTo
+	// Clean would stop a climb above the top at /, hiding the mistake.
+	depth := 0
+	for _, part := range strings.Split(strings.Trim(p, "/"), "/") {
+		switch part {
+		case "..":
+			if depth--; depth < 0 {
+				return ""
+			}
+		case ".", "":
+		default:
+			depth++
+		}
+	}
+	folder := strings.Trim(path.Clean(p), "/")
+	if folder == "" {
+		return space + "/"
+	}
+	return space + "/" + folder + "/"
+}
+
+// formTarget finds where a form's copies go (0.99.1): /owner/space/folder/
+// is that space (one with the same owner); any other path is a folder of
+// the form's own space, from the form's folder: done/, reports/done/,
+// ./done/ or ../done/. owner/space/folder/ without the leading / (before
+// 0.99.1) is now a folder path in the form's own space too.
+func (s *Service) formTarget(ctx context.Context, submitTo, space, formPath, ownerID string) (submitTarget, error) {
+	if rest, ok := strings.CutPrefix(submitTo, "/"); ok {
+		return s.resolveSubmitTo(ctx, rest, ownerID)
+	}
+	rel := relativeSubmitTo(submitTo, space, formPath)
+	if rel == "" {
+		return submitTarget{}, submitToRefused()
+	}
+	return s.resolveSubmitTo(ctx, rel, ownerID)
+}
+
+func submitToRefused() *Error {
+	return formError("submitTo must be a folder ending in /: a folder of this space from the form's folder, such as done/ or ../done/, or /owner/space/folder/ for a space with the same owner, such as /owner/hr-review/leave/.")
+}
+
 // resolveSubmitTo finds submitTo's space, which must be ready and have the
 // same owner as the template's space.
 func (s *Service) resolveSubmitTo(ctx context.Context, submitTo, ownerID string) (submitTarget, error) {
-	refused := formError("submitTo must be owner/space/folder/ naming a space with the same owner as this one, such as owner/hr-review/leave/.")
+	refused := submitToRefused()
 	parts := strings.SplitN(submitTo, "/", 3)
 	if len(parts) < 2 || !usernamePattern.MatchString(parts[0]) || !usernamePattern.MatchString(parts[1]) {
 		return submitTarget{}, refused
@@ -525,7 +575,7 @@ func (s *Service) submitForm(ctx context.Context, repo *repository, space, userI
 		e.Code, e.Fields = "invalid_answers", problems
 		return Receipt{}, e
 	}
-	target, err := s.resolveSubmitTo(ctx, t.SubmitTo, s.repositoryOwner(repo))
+	target, err := s.formTarget(ctx, t.SubmitTo, space, in.Path, s.repositoryOwner(repo))
 	if err != nil {
 		return Receipt{}, err
 	}
