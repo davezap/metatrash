@@ -1,6 +1,6 @@
 # Dashboards
 
-Core 0.99.0 (0.99.1 for the website home page and same-space `submitTo`), Slate 0.24.0,
+Core 0.99.0 (0.99.1 for the website home page and same-space `submitTo`; 0.99.2 for visitors), Slate 0.24.0,
 Slate Viewer 0.44.0 (0.44.1), mtsync 0.99.0.
 
 A dashboard is an ordinary Markdown file with **cards** in it: headline
@@ -114,6 +114,15 @@ group: type
 A `markdown` card can hold its own text after a line `---` instead of a
 `source`. A card that can't be read shows its text with what is wrong, and
 the rest of the page still draws.
+
+## Who sees what
+
+A card shows only what the person looking may read. In a space shared on the
+web (and the public space), visitors who are not signed in see its dashboards
+too: queries answer, notices and forms show as not done, and acknowledging or
+sending asks them to sign in (0.99.2). In a private space a signed-out query
+is refused like reading a file. `show-if` only hides cards; it never grants
+access.
 
 ## Sources
 

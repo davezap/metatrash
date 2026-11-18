@@ -140,12 +140,22 @@ func (h *httpAdapter) serveSiteAPI(w http.ResponseWriter, r *http.Request, clien
 		sendError(w, err)
 		return
 	}
+	// A dashboard card's query is a POST only to carry its body: it reads,
+	// with the same access as reading the files, so a visitor to a space
+	// shared on the web sees its dashboards (0.99.2). It still needs the
+	// site's Origin above; signed out there is no session to forge.
+	readingPost := r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/query")
 	if !read {
 		if !signedIn {
-			sendError(w, problem(401, "unauthorized", "Sign in to change files."))
-			return
-		}
-		if !hmac.Equal([]byte(r.Header.Get(siteCSRFHeader)), []byte(h.siteCSRF(token))) {
+			if !readingPost {
+				message := "Sign in to change files."
+				if strings.HasSuffix(r.URL.Path, "/notices") {
+					message = "Sign in to acknowledge this notice."
+				}
+				sendError(w, problem(401, "unauthorized", message))
+				return
+			}
+		} else if !hmac.Equal([]byte(r.Header.Get(siteCSRFHeader)), []byte(h.siteCSRF(token))) {
 			sendError(w, problem(403, "forbidden", "The page is out of date. Reload it and try again."))
 			return
 		}

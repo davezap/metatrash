@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.99.2 - Dashboards work for visitors to a space shared on the web (2026-11-19)
+
+- **Signed-out queries** (Dave: the docs space's example dashboards showed errors to visitors): the site API refused every signed-out POST, and a card's query is a POST only to carry its body. `POST /api/v1/site/spaces/{space}/query` now answers a visitor with the same access as reading the space's files, so it works in a space shared on the web (and the public space) and is still refused (401) in a private one. It keeps the site's Origin check; there is no CSRF token to check signed out, and nothing is changed. Signed in, nothing changes (`site_api.go`).
+- **Notices for visitors**: `GET .../notices` signed out shows each notice and form as not done instead of 404; acknowledging still needs signing in, now with "Sign in to acknowledge this notice." (`dashboard_http.go`, `noticeStatus` skips the per-person lookups without a person).
+- Tests: `TestSiteAPIAgainstDatabase` (signed-out query refused while private, answered once shared on the web, refused from another site or without Origin; notices not done; acknowledging and writing need signing in). No schema, grant, configuration, dependency or tool schema change. See docs/release-0.99.2.md.
+
 ## 0.99.1 - A space's web address opens on its dashboard; forms file in their own space (2026-11-18)
 
 - **The website opens a space on its home page**: a space's address (`/spaces/owner/space/`, and the public space's) now opens the top folder's `home` setting when that file is there, else `dashboard.md`, else README.md as before (`browser.go` `homePage`, `owned_space_http.go`). 0.99.0 taught only Slate Viewer, so on the website the setting and dashboard.md were ignored. Names match without regard to case.

@@ -175,12 +175,39 @@ func TestSiteAPIAgainstDatabase(t *testing.T) {
 		t.Fatalf("suspended member read: %d", res.Code)
 	}
 
+	// A dashboard's query signed out (0.99.2): refused while the space is private.
+	query := `{"source": "/"}`
+	if res := siteCall(w, "POST", owned+"/query", query, nil, ""); res.Code != 401 || strings.Contains(res.Body.String(), "change files") {
+		t.Fatalf("signed-out query, private: %d %s", res.Code, res.Body)
+	}
+
 	// Readable on the web: anyone reads, nobody but members writes.
 	if _, err := w.db.db.ExecContext(ctx, "UPDATE metatrash_spaces SET visibility = 'web' WHERE space_id = ?", w.ownedID); err != nil {
 		t.Fatal(err)
 	}
 	if res := siteCall(w, "GET", owned+"/file?path=README.md", "", nil, ""); res.Code != 200 {
 		t.Fatalf("signed-out read, web: %d", res.Code)
+	}
+	// Its dashboards work for a visitor: queries answer, notices show as not
+	// done, acknowledging needs signing in, and another site's page is refused.
+	if res := siteCall(w, "POST", owned+"/query", query, nil, ""); res.Code != 200 || siteJSON(t, res)["count"] == nil {
+		t.Fatalf("signed-out query, web: %d %s", res.Code, res.Body)
+	}
+	if res := siteCall(w, "POST", owned+"/query", query, nil, "", "Origin", "https://evil.example"); res.Code != 403 {
+		t.Fatalf("signed-out query from another site: %d", res.Code)
+	}
+	if res := siteCall(w, "POST", owned+"/query", query, nil, "", "Origin", ""); res.Code != 403 {
+		t.Fatalf("signed-out query without Origin: %d", res.Code)
+	}
+	notices := siteCall(w, "GET", owned+"/notices?paths=README.md", "", nil, "")
+	if notices.Code != 200 || !strings.Contains(notices.Body.String(), `"done":false`) {
+		t.Fatalf("signed-out notices, web: %d %s", notices.Code, notices.Body)
+	}
+	if res := siteCall(w, "POST", owned+"/notices", `{"path": "README.md", "blob": "`+strings.Repeat("0", 40)+`"}`, nil, ""); res.Code != 401 || !strings.Contains(res.Body.String(), "acknowledge") {
+		t.Fatalf("signed-out acknowledge: %d %s", res.Code, res.Body)
+	}
+	if res := siteCall(w, "PUT", owned+"/file?path=x.md", `{"text": "x\n"}`, nil, ""); res.Code != 401 {
+		t.Fatalf("signed-out write, web: %d", res.Code)
 	}
 	strangerCSRF := siteJSON(t, siteCall(w, "GET", "/api/v1/site/session", "", strangerSession, ""))["csrf"].(string)
 	state = siteJSON(t, siteCall(w, "GET", owned+"/files", "", strangerSession, ""))["state"].(string)

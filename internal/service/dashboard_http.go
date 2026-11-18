@@ -101,11 +101,19 @@ type noticesResult struct {
 
 func (h *httpAdapter) serveNotices(w http.ResponseWriter, r *http.Request, repo *repository, space string) {
 	identity, _ := r.Context().Value(mcpIdentityKey{}).(mcpIdentity)
-	if identity.oauth == nil || repo.id == "" || h.service.ownedDB == nil {
+	if repo.id == "" || h.service.ownedDB == nil {
 		sendError(w, problem(404, "not_found", "Notices are kept only for your own and shared spaces."))
 		return
 	}
-	userID := identity.oauth.UserID
+	// A visitor to a space shared on the web (signed out) sees every notice
+	// and form as not done yet (0.99.2); acknowledging needs signing in.
+	userID := ""
+	if identity.oauth != nil {
+		userID = identity.oauth.UserID
+	} else if r.Method != http.MethodGet {
+		sendError(w, problem(401, "unauthorized", "Sign in to acknowledge this notice."))
+		return
+	}
 	if r.Method == http.MethodGet {
 		q := r.URL.Query()
 		for k := range q {
@@ -223,13 +231,16 @@ func (s *Service) noticeStatus(ctx context.Context, r *repository, space, userID
 	if err != nil {
 		return noticesResult{}, err
 	}
-	acks, err := s.ownedDB.acknowledgements(ctx, r.id, userID)
-	if err != nil {
-		return noticesResult{}, err
-	}
+	// userID is empty for a visitor: nothing is done, nothing to look up.
 	acked := map[string]int64{}
-	for _, a := range acks {
-		acked[a.FileID+":"+a.Blob] = a.At
+	if userID != "" {
+		acks, err := s.ownedDB.acknowledgements(ctx, r.id, userID)
+		if err != nil {
+			return noticesResult{}, err
+		}
+		for _, a := range acks {
+			acked[a.FileID+":"+a.Blob] = a.At
+		}
 	}
 	var formIDs []string
 	out := noticesResult{Space: space, Notices: []NoticeStatus{}}
@@ -253,7 +264,7 @@ func (s *Service) noticeStatus(ctx context.Context, r *repository, space, userID
 		}
 		out.Notices = append(out.Notices, st)
 	}
-	if len(formIDs) > 0 {
+	if len(formIDs) > 0 && userID != "" {
 		sent, err := s.ownedDB.sentTemplates(ctx, r.id, userID, formIDs)
 		if err != nil {
 			return noticesResult{}, err
