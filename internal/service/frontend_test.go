@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -87,8 +89,45 @@ func TestFrontendEditorIsolation(t *testing.T) {
 	if got := string(withCharts.frontend.editor["charts/charts.js"]); got != "company charts" {
 		t.Fatalf("charts %q", got)
 	}
+	// Code colouring (0.99.4): languages/ and its chunks, only from the bundle.
+	langs := &httpAdapter{service: withCharts}
+	if w := serveTestAsset(langs, "/assets/languages/languages.js"); w.Code != 404 {
+		t.Fatalf("languages without languages files: %d", w.Code)
+	}
+	source["slate/languages/languages.js"] = &fstest.MapFile{Data: []byte("company languages")}
+	source["slate/languages/chunks/python-ABC.js"] = &fstest.MapFile{Data: []byte("python chunk")}
+	source["slate/languages/notes.txt"] = &fstest.MapFile{Data: []byte("not served")}
+	withLanguages := &Service{}
+	if err := withLanguages.SetFrontend(source); err != nil {
+		t.Fatal(err)
+	}
+	langs = &httpAdapter{service: withLanguages}
+	if w := serveTestAsset(langs, "/assets/languages/languages.js"); w.Code != 200 || w.Body.String() != "company languages" || w.Header().Get("Content-Type") != "text/javascript; charset=utf-8" {
+		t.Fatalf("languages.js: %d %q", w.Code, w.Body.String())
+	}
+	if w := serveTestAsset(langs, "/assets/languages/chunks/python-ABC.js"); w.Code != 200 || w.Body.String() != "python chunk" || !strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("chunk: %d %q", w.Code, w.Body.String())
+	}
+	for _, path := range []string{"/assets/languages/notes.txt", "/assets/languages/../slate.js", "/assets/languages/missing.js"} {
+		if w := serveTestAsset(langs, path); w.Code != 404 {
+			t.Fatalf("%s: %d", path, w.Code)
+		}
+	}
+	if w := serveTestAsset(&httpAdapter{service: &Service{}}, "/assets/languages/languages.js"); w.Code != 404 {
+		t.Fatalf("languages without a bundle: %d", w.Code)
+	}
 	delete(source, "slate/slate.css")
 	if err := (&Service{}).SetFrontend(source); err == nil {
 		t.Fatal("accepted incomplete editor bundle")
 	}
+}
+
+func serveTestAsset(h *httpAdapter, path string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.URL.Path = path
+	w := httptest.NewRecorder()
+	if !h.serveAsset(w, r) {
+		w.Code = 0
+	}
+	return w
 }

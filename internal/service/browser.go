@@ -112,6 +112,24 @@ func (h *httpAdapter) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	case "/assets/app-start.js":
 		data, kind = appStartJS, "text/javascript; charset=utf-8"
 	default:
+		// Slate's code colouring (0.99.4, Slate 0.26.0): only a frontend bundle has them,
+		// with the slate.js they belong to.
+		if name, ok := strings.CutPrefix(r.URL.Path, "/assets/languages/"); ok {
+			var file []byte
+			if bundle := h.service.frontend; bundle != nil && strings.HasSuffix(name, ".js") && !strings.Contains(name, "..") {
+				file = bundle.editor["languages/"+name]
+			}
+			if len(file) == 0 {
+				sendError(w, missing())
+				return true
+			}
+			data, kind = file, "text/javascript; charset=utf-8"
+			// Chunk names carry a hash of their content, so they never change.
+			if strings.HasPrefix(name, "chunks/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+			break
+		}
 		name, ok := strings.CutPrefix(r.URL.Path, "/assets/mermaid/")
 		if !ok || !strings.HasSuffix(name, ".js") || strings.Contains(name, "..") {
 			sendError(w, missing())

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.99.4 - Serves Slate's code colouring (2026-11-19)
+
+- **Code colouring files**: Slate 0.26.0 colours code files and fenced code blocks with CodeMirror's language packs, which it loads on demand from `languages/` next to its `slate.js`. A frontend bundle's `slate/languages/**/*.js` now comes with its `slate.js` (`SetFrontend` in `frontend.go`) and is served at `/assets/languages/...` (`browser.go`); chunk names carry a content hash, so `chunks/` answers are cached for a year. Only a bundle has them, because the chunks use the CodeMirror inside that bundle's `slate.js`; without one (Core's own older embedded Slate, which doesn't ask) the path is 404.
+- Site app: Slate 0.26.0 and Slate Viewer 0.46.0 (diagram zoom and full-size view, coloured code files edited and previewed in CodeMirror, coloured fenced code blocks, no Preview button).
+- Tests: `TestFrontendEditorIsolation` (served from the bundle only, `.js` only, no `..`, 404 without a bundle). On Windows the database tests that write an accounts.json (`TestDatabaseAdmin*`, export, space rename) wrote the test database config's path unescaped, so a `C:\...` path made invalid JSON ("invalid account configuration"); they escape it now (`testJSONString`). Test-only. No schema, grant, configuration, dependency or tool schema change. See docs/release-0.99.4.md.
+
 ## 0.99.3 - Optional storage limit per space (2026-11-19)
 
 - **Space storage limits** (Dave: a space should have no size of its own, only the owner's account-wide allowance, with an optional cap per space): an owner can give one of their spaces a limit in Settings → Spaces → (space) → General. A change that adds to a space at or over its limit is refused with 507 `space_limit`, "This space is limited to 2.0 GB by its owner and holds 2.0 GB, so the change doesn't fit…", wherever it comes from (website, apps, Sync, folder actions, GitHub folders, virtual file refreshes); a change that only removes files still goes through. The limit counts what Settings shows the space taking up (its Git repository with every version, plus its virtual files). It is checked in `checkWrite` before the extensions' WriteGate, so on a hosted service the owner's allowance still applies on top. `space_limit.go`.

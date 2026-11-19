@@ -159,7 +159,7 @@ func TestConsoleExportOwnedSpaceAgainstDatabase(t *testing.T) {
 	w := newOAuthWorld(t)
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "accounts.json")
-	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":"`+os.Getenv("METATRASH_TEST_DB_CONFIG")+`"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":`+testJSONString(os.Getenv("METATRASH_TEST_DB_CONFIG"))+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	admin, err := OpenAdminDB(ctx, path)

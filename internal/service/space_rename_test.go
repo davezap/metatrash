@@ -29,7 +29,7 @@ func TestRenameSpaceAgainstDatabase(t *testing.T) {
 	}
 	token := w.connect(owner, map[string]string{space.ID: "read_write"}, "")
 	path := filepath.Join(t.TempDir(), "accounts.json")
-	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":"`+os.Getenv("METATRASH_TEST_DB_CONFIG")+`"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":`+testJSONString(os.Getenv("METATRASH_TEST_DB_CONFIG"))+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	admin, err := OpenAdminDB(ctx, path)

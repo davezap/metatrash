@@ -94,6 +94,22 @@ func (s *Service) SetFrontend(source fs.FS) error {
 		if len(content) != 0 {
 			editor["charts/charts.js"] = append([]byte{}, content...)
 		}
+		// Slate's code colouring (Slate 0.26.0): languages/languages.js and its chunks,
+		// loaded by that slate.js, so they come only from the same bundle.
+		err = fs.WalkDir(source, "slate/languages", func(name string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".js") {
+				return err
+			}
+			content, err := fs.ReadFile(source, name)
+			if err != nil {
+				return err
+			}
+			editor[strings.TrimPrefix(name, "slate/")] = append([]byte{}, content...)
+			return nil
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("frontend editor languages: %w", err)
+		}
 	}
 	s.frontend = &frontendBundle{manifest: manifest, files: files, editor: editor}
 	return nil

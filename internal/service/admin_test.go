@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,7 +40,7 @@ func TestDatabaseAdminUsers(t *testing.T) {
 	}
 	// Only databaseConfigFile is needed: no SMTP password or other secrets.
 	path := filepath.Join(t.TempDir(), "accounts.json")
-	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":"`+os.Getenv("METATRASH_TEST_DB_CONFIG")+`"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":`+testJSONString(os.Getenv("METATRASH_TEST_DB_CONFIG"))+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	admin, err := OpenAdminDB(ctx, path)
@@ -104,7 +105,7 @@ func testAdminDB(t *testing.T) (*accountDatabase, *AdminDB) {
 	t.Helper()
 	db := testDatabase(t)
 	path := filepath.Join(t.TempDir(), "accounts.json")
-	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":"`+os.Getenv("METATRASH_TEST_DB_CONFIG")+`"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"databaseConfigFile":`+testJSONString(os.Getenv("METATRASH_TEST_DB_CONFIG"))+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	admin, err := OpenAdminDB(context.Background(), path)
@@ -231,4 +232,10 @@ func TestDatabaseAdminPrivileges(t *testing.T) {
 	if err != nil || len(missing) != 0 || len(extra) != 0 {
 		t.Fatalf("test database login should have exactly deploy/account-grants.sql: missing %v, extra %v, %v", missing, extra, err)
 	}
+}
+
+// testJSONString is s as a JSON string: a Windows path's backslashes must be escaped.
+func testJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
