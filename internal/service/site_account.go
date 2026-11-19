@@ -19,8 +19,8 @@ import (
 //	POST /api/v1/site/account/username                 {"username"}
 //	POST /api/v1/site/account/spaces                   {"name", "timezone"?} or, to finish an interrupted one, {"name", "slug"}
 //	GET  /api/v1/site/account/spaces/{id}/sharing      invitations, members and the ownership offer of an owned space
-//	POST /api/v1/site/account/spaces/{id}/{action}     visibility, timezone, invite, cancel, suspend, restore, remove, agent,
-//	                                                   transfer-offer, transfer-cancel, delete
+//	POST /api/v1/site/account/spaces/{id}/{action}     visibility, timezone, storage-limit, invite, cancel, suspend, restore,
+//	                                                   remove, agent, transfer-offer, transfer-cancel, delete
 //	POST /api/v1/site/account/invitations/accept       {"space", "invitation"}
 //	POST /api/v1/site/account/offers/{accept|decline}  {"space"}
 //	POST /api/v1/site/account/delete                   {"email"}
@@ -55,6 +55,9 @@ type siteAccountSpace struct {
 	// Owner is set on a space of an owner account this user acts for, such
 	// as an organisation they administer (0.95.23); "" for their own.
 	Owner string `json:"owner,omitempty"`
+	// Limit is the owner's storage limit for the space in bytes, 0 for none
+	// (0.99.3, space_limit.go).
+	Limit int64 `json:"limit,omitempty"`
 }
 
 // siteUsage is storage in bytes: Git is the space's repository (every
@@ -114,14 +117,16 @@ type siteAccount struct {
 	// create a space of its own just now (0.98.1), such as "Creating a space
 	// needs a membership."; CanCreate is then false. Absent when the gate
 	// allows it, there is none, or it can't be asked just now.
-	CreateNeeds     string             `json:"createNeeds,omitempty"`
-	DefaultTimezone string             `json:"defaultTimezone"`
-	Apps            bool               `json:"apps,omitempty"`
-	Fresh           bool               `json:"fresh,omitempty"`
-	Spaces          []siteAccountSpace `json:"spaces"`
-	Joined          []siteJoinedSpace  `json:"joined"`
-	Invitations     []siteInvitation   `json:"invitations"`
-	Offers          []siteOffer        `json:"offers"`
+	CreateNeeds     string `json:"createNeeds,omitempty"`
+	DefaultTimezone string `json:"defaultTimezone"`
+	// SpaceLimits: owners may set a storage limit per space (0.99.3).
+	SpaceLimits bool               `json:"spaceLimits,omitempty"`
+	Apps        bool               `json:"apps,omitempty"`
+	Fresh       bool               `json:"fresh,omitempty"`
+	Spaces      []siteAccountSpace `json:"spaces"`
+	Joined      []siteJoinedSpace  `json:"joined"`
+	Invitations []siteInvitation   `json:"invitations"`
+	Offers      []siteOffer        `json:"offers"`
 	// Manages lists the usernames of the owner accounts this person acts
 	// for, such as organisations they administer (0.95.23).
 	Manages []string `json:"manages,omitempty"`
@@ -180,23 +185,25 @@ type siteConfirm struct {
 // siteAccountBody is every field an account write may send; each route reads
 // its own and ignores the rest being empty.
 type siteAccountBody struct {
-	Username          string  `json:"username"`
-	Name              string  `json:"name"`
-	Slug              *string `json:"slug"`
-	Timezone          string  `json:"timezone"`
-	Visibility        string  `json:"visibility"`
-	Email             string  `json:"email"`
-	Space             string  `json:"space"`
-	Invitation        string  `json:"invitation"`
-	Member            string  `json:"member"`
-	Permission        string  `json:"permission"`
-	Owner             string  `json:"owner"`
-	Code              string  `json:"code"`
-	Credential        string  `json:"credential"`
-	ClientData        string  `json:"client_data"`
-	AuthenticatorData string  `json:"authenticator_data"`
-	Signature         string  `json:"signature"`
-	UserHandle        string  `json:"user_handle"`
+	Username string  `json:"username"`
+	Name     string  `json:"name"`
+	Slug     *string `json:"slug"`
+	Timezone string  `json:"timezone"`
+	// Limit is a space's storage limit in bytes, 0 for none (storage-limit).
+	Limit             *int64 `json:"limit"`
+	Visibility        string `json:"visibility"`
+	Email             string `json:"email"`
+	Space             string `json:"space"`
+	Invitation        string `json:"invitation"`
+	Member            string `json:"member"`
+	Permission        string `json:"permission"`
+	Owner             string `json:"owner"`
+	Code              string `json:"code"`
+	Credential        string `json:"credential"`
+	ClientData        string `json:"client_data"`
+	AuthenticatorData string `json:"authenticator_data"`
+	Signature         string `json:"signature"`
+	UserHandle        string `json:"user_handle"`
 	// Services (0.80.0, site_services.go).
 	Provider string            `json:"provider"`
 	Model    string            `json:"model"`
@@ -227,7 +234,7 @@ type siteNotice struct {
 
 // siteSpaceActions are the POST routes /account/spaces/{id}/{action}.
 var siteSpaceActions = map[string]bool{
-	"visibility": true, "timezone": true, "invite": true, "cancel": true, "suspend": true, "restore": true,
+	"visibility": true, "timezone": true, "storage-limit": true, "invite": true, "cancel": true, "suspend": true, "restore": true,
 	"remove": true, "agent": true, "transfer-offer": true, "transfer-cancel": true, "delete": true,
 	"move": true,
 }
@@ -421,6 +428,7 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 		Apps: h.oauth != nil, Spaces: []siteAccountSpace{}, Joined: []siteJoinedSpace{}, Invitations: []siteInvitation{}, Offers: []siteOffer{},
 	}
 	out.Fresh, _ = h.service.accounts.sessionFresh(session, time.Now())
+	out.SpaceLimits = h.service.spaceLimitsReady(ctx)
 	storage, storageErr := h.service.accountStorage(ctx, user.ID)
 	if storageErr != nil {
 		out.Unavailable = append(out.Unavailable, "storage")
@@ -431,7 +439,7 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 		out.Unavailable = append(out.Unavailable, "spaces")
 	} else {
 		for _, s := range spaces {
-			item := siteAccountSpace{ID: s.ID, Name: s.Name, Slug: s.Slug, Ready: s.Ready, Web: s.Web, Timezone: s.Timezone}
+			item := siteAccountSpace{ID: s.ID, Name: s.Name, Slug: s.Slug, Ready: s.Ready, Web: s.Web, Timezone: s.Timezone, Limit: h.service.spaceStorageLimit(s.ID)}
 			if s.Ready && user.Username != "" {
 				item.Space = user.Username + "/" + s.Slug
 			}
@@ -464,7 +472,7 @@ func (h *httpAdapter) siteAccountOverview(ctx context.Context, user userAccount,
 			if s.Owner == "" {
 				continue
 			}
-			item := siteAccountSpace{ID: s.ID, Name: s.Name, Slug: s.Slug, Ready: h.service.ownedRepository(s.ID) != nil, Web: s.Web, Owner: s.Owner, Space: s.Owner + "/" + s.Slug}
+			item := siteAccountSpace{ID: s.ID, Name: s.Name, Slug: s.Slug, Ready: h.service.ownedRepository(s.ID) != nil, Web: s.Web, Owner: s.Owner, Space: s.Owner + "/" + s.Slug, Limit: h.service.spaceStorageLimit(s.ID)}
 			owner := s.OwnerID
 			if _, ok := zones[owner]; !ok {
 				zones[owner], _ = h.service.ownedDB.spaceTimezones(ctx, owner)
@@ -612,6 +620,22 @@ func (h *httpAdapter) siteSpaceAction(ctx context.Context, actor userAccount, se
 		}
 		h.service.spaceZoneChanged(spaceID)
 		return siteNotice{Notice: "space-timezone"}, nil
+	case "storage-limit":
+		var limit int64
+		if body.Limit != nil {
+			limit = *body.Limit
+		}
+		err := h.service.rates.take(allowance{"space-limit:user:" + actor.ID, 30, 600})
+		if err == nil {
+			err = h.service.setSpaceStorageLimit(ctx, user.ID, spaceID, limit)
+		}
+		if err != nil {
+			return siteNotice{}, err
+		}
+		if limit == 0 {
+			return siteNotice{Notice: "space-limit-removed"}, nil
+		}
+		return siteNotice{Notice: "space-limit"}, nil
 	case "move":
 		err := h.service.rates.take(allowance{"space-move:user:" + actor.ID, 10, 600})
 		if err == nil {

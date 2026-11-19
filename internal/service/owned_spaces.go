@@ -304,6 +304,7 @@ func (s *Service) prepareOwnedSpace(ctx context.Context, space ownedSpace) error
 		repo.writeGate = func(ctx context.Context, bytes int64, onlyRemoves bool) error {
 			return s.checkWrite(ctx, repo, bytes, onlyRemoves)
 		}
+		s.loadSpaceLimit(ctx, repo)
 		if space.State == "provisioning" {
 			result, err := s.ownedDB.db.ExecContext(ctx, "UPDATE metatrash_spaces SET provisioning_state = 'ready' WHERE space_id = ? AND owner_user_id = ? AND provisioning_state = 'provisioning'", space.ID, space.OwnerID)
 			if err != nil {

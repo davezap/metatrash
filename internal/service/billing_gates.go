@@ -85,7 +85,14 @@ func (s *Service) collectBillingGates() billingGates {
 // It runs with the repository's quota lock held, so hooks must answer
 // quickly (Company caches).
 func (s *Service) checkWrite(ctx context.Context, r *repository, bytes int64, onlyRemoves bool) error {
-	if len(s.gates.write) == 0 || !r.owned {
+	if !r.owned {
+		return nil
+	}
+	// The owner's own limit for the space comes first (0.99.3, space_limit.go).
+	if err := checkSpaceLimit(r, bytes, onlyRemoves); err != nil {
+		return err
+	}
+	if len(s.gates.write) == 0 {
 		return nil
 	}
 	w := extension.Write{ActorID: actorOf(ctx), OwnerID: s.repositoryOwner(r), SpaceID: r.id, Bytes: bytes, OnlyRemoves: onlyRemoves}

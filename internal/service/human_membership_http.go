@@ -147,6 +147,8 @@ var accountNotices = map[string]string{
 	"space-deleted":              "The space is deleted: no one can open it, and its address is held for 30 days. If that was a mistake, ask the site’s operator to restore it within those 30 days.",
 	"account-deletion-requested": "Your account will be deleted in 30 days. You have been signed out everywhere, and we’ve emailed you. Signing in again before then cancels the deletion.",
 	"space-timezone":             "The space's time zone is saved. Its schedules run on it from now on.",
+	"space-limit":                "The space's storage limit is saved. Changes that would take it over the limit are refused; removing files still works.",
+	"space-limit-removed":        "The space has no limit of its own now. It can grow up to what your account allows.",
 	"transfer-offered":           "Ownership offered. We’ve emailed them; they accept it in Settings within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-offered-unsent":    "Ownership offered, but the email could not be sent, so let them know: they accept it in Settings within seven days. Until then nothing changes, and you can cancel the offer.",
 	"transfer-cancelled":         "Ownership offer cancelled. You still own the space.",

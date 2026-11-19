@@ -41,25 +41,28 @@ type Service struct {
 	// moduleTools are the extensions' agent tools by name (0.98.0).
 	moduleTools map[string]*moduleTool
 	// brand is the one extension's Brand, nil for Metatrash (brand.go).
-	brand           *extension.Brand
-	brandOnce       sync.Once
-	brandPages      pageTemplates
-	gates           billingGates // extensions' billing hooks (billing_gates.go)
-	extensionCancel context.CancelFunc
-	frontend        *frontendBundle
-	ownedMu         sync.RWMutex
-	ownedRepos      map[string]*repository
-	ownedRoot       string
-	ownedDB         *accountDatabase
-	accounts        *accounts
-	config          Config
-	keys            map[string]Keys
-	repos           map[string]*repository
-	rates           limiter
-	cursorKey       []byte
-	writes          extension.WriteScheduler
-	stop            chan struct{}
-	lockPath        string
+	brand     *extension.Brand
+	brandOnce sync.Once
+	// spaceLimitOnce looks once for the space storage limit column (space_limit.go).
+	spaceLimitOnce   sync.Once
+	spaceLimitColumn bool
+	brandPages       pageTemplates
+	gates            billingGates // extensions' billing hooks (billing_gates.go)
+	extensionCancel  context.CancelFunc
+	frontend         *frontendBundle
+	ownedMu          sync.RWMutex
+	ownedRepos       map[string]*repository
+	ownedRoot        string
+	ownedDB          *accountDatabase
+	accounts         *accounts
+	config           Config
+	keys             map[string]Keys
+	repos            map[string]*repository
+	rates            limiter
+	cursorKey        []byte
+	writes           extension.WriteScheduler
+	stop             chan struct{}
+	lockPath         string
 	// githubSourceHook replaces the GitHub reader in tests.
 	githubSourceHook func(ctx context.Context, r *repository, repo string) (githubSource, error)
 	// githubPushHook replaces the GitHub writer in tests.

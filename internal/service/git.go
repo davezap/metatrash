@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -56,6 +57,9 @@ type repository struct {
 	// usage is what the space takes up (owned spaces, storage.go).
 	usage spaceUsage
 	quota repositoryBytes
+	// storageLimit is the owner's limit for an owned space in bytes, 0 for
+	// none (space_limit.go).
+	storageLimit atomic.Int64
 }
 
 // watch returns a channel that is closed at the next branch update.
@@ -604,10 +608,25 @@ func provision(ctx context.Context, path string, limits Storage, rootAgents []by
 	if _, err = staged.commitFiles(ctx, "", files, texts, map[string][]byte{defaultLocksPath: []byte(defaultLocksMarker)}, changes, ""); err != nil {
 		return nil, err
 	}
-	if err = os.Rename(temp, path); err != nil {
+	if err = renameRetry(temp, path); err != nil {
 		return nil, err
 	}
 	return r, nil
+}
+
+// renameRetry renames, trying again for up to two seconds on Windows, where a
+// rename fails with "Access is denied" while another program (an antivirus
+// scanner, the search indexer, OneDrive) briefly has a file in it open.
+func renameRetry(from, to string) error {
+	err := os.Rename(from, to)
+	if runtime.GOOS != "windows" {
+		return err
+	}
+	for wait := 20 * time.Millisecond; err != nil && !errors.Is(err, os.ErrNotExist) && wait < 2*time.Second; wait *= 2 {
+		time.Sleep(wait)
+		err = os.Rename(from, to)
+	}
+	return err
 }
 
 // onlyRemoves reports whether a change deletes files and adds nothing.

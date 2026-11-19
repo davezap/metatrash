@@ -464,6 +464,10 @@ CREATE TABLE IF NOT EXISTS metatrash_space_usage (
     CONSTRAINT metatrash_space_usage_space FOREIGN KEY (space_id)
         REFERENCES metatrash_spaces (space_id) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB;
+-- 0.99.3: an owner's optional storage limit per space (also deploy/account-space-storage-limit.sql
+-- for existing databases; additive, so the schema version stays 25).
+ALTER TABLE metatrash_spaces
+    ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT UNSIGNED NULL;
 INSERT INTO metatrash_account_meta VALUES (1,25,'empty');
 CREATE TABLE IF NOT EXISTS metatrash_schema_components (
  component VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
