@@ -43,6 +43,10 @@ type accountDatabase struct {
 	// gate asks the extensions whether an account may use an owner's
 	// spaces now (extension.Hooks.SpaceGate); nil when none asks.
 	gate func(context.Context, string, string) error
+	// levels asks the extensions what an account may do in the spaces of
+	// the owners they decide (extension.Hooks.SpaceLevels, 0.100.0); nil
+	// when none decides any.
+	levels func(context.Context, string) (spaceLevels, error)
 	// admit asks the extensions whether a new account may be made
 	// (extension.Hooks.AdmitAccount); nil when none asks.
 	admit func(ctx context.Context, userID, email string) error

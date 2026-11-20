@@ -98,14 +98,30 @@ func (db *accountDatabase) accessibleSpaces(ctx context.Context, user userAccoun
 		if listed[item.ID] {
 			continue // also an organisation's space this user acts for
 		}
-		item.CanWrite = permission == "read_write"
+		listed[item.ID] = true
+		// An extension may decide this owner's spaces (SpaceLevels): the
+		// membership then only lowers its level.
+		_, level, err := db.memberAccess(ctx, user.ID, item.OwnerID, item.ID, sql.NullString{String: "active", Valid: true}, sql.NullString{String: permission, Valid: true})
+		if err != nil {
+			return nil, err
+		}
+		if !level.Valid {
+			continue // hidden by the extension
+		}
+		item.CanWrite = level.String == "read_write"
 		item.Web = visibility == spaceWeb
 		spaces = append(spaces, item)
 	}
 	if rows.Err() != nil {
 		return nil, fmt.Errorf("cannot list joined spaces")
 	}
-	return spaces, nil
+	rows.Close()
+	// Spaces an extension gives a level in without a membership.
+	extra, err := db.levelSpaces(ctx, user.ID, listed)
+	if err != nil {
+		return nil, err
+	}
+	return append(spaces, extra...), nil
 }
 
 // actingSpaces lists the ready spaces of the owner accounts userID acts for
@@ -243,6 +259,27 @@ func (db *accountDatabase) checkGrantChoice(ctx context.Context, tx *sql.Tx, use
 		return sql.NullString{}, fmt.Errorf("cannot check selected space")
 	}
 	if space.OwnerID == userID || db.actsFor(ctx, userID, space.OwnerID) {
+		return sql.NullString{}, nil
+	}
+	// An extension may decide this owner's spaces (SpaceLevels). Consent
+	// given through its level alone has no membership to point at (NULL,
+	// like an owner's); access is worked out again on every operation.
+	if level, managed, err := db.levelOf(ctx, tx, userID, space.OwnerID, choice.SpaceID); err != nil {
+		return sql.NullString{}, err
+	} else if managed {
+		if level == "" {
+			return sql.NullString{}, problem(409, "conflict", "A selected space is no longer available. Reload and try again.")
+		}
+		if choice.Permission == "read_write" && level != "read_write" {
+			return sql.NullString{}, problem(409, "conflict", "You have read-only access to a selected space.")
+		}
+		var member int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_memberships WHERE space_id = ? AND user_id = ?", choice.SpaceID, userID).Scan(&member); err != nil {
+			return sql.NullString{}, fmt.Errorf("cannot check selected space")
+		}
+		if member > 0 {
+			return sql.NullString{String: userID, Valid: true}, nil
+		}
 		return sql.NullString{}, nil
 	}
 	var status, permission string

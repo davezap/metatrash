@@ -299,6 +299,7 @@ func (s *Service) startExtensions() (err error) {
 	}
 	s.ownedDB.actingFor = s.actingOwnersFunc()
 	s.ownedDB.gate = s.spaceGateFunc()
+	s.ownedDB.levels = s.spaceLevelsFunc()
 	s.gates = s.collectBillingGates()
 	s.ownedDB.admit = s.admitAccountFunc()
 	return nil
@@ -319,6 +320,7 @@ func (s *Service) closeExtensions() {
 	if s.ownedDB != nil {
 		s.ownedDB.extensionPurge = nil
 		s.ownedDB.actingFor = nil
+		s.ownedDB.levels = nil
 	}
 }
 

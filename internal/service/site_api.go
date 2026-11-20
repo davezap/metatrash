@@ -346,9 +346,20 @@ func (s *Service) siteSpaceAccess(ctx context.Context, user userAccount, signedI
 	if err != nil {
 		return nil, "", fmt.Errorf("site authorization unavailable")
 	}
+	acting := signedIn && s.ownedDB.actsFor(lookup, user.ID, ownerID)
+	if signedIn && !acting {
+		// An extension may decide this owner's spaces (SpaceLevels): a
+		// membership then only lowers its level.
+		if status, permission, err = s.ownedDB.memberAccess(lookup, user.ID, ownerID, spaceID, status, permission); err != nil {
+			if visibility != spaceWeb {
+				return nil, "", err
+			}
+			status, permission = sql.NullString{}, sql.NullString{}
+		}
+	}
 	access := ""
 	switch {
-	case signedIn && s.ownedDB.actsFor(lookup, user.ID, ownerID):
+	case acting:
 		access = "read_write"
 	case status.Valid && status.String == "suspended":
 		return nil, "", problem(403, "forbidden", "Your access to this space is suspended by its owner.")

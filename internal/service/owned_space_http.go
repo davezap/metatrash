@@ -198,7 +198,20 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, problem(503, "unavailable", "Your space is temporarily unavailable."))
 		return
 	}
-	if err == nil && !member && signedIn {
+	if err == nil && signedIn && space.OwnerID != user.ID && !h.service.ownedDB.actsFor(ctx, user.ID, space.OwnerID) {
+		// An extension may decide this owner's spaces (SpaceLevels): then
+		// its level, lowered by a membership, decides instead.
+		level, managed, levelErr := h.service.ownedDB.levelOf(ctx, h.service.ownedDB.db, user.ID, space.OwnerID, space.ID)
+		switch {
+		case levelErr != nil && space.Visibility != spaceWeb:
+			h.sendGateRefusal(w, r, user, levelErr, markdown || raw || export)
+			return
+		case levelErr != nil:
+			member = false
+		case managed:
+			member = level != ""
+		}
+	} else if err == nil && !member && signedIn {
 		member = h.service.ownedDB.actsFor(ctx, user.ID, space.OwnerID)
 	}
 	if err == nil && member && signedIn {

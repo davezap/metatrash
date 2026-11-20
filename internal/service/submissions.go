@@ -738,7 +738,21 @@ func (db *accountDatabase) canWriteSpace(ctx context.Context, spaceID, userID st
 	if err != nil {
 		return false, fmt.Errorf("cannot read space members")
 	}
-	return n > 0 || ownerID.Valid && db.actsFor(ctx, userID, ownerID.String), nil
+	if !ownerID.Valid {
+		return false, nil
+	}
+	if ownerID.String == userID || db.actsFor(ctx, userID, ownerID.String) {
+		return true, nil
+	}
+	// An extension may decide this owner's spaces (SpaceLevels).
+	level, managed, err := db.levelOf(ctx, db.db, userID, ownerID.String, spaceID)
+	if err != nil {
+		return false, err
+	}
+	if managed {
+		return level == "read_write", nil
+	}
+	return n > 0, nil
 }
 
 // acknowledgeSent records path as read at its folder's published version

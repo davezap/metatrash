@@ -119,6 +119,12 @@ func (s *Service) agentSpaceAccess(ctx context.Context, id oauthIdentity, space,
 		return nil, "", notConnected
 	}
 	owner := s.ownedDB.actsFor(lookup, id.UserID, ownerID)
+	if !owner {
+		// An extension may decide this owner's spaces (SpaceLevels).
+		if status, permission, err = s.ownedDB.memberAccess(lookup, id.UserID, ownerID, spaceID, status, permission); err != nil {
+			return nil, "", err
+		}
+	}
 	if !owner && status.Valid && status.String == "suspended" {
 		return nil, "", problem(403, "forbidden", "Your access to this space is suspended by its owner.")
 	}
@@ -163,7 +169,13 @@ func (s *Service) listConnectedSpaces(ctx context.Context, id oauthIdentity) (co
 		if err := rows.Scan(&item.ID, &slug, &item.Name, &item.Owner, &consent, &ownerID, &status, &permission); err != nil {
 			return result, fmt.Errorf("cannot list connected spaces")
 		}
-		if item.Access = effectiveAccess(id, consent, s.ownedDB.actsFor(ctx, id.UserID, ownerID), status, permission); item.Access == "" || s.ownedRepository(item.ID) == nil {
+		owner := s.ownedDB.actsFor(ctx, id.UserID, ownerID)
+		if !owner {
+			if status, permission, err = s.ownedDB.memberAccess(ctx, id.UserID, ownerID, item.ID, status, permission); err != nil {
+				return result, err
+			}
+		}
+		if item.Access = effectiveAccess(id, consent, owner, status, permission); item.Access == "" || s.ownedRepository(item.ID) == nil {
 			continue
 		}
 		if s.ownedDB.gateFor(ctx, id.UserID, ownerID) != nil {

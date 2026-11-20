@@ -136,6 +136,10 @@ type Hooks struct {
 	// stay readable by everyone. Company organisations use it to require a
 	// recent Microsoft sign-in from their tenants.
 	SpaceGate func(ctx context.Context, userID, ownerID string) error
+	// SpaceLevels lets an extension decide what an account may do in the
+	// spaces of some owners (Core 0.100.0; see SpaceLevels). nil leaves
+	// every space to Core's ownership and membership rules.
+	SpaceLevels func(ctx context.Context, userID string) (SpaceLevels, error)
 	// WriteGate is asked before a change is committed to an account-owned
 	// space, whoever makes it: the website, apps and Sync, folder actions,
 	// GitHub folders and refreshed virtual files. nil lets the write go on;
@@ -155,6 +159,22 @@ type Hooks struct {
 	Brand *Brand
 	// Tools are agent tools the module adds (Core 0.98.0; see Tool).
 	Tools []Tool
+}
+
+// SpaceLevels is an extension's answer for one account (Hooks.SpaceLevels).
+// For the spaces of each owner in Owners, the extension decides the
+// account's level: Spaces maps a space ID to "read_only" or "read_write",
+// and a space of those owners missing from it is hidden from the account.
+// A membership (a personal share) can then only lower that level, or
+// suspend it; it never opens a space on its own. Owning a space or acting
+// for its owner (ActsFor) still gives full control, and a space readable on
+// the web stays readable. Spaces of owners not in Owners keep Core's rules.
+// SpaceGate is still asked. An error refuses the account every space of
+// owners it doesn't own or act for, as unavailable, until the next answer.
+// Company organisations use it for Access page rows per Microsoft tenant.
+type SpaceLevels struct {
+	Owners []string
+	Spaces map[string]string
 }
 
 // Write describes a change about to be committed to an owned space.
