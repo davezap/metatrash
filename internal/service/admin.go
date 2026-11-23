@@ -761,6 +761,7 @@ var accountGrants = []string{
 	"metatrash_virtual_refresh UPDATE (every)", "metatrash_virtual_refresh UPDATE (next_run_at)", "metatrash_virtual_refresh UPDATE (last_run_at)",
 	"metatrash_virtual_refresh UPDATE (stale_since)", "metatrash_virtual_refresh UPDATE (stale_reason)",
 	"metatrash_spaces UPDATE (deleted_at)", "metatrash_spaces UPDATE (slug)", "metatrash_spaces UPDATE (name)", "metatrash_spaces UPDATE (storage_limit_bytes)",
+	"metatrash_invitations UPDATE (agent_permission)",
 	"metatrash_users UPDATE (deletion_requested_at)", "metatrash_users UPDATE (deleted_at)",
 	"metatrash_space_usage SELECT", "metatrash_space_usage INSERT", "metatrash_space_usage DELETE",
 	"metatrash_space_usage UPDATE (git_bytes)", "metatrash_space_usage UPDATE (file_bytes)", "metatrash_space_usage UPDATE (file_objects)",

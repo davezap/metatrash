@@ -378,6 +378,17 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "GET" {
 			op = "activity"
 		}
+	case "rerun":
+		// Run a folder action again on its files (0.101.0, rerun.go): the
+		// website only.
+		if !siteRequest(r.Context()) {
+			sendError(w, missing())
+			return
+		}
+		allow = "POST"
+		if r.Method == "POST" {
+			op = resource
+		}
 	case "email":
 		// A folder's email address (0.97.0), for the space's owner.
 		if !accountResource {
@@ -419,7 +430,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews" || op == "upload" || op == "configure"
+	write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews" || op == "upload" || op == "configure" || op == "rerun"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -466,6 +477,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	case "email":
 		h.serveEmailAddress(w, r, repo)
+		return
+	case "rerun":
+		h.serveRerun(w, r, repo)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)

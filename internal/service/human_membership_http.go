@@ -9,6 +9,9 @@ import (
 
 type humanInvitation struct {
 	ID, SpaceID, Name, Owner, Email, Status, Expires string
+	// AgentPermission is what their apps may do once they accept, "" when
+	// the server keeps no choice (invitation_permission.go).
+	AgentPermission string
 }
 type joinedHumanSpace struct {
 	Name, Owner, Slug, URL, Status string
@@ -90,7 +93,11 @@ func (h *httpAdapter) humanSharing(ctx context.Context, user userAccount, spaceI
 		return nil, err
 	}
 	page := &humanSharingPage{ID: space.ID, Name: space.Name, Slug: space.Slug, URL: h.ownedSpaceURL(user.Username, space.Slug)}
-	rows, err := h.service.ownedDB.db.QueryContext(ctx, `SELECT invitation_id, email, expires_at FROM metatrash_invitations WHERE space_id = ? AND status = 'pending' ORDER BY expires_at, invitation_id LIMIT 200`, space.ID)
+	permission := "''"
+	if h.service.ownedDB.invitationPermissionsReady(ctx) {
+		permission = "agent_permission"
+	}
+	rows, err := h.service.ownedDB.db.QueryContext(ctx, `SELECT invitation_id, email, expires_at, `+permission+` FROM metatrash_invitations WHERE space_id = ? AND status = 'pending' ORDER BY expires_at, invitation_id LIMIT 200`, space.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +105,7 @@ func (h *httpAdapter) humanSharing(ctx context.Context, user userAccount, spaceI
 	for rows.Next() {
 		var item humanInvitation
 		var expires int64
-		if err := rows.Scan(&item.ID, &item.Email, &expires); err != nil {
+		if err := rows.Scan(&item.ID, &item.Email, &expires, &item.AgentPermission); err != nil {
 			rows.Close()
 			return nil, err
 		}

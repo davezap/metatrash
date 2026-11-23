@@ -188,7 +188,11 @@ func (r *repository) loadSnapshot(ctx context.Context, revision string) (map[str
 	}
 	github := map[string]bool{}
 	readOnly := map[string]lockMap{}
+	sorts := map[string]string{}
 	for folder, config := range configs {
+		if config.Sort != nil {
+			sorts[folder] = *config.Sort
+		}
 		if folder != "" && config.has("github") {
 			github[folder] = true
 		}
@@ -196,7 +200,7 @@ func (r *repository) loadSnapshot(ctx context.Context, revision string) (map[str
 			readOnly[folder] = config.ReadOnly
 		}
 	}
-	markFolderFiles(files, github, readOnly)
+	markFolderFiles(files, github, readOnly, sorts)
 	return files, snapshotCost(files, len(b)), nil
 }
 

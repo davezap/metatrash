@@ -145,7 +145,12 @@ func (db *accountDatabase) acceptHumanInvitation(ctx context.Context, userID, sp
 		if status != "pending" || expires <= now || membershipStatus != "" {
 			return problem(409, "conflict", "Invitation unavailable or membership already exists. Ask the owner to review access.")
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_memberships (space_id, user_id, role, status, joined_at, updated_at) VALUES (?, ?, 'member', 'active', ?, ?)", spaceID, userID, now, now); err != nil {
+		// The invitation may have chosen what their apps may do (0.101.0).
+		permission, err := db.invitedAgentPermission(ctx, tx, spaceID, invitationID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO metatrash_memberships (space_id, user_id, role, status, joined_at, updated_at, agent_permission) VALUES (?, ?, 'member', 'active', ?, ?, ?)", spaceID, userID, now, now, permission); err != nil {
 			return fmt.Errorf("cannot create membership")
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE metatrash_invitations SET status = 'accepted', accepted_user_id = ? WHERE space_id = ? AND invitation_id = ?", userID, spaceID, invitationID); err != nil {

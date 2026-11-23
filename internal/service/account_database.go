@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -50,6 +51,10 @@ type accountDatabase struct {
 	// admit asks the extensions whether a new account may be made
 	// (extension.Hooks.AdmitAccount); nil when none asks.
 	admit func(ctx context.Context, userID, email string) error
+	// invitePermission: the database keeps what an invitation's apps may
+	// do (invitation_permission.go), looked up once.
+	invitePermissionOnce sync.Once
+	invitePermission     bool
 }
 
 func readLimitedFile(path string, limit int64) ([]byte, error) {

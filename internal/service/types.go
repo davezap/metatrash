@@ -36,6 +36,10 @@ type File struct {
 	// ReadOnly, also derived, is the lock a readOnly entry in its folder's
 	// settings puts on the file: "agents" or "everyone" (see locks.go).
 	ReadOnly string `json:"readOnly,omitempty"`
+	// Sort, also derived, is set on a folder's .metatrash.json when the
+	// folder chose an order for its listing (sort, 0.101.0): "a-z" or "z-a".
+	// Slate Viewer reads it from the list without opening every settings file.
+	Sort string `json:"sort,omitempty"`
 	// Blob is the Git blob hash of the text. Read, write, edit, append, move
 	// and delete results carry it, and list with blobs=true or since=, so a
 	// client can tell a changed file without reading it (read's ifBlob).

@@ -25,7 +25,8 @@ import (
 //
 // {resource} is file, files, history, search, edit, move, append, export,
 // content (GET, and PUT to upload a file from 0.95.8), acknowledgements,
-// submissions or reviews, as on /api/v1/account. GitHub pull/push/pending
+// submissions or reviews, as on /api/v1/account, and rerun (0.101.0, rerun.go)
+// only here. GitHub pull/push/pending
 // and configure stay with the OAuth resource for now.
 //
 // A person signed in on the site has their own access: the owner can change
@@ -57,6 +58,7 @@ var siteResources = map[string]string{
 	"edit": "POST", "move": "POST", "append": "POST",
 	"content": "GET, PUT", "acknowledgements": "GET, POST", "submissions": "GET, POST", "reviews": "POST",
 	"activity": "GET", "email": "GET", "query": "POST", "notices": "GET, POST",
+	"rerun": "POST",
 }
 
 // siteSpace is one space in the session answer.

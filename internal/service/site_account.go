@@ -20,7 +20,7 @@ import (
 //	POST /api/v1/site/account/spaces                   {"name", "timezone"?} or, to finish an interrupted one, {"name", "slug"}
 //	GET  /api/v1/site/account/spaces/{id}/sharing      invitations, members and the ownership offer of an owned space
 //	POST /api/v1/site/account/spaces/{id}/{action}     visibility, timezone, storage-limit, invite, cancel, suspend, restore,
-//	                                                   remove, agent, transfer-offer, transfer-cancel, delete
+//	                                                   remove, agent, invitation-agent, transfer-offer, transfer-cancel, delete
 //	POST /api/v1/site/account/invitations/accept       {"space", "invitation"}
 //	POST /api/v1/site/account/offers/{accept|decline}  {"space"}
 //	POST /api/v1/site/account/delete                   {"email"}
@@ -98,6 +98,10 @@ type siteInvitation struct {
 	Email   string `json:"email,omitempty"`
 	Status  string `json:"status,omitempty"`
 	Expires string `json:"expires"`
+	// AgentPermission is what their connected apps may do once they accept
+	// (0.101.0), on an owned space's invitations; absent when the server
+	// keeps no choice.
+	AgentPermission string `json:"agentPermission,omitempty"`
 }
 
 type siteOffer struct {
@@ -234,7 +238,7 @@ type siteNotice struct {
 
 // siteSpaceActions are the POST routes /account/spaces/{id}/{action}.
 var siteSpaceActions = map[string]bool{
-	"visibility": true, "timezone": true, "storage-limit": true, "invite": true, "cancel": true, "suspend": true, "restore": true,
+	"visibility": true, "timezone": true, "storage-limit": true, "invite": true, "cancel": true, "invitation-agent": true, "suspend": true, "restore": true,
 	"remove": true, "agent": true, "transfer-offer": true, "transfer-cancel": true, "delete": true,
 	"move": true,
 }
@@ -524,7 +528,7 @@ func (h *httpAdapter) siteSharingState(ctx context.Context, actor userAccount, s
 		Invitations: []siteInvitation{}, Members: []siteMember{}, Candidates: []siteMember{}}
 	out.Fresh, _ = h.service.accounts.sessionFresh(session, time.Now())
 	for _, i := range page.Invitations {
-		out.Invitations = append(out.Invitations, siteInvitation{ID: i.ID, Email: i.Email, Status: i.Status, Expires: i.Expires})
+		out.Invitations = append(out.Invitations, siteInvitation{ID: i.ID, Email: i.Email, Status: i.Status, Expires: i.Expires, AgentPermission: i.AgentPermission})
 	}
 	member := func(m humanMember) siteMember {
 		return siteMember{ID: m.ID, Email: m.Email, Username: m.Username, Status: m.Status, AgentPermission: m.AgentPermission}
@@ -673,13 +677,25 @@ func (h *httpAdapter) siteSpaceAction(ctx context.Context, actor userAccount, se
 	}
 	switch action {
 	case "invite":
+		if body.Permission != "" && !validAgentPermission(body.Permission) {
+			return siteNotice{}, invalid("Invalid app permission.")
+		}
 		invitationID, err := db.inviteHuman(ctx, user.ID, spaceID, body.Email)
 		if err != nil {
 			return siteNotice{}, err
 		}
+		// What their apps may do once they accept (0.101.0), when the server
+		// keeps it; without the column the invitation goes as before.
+		if body.Permission != "" && db.invitationPermissionsReady(ctx) {
+			if err := db.setInvitationAgentPermission(ctx, user.ID, spaceID, invitationID, body.Permission); err != nil {
+				return siteNotice{}, err
+			}
+		}
 		return siteNotice{Notice: h.emailInvitation(ctx, user, spaceID, invitationID)}, nil
 	case "cancel":
 		return siteNotice{}, db.cancelHumanInvitation(ctx, user.ID, spaceID, body.Invitation)
+	case "invitation-agent":
+		return siteNotice{}, db.setInvitationAgentPermission(ctx, user.ID, spaceID, body.Invitation, body.Permission)
 	case "agent":
 		return siteNotice{}, db.setMemberAgentPermission(ctx, user.ID, spaceID, body.Member, body.Permission)
 	default:

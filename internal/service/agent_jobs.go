@@ -37,7 +37,8 @@ const (
 // use a memory store.
 type agentJobStore interface {
 	add(ctx context.Context, j agentJob) error
-	// queuedSince counts a folder's jobs queued at or after since.
+	// queuedSince counts a folder's jobs queued at or after since, other
+	// than a re-run's (rerunCommit, rerun.go).
 	queuedSince(ctx context.Context, spaceID, folder string, since time.Time) (int, error)
 	// tokensSince sums the tokens of an agent's jobs that finished at or
 	// after since.
@@ -120,7 +121,7 @@ func nullText(s string) any {
 
 func (s dbJobStore) queuedSince(ctx context.Context, spaceID, folder string, since time.Time) (int, error) {
 	var n int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_agent_jobs WHERE space_id = ? AND folder = ? AND queued_at >= ?", spaceID, folder, since.Unix()).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM metatrash_agent_jobs WHERE space_id = ? AND folder = ? AND queued_at >= ? AND commit_id <> ?", spaceID, folder, since.Unix(), rerunCommit).Scan(&n); err != nil {
 		return 0, fmt.Errorf("cannot count agent jobs")
 	}
 	return n, nil

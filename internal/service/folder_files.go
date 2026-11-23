@@ -154,12 +154,17 @@ func protectedFolderFile(github map[string]bool, path string) bool {
 	return false
 }
 
-// markFolderFiles sets Protected, Deletable and ReadOnly on every record.
-func markFolderFiles(files map[string]record, github map[string]bool, readOnly map[string]lockMap) {
+// markFolderFiles sets Protected, Deletable, ReadOnly and Sort on every
+// record; sorts holds each folder's chosen order, by folder.
+func markFolderFiles(files map[string]record, github map[string]bool, readOnly map[string]lockMap, sorts map[string]string) {
 	for p, f := range files {
 		f.Protected = protectedFolderFile(github, p)
 		f.Deletable = !f.Protected
 		f.ReadOnly = fileLock(readOnly, p)
+		f.Sort = ""
+		if isFolderConfig(p) {
+			f.Sort = sorts[configFolder(p)]
+		}
 		files[p] = f
 	}
 }

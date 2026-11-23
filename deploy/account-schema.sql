@@ -468,6 +468,13 @@ CREATE TABLE IF NOT EXISTS metatrash_space_usage (
 -- for existing databases; additive, so the schema version stays 25).
 ALTER TABLE metatrash_spaces
     ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT UNSIGNED NULL;
+-- 0.101.0: what a pending invitation's apps may do (also deploy/account-invitation-permission.sql
+-- for existing databases; additive, so the schema version stays 25).
+ALTER TABLE metatrash_invitations
+    ADD COLUMN IF NOT EXISTS agent_permission VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin
+        NOT NULL DEFAULT 'read_write',
+    ADD CONSTRAINT IF NOT EXISTS metatrash_invitations_agent_permission
+        CHECK (agent_permission IN ('read_only', 'read_write'));
 INSERT INTO metatrash_account_meta VALUES (1,25,'empty');
 CREATE TABLE IF NOT EXISTS metatrash_schema_components (
  component VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,

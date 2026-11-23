@@ -94,7 +94,7 @@ func (m *memoryJobStore) queuedSince(_ context.Context, space, folder string, si
 	defer m.mu.Unlock()
 	n := 0
 	for _, j := range m.jobs {
-		if j.SpaceID == space && j.Folder == folder && !j.QueuedAt.Before(since) {
+		if j.SpaceID == space && j.Folder == folder && !j.QueuedAt.Before(since) && j.Commit != rerunCommit {
 			n++
 		}
 	}

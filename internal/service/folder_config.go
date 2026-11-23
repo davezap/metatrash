@@ -77,7 +77,18 @@ type folderConfig struct {
 	// folder itself. Without it a space opens on its root dashboard.md, then
 	// README.md. Never inherited.
 	Home *string `json:"home,omitempty"`
+	// Sort is the order the folder lists its files and subfolders in
+	// (0.101.0): "a-z" (the default) or "z-a", by name, folders first
+	// either way. Only Slate Viewer and the website use it; agents and the
+	// API list by path. Never inherited.
+	Sort *string `json:"sort,omitempty"`
 }
+
+// Folder orders (sort).
+const (
+	folderSortAZ = "a-z"
+	folderSortZA = "z-a"
+)
 
 type folderPrint struct {
 	Image string `json:"image,omitempty"`
@@ -218,7 +229,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked names keys of this file (purpose, children, services, inherit, readOnly, publishedVersion, actions, print, footer or locked), or fillForms or takeQuizzes for who may fill in this folder's forms and take its quizzes, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file (purpose, children, services, inherit, readOnly, publishedVersion, actions, print, footer, home, sort or locked), or fillForms or takeQuizzes for who may fill in this folder's forms and take its quizzes, not %q.", key))
 		}
 	}
 	if c.Locked["locked"] == lockEveryone {
@@ -245,6 +256,9 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	if c.Home != nil && (!validPath(*c.Home) || strings.Contains(*c.Home, "/") || !strings.HasSuffix(strings.ToLower(*c.Home), ".md") || isAgentsFile(*c.Home)) {
 		return c, folderConfigError("home is the name of a Markdown file in this folder, such as dashboard.md.")
+	}
+	if c.Sort != nil && *c.Sort != folderSortAZ && *c.Sort != folderSortZA {
+		return c, folderConfigError(`sort is "a-z" (names A to Z, the default) or "z-a" (Z to A).`)
 	}
 	if len(c.Services) > maxFolderServices {
 		return c, folderConfigError(fmt.Sprintf("services is limited to %d entries.", maxFolderServices))
@@ -517,7 +531,7 @@ func (r *repository) folderConfigs(ctx context.Context, files map[string]record)
 
 // lockableKeys are the names locked may hold: keys of the file, and the
 // form locks fillForms and takeQuizzes.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "home": true, "locked": true, lockFillForms: true, lockTakeQuizzes: true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "home": true, "sort": true, "locked": true, lockFillForms: true, lockTakeQuizzes: true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.
@@ -591,7 +605,7 @@ func (r *repository) effectiveSettings(ctx context.Context, files map[string]rec
 		return nil, err
 	}
 	for k, v := range parent {
-		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "publishedVersion" && k != "actions" && k != "inherit" && k != "home" {
+		if _, set := keys[k]; !set && k != "services" && k != "readOnly" && k != "publishedVersion" && k != "actions" && k != "inherit" && k != "home" && k != "sort" {
 			keys[k] = v
 		}
 	}

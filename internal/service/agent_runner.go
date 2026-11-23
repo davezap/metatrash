@@ -902,6 +902,8 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	if j.File == "" {
 		zone := a.zoneOf(ctx, j.SpaceID)
 		trigger = fmt.Sprintf("This is a scheduled run (every %s, %s time; now %s). No file arrived.", action.Every, zone, a.clock().In(zone).Format("Monday 2 January 2006 15:04"))
+	} else if j.Commit == rerunCommit {
+		trigger = "The file " + rel + " is being run again: a person asked for this action to run once more on every file it covers, perhaps because its instructions changed. It may have been handled before, so check what earlier runs left in place (runner.md says what they did) and don't repeat work that is already done the way these instructions ask."
 	} else if before, err := r.commitParent(ctx, j.Commit); err == nil {
 		if _, old, err := r.snapshot(ctx, before); err == nil {
 			if _, existed := old[j.File]; existed {

@@ -59,6 +59,8 @@ GRANT UPDATE (deleted_at, slug) ON metatrash.metatrash_spaces TO 'metatrash_acco
 GRANT UPDATE (name) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
 -- 0.99.3: space storage limits (after deploy/account-space-storage-limit.sql adds the column).
 GRANT UPDATE (storage_limit_bytes) ON metatrash.metatrash_spaces TO 'metatrash_accounts'@'localhost';
+-- 0.101.0: what an invitation's apps may do (after deploy/account-invitation-permission.sql adds the column).
+GRANT UPDATE (agent_permission) ON metatrash.metatrash_invitations TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (deletion_requested_at, deleted_at) ON metatrash.metatrash_users TO 'metatrash_accounts'@'localhost';
 GRANT SELECT, INSERT, DELETE ON metatrash.metatrash_space_usage TO 'metatrash_accounts'@'localhost';
 GRANT UPDATE (git_bytes, file_bytes, file_objects, git_measured_at, files_measured_at)
