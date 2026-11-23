@@ -3,10 +3,10 @@
   "defaults": {
     "rates": {
       "windowSeconds": 60,
-      "clientReads": 120,
-      "clientWrites": 20,
-      "spaceReads": 600,
-      "spaceWrites": 60
+      "clientReads": 600,
+      "clientWrites": 120,
+      "spaceReads": 3000,
+      "spaceWrites": 300
     },
     "storage": {
       "maxFileBytes": 65536,
@@ -19,8 +19,8 @@
   "global": {
     "rates": {
       "windowSeconds": 60,
-      "reads": 1200,
-      "writes": 120
+      "reads": 30000,
+      "writes": 3000
     },
     "maxQueuedWrites": 32,
     "maxListWaiters": 256

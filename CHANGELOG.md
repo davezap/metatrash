@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.100.2 - Clearer passkey message, higher example rate limits (2026-11-22)
+
+- **Passkey sign-in message**: when the browser answers `NotAllowedError` to "Sign in with a passkey", the sign-in page said "Cancelled or timed out", but browsers answer the same when the device simply has no passkey for the site (on purpose, so a site can't learn which passkeys exist). It now says no passkey was used, that passkeys made for an old address of the site don't work here, and how to sign in by email and add one (`internal/service/web/passkey.js`). Nothing about the account is revealed (Dave, 2026-11-21).
+- **Example rate limits**: `config/spaces.example.json` allowed 120 reads a minute per client per space and 1,200 for the whole server, which one person browsing with dashboards and an agent reaches ("Rate limit reached"). It now has `clientReads` 600, `clientWrites` 120, `spaceReads` 3000, `spaceWrites` 300, and global `reads` 30000, `writes` 3000. Existing servers keep their own spaces.json until changed (Dave, 2026-11-21).
+- Site app: Slate Viewer 0.47.2 (no false "save changes?" or conflict prompts, new documents open at the top, last place kept across sign-out, clearer passkey message when confirming it's you).
+- No schema, grant, dependency or tool schema change. See docs/release-0.100.2.md.
+
 ## 0.100.1 - Browser hardening headers (2026-11-22)
 
 - Every answer now carries `Permissions-Policy` (camera, microphone, location, USB, serial, HID, Bluetooth, MIDI, motion sensors and screen capture off; no page uses them, and a form's photo field is a file input, which it doesn't affect) and `Cross-Origin-Opener-Policy: same-origin-allow-popups` (another site's window can't keep a handle on ours; popups we open, such as Paddle's, still work). Both are set in `ServeHTTP` next to `X-Content-Type-Options`. Header graders had marked them missing (Dave, 2026-11-22).

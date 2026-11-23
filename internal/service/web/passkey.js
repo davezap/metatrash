@@ -32,7 +32,10 @@
   const explain = (err) => {
     switch (err && err.name) {
       case "NotAllowedError":
-        return "Cancelled or timed out. Try again when you're ready.";
+        // Browsers answer the same when the person cancels, when it times out
+        // and when this device has no passkey for the site, so the page can't
+        // tell which (on purpose, so a site can't learn what passkeys exist).
+        return "No passkey was used. If this device has no passkey for this site yet (passkeys made for an old address of the site don't work here), sign in with your email address, then add one in Settings → Security. Otherwise, try again.";
       case "SecurityError":
         return "Passkeys are not available on this address.";
       default:
