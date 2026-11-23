@@ -170,9 +170,19 @@ func sendError(w http.ResponseWriter, err error) {
 	}{p})
 }
 
+// permissionsPolicy turns off the browser features no Metatrash page uses. A
+// form's photo field is a file input, which this doesn't affect.
+const permissionsPolicy = "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=(), midi=(), magnetometer=(), gyroscope=(), accelerometer=(), display-capture=()"
+
 func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
+	// Browser hardening on every answer (0.100.1): no page here uses the
+	// camera, microphone, location or other device APIs, and another
+	// site's window can't keep a handle on ours (popups we open, such as a
+	// payment provider's, still work).
+	w.Header().Set("Permissions-Policy", permissionsPolicy)
+	w.Header().Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
 	client := h.client(r)
 	// A separate ingress ceiling covers discovery, malformed routes, and authentication attempts.
 	if err := h.service.rates.reserve(allowance{"ingress", h.ingress.GlobalPerMinute, 60}, allowance{"ingress:" + client, h.ingress.ClientPerMinute, 60}); err != nil {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.100.1 - Browser hardening headers (2026-11-22)
+
+- Every answer now carries `Permissions-Policy` (camera, microphone, location, USB, serial, HID, Bluetooth, MIDI, motion sensors and screen capture off; no page uses them, and a form's photo field is a file input, which it doesn't affect) and `Cross-Origin-Opener-Policy: same-origin-allow-popups` (another site's window can't keep a handle on ours; popups we open, such as Paddle's, still work). Both are set in `ServeHTTP` next to `X-Content-Type-Options`. Header graders had marked them missing (Dave, 2026-11-22).
+- Tests: `TestWebReadableSpaceAgainstDatabase` checks both headers on a web page. No schema, grant, configuration, dependency or tool schema change.
+
 ## 0.100.0 - Extensions can decide what a person may do in a space (2026-11-20)
 
 - **SpaceLevels hook** (`extension.Hooks.SpaceLevels`, `extension.SpaceLevels`; `internal/service/space_levels.go`, new): an extension may decide, for the spaces of some owner accounts, what an account may do in each: `Owners` names those owners, `Spaces` maps a space ID to `read_only` or `read_write`, and a space of theirs missing from it is hidden. For those owners a membership (a personal share) can only lower the extension's level or suspend it, never open a space on its own. Owning a space or acting for its owner (ActsFor) still decides first, SpaceGate is still asked, and a space readable on the web stays readable. Answers are cached for 10 seconds per account; two extensions deciding the same space give the lower level; an error refuses the account the spaces of owners it doesn't own or act for, as unavailable. Without the hook nothing changes. Metatrash's Company edition uses it for an organisation's Access page rows per Microsoft tenant.

@@ -85,7 +85,8 @@ func TestWebReadableSpaceAgainstDatabase(t *testing.T) {
 			res = oauthCall(w.h, "GET", page, nil, ownerSession)
 		}
 		body := res.Body.String()
-		if res.Code != 200 || !strings.Contains(body, "metatrash-app") || res.Header().Get("X-Robots-Tag") != "" || strings.Contains(body, `name="robots"`) {
+		if res.Code != 200 || !strings.Contains(body, "metatrash-app") || res.Header().Get("X-Robots-Tag") != "" || strings.Contains(body, `name="robots"`) ||
+			res.Header().Get("Permissions-Policy") != permissionsPolicy || res.Header().Get("Cross-Origin-Opener-Policy") != "same-origin-allow-popups" {
 			t.Fatalf("%s, web: %d", viewer, res.Code)
 		}
 	}
