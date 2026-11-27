@@ -164,7 +164,18 @@ func (r *repository) readingFolders(ctx context.Context, state string, files map
 func (idx ackIndex) statusIn(folder policyFolder, userID string, f policyFile) *policyAck {
 	ack := idx.status(userID, f)
 	if ack != nil && folder.NewFiles {
-		ack.Current = true
+		ack.Current, ack.Version = true, 0
 	}
 	return ack
+}
+
+// rowVersion is the version an acknowledgement row keeps for folder: its
+// published version, or 1 in a folder that asks for new files (the column
+// holds versions from 1, metatrash_acknowledgements_version; such a folder
+// counts any row of a file as read, whatever its version).
+func rowVersion(folder policyFolder) int {
+	if folder.NewFiles {
+		return 1
+	}
+	return folder.Version
 }

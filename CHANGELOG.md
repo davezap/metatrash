@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.102.1 - Fixes for 0.102.0's read confirmations (2026-11-27)
+
+0.102.0 failed its database tests in CI and was never pinned; this is the same release with two fixes.
+
+- A `POST .../acknowledgements` body with no `version` was read as version 0 (a folder that asks for new files) instead of being refused with 400 (`TestAcknowledgementsAgainstDatabase`). The version is now required (`*int`); 0 is still accepted when given. `acknowledgements.go`.
+- Confirming a new file stored version 0, which the column's check `metatrash_acknowledgements_version` (version > 0) refuses, so it answered 500 (`TestNewFilesNeedReading`). Rows for a folder that asks for new files now keep version 1 (`rowVersion`); the answers still say version 0, and any row of the file counts as read. No schema change. `reading.go`, `acknowledgements.go`, `submissions.go` (sending a form there).
+
 ## 0.102.0 - New files need reading, dashboard cards that list files (2026-11-27)
 
 - **New files need reading** (Dave: a folder option so any new file is marked new, gets the red dot and goes on everyone's list to read and confirm): an acknowledge service may say `"newFiles": true` in a folder without a `publishedVersion`. Each tracked file (by default every `.md` file in the folder and its subfolders, or the service's `files`) that arrives after the setting was turned on is to be read once by everyone in the space: a dot, a count, I Have Read This. Files already there when it was turned on are not asked for (the server finds that commit in the settings file's history, as it does for published versions), a file moved in from elsewhere counts as new, and later edits don't ask again (confirming any text of a file counts). Turning it off and on again asks only for files added after the newest turn-on. A subfolder with its own `publishedVersion` keeps its versions. `newFiles` with `publishedVersion` is refused (one or the other). `GET .../acknowledgements` lists such a folder with `newFiles: true`, version 0, revision the space now, timestamp when it was turned on, and only its new files; `POST` takes version 0 for them; the report counts them too. Sending a form there confirms it, and a dashboard notice refuses them like a published file. `reading.go` (new), `publish.go` (`settingsHistory` split from `publishPoints`; the cache keeps the history), `acknowledgements.go`, `folder_config.go`, `email_in.go`, `dashboard_http.go`, `submissions.go`. mtsync: `policies` says "new files need reading, since …", `ack FILE 0` confirms one, `readers` says "(new file)".

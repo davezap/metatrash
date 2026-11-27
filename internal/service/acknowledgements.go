@@ -649,7 +649,7 @@ func (s *Service) acknowledge(ctx context.Context, r *repository, space, userID,
 			if version != folder.Version {
 				return policyFile{}, problem(409, "conflict", fmt.Sprintf("%s is now at version %d, not %d; read the new version, then confirm it.", folder.Folder, folder.Version, version))
 			}
-			if err := s.ownedDB.recordAcknowledgement(ctx, r.id, ackRow{UserID: userID, FileID: f.ID, Blob: f.Blob, Path: path, Version: version, At: time.Now().UTC().Unix()}); err != nil {
+			if err := s.ownedDB.recordAcknowledgement(ctx, r.id, ackRow{UserID: userID, FileID: f.ID, Blob: f.Blob, Path: path, Version: rowVersion(folder), At: time.Now().UTC().Unix()}); err != nil {
 				return policyFile{}, err
 			}
 			f.Acknowledged = &policyAck{Version: version, Timestamp: time.Now().UTC().Format(time.RFC3339), Current: true}
@@ -714,14 +714,16 @@ func (h *httpAdapter) serveAcknowledgements(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var body struct {
-		Path    string `json:"path"`
-		Version int    `json:"version"`
+		Path string `json:"path"`
+		// A pointer, so a missing version is refused rather than read as 0
+		// (version 0 is a folder that asks for new files).
+		Version *int `json:"version"`
 	}
-	if err := strictJSON(b, &body); err != nil || body.Path == "" || body.Version < 0 {
+	if err := strictJSON(b, &body); err != nil || body.Path == "" || body.Version == nil || *body.Version < 0 {
 		sendError(w, invalid(`Send {"path": "...", "version": N}: the file and the published version you read (0 in a folder that asks for new files).`))
 		return
 	}
-	value, err := h.service.acknowledge(r.Context(), repo, space, userID, body.Path, body.Version)
+	value, err := h.service.acknowledge(r.Context(), repo, space, userID, body.Path, *body.Version)
 	if err != nil {
 		sendError(w, err)
 		return

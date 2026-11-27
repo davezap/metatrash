@@ -770,7 +770,7 @@ func (s *Service) acknowledgeSent(ctx context.Context, repo *repository, state s
 			if f.Path != path || !f.Tracked {
 				continue
 			}
-			if err := s.ownedDB.recordAcknowledgement(ctx, repo.id, ackRow{UserID: userID, FileID: f.ID, Blob: f.Blob, Path: path, Version: folder.Version, At: now.Unix()}); err != nil {
+			if err := s.ownedDB.recordAcknowledgement(ctx, repo.id, ackRow{UserID: userID, FileID: f.ID, Blob: f.Blob, Path: path, Version: rowVersion(folder), At: now.Unix()}); err != nil {
 				return 0, err
 			}
 			return folder.Version, nil
