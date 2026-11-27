@@ -761,7 +761,7 @@ func (s *Service) acknowledgeSent(ctx context.Context, repo *repository, state s
 	if s.ownedDB == nil {
 		return 0, nil
 	}
-	folders, err := repo.publishedFolders(ctx, state, files)
+	folders, err := repo.readingFolders(ctx, state, files)
 	if err != nil {
 		return 0, err
 	}

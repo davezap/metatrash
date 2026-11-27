@@ -33,18 +33,26 @@ type publishPoint struct {
 // maxPublishPoints bounds the versions read from one settings file's history.
 const maxPublishPoints = 1000
 
-// publishCache keeps a settings file's published versions by the newest
-// commit that touched it; history only grows, so an entry never goes stale.
+// publishCache keeps a settings file's history by the newest commit that
+// touched it; history only grows, so an entry never goes stale.
 var publishCache sync.Map
 
 type publishKey struct {
 	repo, id, newest string
 }
 
-// publishPoints returns the versions folder's .metatrash.json has published up
-// to state, oldest first. files is the snapshot at state. When a number was
-// set, removed and set again, the latest setting counts.
-func (r *repository) publishPoints(ctx context.Context, state string, files map[string]record, folder string) ([]publishPoint, error) {
+// settingsChange is one commit that changed a folder's .metatrash.json:
+// config is its settings then, nil when the file was deleted or unreadable.
+type settingsChange struct {
+	commit, stamp, path string
+	by                  *changeAuthor
+	config              *folderConfig
+}
+
+// settingsHistory returns the changes to folder's .metatrash.json up to
+// state, oldest first (at most maxPublishPoints). files is the snapshot at
+// state.
+func (r *repository) settingsHistory(ctx context.Context, state string, files map[string]record, folder string) ([]settingsChange, error) {
 	cfg, ok := files[folder+folderConfigName]
 	if !ok {
 		return nil, nil
@@ -79,7 +87,7 @@ func (r *repository) publishPoints(ctx context.Context, state string, files map[
 	}
 	key := publishKey{r.path, cfg.ID, changes[0].commit}
 	if cached, ok := publishCache.Load(key); ok {
-		return cached.([]publishPoint), nil
+		return cached.([]settingsChange), nil
 	}
 	// The settings text at each change, in one git process.
 	var batch strings.Builder
@@ -113,30 +121,44 @@ func (r *repository) publishPoints(ctx context.Context, state string, files map[
 			}
 		}
 	}
-	version := func(c change) int {
-		text, ok := texts[c.commit]
-		if !ok {
-			return 0
+	history := make([]settingsChange, 0, len(changes))
+	for i := len(changes) - 1; i >= 0; i-- {
+		c := changes[i]
+		stamp := c.stamp
+		if t, err := time.Parse(time.RFC3339, c.stamp); err == nil {
+			stamp = t.UTC().Format(time.RFC3339)
 		}
-		parsed, err := parseFolderConfig(text)
-		if err != nil || parsed.PublishedVersion == nil {
-			return 0
+		sc := settingsChange{commit: c.commit, stamp: stamp, path: c.path, by: c.by}
+		if text, ok := texts[c.commit]; ok {
+			if parsed, err := parseFolderConfig(text); err == nil {
+				sc.config = &parsed
+			}
 		}
-		return *parsed.PublishedVersion
+		history = append(history, sc)
+	}
+	publishCache.Store(key, history)
+	return history, nil
+}
+
+// publishPoints returns the versions folder's .metatrash.json has published up
+// to state, oldest first. files is the snapshot at state. When a number was
+// set, removed and set again, the latest setting counts.
+func (r *repository) publishPoints(ctx context.Context, state string, files map[string]record, folder string) ([]publishPoint, error) {
+	history, err := r.settingsHistory(ctx, state, files, folder)
+	if err != nil {
+		return nil, err
 	}
 	// Oldest first: a point is each change to a new, nonzero number.
 	byVersion := map[int]int{}
 	var points []publishPoint
 	previous := 0
-	for i := len(changes) - 1; i >= 0; i-- {
-		c := changes[i]
-		v := version(c)
+	for _, c := range history {
+		v := 0
+		if c.config != nil && c.config.PublishedVersion != nil {
+			v = *c.config.PublishedVersion
+		}
 		if v != 0 && v != previous {
-			stamp := c.stamp
-			if t, err := time.Parse(time.RFC3339, c.stamp); err == nil {
-				stamp = t.UTC().Format(time.RFC3339)
-			}
-			p := publishPoint{Version: v, Revision: c.commit, Timestamp: stamp, By: c.by, folder: configFolder(c.path)}
+			p := publishPoint{Version: v, Revision: c.commit, Timestamp: c.stamp, By: c.by, folder: configFolder(c.path)}
 			if at, seen := byVersion[v]; seen {
 				points = append(points[:at], points[at+1:]...)
 				for n, i := range byVersion {
@@ -150,7 +172,6 @@ func (r *repository) publishPoints(ctx context.Context, state string, files map[
 		}
 		previous = v
 	}
-	publishCache.Store(key, points)
 	return points, nil
 }
 

@@ -343,14 +343,27 @@ func (a *measureAcc) value() float64 {
 	return float64(a.count)
 }
 
-// resolveQuerySource is the source's path in the space: from the space root
-// with a leading /, else from the folder of base. A folder ends with /.
-func resolveQuerySource(base, source string) (string, bool, error) {
+// Source kinds.
+const (
+	querySourceFolder = "folder"
+	querySourceCSV    = "csv"
+	querySourceFiles  = "files"
+)
+
+// resolveQuerySource is the source's path in the space and its kind: from
+// the space root with a leading /, else from the folder of base. A folder
+// ends with /; a pattern (Core 0.102.0) has * or ? in it, such as forms/*.md
+// or guides/**/*.md, and lists the files it matches.
+func resolveQuerySource(base, source string) (string, string, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
-		return "", false, invalid("source is missing: name a folder (jobs/) or a .csv file.")
+		return "", "", invalid("source is missing: name a folder (jobs/), a .csv file or a pattern (forms/*.md).")
 	}
-	folder := strings.HasSuffix(source, "/")
+	pattern := strings.ContainsAny(source, "*?")
+	folder := !pattern && strings.HasSuffix(source, "/")
+	if pattern && strings.HasSuffix(source, "/") {
+		return "", "", invalid("A pattern names files, such as forms/*.md; it can't end with /.")
+	}
 	p := source
 	if strings.HasPrefix(source, "/") {
 		p = strings.TrimPrefix(source, "/")
@@ -358,7 +371,7 @@ func resolveQuerySource(base, source string) (string, bool, error) {
 		dir := ""
 		if base != "" {
 			if !validPath(base) {
-				return "", false, invalid("base must be the dashboard's path.")
+				return "", "", invalid("base must be the dashboard's path.")
 			}
 			dir = path.Dir(base)
 			if dir == "." {
@@ -370,20 +383,91 @@ func resolveQuerySource(base, source string) (string, bool, error) {
 	p = strings.Trim(path.Clean("/"+p), "/")
 	if p == "" || p == "." {
 		if folder {
-			return "", true, nil
+			return "", querySourceFolder, nil
 		}
-		return "", false, invalid("source must be a folder or a .csv file.")
+		return "", "", invalid("source must be a folder, a .csv file or a pattern such as *.md.")
+	}
+	if pattern {
+		if len(p) > 512 {
+			return "", "", invalid("The pattern is too long.")
+		}
+		for _, segment := range strings.Split(p, "/") {
+			if segment == "**" {
+				continue
+			}
+			if strings.Contains(segment, "**") {
+				return "", "", invalid("** stands for any folders on its own, as in guides/**/*.md.")
+			}
+			// The pattern is a path once its wildcards are letters.
+			if !validPath(strings.NewReplacer("*", "x", "?", "x").Replace(segment)) {
+				return "", "", invalid("source is not a valid pattern in this space.")
+			}
+		}
+		return p, querySourceFiles, nil
 	}
 	if !validPath(p) {
-		return "", false, invalid("source is not a valid path in this space.")
+		return "", "", invalid("source is not a valid path in this space.")
 	}
 	if folder {
-		return p + "/", true, nil
+		return p + "/", querySourceFolder, nil
 	}
 	if !strings.HasSuffix(strings.ToLower(p), ".csv") {
-		return "", false, invalid("source must be a folder (ending in /) or a .csv file.")
+		return "", "", invalid("source must be a folder (ending in /), a .csv file or a pattern such as forms/*.md.")
 	}
-	return p, false, nil
+	return p, querySourceCSV, nil
+}
+
+// matchQueryPattern reports whether p matches pattern, segment by segment
+// and without regard to case: * is any run of characters within a name, ?
+// one character, and a segment ** any number of folders (none included).
+func matchQueryPattern(pattern, p string) bool {
+	return matchQuerySegments(strings.Split(strings.ToLower(pattern), "/"), strings.Split(strings.ToLower(p), "/"))
+}
+
+func matchQuerySegments(pattern, segments []string) bool {
+	if len(pattern) == 0 {
+		return len(segments) == 0
+	}
+	if pattern[0] == "**" {
+		for i := 0; i < len(segments); i++ {
+			if matchQuerySegments(pattern[1:], segments[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(segments) == 0 || !matchQueryName(pattern[0], segments[0]) {
+		return false
+	}
+	return matchQuerySegments(pattern[1:], segments[1:])
+}
+
+// matchQueryName matches one name against * and ? (no other wildcards, so
+// [ and ] are themselves).
+func matchQueryName(pattern, name string) bool {
+	px, nx := 0, 0
+	star, mark := -1, 0
+	pr, nr := []rune(pattern), []rune(name)
+	for nx < len(nr) {
+		switch {
+		case px < len(pr) && (pr[px] == '?' || pr[px] == nr[nx]):
+			px++
+			nx++
+		case px < len(pr) && pr[px] == '*':
+			star, mark = px, nx
+			px++
+		case star >= 0:
+			px = star + 1
+			mark++
+			nx = mark
+		default:
+			return false
+		}
+	}
+	for px < len(pr) && pr[px] == '*' {
+		px++
+	}
+	return px == len(pr)
 }
 
 // query answers one card's query against the space at head. me is the
@@ -434,7 +518,7 @@ func (s *Service) query(ctx context.Context, r *repository, space, me string, in
 	if today == "" || !validDate(today) {
 		today = s.now().UTC().Format("2006-01-02")
 	}
-	sourcePath, folder, err := resolveQuerySource(in.Base, in.Source)
+	sourcePath, sourceKind, err := resolveQuerySource(in.Base, in.Source)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -442,7 +526,7 @@ func (s *Service) query(ctx context.Context, r *repository, space, me string, in
 	if err != nil {
 		return QueryResult{}, err
 	}
-	src, err := s.loadQuerySource(ctx, r, files, sourcePath, folder)
+	src, err := s.loadQuerySource(ctx, r, files, sourcePath, sourceKind)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -578,9 +662,23 @@ func compareQueryValues(a, b string) int {
 
 // loadQuerySource parses the source's rows, or takes them from the cache
 // when its files are unchanged.
-func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[string]record, sourcePath string, folder bool) (*querySource, error) {
+func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[string]record, sourcePath, sourceKind string) (*querySource, error) {
 	var paths []string
-	if folder {
+	folder := sourceKind == querySourceFolder
+	if sourceKind == querySourceFiles {
+		// Every file the person can open that matches, but not the folders'
+		// own AGENTS.md and settings or anything under a dot folder.
+		for p := range files {
+			if isFolderFile(p) || hasDotName(p) || !matchQueryPattern(sourcePath, p) {
+				continue
+			}
+			paths = append(paths, p)
+		}
+		if len(paths) > maxQuerySourceRows {
+			return nil, problem(413, "payload_too_large", fmt.Sprintf("%s matches more than %d files; a dashboard reads up to %d rows from one source.", sourcePath, maxQuerySourceRows, maxQuerySourceRows))
+		}
+		sort.Strings(paths)
+	} else if folder {
 		for p, f := range files {
 			if !strings.HasPrefix(p, sourcePath) || strings.Contains(p[len(sourcePath):], "/") || f.Virtual != nil {
 				continue
@@ -618,7 +716,7 @@ func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[
 		paths = []string{sourcePath}
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00", r.path, sourcePath)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00", r.path, sourceKind, sourcePath)
 	for _, p := range paths {
 		fmt.Fprintf(h, "%s\x00%s\x00", p, files[p].Blob)
 	}
@@ -627,7 +725,13 @@ func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[
 		return src, nil
 	}
 	var src *querySource
-	if folder {
+	if sourceKind == querySourceFiles {
+		parsed, err := patternRows(ctx, r, files, paths)
+		if err != nil {
+			return nil, err
+		}
+		src = parsed
+	} else if folder {
 		hashes := make([]string, 0, len(paths))
 		for _, p := range paths {
 			hashes = append(hashes, files[p].Blob)
@@ -674,6 +778,51 @@ func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[
 		src = parsed
 	}
 	s.queryCache.put(key, src)
+	return src, nil
+}
+
+// patternRows is a pattern source's rows: each file's name, path and
+// folder, and a Markdown file's front matter as a folder source reads it.
+func patternRows(ctx context.Context, r *repository, files map[string]record, paths []string) (*querySource, error) {
+	var hashes []string
+	for _, p := range paths {
+		if f := files[p]; f.Virtual == nil && strings.HasSuffix(strings.ToLower(p), ".md") {
+			hashes = append(hashes, f.Blob)
+		}
+	}
+	texts := map[string][]byte{}
+	if len(hashes) > 0 {
+		got, err := r.blobs(ctx, hashes)
+		if err != nil {
+			return nil, err
+		}
+		texts = got
+	}
+	src := &querySource{kind: querySourceFiles}
+	seen := map[string]bool{"folder": true}
+	for _, p := range paths {
+		f := files[p]
+		values := map[string][]string{}
+		if text, ok := texts[f.Blob]; ok && f.Virtual == nil && strings.HasSuffix(strings.ToLower(p), ".md") {
+			values = markdownRowValues(string(text))
+		}
+		values["file"] = []string{p}
+		if _, ok := values["name"]; !ok {
+			values["name"] = []string{strings.TrimSuffix(path.Base(p), path.Ext(p))}
+		}
+		if _, ok := values["folder"]; !ok {
+			dir := path.Dir(p)
+			if dir == "." {
+				dir = ""
+			}
+			values["folder"] = []string{dir}
+		}
+		for k := range values {
+			seen[k] = true
+		}
+		src.rows = append(src.rows, queryRow{file: p, values: values})
+	}
+	src.fields = sortedQueryFields(seen)
 	return src, nil
 }
 

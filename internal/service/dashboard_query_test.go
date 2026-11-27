@@ -103,6 +103,32 @@ func TestDashboardQuery(t *testing.T) {
 		t.Fatalf("after change: %+v", got)
 	}
 
+	// A pattern lists matching files as rows (Core 0.102.0): any file type,
+	// front matter for Markdown, never AGENTS.md or a dot folder.
+	write("service/forms/leave.md", "---\ntitle: Leave request\n---\nform\n")
+	write("service/forms/expenses.md", "---\ntitle: Expenses\n---\n")
+	write("service/forms/notes.txt", "plain\n")
+	write("service/forms/AGENTS.md", "# Forms\n")
+	write("service/forms/old/2025.md", "old\n")
+	got = query("", QueryInput{Base: "service/dashboard.md", Source: "forms/*.md"}, "")
+	if got.Kind != "files" || got.Source != "service/forms/*.md" || got.Count != 2 || got.Rows[0].File != "service/forms/expenses.md" || got.Rows[0].Values["title"] != "Expenses" || got.Rows[1].Values["name"] != "leave" {
+		t.Fatalf("pattern: %+v", got)
+	}
+	got = query("", QueryInput{Source: "/service/forms/*"}, "")
+	if got.Count != 3 || got.Rows[1].Values["folder"] != "service/forms" {
+		t.Fatalf("star: %+v", got.Rows)
+	}
+	got = query("", QueryInput{Source: "/service/**/*.MD", Where: "folder=service/forms/old"}, "")
+	if got.Count != 1 || got.Rows[0].File != "service/forms/old/2025.md" {
+		t.Fatalf("any folders: %+v", got.Rows)
+	}
+	if got = query("", QueryInput{Source: "/nothing/*.md"}, ""); got.Count != 0 {
+		t.Fatalf("no match: %+v", got)
+	}
+	for _, bad := range []string{"forms/*/", "a**b/*.md", "forms/*.md\x00"} {
+		query("", QueryInput{Base: "service/dashboard.md", Source: bad}, "invalid_request")
+	}
+
 	// REST: POST .../query.
 	h, err := s.Handler(metatrash.ToolSchema, nil)
 	if err != nil {
@@ -123,6 +149,27 @@ func TestDashboardQuery(t *testing.T) {
 	}
 	if code, _ := post(`{"source": "x/", "nope": 1}`); code != 400 {
 		t.Fatalf("unknown key: %d", code)
+	}
+}
+
+func TestQueryPatternMatch(t *testing.T) {
+	for _, c := range []struct {
+		pattern, path string
+		want          bool
+	}{
+		{"a/*.md", "a/x.md", true},
+		{"a/*.md", "a/b/x.md", false},
+		{"a/**/*.md", "a/x.md", true},
+		{"a/**/*.md", "a/b/c/x.md", true},
+		{"**/*.dash.md", "x.dash.md", true},
+		{"a/?.md", "a/xy.md", false},
+		{"a/*-[1].md", "a/x-[1].md", true},
+		{"a/*.MD", "A/b.md", true},
+		{"a/*", "a", false},
+	} {
+		if got := matchQueryPattern(c.pattern, c.path); got != c.want {
+			t.Errorf("%s %s: %v", c.pattern, c.path, got)
+		}
 	}
 }
 

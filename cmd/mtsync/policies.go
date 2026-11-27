@@ -63,7 +63,10 @@ type policyFolder struct {
 	Timestamp   string        `json:"timestamp"`
 	By          *changeAuthor `json:"by,omitempty"`
 	Acknowledge bool          `json:"acknowledge"`
-	Files       []policyFile  `json:"files"`
+	// NewFiles (metatrash 0.102.0): the folder asks for new files as they
+	// arrive; Version is 0 and Timestamp when that was turned on.
+	NewFiles bool         `json:"newFiles,omitempty"`
+	Files    []policyFile `json:"files"`
 }
 
 type policiesAnswer struct {
@@ -235,6 +238,9 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 			name = "(whole folder)"
 		}
 		line := fmt.Sprintf("%s  version %d, published %s", name, f.Version, localTime(f.Timestamp))
+		if f.NewFiles {
+			line = fmt.Sprintf("%s  new files need reading, since %s", name, localTime(f.Timestamp))
+		}
 		if f.By != nil {
 			line += " by " + f.By.String()
 		}
@@ -255,7 +261,7 @@ func showPolicies(ctx context.Context, place string, asJSON bool, out io.Writer)
 			fmt.Fprintf(out, "  %-40s %s\n", file.Path, state)
 		}
 	}
-	fmt.Fprintf(out, "%d to do. Confirm reading one: mtsync ack FILE VERSION; take a quiz in Slate Viewer or with mtsync submit\n", answer.Outstanding)
+	fmt.Fprintf(out, "%d to do. Confirm reading one: mtsync ack FILE VERSION (0 for a new file); take a quiz in Slate Viewer or with mtsync submit\n", answer.Outstanding)
 	return nil
 }
 
@@ -293,8 +299,8 @@ func quizLine(q policyQuiz, n int) string {
 // acknowledgeFile confirms the person read file's published text, version.
 func acknowledgeFile(ctx context.Context, file, version string, out io.Writer) error {
 	v, err := strconv.Atoi(version)
-	if err != nil || v < 1 {
-		return fmt.Errorf("%q is not a version; use the folder's version from mtsync policies", version)
+	if err != nil || v < 0 {
+		return fmt.Errorf("%q is not a version; use the folder's version from mtsync policies (0 in a folder where new files need reading)", version)
 	}
 	e, rel, err := syncedFile(file)
 	if err != nil {
@@ -304,7 +310,11 @@ func acknowledgeFile(ctx context.Context, file, version string, out io.Writer) e
 	if _, err := c.acknowledge(ctx, rel, v); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Confirmed: you read %s, version %d.\n", rel, v)
+	if v == 0 {
+		fmt.Fprintf(out, "Confirmed: you read %s.\n", rel)
+	} else {
+		fmt.Fprintf(out, "Confirmed: you read %s, version %d.\n", rel, v)
+	}
 	return nil
 }
 
@@ -333,7 +343,11 @@ func showReport(ctx context.Context, place string, asJSON bool, out io.Writer) e
 				continue
 			}
 			f := answer.Files[i]
-			fmt.Fprintf(out, "  %-40s %s (version %d)\n", f.Path, s.Status, f.Version)
+			if f.Version == 0 {
+				fmt.Fprintf(out, "  %-40s %s (new file)\n", f.Path, s.Status)
+			} else {
+				fmt.Fprintf(out, "  %-40s %s (version %d)\n", f.Path, s.Status, f.Version)
+			}
 		}
 	}
 	return nil

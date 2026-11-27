@@ -189,8 +189,12 @@ type policyFolder struct {
 	Folder string `json:"folder"`
 	publishPoint
 	// Acknowledge is set when the folder asks people to read its files.
-	Acknowledge bool         `json:"acknowledge"`
-	Files       []policyFile `json:"files"`
+	Acknowledge bool `json:"acknowledge"`
+	// NewFiles is set when it asks for new files as they arrive (reading.go):
+	// Version is then 0, Revision the state and Timestamp when the setting
+	// was turned on.
+	NewFiles bool         `json:"newFiles,omitempty"`
+	Files    []policyFile `json:"files"`
 }
 
 type policiesResult struct {
@@ -212,6 +216,16 @@ func (r *repository) publishedFolders(ctx context.Context, state string, files m
 	if err != nil {
 		return nil, err
 	}
+	folders, err := r.publishedOnly(ctx, state, files, configs)
+	if err != nil {
+		return nil, err
+	}
+	r.linkQuizzes(ctx, folders)
+	return folders, nil
+}
+
+// publishedOnly is publishedFolders before quizzes are linked.
+func (r *repository) publishedOnly(ctx context.Context, state string, files map[string]record, configs map[string]folderConfig) ([]policyFolder, error) {
 	current := make(map[string]string, len(files))
 	for p, f := range files {
 		current[f.ID] = p
@@ -274,7 +288,6 @@ func (r *repository) publishedFolders(ctx context.Context, state string, files m
 		}
 		folders = append(folders, pf)
 	}
-	r.linkQuizzes(ctx, folders)
 	return folders, nil
 }
 
@@ -351,7 +364,7 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 	if err != nil {
 		return policiesResult{}, err
 	}
-	folders, err := r.publishedFolders(ctx, state, files)
+	folders, err := r.readingFolders(ctx, state, files)
 	if err != nil {
 		return policiesResult{}, err
 	}
@@ -381,7 +394,7 @@ func (s *Service) policies(ctx context.Context, r *repository, space, userID str
 			if !f.Tracked || f.Quiz != nil {
 				continue
 			}
-			f.Acknowledged = idx.status(userID, *f)
+			f.Acknowledged = idx.statusIn(result.Folders[i], userID, *f)
 			f.Outstanding = f.Acknowledged == nil || !f.Acknowledged.Current
 			unread[f.Path] = f.Outstanding
 		}
@@ -538,16 +551,18 @@ func (s *Service) policyReport(ctx context.Context, r *repository, space string)
 	if err != nil {
 		return reportResult{}, err
 	}
-	folders, err := r.publishedFolders(ctx, state, files)
+	folders, err := r.readingFolders(ctx, state, files)
 	if err != nil {
 		return reportResult{}, err
 	}
 	result := reportResult{Space: space, State: state, Files: []reportFile{}, People: []reportPerson{}}
 	var tracked []policyFile
+	var trackedIn []policyFolder
 	for _, folder := range folders {
 		for _, f := range folder.Files {
 			if f.Tracked {
 				tracked = append(tracked, f)
+				trackedIn = append(trackedIn, folder)
 				result.Files = append(result.Files, reportFile{ID: f.ID, Path: f.Path, Folder: folder.Folder, Version: folder.Version})
 			}
 		}
@@ -570,7 +585,7 @@ func (s *Service) policyReport(ctx context.Context, r *repository, space string)
 	}
 	for _, person := range readers {
 		row := reportPerson{Name: person.Name, Files: []reportStatus{}}
-		for _, f := range tracked {
+		for i, f := range tracked {
 			if q := f.Quiz; q != nil {
 				// A quiz is done once it is passed.
 				st := quizStateOf(quizzes, person.UserID, q.id, q.blob, q.retryAfter)
@@ -587,7 +602,7 @@ func (s *Service) policyReport(ctx context.Context, r *repository, space string)
 				row.Files = append(row.Files, status)
 				continue
 			}
-			ack := idx.status(person.UserID, f)
+			ack := idx.statusIn(trackedIn[i], person.UserID, f)
 			st := reportStatus{Status: "unread", Acknowledged: ack}
 			if ack != nil && ack.Current {
 				st.Status = "read"
@@ -613,7 +628,7 @@ func (s *Service) acknowledge(ctx context.Context, r *repository, space, userID,
 	if !validPath(path) {
 		return policyFile{}, invalid("Invalid path.")
 	}
-	folders, err := r.publishedFolders(ctx, state, files)
+	folders, err := r.readingFolders(ctx, state, files)
 	if err != nil {
 		return policyFile{}, err
 	}
@@ -628,6 +643,9 @@ func (s *Service) acknowledge(ctx context.Context, r *repository, space, userID,
 			if f.Quiz != nil {
 				return policyFile{}, problem(409, "quiz_required", path+" is a quiz: it is done by passing it, not by confirming you read it.")
 			}
+			if folder.NewFiles && version != 0 {
+				return policyFile{}, problem(409, "conflict", fmt.Sprintf("%s asks for new files as they arrive and has no versions: confirm it with version 0.", folder.Folder))
+			}
 			if version != folder.Version {
 				return policyFile{}, problem(409, "conflict", fmt.Sprintf("%s is now at version %d, not %d; read the new version, then confirm it.", folder.Folder, folder.Version, version))
 			}
@@ -638,7 +656,7 @@ func (s *Service) acknowledge(ctx context.Context, r *repository, space, userID,
 			return f, nil
 		}
 	}
-	return policyFile{}, problem(404, "not_found", path+" is not in a published version of its folder.")
+	return policyFile{}, problem(404, "not_found", path+" is not a file its folder asks people to read: neither in a published version of its folder nor new in a folder that asks for new files.")
 }
 
 // serveAcknowledgements handles the acknowledgements resource after access
@@ -699,8 +717,8 @@ func (h *httpAdapter) serveAcknowledgements(w http.ResponseWriter, r *http.Reque
 		Path    string `json:"path"`
 		Version int    `json:"version"`
 	}
-	if err := strictJSON(b, &body); err != nil || body.Path == "" || body.Version < 1 {
-		sendError(w, invalid(`Send {"path": "...", "version": N}: the file and the published version you read.`))
+	if err := strictJSON(b, &body); err != nil || body.Path == "" || body.Version < 0 {
+		sendError(w, invalid(`Send {"path": "...", "version": N}: the file and the published version you read (0 in a folder that asks for new files).`))
 		return
 	}
 	value, err := h.service.acknowledge(r.Context(), repo, space, userID, body.Path, body.Version)

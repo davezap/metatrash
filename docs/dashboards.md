@@ -102,7 +102,7 @@ group: type
 | `title` | the card's heading |
 | `size` | `normal` (default), `wide` (two columns) or `full` (the whole row) |
 | `show` | `count`, `list`, `table`, `pie`, `bar`, `line`, `markdown` or `form` |
-| `source` | a folder ending in `/` or a `.csv` file (for `markdown` and `form`, a `.md` file); from the dashboard's folder, or from the space root with a leading `/` |
+| `source` | a folder ending in `/`, a `.csv` file, or a pattern such as `forms/*.md` (for `markdown` and `form`, a `.md` file); from the dashboard's folder, or from the space root with a leading `/` |
 | `where` | filters, separated by `;`; all must hold (below) |
 | `group` | a field: one slice, bar or row per value |
 | `measure` | `count` (default), or `sum`, `avg`, `min` or `max` followed by a field: `sum amount` |
@@ -135,6 +135,25 @@ access.
   copy's own `status`, `submittedBy` and `submittedAt` keep their meaning.
 - **A CSV file.** The first line names the fields. Numbers may have commas
   (`"1,200"`).
+- **A pattern** (Core 0.102.0): `forms/*.md`, `*.dash.md`, `guides/**/*.md`.
+  Every file that matches is a row, of any type (a PDF too). `*` stands for
+  any characters within a name, `?` for one, and `**` on its own for any
+  number of folders (none included). Matching ignores case. Rows have
+  `name`, `file` and `folder` (the file's folder), and a Markdown file's
+  front matter as well, so `columns: title` shows a form's or guide's title.
+  Folders' own `AGENTS.md` and settings, and anything under a folder whose
+  name starts with a dot, are left out. With `show: list` each row is a link
+  to its file, so a pattern makes a small table of contents, a list of other
+  dashboards, or a list of forms to fill in:
+
+  ````markdown
+  ```card
+  title: Forms
+  show: list
+  source: /forms/*.md
+  columns: title
+  ```
+  ````
 
 Values are compared as numbers, `YYYY-MM-DD` dates or `HH:MM` times when
 both sides read as one, otherwise as text, ignoring case. A source reads up

@@ -204,7 +204,7 @@ func (s *Service) acknowledgeNotice(ctx context.Context, r *repository, space, u
 	if noticeKind(string(b)) == "form" {
 		return NoticeStatus{}, problem(409, "form_required", path+" is a form: send it instead of acknowledging it.")
 	}
-	folders, err := r.publishedFolders(ctx, state, files)
+	folders, err := r.readingFolders(ctx, state, files)
 	if err != nil {
 		return NoticeStatus{}, err
 	}

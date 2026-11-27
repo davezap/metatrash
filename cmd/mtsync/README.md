@@ -217,7 +217,9 @@ VERSION` confirms you read FILE as published in VERSION (only for a file its
 folder asks you to read, and only at the folder's current version).
 `mtsync readers PLACE` shows who still has to read what (it needs read-write
 access; `-json` for editors). All three need metatrash 0.48.0 and a signed-in
-space.
+space. A folder whose acknowledge service has `"newFiles": true`
+(metatrash 0.102.0) has no versions: it lists the files added since that was
+turned on as "new files need reading", and `mtsync ack FILE 0` confirms one.
 
 `mtsync submit FILE ANSWERS` sends your answers to a form (metatrash 0.49.0;
 a form template is a `.md` file whose front matter has `form:`, see the

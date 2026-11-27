@@ -106,6 +106,12 @@ type folderService struct {
 	// like readOnly entries; by default every .md file in the folder and its
 	// subfolders other than AGENTS.md.
 	Files []string `json:"files,omitempty"`
+	// NewFiles makes an acknowledge service ask for files as they arrive
+	// rather than for published versions (Core 0.102.0): in a folder without
+	// a publishedVersion, each tracked file added after the setting was
+	// turned on is to be read once by everyone, and reading any of its texts
+	// counts (see reading.go).
+	NewFiles bool `json:"newFiles,omitempty"`
 	// Allow, Block, Address and History are an email service's (0.97.0,
 	// email_in.go): which senders it takes or refuses (addresses or domains),
 	// which version of the folder's address is current, and whether quoted
@@ -154,8 +160,8 @@ func checkGitHubService(svc folderService) error {
 	if svc.Pull != "" && svc.Pull != "auto" && svc.Pull != "agent" {
 		return folderConfigError(`github pull must be "auto" (the default: GitHub's pushes are pulled as they happen) or "agent" (only the pull tool pulls).`)
 	}
-	if svc.Files != nil {
-		return folderConfigError("github takes no files.")
+	if svc.Files != nil || svc.NewFiles {
+		return folderConfigError("github takes no files or newFiles.")
 	}
 	if svc.emailFields() {
 		return folderConfigError("allow, block, address and history belong to an email service, not github.")
@@ -165,7 +171,7 @@ func checkGitHubService(svc folderService) error {
 
 func checkAcknowledgeService(svc folderService) error {
 	if svc.Repo != "" || svc.Branch != "" || svc.Push != "" || svc.Pull != "" || svc.emailFields() {
-		return folderConfigError("acknowledge takes only files (which files people must read; by default every .md file).")
+		return folderConfigError("acknowledge takes only files (which files people must read; by default every .md file) and newFiles (ask for new files as they arrive).")
 	}
 	if len(svc.Files) > maxAcknowledgeFiles {
 		return folderConfigError(fmt.Sprintf("acknowledge files is limited to %d entries.", maxAcknowledgeFiles))
@@ -245,6 +251,9 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	if v := c.PublishedVersion; v != nil && (*v < 1 || *v > maxPublishedVersion) {
 		return c, folderConfigError(fmt.Sprintf("publishedVersion must be a whole number from 1 to %d.", maxPublishedVersion))
+	}
+	if svc, ok := c.acknowledgeService(); ok && svc.NewFiles && c.PublishedVersion != nil {
+		return c, folderConfigError("acknowledge newFiles is for a folder without published versions: a folder with publishedVersion asks people to read each version it publishes. Remove one of them.")
 	}
 	if c.Print != nil && c.Print.Image != "" && !printImageAddress(c.Print.Image) {
 		return c, folderConfigError(fmt.Sprintf("print image must be an https address of an image, such as https://example.com/logo.png, of at most %d characters.", maxPrintImage))
@@ -358,7 +367,7 @@ func (svc folderService) withDefaults() folderService {
 
 func (svc folderService) equal(other folderService) bool {
 	return svc.Type == other.Type && svc.Repo == other.Repo && svc.Branch == other.Branch && svc.Push == other.Push && svc.Pull == other.Pull && slices.Equal(svc.Files, other.Files) &&
-		slices.Equal(svc.Allow, other.Allow) && slices.Equal(svc.Block, other.Block) && svc.Address == other.Address && svc.History == other.History && svc.Name == other.Name
+		slices.Equal(svc.Allow, other.Allow) && slices.Equal(svc.Block, other.Block) && svc.Address == other.Address && svc.History == other.History && svc.Name == other.Name && svc.NewFiles == other.NewFiles
 }
 
 func (c folderConfig) has(kind string) bool {

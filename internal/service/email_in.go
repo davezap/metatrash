@@ -114,7 +114,7 @@ func (c *emailConfig) settings() (*emailSettings, error) {
 
 // checkEmailService checks an email service's settings (parseFolderConfig).
 func checkEmailService(svc folderService) error {
-	if svc.Repo != "" || svc.Branch != "" || svc.Push != "" || svc.Pull != "" || svc.Files != nil {
+	if svc.Repo != "" || svc.Branch != "" || svc.Push != "" || svc.Pull != "" || svc.Files != nil || svc.NewFiles {
 		return folderConfigError("email takes name, allow, block, address and history only.")
 	}
 	if svc.Name != "" && !actionNamePattern.MatchString(svc.Name) {
