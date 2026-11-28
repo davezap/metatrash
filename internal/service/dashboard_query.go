@@ -669,7 +669,7 @@ func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[
 		// Every file the person can open that matches, but not the folders'
 		// own AGENTS.md and settings or anything under a dot folder.
 		for p := range files {
-			if isFolderFile(p) || hasDotName(p) || !matchQueryPattern(sourcePath, p) {
+			if isFolderFile(p) || hasDotName(p) || !matchQueryPattern(sourcePath, p) || files[p].Record != nil {
 				continue
 			}
 			paths = append(paths, p)
@@ -680,7 +680,7 @@ func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[
 		sort.Strings(paths)
 	} else if folder {
 		for p, f := range files {
-			if !strings.HasPrefix(p, sourcePath) || strings.Contains(p[len(sourcePath):], "/") || f.Virtual != nil {
+			if !strings.HasPrefix(p, sourcePath) || strings.Contains(p[len(sourcePath):], "/") || f.Virtual != nil || f.Record != nil {
 				continue
 			}
 			name := path.Base(p)
@@ -710,7 +710,7 @@ func (s *Service) loadQuerySource(ctx context.Context, r *repository, files map[
 		if !ok {
 			return nil, problem(404, "not_found", "The source file "+sourcePath+" is not in this space.")
 		}
-		if f.Virtual != nil && f.Virtual.TextSHA256 == "" {
+		if f.Virtual != nil && f.Virtual.TextSHA256 == "" || f.Record != nil {
 			return nil, invalid(sourcePath + " has no text to read.")
 		}
 		paths = []string{sourcePath}

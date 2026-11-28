@@ -101,6 +101,10 @@ func (h *httpAdapter) serveContent(w http.ResponseWriter, r *http.Request, repo 
 		sendError(w, err)
 		return
 	}
+	if f.Record != nil {
+		var result ReadResult
+		body = h.service.readRecord(ctx, repo, path, *f.Record, body, revision, &result)
+	}
 	sendDownload(w, r, pathpkg.Base(path), "text/plain; charset=utf-8", body, false)
 }
 

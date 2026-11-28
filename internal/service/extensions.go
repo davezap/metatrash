@@ -70,6 +70,21 @@ func (h extensionHost) SendMail(ctx context.Context, to, subject, body string) e
 	}
 	return err
 }
+
+// OpenSpace is extension.RecordWriter (0.105.0): an account space's files
+// by ID, for a module writing record pointers outside a tool call.
+func (h extensionHost) OpenSpace(ctx context.Context, spaceID, actorID string) (extension.SpaceFiles, error) {
+	r := h.s.ownedRepository(spaceID)
+	if r == nil {
+		return nil, missing()
+	}
+	name := spaceID
+	if a := h.s.agents.Load(); a != nil {
+		name = a.spaceAddress(ctx, spaceID)
+	}
+	return &spaceFiles{s: h.s, r: r, name: name, service: true, actor: actorID}, nil
+}
+
 func (h extensionHost) Rate(key string, n, seconds int) error {
 	return h.s.rates.take(allowance{key, n, seconds})
 }
@@ -246,6 +261,12 @@ func (s *Service) startExtensions() (err error) {
 				return fmt.Errorf("extension %s brand: %w", hooks.Name, err)
 			}
 			s.brand = hooks.Brand
+		}
+		if hooks.RecordView != nil || hooks.RecordFile != nil {
+			if hooks.RecordView == nil || s.recordHooks() != nil {
+				cleanup()
+				return fmt.Errorf("extension %s: record hooks need RecordView, and only one extension may set them", hooks.Name)
+			}
 		}
 		valid = true
 		s.extensions = append(s.extensions, hooks)

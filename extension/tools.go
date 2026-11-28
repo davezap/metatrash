@@ -73,7 +73,8 @@ type SpaceFiles interface {
 	// Read gives the current files at paths: a file's path, or a folder
 	// ending in "/" (everything under it; "" is the whole of Folder). Each
 	// file comes with its blob hash. Virtual files (uploads such as
-	// pictures and PDFs) are listed with Virtual set and no Data. More
+	// pictures and PDFs) are listed with Virtual set and no Data; record
+	// pointers with Record set and their pointer as Data. More
 	// than maxFiles files or maxBytes of text refuses with
 	// payload_too_large, and a path that names nothing with not_found.
 	Read(ctx context.Context, paths []string, maxFiles int, maxBytes int64) (state string, files []SpaceFile, err error)
@@ -83,10 +84,10 @@ type SpaceFiles interface {
 	// file changed since it was read refuses with conflict (409, every
 	// such path in the message). Texts are UTF-8 without NUL. The folder's
 	// locks apply as for the caller's own writes, and .metatrash.json
-	// files and virtual files can't be changed this way. Folder files for
-	// new folders are added, and emptied folders lose theirs, as writes
-	// and deletes do. It answers the new state, or the old one when
-	// nothing changed.
+	// files and virtual files can't be changed this way (a record pointer
+	// only by another Record, or Delete). Folder files for new folders are
+	// added, and emptied folders lose theirs, as writes and deletes do. It
+	// answers the new state, or the old one when nothing changed.
 	Apply(ctx context.Context, changes []FileChange, summary string) (state string, err error)
 }
 
@@ -96,6 +97,9 @@ type SpaceFile struct {
 	Blob    string
 	Data    []byte
 	Virtual bool
+	// Record is set on a record pointer (Core 0.105.0); Data is then its
+	// pointer text.
+	Record *Record
 }
 
 // FileChange is one change Apply makes.
@@ -106,6 +110,10 @@ type FileChange struct {
 	// Text is the file's new text; ignored when Delete is set.
 	Text   string
 	Delete bool
+	// Record writes a record pointer instead of Text (Core 0.105.0): a new
+	// one, or a new version of one (another step, say). Only a record
+	// pointer may replace one; Delete removes it.
+	Record *Record
 }
 
 // ToolError is an error a tool's Call returns to show the agent what went

@@ -122,6 +122,9 @@ func (s *Service) edit(ctx context.Context, r *repository, space string, in Inpu
 	if f.Virtual != nil {
 		return nil, virtualRefused(in.Path)
 	}
+	if f.Record != nil {
+		return nil, recordRefused(in.Path)
+	}
 	rebased := in.IfInState != "" && in.IfInState != head
 	if rebased && (in.Strict || !r.unchangedSince(ctx, in.IfInState, files, in.Path)) {
 		message := in.Path + " changed since that state; read it again before editing."
@@ -190,6 +193,9 @@ func (s *Service) appendText(ctx context.Context, r *repository, space string, i
 	if f, ok := files[in.Path]; ok {
 		if f.Virtual != nil {
 			return nil, virtualRefused(in.Path)
+		}
+		if f.Record != nil {
+			return nil, recordRefused(in.Path)
 		}
 		b, err := r.blob(ctx, f.Blob)
 		if err != nil {
@@ -295,7 +301,7 @@ func (s *Service) search(ctx context.Context, r *repository, space string, in In
 	docling := s.docling()
 	paths := []string{}
 	for p, f := range files {
-		if strings.HasPrefix(p, in.Prefix) && (f.Virtual == nil || f.Virtual.TextSHA256 != "" || docling.wants(r, *f.Virtual)) {
+		if strings.HasPrefix(p, in.Prefix) && f.Record == nil && (f.Virtual == nil || f.Virtual.TextSHA256 != "" || docling.wants(r, *f.Virtual)) {
 			paths = append(paths, p)
 		}
 	}

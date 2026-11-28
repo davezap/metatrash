@@ -15,6 +15,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"metatrash.com/metatrash"
+	"metatrash.com/metatrash/extension"
 )
 
 type mcpIdentityKey struct{}
@@ -155,6 +156,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			return nil, fmt.Errorf("MCP schema %s: %w", op, err)
 		}
 		server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			ctx = withRecordRoute(ctx, extension.RouteMCP)
 			identity, ok := ctx.Value(mcpIdentityKey{}).(mcpIdentity)
 			if !ok {
 				return mcpFailure(problem(401, "unauthorized", "Missing transport credentials.")), nil

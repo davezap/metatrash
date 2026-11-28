@@ -193,7 +193,9 @@ func serveFolder(w http.ResponseWriter, r *http.Request, repo *repository, files
 		return
 	}
 	w.Header().Add("Vary", "Accept")
-	if file, ok := files[prefix+"README.md"]; ok {
+	// A record pointer's view needs its reader (0.105.0): the folder's
+	// Markdown is then its list, and the README opens on its own page.
+	if file, ok := files[prefix+"README.md"]; ok && file.Record == nil {
 		content, err := repo.blob(r.Context(), file.Blob)
 		if err != nil {
 			sendError(w, err)

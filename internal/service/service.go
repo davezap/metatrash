@@ -291,7 +291,8 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		}
 		result := ReadResult{Space: space, State: state}
 		result.File.File = withBlob(f)
-		if in.IfBlob == f.Blob {
+		// A record's view changes without its pointer changing.
+		if in.IfBlob == f.Blob && f.Record == nil {
 			result.Unchanged = true
 			return result, nil
 		}
@@ -314,6 +315,8 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 			}
 		} else if b, err = r.blob(ctx, f.Blob); err != nil {
 			return nil, err
+		} else if f.Record != nil {
+			b = s.readRecord(ctx, r, in.Path, *f.Record, b, in.Revision, &result)
 		}
 		result.File.Text = string(b)
 		if isFolderConfig(in.Path) {
@@ -516,7 +519,10 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		if exists && in.CreateOnly {
 			return nil, problem(409, "destination_exists", "Destination exists.")
 		}
-		if in.Virtual == nil && looksVirtual(*in.Text) && !exists {
+		if in.Virtual == nil && in.Record == nil && looksVirtual(*in.Text) && !exists {
+			if looksRecord(*in.Text) {
+				return nil, recordPointerRefused()
+			}
 			return nil, pointerRefused()
 		}
 		if in.Virtual != nil && virtualSpaceBytes(files, dest)+in.Virtual.Size > maxVirtualPerSpace {
@@ -527,11 +533,14 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 			if err != nil {
 				return nil, err
 			}
-			if string(b) == *in.Text && (in.Virtual == nil || f.Virtual != nil) {
+			if string(b) == *in.Text && (in.Virtual == nil || f.Virtual != nil) && (in.Record == nil || f.Record != nil) {
 				return WriteResult{Mutation: Mutation{Space: space, OldState: head, NewState: head, File: withBlob(f), Rebased: rebased}}, nil
 			}
 			if f.Virtual != nil && in.Virtual == nil {
 				return nil, virtualRefused(dest)
+			}
+			if f.Record != nil && in.Record == nil {
+				return nil, recordRefused(dest)
 			}
 		} else {
 			id, err := randomHex(16)
@@ -543,6 +552,7 @@ func (s *Service) mutate(ctx context.Context, r *repository, space, op string, i
 		}
 		f.Bytes = int64(len(*in.Text))
 		f.Virtual = in.Virtual
+		f.Record = in.Record
 	}
 	// A new name (a new file, or a move) may not hide characters that change
 	// how it reads (0.95.11); files that already have such names keep them.

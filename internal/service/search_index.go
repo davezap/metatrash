@@ -645,7 +645,9 @@ func (m *searchIndexes) catchUp(r *repository, si *spaceIndex) (int, error) {
 		for _, p := range changed[start:end] {
 			f := files[p]
 			var text string
-			if f.Virtual == nil {
+			if f.Record != nil {
+				// A record's content is never indexed (0.105.0): its name is.
+			} else if f.Virtual == nil {
 				text = string(texts[f.Blob])
 			} else {
 				t, ok := m.virtualText(ctx, r, p, f, want[p])

@@ -47,6 +47,9 @@ type File struct {
 	// Virtual is set on a virtual file (0.60.0, virtual.go): the text is
 	// its pointer, and this describes the content kept outside Git.
 	Virtual *VirtualInfo `json:"virtual,omitempty"`
+	// Record is set on a record pointer (0.105.0, records.go): the text is
+	// its pointer, and reads show what the record lets the reader see.
+	Record *RecordInfo `json:"record,omitempty"`
 	// Stale is set by list on a virtual file whose refreshes are failing
 	// (0.62.0; read says so too, with a note).
 	Stale *VirtualStale `json:"stale,omitempty"`
@@ -83,6 +86,9 @@ type ReadResult struct {
 	// blob; Text is then empty, so an agent re-checking a file it holds pays
 	// for no text.
 	Unchanged bool `json:"unchanged,omitempty"`
+	// RecordFiles are a record pointer's attachments this reader may
+	// fetch (0.105.0): name -> its record route.
+	RecordFiles map[string]string `json:"recordFiles,omitempty"`
 }
 
 type ListResult struct {
@@ -179,6 +185,9 @@ type Input struct {
 	// Virtual is set only by Metatrash itself (putVirtual): the write is a
 	// virtual file's pointer, and this describes its content.
 	Virtual *VirtualInfo `json:"-"`
+	// Record is set only by Metatrash itself (an extension's Apply): the
+	// write is a record pointer (0.105.0, records.go).
+	Record *RecordInfo `json:"-"`
 	// Images is set by clients that can show a model a picture (MCP, the
 	// runner): a read of a virtual picture then carries it.
 	Images bool `json:"-"`
@@ -200,6 +209,7 @@ type storedRecord struct {
 	Protected bool         `json:"protected"`
 	Blob      string       `json:"blob"`
 	Virtual   *VirtualInfo `json:"virtual,omitempty"`
+	Record    *RecordInfo  `json:"record,omitempty"`
 }
 
 // validPath checks storage syntax without normalizing spelling or case.

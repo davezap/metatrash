@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"metatrash.com/metatrash"
+	"metatrash.com/metatrash/extension"
 )
 
 // The runner runs folder actions (actions.go). After every commit to an owned
@@ -920,6 +921,7 @@ func (a *agentRunner) execute(ctx context.Context, j *agentJob) (jobOutcome, err
 	toolCtx = context.WithValue(toolCtx, runnerJobKey{}, &runnerJobContext{folder: j.Folder, action: j.Action, payerID: payer.userID, contributor: payer.agentID != "", submit: slices.Contains(action.Tools, "submit")})
 	toolCtx = withAuthor(toolCtx, func() changeAuthor { return changeAuthor{Name: payerName, App: m.app, Kind: "agent"} })
 	toolCtx = withActor(toolCtx, payer.userID)
+	toolCtx = withRecordRoute(toolCtx, extension.RouteRunner)
 	cache := m.provider == "anthropic"
 	systemBlock := contentBlock{Type: "text", Text: system}
 	if cache {

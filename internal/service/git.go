@@ -352,7 +352,7 @@ func (r *repository) commitFilesLocked(ctx context.Context, old string, files ma
 	}
 	index := make(map[string]storedRecord, len(files))
 	for p, f := range files {
-		index[p] = storedRecord{ID: f.ID, Path: f.Path, Bytes: f.Bytes, Blob: f.Blob, Virtual: f.Virtual}
+		index[p] = storedRecord{ID: f.ID, Path: f.Path, Bytes: f.Bytes, Blob: f.Blob, Virtual: f.Virtual, Record: f.Record}
 	}
 	metadata, err := json.Marshal(index)
 	if err != nil {

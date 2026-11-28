@@ -341,6 +341,14 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		sendError(w, missing())
 		return
 	}
+	if file.Record != nil && (raw || markdown) {
+		readerID := ""
+		if signedIn {
+			readerID = user.ID
+		}
+		h.serveRecordPage(w, r, repo, path, *file.Record, readerID)
+		return
+	}
 	if file.Virtual != nil {
 		if raw || markdown {
 			h.serveVirtual(w, r, repo, path, *file.Virtual, raw)
@@ -351,8 +359,8 @@ func (h *httpAdapter) serveSpacePage(w http.ResponseWriter, r *http.Request, cli
 		return
 	}
 	// A virtual file's text, if any, is its ?format=md (serveVirtual).
-	hasText := file.Virtual != nil
-	if file.Virtual == nil {
+	hasText := file.Virtual != nil || file.Record != nil
+	if file.Virtual == nil && file.Record == nil {
 		content, err := repo.blob(ctx, file.Blob)
 		if err != nil {
 			sendError(w, err)

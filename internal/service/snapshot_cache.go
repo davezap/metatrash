@@ -91,6 +91,10 @@ func cloneSnapshot(files map[string]record) map[string]record {
 			v := *f.Virtual
 			f.Virtual = &v
 		}
+		if f.Record != nil {
+			rec := *f.Record
+			f.Record = &rec
+		}
 		if f.Stale != nil {
 			stale := *f.Stale
 			f.Stale = &stale
@@ -108,6 +112,9 @@ func snapshotCost(files map[string]record, encoded int) int64 {
 		size += 512 + int64(len(path)+len(f.ID)+len(f.Path)+len(f.Blob)+len(f.File.Blob)+len(f.ReadOnly))
 		if v := f.Virtual; v != nil {
 			size += int64(len(v.SHA256) + len(v.Type) + len(v.TextSHA256) + len(v.Source) + len(v.Refresh) + len(v.GitBlob))
+		}
+		if rec := f.Record; rec != nil {
+			size += int64(len(rec.Record) + len(rec.Section) + len(rec.Step) + len(rec.Org) + len(rec.Form) + len(rec.From))
 		}
 		if s := f.Stale; s != nil {
 			size += int64(len(s.Since) + len(s.Reason))

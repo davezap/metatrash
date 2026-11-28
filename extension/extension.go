@@ -159,6 +159,15 @@ type Hooks struct {
 	Brand *Brand
 	// Tools are agent tools the module adds (Core 0.98.0; see Tool).
 	Tools []Tool
+	// RecordView answers what a reader may see of a record pointer (Core
+	// 0.105.0; see records.go). It is asked on every read of one, never
+	// cached. An error shows the file blank with a note. At most one
+	// module may set it; without one every record pointer reads blank.
+	RecordView func(ctx context.Context, req RecordViewRequest) (RecordView, error)
+	// RecordFile finds a record attachment a reader asks for (Core
+	// 0.105.0), after checking the reader may have it. Set it with
+	// RecordView.
+	RecordFile func(ctx context.Context, req RecordFileRequest) (RecordFile, error)
 }
 
 // SpaceLevels is an extension's answer for one account (Hooks.SpaceLevels).

@@ -303,6 +303,10 @@ type spaceFiles struct {
 	name   string
 	folder string // "" or a folder ending in "/"
 	job    bool
+	// service is a space an extension opened itself (RecordWriter): its
+	// folder locks don't apply.
+	service bool
+	actor   string // the account a service change is made for
 }
 
 func (f *spaceFiles) SpaceID() string {
@@ -366,6 +370,10 @@ func (f *spaceFiles) Read(ctx context.Context, paths []string, maxFiles int, max
 	out := make([]extension.SpaceFile, 0, len(picked))
 	for path, rec := range picked {
 		sf := extension.SpaceFile{Path: strings.TrimPrefix(path, f.folder), Blob: rec.Blob, Virtual: rec.Virtual != nil}
+		if rec.Record != nil {
+			info := *rec.Record
+			sf.Record = &info
+		}
 		if rec.Virtual == nil {
 			b, ok := blobs[rec.Blob]
 			if !ok {
@@ -411,12 +419,24 @@ func (f *spaceFiles) Apply(ctx context.Context, changes []extension.FileChange, 
 		if c.Delete {
 			continue
 		}
+		if c.Record != nil {
+			if f.r.id == "" {
+				return "", problem(403, "record_pointer", c.Path+": record pointers are kept only in account spaces.")
+			}
+			if err := checkRecord(*c.Record); err != nil {
+				return "", err
+			}
+			continue
+		}
 		if !utf8.ValidString(c.Text) || strings.ContainsRune(c.Text, 0) {
 			return "", invalid(c.Path + ": text must be UTF-8 without NUL.")
 		}
 		if int64(len(c.Text)) > f.r.limits.MaxFileBytes {
 			return "", problem(413, "payload_too_large", c.Path+" is over the file limit.")
 		}
+	}
+	if f.service && f.actor != "" {
+		ctx = withActor(ctx, f.actor)
 	}
 	value, err := f.s.queued(ctx, f.r, func() (any, error) { return f.apply(ctx, changes, summary) })
 	if err != nil {
@@ -448,6 +468,9 @@ func (f *spaceFiles) apply(ctx context.Context, changes []extension.FileChange, 
 		return "", err
 	}
 	person := writerOf(ctx)
+	if f.service {
+		person = 0 // no lock stops the service itself
+	}
 	readOnly, err := r.readOnlyRules(ctx, files, nil)
 	if err != nil {
 		return "", err
@@ -465,6 +488,13 @@ func (f *spaceFiles) apply(ctx context.Context, changes []extension.FileChange, 
 		if exists && rec.Virtual != nil {
 			return "", virtualRefused(c.Path)
 		}
+		if exists && rec.Record != nil && c.Record == nil && !c.Delete {
+			return "", recordRefused(c.Path)
+		}
+		text := c.Text
+		if c.Record != nil && !c.Delete {
+			text = recordPointer(*c.Record)
+		}
 		if c.Delete {
 			if !exists {
 				return "", problem(404, "not_found", c.Path+" is not in the space.")
@@ -479,7 +509,10 @@ func (f *spaceFiles) apply(ctx context.Context, changes []extension.FileChange, 
 		}
 		operation := "write"
 		if !exists {
-			if looksVirtual(c.Text) {
+			if c.Record == nil && looksRecord(text) {
+				return "", recordPointerRefused()
+			}
+			if c.Record == nil && looksVirtual(text) {
 				return "", pointerRefused()
 			}
 			if reason := filenames.NewName(p); reason != "" {
@@ -493,12 +526,17 @@ func (f *spaceFiles) apply(ctx context.Context, changes []extension.FileChange, 
 			operation = "create"
 		} else if b, err := r.blob(ctx, rec.Blob); err != nil {
 			return "", err
-		} else if string(b) == c.Text {
+		} else if string(b) == text && (c.Record == nil) == (rec.Record == nil) {
 			continue
 		}
-		rec.Bytes = int64(len(c.Text))
+		rec.Bytes = int64(len(text))
+		rec.Record = nil
+		if c.Record != nil {
+			info := *c.Record
+			rec.Record = &info
+		}
 		files[p] = rec
-		texts[p] = c.Text
+		texts[p] = text
 		commit = append(commit, commitChange{rec.ID, operation, p})
 		written = append(written, p)
 	}

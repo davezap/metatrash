@@ -235,7 +235,7 @@ func (s *Service) createFromTemplate(ctx context.Context, r *repository, space s
 		if !ok || !strings.HasSuffix(strings.ToLower(in.Template), ".md") {
 			return nil, problem(404, "template_not_found", in.Template+" is not a Markdown file in this space; templates come from the same space.")
 		}
-		if f.Virtual != nil {
+		if f.Virtual != nil || f.Record != nil {
 			return nil, invalid(in.Template + " is a virtual file and cannot be a template.")
 		}
 		b, err := r.blob(ctx, f.Blob)

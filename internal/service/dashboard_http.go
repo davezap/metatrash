@@ -191,7 +191,7 @@ func (s *Service) acknowledgeNotice(ctx context.Context, r *repository, space, u
 		return NoticeStatus{}, err
 	}
 	f, ok := files[path]
-	if !ok || f.Virtual != nil {
+	if !ok || f.Virtual != nil || f.Record != nil {
 		return NoticeStatus{}, missing()
 	}
 	if f.Blob != blob {
@@ -246,7 +246,7 @@ func (s *Service) noticeStatus(ctx context.Context, r *repository, space, userID
 	out := noticesResult{Space: space, Notices: []NoticeStatus{}}
 	for _, p := range paths {
 		f, ok := files[p]
-		if !validPath(p) || !ok || f.Virtual != nil {
+		if !validPath(p) || !ok || f.Virtual != nil || f.Record != nil {
 			out.Notices = append(out.Notices, NoticeStatus{Path: p, Kind: "missing"})
 			continue
 		}

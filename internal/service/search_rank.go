@@ -134,7 +134,7 @@ func (s *Service) rankedSearch(ctx context.Context, r *repository, space string,
 	docling := s.docling()
 	paths := []string{}
 	for p, f := range files {
-		if strings.HasPrefix(p, in.Prefix) && (f.Virtual == nil || f.Virtual.TextSHA256 != "" || docling.wants(r, *f.Virtual)) {
+		if strings.HasPrefix(p, in.Prefix) && f.Record == nil && (f.Virtual == nil || f.Virtual.TextSHA256 != "" || docling.wants(r, *f.Virtual)) {
 			paths = append(paths, p)
 		}
 	}

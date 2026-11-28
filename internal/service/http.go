@@ -254,6 +254,10 @@ func (h *httpAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveSiteAPI(w, r, client)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/records/") {
+		h.serveRecordRoute(w, r, client)
+		return
+	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	if len(parts) != 5 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "spaces" {
 		sendError(w, missing())

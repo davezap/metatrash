@@ -732,7 +732,7 @@ func (s *Service) applyPull(ctx context.Context, r *repository, plan pullPlan) (
 		f.Bytes = int64(len(b))
 		f.Protected, f.Deletable = false, true
 		// Text replaces a virtual file, or a pointer an ordinary one.
-		f.Virtual = nil
+		f.Virtual, f.Record = nil, nil
 		if info, ok := plan.virtual[rel]; ok {
 			f.Virtual = &info
 		}
