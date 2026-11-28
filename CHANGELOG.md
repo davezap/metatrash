@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.104.0 - Failed conversions stop after three tries (2026-11-28)
+
+- **A file Docling can't convert stops counting as failed** (Dave, small bugs batch: the site's Files list said "6 failed" for good in a space, with no way to tell what it meant). A conversion that fails is tried again a day later (`doclingRetryAfter`) and listed in activity as failed until then, so a file the converter can never read was listed as failed forever. After `doclingGiveUpAfter` (3) failed tries in a row it is no longer tried or listed; agents keep reading its plain text, as before. A changed file is new content and is tried afresh; a busy converter ("tried again in a few minutes") doesn't count as a try. The record is in memory (at most 10,000 files), so a restart allows another three tries. `docling.go` (`tries`, `gaveUp`, `resting`).
+- Site app: Slate Viewer 0.51.0 (the activity line says what failed and lists it; folders show a mark; sync conflicts panel; the space stays open when a listing fails once; the New File/Folder name box takes one Enter).
+- Tests: `TestDoclingRemote` (three tries, then not listed or queued again). No schema, grant, configuration or dependency change. See docs/release-0.104.0.md.
+
 ## 0.103.1 - Fix: New from a template on the website (2026-11-28)
 
 - The website's own API (`/api/v1/site/spaces/...`) didn't offer `from-template`, so in Slate Viewer on the site every New File from a template (and New File in a folder with a default template) answered "File or revision not found" and made nothing (found by Dave on the test clone with 0.96.78). `siteResources` now has `from-template` (POST). REST, the OAuth resource and MCP `write` with `fromTemplate` were not affected. `site_api.go`. Test: `TestSiteOffersFromTemplate`. See docs/release-0.103.1.md.

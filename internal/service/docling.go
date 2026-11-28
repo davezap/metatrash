@@ -56,6 +56,15 @@ const (
 	// long a failed PDF waits before it is tried again.
 	doclingMissingFor = 10 * time.Minute
 	doclingRetryAfter = 24 * time.Hour
+	// doclingGiveUpAfter failed tries (a day apart) stop a file being tried
+	// again and listed as failed (0.104.0): one the converter can't read
+	// counted as failed in the site's Files list for good. Agents keep
+	// reading its plain text; a changed file is new content, tried afresh.
+	// Kept in memory, so a restart allows another round.
+	doclingGiveUpAfter = 3
+	// doclingGaveUpMax bounds the files given up on; past it the record
+	// starts again.
+	doclingGaveUpMax = 10000
 )
 
 // doclingConfig is agents.docling in accounts.json.
@@ -217,6 +226,8 @@ type doclingQueue struct {
 	pending  map[string]bool      // queued or converting, by key
 	missing  map[string]time.Time // no Markdown in the bucket when checked
 	failed   map[string]time.Time // conversion failed (or the PDF is too big)
+	tries    map[string]int       // failed tries in a row, by key
+	gaveUp   map[string]bool      // failed doclingGiveUpAfter times: not tried again
 	// done counts finished conversions, for tests.
 	done func(key string, err error)
 	// version and ident name the converter (doclingSettings); a service's
@@ -249,7 +260,7 @@ func (e doclingRetrySoon) Error() string { return e.err.Error() }
 const doclingRetrySoonAfter = 15 * time.Minute
 
 func newDoclingQueue(s *Service, d *doclingSettings) *doclingQueue {
-	q := &doclingQueue{s: s, settings: d, jobs: make(chan doclingJob, doclingQueueSize), pending: map[string]bool{}, missing: map[string]time.Time{}, failed: map[string]time.Time{}, pairWant: map[string][]string{},
+	q := &doclingQueue{s: s, settings: d, jobs: make(chan doclingJob, doclingQueueSize), pending: map[string]bool{}, missing: map[string]time.Time{}, failed: map[string]time.Time{}, tries: map[string]int{}, gaveUp: map[string]bool{}, pairWant: map[string][]string{},
 		queuedAt: map[string]time.Time{}, running: map[string]time.Time{}, failures: map[string]doclingFailure{}, notes: map[string]map[string]pathNote{}}
 	q.version, q.ident = d.version, d.ident
 	q.run = q.convertFile
@@ -295,10 +306,21 @@ func (q *doclingQueue) start(ctx context.Context) {
 						q.failures[j.key] = doclingFailure{why: soon.Error(), soon: true, at: now, due: now.Add(doclingRetrySoonAfter)}
 					} else if err != nil {
 						q.failed[j.key] = now
-						q.failures[j.key] = doclingFailure{why: err.Error(), at: now, due: now.Add(doclingRetryAfter)}
+						q.tries[j.key]++
+						if q.tries[j.key] >= doclingGiveUpAfter && ctx.Err() == nil {
+							if len(q.gaveUp) >= doclingGaveUpMax {
+								q.gaveUp = map[string]bool{}
+							}
+							q.gaveUp[j.key] = true
+							delete(q.tries, j.key)
+							delete(q.failures, j.key)
+						} else {
+							q.failures[j.key] = doclingFailure{why: err.Error(), at: now, due: now.Add(doclingRetryAfter)}
+						}
 					} else {
 						delete(q.missing, j.key)
 						delete(q.failures, j.key)
+						delete(q.tries, j.key)
 					}
 					for key, f := range q.failures {
 						if now.After(f.due) {
@@ -432,6 +454,12 @@ func (q *doclingQueue) wants(r *repository, v VirtualInfo) bool {
 	return ok && doclingConverts(version, format.ext) && r.owned && idPattern.MatchString(r.id) && objectHashPattern.MatchString(v.SHA256) && v.Size <= q.settings.maxBytes
 }
 
+// resting reports a key not to convert now: it failed in the last
+// doclingRetryAfter, or too often. Callers hold q.mu.
+func (q *doclingQueue) resting(key string) bool {
+	return q.gaveUp[key] || time.Since(q.failed[key]) < doclingRetryAfter
+}
+
 // enqueue asks for v's conversion, unless it is queued, failed recently or
 // the queue is full (a later read asks again).
 func (q *doclingQueue) enqueue(r *repository, v VirtualInfo) {
@@ -441,7 +469,7 @@ func (q *doclingQueue) enqueue(r *repository, v VirtualInfo) {
 	key := q.key(r, v)
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.pending[key] || time.Since(q.failed[key]) < doclingRetryAfter {
+	if q.pending[key] || q.resting(key) {
 		return
 	}
 	select {
@@ -463,7 +491,7 @@ func (q *doclingQueue) text(ctx context.Context, r *repository, v VirtualInfo) (
 		return text, true, false
 	}
 	q.mu.Lock()
-	failed := time.Since(q.failed[key]) < doclingRetryAfter
+	failed := q.resting(key)
 	known := q.pending[key] || time.Since(q.missing[key]) < doclingMissingFor
 	q.mu.Unlock()
 	if failed {

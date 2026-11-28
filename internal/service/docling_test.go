@@ -346,6 +346,37 @@ func TestDoclingRemote(t *testing.T) {
 	if time.Since(failedAt) > time.Minute {
 		t.Errorf("damaged PDF retried soon: %s", failedAt)
 	}
+	// After doclingGiveUpAfter failed tries it is left alone and no longer
+	// listed as failed (0.104.0).
+	badKey := q.key(w.repo, *bad.File.Virtual)
+	for try := 2; try <= doclingGiveUpAfter; try++ {
+		q.mu.Lock()
+		if q.gaveUp[badKey] {
+			q.mu.Unlock()
+			t.Fatalf("gave up after %d tries", try-1)
+		}
+		delete(q.failed, badKey) // as if a day went by
+		q.mu.Unlock()
+		q.enqueue(w.repo, *bad.File.Virtual)
+		if err := wait(); err == nil || !strings.Contains(err.Error(), "damaged") {
+			t.Fatalf("try %d: %v", try, err)
+		}
+	}
+	q.mu.Lock()
+	_, listed := q.failures[badKey]
+	gaveUp := q.gaveUp[badKey]
+	delete(q.failed, badKey)
+	q.mu.Unlock()
+	if !gaveUp || listed {
+		t.Fatalf("after %d tries: gaveUp %v, still listed %v", doclingGiveUpAfter, gaveUp, listed)
+	}
+	q.enqueue(w.repo, *bad.File.Virtual)
+	q.mu.Lock()
+	queued := q.pending[badKey]
+	q.mu.Unlock()
+	if queued {
+		t.Fatal("a file given up on was queued again")
+	}
 
 	// Settings.
 	for config, want := range map[*doclingConfig]string{
