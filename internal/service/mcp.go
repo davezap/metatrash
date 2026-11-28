@@ -52,6 +52,8 @@ type mcpInput struct {
 	Since      string  `json:"since"`
 	Source     *string `json:"source"`
 	Refresh    *string `json:"refresh"`
+	// write's (0.103.0): a template to start the new file from.
+	FromTemplate string `json:"fromTemplate"`
 	// The query tool's (0.99.0); source is shared with configure.
 	Base    string `json:"base"`
 	Where   string `json:"where"`
@@ -221,7 +223,7 @@ func (h *httpAdapter) mcpHandler(schema []byte, account bool) (http.Handler, err
 			in := Input{Path: args.Path, Revision: args.Revision, Prefix: args.Prefix, ID: args.ID, Cursor: args.Cursor, Limit: args.Limit,
 				Text: args.Text, IfInState: args.IfInState, CreateOnly: args.CreateOnly, Strict: args.Strict, From: args.From, To: args.To,
 				StartLine: args.StartLine, LineCount: args.LineCount, Edits: args.Edits, Query: args.Query, Regex: args.Regex, IgnoreCase: args.IgnoreCase, Context: args.Context, Rank: args.Rank,
-				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true, Source: args.Source, Refresh: args.Refresh}
+				IfBlob: args.IfBlob, Line: args.Line, Since: args.Since, Images: true, Source: args.Source, Refresh: args.Refresh, FromTemplate: args.FromTemplate}
 			var value any
 			if op == "query" {
 				q := QueryInput{Base: args.Base, Where: args.Where, Group: args.Group, Measure: args.Measure, Sort: args.Sort, Limit: args.Limit, Columns: args.Columns, Today: args.Today}

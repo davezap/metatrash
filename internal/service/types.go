@@ -186,6 +186,10 @@ type Input struct {
 	// nil leaves one as it is.
 	Source  *string `json:"-"`
 	Refresh *string `json:"-"`
+	// FromTemplate is MCP write's template (0.103.0, templates.go): the new
+	// file at Path starts from this Markdown file of the space instead of
+	// Text.
+	FromTemplate string `json:"-"`
 }
 
 // storedRecord is the index entry format in .metatrash/files.json.

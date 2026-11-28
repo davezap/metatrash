@@ -65,7 +65,7 @@ func TestParseFolderConfig(t *testing.T) {
 		`{"footer":"[x](//evil.example/)"}`:                                            "footer link",
 		`{"footer":"[x](https://a:b@example.com/)"}`:                                   "footer link",
 		`{"footer":1}`:                    "wrong value type",
-		`{"locked":{"footers":"agents"}}`: "home, sort or locked",
+		`{"locked":{"footers":"agents"}}`: "templates, defaultTemplate or locked",
 		`{} {}`:                           "",
 	}
 	for text, want := range bad {

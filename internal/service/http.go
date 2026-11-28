@@ -340,6 +340,12 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		if r.Method == "GET" || r.Method == "POST" {
 			op = resource
 		}
+	case "from-template":
+		// A new file from a template (0.103.0, templates.go).
+		allow = "POST"
+		if r.Method == "POST" {
+			op = "fromTemplate"
+		}
 	case "query":
 		// A dashboard card's query (0.99.0): a read, sent as JSON.
 		allow = "POST"
@@ -430,7 +436,7 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		sendError(w, problem(405, "invalid_request", "Unsupported method."))
 		return
 	}
-	write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews" || op == "upload" || op == "configure" || op == "rerun"
+	write := op == "write" || op == "edit" || op == "append" || op == "move" || op == "delete" || op == "pull" || op == "push" || op == "reviews" || op == "upload" || op == "configure" || op == "rerun" || op == "fromTemplate"
 	repo, space, err := access(write)
 	if err != nil {
 		var p *Error
@@ -480,6 +486,9 @@ func (h *httpAdapter) serveRESTOperation(w http.ResponseWriter, r *http.Request,
 		return
 	case "rerun":
 		h.serveRerun(w, r, repo)
+		return
+	case "fromTemplate":
+		h.serveFromTemplate(w, r, repo, space)
 		return
 	}
 	in, err := parseQuery(r.URL.RawQuery, op)

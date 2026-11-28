@@ -360,6 +360,16 @@ func (s *Service) dispatchRepository(ctx context.Context, r *repository, space, 
 		v.Hint = s.unpushedHint(ctx, r, v.NewState, in.Path)
 		return v, nil
 	case "write", "move", "delete":
+		if op == "write" && in.FromTemplate != "" {
+			if in.Text != nil {
+				return nil, invalid("Send text or fromTemplate, not both.")
+			}
+			if !validPath(in.Path) {
+				return nil, invalid("Valid path is required.")
+			}
+			folder, name := fileFolder(in.Path), in.Path[len(fileFolder(in.Path)):]
+			return s.createFromTemplate(ctx, r, space, templateRequest{Template: in.FromTemplate, Folder: folder, Name: name, IfInState: in.IfInState})
+		}
 		if !hashPattern.MatchString(in.IfInState) {
 			return nil, invalid("ifInState must be a commit hash from read/list.")
 		}

@@ -82,6 +82,12 @@ type folderConfig struct {
 	// either way. Only Slate Viewer and the website use it; agents and the
 	// API list by path. Never inherited.
 	Sort *string `json:"sort,omitempty"`
+	// Templates are the Markdown files new files in the folder may start
+	// from, and DefaultTemplate the one a plain new file starts from
+	// (0.103.0, templates.go): a leading / is the space root, otherwise from
+	// this folder. Inherited; DefaultTemplate "" turns an inherited one off.
+	Templates       []string `json:"templates,omitempty"`
+	DefaultTemplate *string  `json:"defaultTemplate,omitempty"`
 }
 
 // Folder orders (sort).
@@ -235,7 +241,7 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	for key := range c.Locked {
 		if !lockableKeys[key] {
-			return c, folderConfigError(fmt.Sprintf("locked names keys of this file (purpose, children, services, inherit, readOnly, publishedVersion, actions, print, footer, home, sort or locked), or fillForms or takeQuizzes for who may fill in this folder's forms and take its quizzes, not %q.", key))
+			return c, folderConfigError(fmt.Sprintf("locked names keys of this file (purpose, children, services, inherit, readOnly, publishedVersion, actions, print, footer, home, sort, templates, defaultTemplate or locked), or fillForms or takeQuizzes for who may fill in this folder's forms and take its quizzes, not %q.", key))
 		}
 	}
 	if c.Locked["locked"] == lockEveryone {
@@ -265,6 +271,9 @@ func parseFolderConfig(text string) (folderConfig, error) {
 	}
 	if c.Home != nil && (!validPath(*c.Home) || strings.Contains(*c.Home, "/") || !strings.HasSuffix(strings.ToLower(*c.Home), ".md") || isAgentsFile(*c.Home)) {
 		return c, folderConfigError("home is the name of a Markdown file in this folder, such as dashboard.md.")
+	}
+	if err := checkTemplateSettings(c); err != nil {
+		return c, err
 	}
 	if c.Sort != nil && *c.Sort != folderSortAZ && *c.Sort != folderSortZA {
 		return c, folderConfigError(`sort is "a-z" (names A to Z, the default) or "z-a" (Z to A).`)
@@ -540,7 +549,7 @@ func (r *repository) folderConfigs(ctx context.Context, files map[string]record)
 
 // lockableKeys are the names locked may hold: keys of the file, and the
 // form locks fillForms and takeQuizzes.
-var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "home": true, "sort": true, "locked": true, lockFillForms: true, lockTakeQuizzes: true}
+var lockableKeys = map[string]bool{"purpose": true, "children": true, "services": true, "inherit": true, "readOnly": true, "publishedVersion": true, "actions": true, "print": true, "footer": true, "home": true, "sort": true, "templates": true, "defaultTemplate": true, "locked": true, lockFillForms: true, lockTakeQuizzes: true}
 
 // folderConfigInherit is the .metatrash.json a new folder below the root
 // starts with: the parent folder's settings.

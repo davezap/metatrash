@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.21.0",
+  "schemaVersion": "0.22.0",
   "status": "implemented",
   "clients": {
     "mtsync": {"minVersion": "0.94.2"},
@@ -386,7 +386,7 @@
     },
     {
       "name": "write",
-      "description": "Create a file or replace its whole text. To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": level}), locked ({\"key\": level}: settings only people may change; also \"fillForms\" and \"takeQuizzes\": who may send the folder's forms and quizzes; levels: \"folderAgents\" stops the agents of folder actions, \"connectedAgents\" other agents, \"agents\" both, \"everyone\" people too), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (up to 3 lines of Markdown, separated by \\n, the website shows centred below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), home (the name of a .md file in the folder that opens first, such as dashboard.md; only when asked), sort (\"z-a\" lists the folder Z to A for people, \"a-z\" A to Z, the default; only when asked), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}] (people confirm reading each published version; with \"newFiles\":true and no publishedVersion, each file added later instead) or [{\"type\":\"email\",\"allow\":[\"example.com\"]}]: messages to the folder's address arrive as .md files; allow/block senders, keep the -<id>.md ending when renaming; only when asked) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
+      "description": "Create a file or replace its whole text; or, with fromTemplate in place of text, create a new file from a template (a .md file of the space; {{@today}}, {{@now}}, {{@name}}, {{@email}} and {{@title}} are filled in, and its newName front matter is left out). To change part of a file use edit; to add to one use append. Every folder has an AGENTS.md (what it holds and how to work in it; keep it current) and a .metatrash.json (its settings); they come with the folder's first file (write either to make an empty folder), go with its last, and cannot be deleted or moved. A .metatrash.json is checked: a JSON object with optional inherit (true: take the parent's settings but services), purpose (text), children ({\"name\" or \"folder/\": text}), readOnly ({\"name\", \"*.pdf\" or \"folder/\": level}), locked ({\"key\": level}: settings only people may change; also \"fillForms\" and \"takeQuizzes\": who may send the folder's forms and quizzes; levels: \"folderAgents\" stops the agents of folder actions, \"connectedAgents\" other agents, \"agents\" both, \"everyone\" people too), publishedVersion (a whole number; raising it publishes the folder's current files for people to read: only when asked), print ({\"image\":\"https://…\"}: an image Slate Viewer prints above the first page's title; only when asked), footer (up to 3 lines of Markdown, separated by \\n, the website shows centred below the folder's pages and its subfolders'; links to https, mailto: or /site paths, no HTML; :metatrash: is the wordmark; \"\" turns it off; only when asked), home (the name of a .md file in the folder that opens first, such as dashboard.md; only when asked), sort (\"z-a\" lists the folder Z to A for people, \"a-z\" A to Z, the default; only when asked), templates (up to 20 .md files new files here may start from: /Templates/meeting.md from the space root, otherwise from this folder; inherited) and defaultTemplate (the one a plain New File in Slate Viewer starts from; \"\" turns an inherited one off), services ([{\"type\":\"github\",\"repo\":\"owner/name\",\"branch\":\"main\"}] or [{\"type\":\"acknowledge\"}] (people confirm reading each published version; with \"newFiles\":true and no publishedVersion, each file added later instead) or [{\"type\":\"email\",\"allow\":[\"example.com\"]}]: messages to the folder's address arrive as .md files; allow/block senders, keep the -<id>.md ending when renaming; only when asked) and actions ([{\"name\":\"tidy-draft\",\"on\":\"inbound/*.md\",\"do\":\"plain-language instructions\"}]: an agent pinned to the folder runs once for each file that arrives and records the outcome in runner.md; only when asked); a refusal says which rule. Names starting with a dot are allowed only in a github folder. In a github folder: pull at the start of a session, change files, check pending, then push with a message.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -412,6 +412,12 @@
             "type": "string",
             "description": "UTF-8; no NUL; byte limits apply."
           },
+          "fromTemplate": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 241,
+            "description": "Instead of text: the .md file of this space the new file starts from. Fails if path exists."
+          },
           "ifInState": {
             "type": "string",
             "pattern": "^[0-9a-f]{40}$",
@@ -431,7 +437,6 @@
         "required": [
           "space",
           "path",
-          "text",
           "ifInState"
         ],
         "additionalProperties": false
@@ -1791,6 +1796,12 @@
         "strict"
       ],
       "note": "REST write, move and delete default to strict: true (the whole-space check sync clients rely on); send strict: false for the per-file check MCP uses by default. Edit defaults to the per-file check everywhere."
+    },
+    "fromTemplate": {
+      "method": "POST",
+      "path": "/api/v1/spaces/{space}/from-template",
+      "body": ["template", "folder", "name", "ifInState", "today", "now"],
+      "note": "A new file from a template (0.103.0): template is a .md file of the space (left out: the folder's defaultTemplate); folder ends in / (\"\" for the top); without name the template's newName names it, numbered when taken. Answers 201 with the write result."
     },
     "edit": {
       "method": "POST",
