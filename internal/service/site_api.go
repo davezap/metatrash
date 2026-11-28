@@ -58,7 +58,7 @@ var siteResources = map[string]string{
 	"edit": "POST", "move": "POST", "append": "POST",
 	"content": "GET, PUT", "acknowledgements": "GET, POST", "submissions": "GET, POST", "reviews": "POST",
 	"activity": "GET", "email": "GET", "query": "POST", "notices": "GET, POST",
-	"rerun": "POST",
+	"rerun": "POST", "from-template": "POST",
 }
 
 // siteSpace is one space in the session answer.

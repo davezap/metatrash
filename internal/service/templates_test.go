@@ -238,3 +238,16 @@ func TestNewFileFromTemplateOverREST(t *testing.T) {
 		t.Fatalf("text: %v", out)
 	}
 }
+
+// The website's own API offers from-template (0.103.1: 0.103.0 left it out,
+// so Slate Viewer's New from a template answered not_found).
+func TestSiteOffersFromTemplate(t *testing.T) {
+	if siteResources["from-template"] != "POST" {
+		t.Fatalf("site resources: %q", siteResources["from-template"])
+	}
+	for resource := range siteResources {
+		if !strings.Contains(siteResources[resource], "GET") && !strings.Contains(siteResources[resource], "POST") && !strings.Contains(siteResources[resource], "PUT") {
+			t.Errorf("%s: %q", resource, siteResources[resource])
+		}
+	}
+}
